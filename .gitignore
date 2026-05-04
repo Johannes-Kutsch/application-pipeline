@@ -1,7 +1,6 @@
 *.idea
 *.claude
-pycastle/*
-!pycastle/__init__.py
+pycastle/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

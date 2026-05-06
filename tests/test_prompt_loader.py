@@ -1,124 +1,147 @@
 import dataclasses
 import pathlib
-import textwrap
 
 import pytest
 
 from application_pipeline import (
     Config,
-    ConfigError,
     Prompts,
+    PromptError,
     SourceEntry,
     load,
     load_prompts,
 )
 
 
-REQUIRED_BODY = textwrap.dedent(
-    """
-    from application_pipeline import SourceEntry
+REQUIRED_BODY = """
+from application_pipeline import SourceEntry
 
-    KEYWORDS = ["python"]
-    SKILLS = ["python"]
-    SOURCES = [SourceEntry(parser_type="bundesagentur")]
-    LOCATIONS = ["Hamburg"]
-    """
-)
+KEYWORDS = ["python"]
+SKILLS = ["python"]
+SOURCES = [SourceEntry(parser_type="bundesagentur")]
+LOCATIONS = ["Hamburg"]
+"""
 
 
-def write_config(
-    tmp_path: pathlib.Path,
+def write_prompts(
+    prompts_dir: pathlib.Path,
     *,
-    classify_text: str = "classify body\n",
-    judge_text: str = "judge body\n",
-) -> pathlib.Path:
-    path = tmp_path / "config.py"
-    path.write_text(REQUIRED_BODY)
-    prompts = tmp_path / "prompts"
-    prompts.mkdir(exist_ok=True)
-    (prompts / "classify_relevance.md").write_text(classify_text)
-    (prompts / "judge_match.md").write_text(judge_text)
-    return path
-
-
-def test_load_prompts_returns_file_contents(tmp_path: pathlib.Path) -> None:
-    path = write_config(
-        tmp_path,
-        classify_text="Classify this listing.\n",
-        judge_text="Judge against skills.\n",
-    )
-    config = load(path)
-
-    prompts = load_prompts(config)
-
-    assert isinstance(prompts, Prompts)
-    assert prompts.classify_relevance == "Classify this listing.\n"
-    assert prompts.judge_match == "Judge against skills.\n"
-
-
-def test_load_prompts_preserves_utf8(tmp_path: pathlib.Path) -> None:
-    write_config(
-        tmp_path,
-        classify_text="Klassifiziere — Schlüssel: ✓\n",
-        judge_text="Beurteile — Fähigkeiten: π\n",
-    )
-    config = load(tmp_path / "config.py")
-
-    prompts = load_prompts(config)
-
-    assert prompts.classify_relevance == "Klassifiziere — Schlüssel: ✓\n"
-    assert prompts.judge_match == "Beurteile — Fähigkeiten: π\n"
-
-
-def test_prompts_is_frozen() -> None:
-    prompts = Prompts(classify_relevance="a", judge_match="b")
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        prompts.classify_relevance = "x"  # type: ignore[misc]
-
-
-def test_load_prompts_raises_when_file_missing_after_config_load(
-    tmp_path: pathlib.Path,
+    classify_de: str = "classify de\n",
+    classify_en: str = "classify en\n",
+    judge_de: str = "judge de\n",
+    judge_en: str = "judge en\n",
 ) -> None:
-    write_config(tmp_path)
-    config = load(tmp_path / "config.py")
-    config.classify_relevance_prompt.unlink()
-
-    with pytest.raises(ConfigError) as exc_info:
-        load_prompts(config)
-    message = str(exc_info.value)
-    assert "CLASSIFY_RELEVANCE_PROMPT" in message
-    assert str(config.classify_relevance_prompt) in message
+    prompts_dir.mkdir(exist_ok=True)
+    (prompts_dir / "classify_relevance.de.md").write_text(classify_de, encoding="utf-8")
+    (prompts_dir / "classify_relevance.en.md").write_text(classify_en, encoding="utf-8")
+    (prompts_dir / "judge_match.de.md").write_text(judge_de, encoding="utf-8")
+    (prompts_dir / "judge_match.en.md").write_text(judge_en, encoding="utf-8")
 
 
-def test_load_prompts_raises_when_file_becomes_empty(tmp_path: pathlib.Path) -> None:
-    write_config(tmp_path)
-    config = load(tmp_path / "config.py")
-    config.judge_match_prompt.write_text("")
-
-    with pytest.raises(ConfigError) as exc_info:
-        load_prompts(config)
-    message = str(exc_info.value)
-    assert "JUDGE_MATCH_PROMPT" in message
-    assert str(config.judge_match_prompt) in message
-
-
-def test_load_prompts_accepts_config_constructed_directly(
-    tmp_path: pathlib.Path,
-) -> None:
-    classify = tmp_path / "c.md"
-    classify.write_text("c\n")
-    judge = tmp_path / "j.md"
-    judge.write_text("j\n")
-    config = Config(
+def make_config(tmp_path: pathlib.Path) -> Config:
+    return Config(
         keywords=["k"],
         skills=[],
         sources=[SourceEntry(parser_type="bundesagentur")],
         locations=["Hamburg"],
-        classify_relevance_prompt=classify,
-        judge_match_prompt=judge,
+        prompts_dir=tmp_path / "prompts",
     )
+
+
+def test_load_prompts_returns_per_language_dicts(tmp_path: pathlib.Path) -> None:
+    write_prompts(
+        tmp_path / "prompts",
+        classify_de="Klassifiziere.\n",
+        classify_en="Classify.\n",
+        judge_de="Beurteile.\n",
+        judge_en="Judge.\n",
+    )
+    config = make_config(tmp_path)
 
     prompts = load_prompts(config)
 
-    assert prompts.classify_relevance == "c\n"
-    assert prompts.judge_match == "j\n"
+    assert isinstance(prompts, Prompts)
+    assert prompts.classify_relevance["de"] == "Klassifiziere.\n"
+    assert prompts.classify_relevance["en"] == "Classify.\n"
+    assert prompts.judge_match["de"] == "Beurteile.\n"
+    assert prompts.judge_match["en"] == "Judge.\n"
+
+
+def test_load_prompts_preserves_utf8(tmp_path: pathlib.Path) -> None:
+    write_prompts(
+        tmp_path / "prompts",
+        classify_de="Klassifiziere — Schlüssel: ✓\n",
+        classify_en="Classify — key: ✓\n",
+        judge_de="Beurteile — Fähigkeiten: π\n",
+        judge_en="Judge — skills: π\n",
+    )
+    config = make_config(tmp_path)
+
+    prompts = load_prompts(config)
+
+    assert prompts.classify_relevance["de"] == "Klassifiziere — Schlüssel: ✓\n"
+    assert prompts.classify_relevance["en"] == "Classify — key: ✓\n"
+    assert prompts.judge_match["de"] == "Beurteile — Fähigkeiten: π\n"
+    assert prompts.judge_match["en"] == "Judge — skills: π\n"
+
+
+def test_prompts_is_frozen(tmp_path: pathlib.Path) -> None:
+    write_prompts(tmp_path / "prompts")
+    config = make_config(tmp_path)
+    prompts = load_prompts(config)
+    with pytest.raises((dataclasses.FrozenInstanceError, TypeError)):
+        prompts.classify_relevance = {}  # type: ignore[misc]
+
+
+def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / "config.py"
+    path.write_text(REQUIRED_BODY)
+    write_prompts(tmp_path / "prompts")
+
+    config = load(path)
+    prompts = load_prompts(config)
+
+    assert "de" in prompts.classify_relevance
+    assert "en" in prompts.classify_relevance
+
+
+@pytest.mark.parametrize(
+    "missing_file",
+    [
+        "classify_relevance.de.md",
+        "classify_relevance.en.md",
+        "judge_match.de.md",
+        "judge_match.en.md",
+    ],
+)
+def test_load_prompts_raises_when_file_missing(
+    tmp_path: pathlib.Path, missing_file: str
+) -> None:
+    write_prompts(tmp_path / "prompts")
+    (tmp_path / "prompts" / missing_file).unlink()
+    config = make_config(tmp_path)
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+    assert missing_file in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "empty_file",
+    [
+        "classify_relevance.de.md",
+        "classify_relevance.en.md",
+        "judge_match.de.md",
+        "judge_match.en.md",
+    ],
+)
+def test_load_prompts_raises_when_file_empty(
+    tmp_path: pathlib.Path, empty_file: str
+) -> None:
+    write_prompts(tmp_path / "prompts")
+    (tmp_path / "prompts" / empty_file).write_text("")
+    config = make_config(tmp_path)
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+    assert empty_file in str(exc_info.value)

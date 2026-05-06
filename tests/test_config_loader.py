@@ -24,8 +24,13 @@ def write_config(tmp_path: pathlib.Path, body: str) -> pathlib.Path:
     path.write_text(textwrap.dedent(body))
     prompts = tmp_path / "prompts"
     prompts.mkdir(exist_ok=True)
-    (prompts / "classify_relevance.md").write_text("classify\n")
-    (prompts / "judge_match.md").write_text("judge\n")
+    for name in (
+        "classify_relevance.de.md",
+        "classify_relevance.en.md",
+        "judge_match.de.md",
+        "judge_match.en.md",
+    ):
+        (prompts / name).write_text(f"{name}\n")
     return path
 
 
@@ -92,11 +97,7 @@ def test_load_defaults_when_optional_fields_absent(tmp_path: pathlib.Path) -> No
     config = load(path)
 
     assert config.include_remote is False
-    assert (
-        config.classify_relevance_prompt
-        == tmp_path / "prompts" / "classify_relevance.md"
-    )
-    assert config.judge_match_prompt == tmp_path / "prompts" / "judge_match.md"
+    assert config.prompts_dir == tmp_path / "prompts"
 
 
 def test_load_reads_include_remote_when_set(tmp_path: pathlib.Path) -> None:
@@ -110,70 +111,52 @@ def test_load_reads_include_remote_when_set(tmp_path: pathlib.Path) -> None:
     assert config.include_remote is True
 
 
-def test_load_resolves_relative_prompt_paths_against_config_dir(
+def test_load_resolves_relative_prompts_dir_against_config_dir(
     tmp_path: pathlib.Path,
 ) -> None:
     settings = tmp_path / "settings"
     settings.mkdir()
-    custom = settings / "custom"
-    custom.mkdir()
-    (custom / "relevance.md").write_text("rel\n")
-    (custom / "match.md").write_text("match\n")
+    custom_prompts = settings / "custom_prompts"
+    custom_prompts.mkdir()
+    for name in (
+        "classify_relevance.de.md",
+        "classify_relevance.en.md",
+        "judge_match.de.md",
+        "judge_match.en.md",
+    ):
+        (custom_prompts / name).write_text(f"{name}\n")
     path = write_config(
         settings,
         REQUIRED_BODY
         + "\nimport pathlib\n"
-        + 'CLASSIFY_RELEVANCE_PROMPT = pathlib.Path("custom/relevance.md")\n'
-        + 'JUDGE_MATCH_PROMPT = pathlib.Path("custom/match.md")\n',
+        + 'PROMPTS_DIR = pathlib.Path("custom_prompts")\n',
     )
 
     config = load(path)
 
-    assert config.classify_relevance_prompt == settings / "custom" / "relevance.md"
-    assert config.judge_match_prompt == settings / "custom" / "match.md"
+    assert config.prompts_dir == settings / "custom_prompts"
 
 
-def test_load_passes_absolute_prompt_paths_through(tmp_path: pathlib.Path) -> None:
-    abs_relevance = tmp_path / "elsewhere_relevance.md"
-    abs_relevance.write_text("rel\n")
-    abs_match = tmp_path / "elsewhere_match.md"
-    abs_match.write_text("match\n")
+def test_load_passes_absolute_prompts_dir_through(tmp_path: pathlib.Path) -> None:
+    abs_prompts = tmp_path / "abs_prompts"
+    abs_prompts.mkdir()
+    for name in (
+        "classify_relevance.de.md",
+        "classify_relevance.en.md",
+        "judge_match.de.md",
+        "judge_match.en.md",
+    ):
+        (abs_prompts / name).write_text(f"{name}\n")
     path = write_config(
         tmp_path,
         REQUIRED_BODY
         + "\nimport pathlib\n"
-        + f'CLASSIFY_RELEVANCE_PROMPT = pathlib.Path(r"{abs_relevance}")\n'
-        + f'JUDGE_MATCH_PROMPT = pathlib.Path(r"{abs_match}")\n',
+        + f'PROMPTS_DIR = pathlib.Path(r"{abs_prompts}")\n',
     )
 
     config = load(path)
 
-    assert config.classify_relevance_prompt == abs_relevance
-    assert config.judge_match_prompt == abs_match
-
-
-def test_load_raises_when_prompt_file_missing(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY)
-    (tmp_path / "prompts" / "classify_relevance.md").unlink()
-
-    expected_path = tmp_path / "prompts" / "classify_relevance.md"
-    with pytest.raises(ConfigError) as exc_info:
-        load(path)
-    message = str(exc_info.value)
-    assert "CLASSIFY_RELEVANCE_PROMPT" in message
-    assert str(expected_path) in message
-
-
-def test_load_raises_when_prompt_file_empty(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY)
-    empty = tmp_path / "prompts" / "judge_match.md"
-    empty.write_text("")
-
-    with pytest.raises(ConfigError) as exc_info:
-        load(path)
-    message = str(exc_info.value)
-    assert "JUDGE_MATCH_PROMPT" in message
-    assert str(empty) in message
+    assert config.prompts_dir == abs_prompts
 
 
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:

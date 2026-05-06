@@ -1,29 +1,41 @@
 import pathlib
 from dataclasses import dataclass
+from typing import Literal
 
-from .config import Config, ConfigError
+from .config import Config
+from .user_settings import UserSettingsError
+
+
+class PromptError(UserSettingsError):
+    pass
+
+
+_LANGS: tuple[Literal["de", "en"], ...] = ("de", "en")
+
+_CALL_SITES = ("classify_relevance", "judge_match")
 
 
 @dataclass(frozen=True)
 class Prompts:
-    classify_relevance: str
-    judge_match: str
+    classify_relevance: dict[Literal["de", "en"], str]
+    judge_match: dict[Literal["de", "en"], str]
 
 
 def load_prompts(config: Config) -> Prompts:
-    return Prompts(
-        classify_relevance=_read(
-            "CLASSIFY_RELEVANCE_PROMPT", config.classify_relevance_prompt
-        ),
-        judge_match=_read("JUDGE_MATCH_PROMPT", config.judge_match_prompt),
-    )
+    classify = {
+        lang: _read(config.prompts_dir, "classify_relevance", lang) for lang in _LANGS
+    }
+    judge = {lang: _read(config.prompts_dir, "judge_match", lang) for lang in _LANGS}
+    return Prompts(classify_relevance=classify, judge_match=judge)
 
 
-def _read(name: str, path: pathlib.Path) -> str:
+def _read(prompts_dir: pathlib.Path, call_site: str, lang: str) -> str:
+    filename = f"{call_site}.{lang}.md"
+    path = prompts_dir / filename
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ConfigError(f"{name} could not be read from {path}: {exc}") from exc
+        raise PromptError(f"{filename} could not be read from {path}: {exc}") from exc
     if not text.strip():
-        raise ConfigError(f"{name} file is empty: {path}")
+        raise PromptError(f"{filename} file is empty: {path}")
     return text

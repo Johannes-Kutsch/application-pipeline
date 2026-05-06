@@ -9,7 +9,7 @@ from .llm import (
     MatchVerdict,
     RelevanceVerdict,
 )
-from .prompts import Prompts, load_prompts
+from .prompts import PromptError, Prompts, load_prompts
 from .renderer import render
 from .results import ResultsFileError, ResultsFileManager
 from .results import load as load_results
@@ -26,6 +26,7 @@ __all__ = [
     "LayoutError",
     "MatchTier",
     "MatchVerdict",
+    "PromptError",
     "Prompts",
     "RelevanceVerdict",
     "ResultsFileError",

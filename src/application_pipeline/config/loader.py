@@ -15,19 +15,10 @@ def load(path: pathlib.Path) -> Config:
             raise ConfigError(f"Missing required field: {name}")
 
     config_dir = path.resolve().parent
-    classify_prompt = _load_prompt_path(
-        "CLASSIFY_RELEVANCE_PROMPT",
+    prompts_dir = _resolve_dir(
+        "PROMPTS_DIR",
         config_dir,
-        getattr(
-            module,
-            "CLASSIFY_RELEVANCE_PROMPT",
-            pathlib.Path("prompts/classify_relevance.md"),
-        ),
-    )
-    judge_prompt = _load_prompt_path(
-        "JUDGE_MATCH_PROMPT",
-        config_dir,
-        getattr(module, "JUDGE_MATCH_PROMPT", pathlib.Path("prompts/judge_match.md")),
+        getattr(module, "PROMPTS_DIR", pathlib.Path("prompts")),
     )
 
     config = Config(
@@ -38,23 +29,16 @@ def load(path: pathlib.Path) -> Config:
         include_remote=getattr(module, "INCLUDE_REMOTE", False),
         inclusion_keywords=getattr(module, "INCLUSION_KEYWORDS", []),
         negative_keywords=getattr(module, "NEGATIVE_KEYWORDS", []),
-        classify_relevance_prompt=classify_prompt,
-        judge_match_prompt=judge_prompt,
+        prompts_dir=prompts_dir,
     )
     _validate(config)
     return config
 
 
-def _load_prompt_path(
-    name: str, config_dir: pathlib.Path, value: object
-) -> pathlib.Path:
+def _resolve_dir(name: str, config_dir: pathlib.Path, value: object) -> pathlib.Path:
     path = pathlib.Path(value)  # type: ignore[arg-type]
     if not path.is_absolute():
         path = config_dir / path
-    if not path.is_file():
-        raise ConfigError(f"{name} file does not exist: {path}")
-    if path.stat().st_size == 0:
-        raise ConfigError(f"{name} file is empty: {path}")
     return path
 
 

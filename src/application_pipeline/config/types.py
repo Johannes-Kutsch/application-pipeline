@@ -33,9 +33,4 @@ class Config:
     include_remote: bool = False
     inclusion_keywords: list[str] = field(default_factory=list)
     negative_keywords: list[str] = field(default_factory=list)
-    classify_relevance_prompt: pathlib.Path = field(
-        default_factory=lambda: pathlib.Path("prompts/classify_relevance.md")
-    )
-    judge_match_prompt: pathlib.Path = field(
-        default_factory=lambda: pathlib.Path("prompts/judge_match.md")
-    )
+    prompts_dir: pathlib.Path = field(default_factory=lambda: pathlib.Path("prompts"))

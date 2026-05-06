@@ -22,6 +22,10 @@ REQUIRED_BODY = textwrap.dedent(
 def write_config(tmp_path: pathlib.Path, body: str) -> pathlib.Path:
     path = tmp_path / "config.py"
     path.write_text(textwrap.dedent(body))
+    prompts = tmp_path / "prompts"
+    prompts.mkdir(exist_ok=True)
+    (prompts / "classify_relevance.md").write_text("classify\n")
+    (prompts / "judge_match.md").write_text("judge\n")
     return path
 
 
@@ -88,8 +92,11 @@ def test_load_defaults_when_optional_fields_absent(tmp_path: pathlib.Path) -> No
     config = load(path)
 
     assert config.include_remote is False
-    assert config.relevance_prompt_path is None
-    assert config.match_prompt_path is None
+    assert (
+        config.classify_relevance_prompt
+        == tmp_path / "prompts" / "classify_relevance.md"
+    )
+    assert config.judge_match_prompt == tmp_path / "prompts" / "judge_match.md"
 
 
 def test_load_reads_include_remote_when_set(tmp_path: pathlib.Path) -> None:
@@ -103,20 +110,70 @@ def test_load_reads_include_remote_when_set(tmp_path: pathlib.Path) -> None:
     assert config.include_remote is True
 
 
-def test_load_reads_prompt_path_overrides(tmp_path: pathlib.Path) -> None:
-    relevance = tmp_path / "relevance.txt"
-    match = tmp_path / "match.txt"
+def test_load_resolves_relative_prompt_paths_against_config_dir(
+    tmp_path: pathlib.Path,
+) -> None:
+    settings = tmp_path / "settings"
+    settings.mkdir()
+    custom = settings / "custom"
+    custom.mkdir()
+    (custom / "relevance.md").write_text("rel\n")
+    (custom / "match.md").write_text("match\n")
     path = write_config(
-        tmp_path,
+        settings,
         REQUIRED_BODY
-        + f'\nRELEVANCE_PROMPT_PATH = r"{relevance}"\n'
-        + f'MATCH_PROMPT_PATH = r"{match}"\n',
+        + "\nimport pathlib\n"
+        + 'CLASSIFY_RELEVANCE_PROMPT = pathlib.Path("custom/relevance.md")\n'
+        + 'JUDGE_MATCH_PROMPT = pathlib.Path("custom/match.md")\n',
     )
 
     config = load(path)
 
-    assert config.relevance_prompt_path == relevance
-    assert config.match_prompt_path == match
+    assert config.classify_relevance_prompt == settings / "custom" / "relevance.md"
+    assert config.judge_match_prompt == settings / "custom" / "match.md"
+
+
+def test_load_passes_absolute_prompt_paths_through(tmp_path: pathlib.Path) -> None:
+    abs_relevance = tmp_path / "elsewhere_relevance.md"
+    abs_relevance.write_text("rel\n")
+    abs_match = tmp_path / "elsewhere_match.md"
+    abs_match.write_text("match\n")
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + "\nimport pathlib\n"
+        + f'CLASSIFY_RELEVANCE_PROMPT = pathlib.Path(r"{abs_relevance}")\n'
+        + f'JUDGE_MATCH_PROMPT = pathlib.Path(r"{abs_match}")\n',
+    )
+
+    config = load(path)
+
+    assert config.classify_relevance_prompt == abs_relevance
+    assert config.judge_match_prompt == abs_match
+
+
+def test_load_raises_when_prompt_file_missing(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+    (tmp_path / "prompts" / "classify_relevance.md").unlink()
+
+    expected_path = tmp_path / "prompts" / "classify_relevance.md"
+    with pytest.raises(ConfigError) as exc_info:
+        load(path)
+    message = str(exc_info.value)
+    assert "CLASSIFY_RELEVANCE_PROMPT" in message
+    assert str(expected_path) in message
+
+
+def test_load_raises_when_prompt_file_empty(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+    empty = tmp_path / "prompts" / "judge_match.md"
+    empty.write_text("")
+
+    with pytest.raises(ConfigError) as exc_info:
+        load(path)
+    message = str(exc_info.value)
+    assert "JUDGE_MATCH_PROMPT" in message
+    assert str(empty) in message
 
 
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:

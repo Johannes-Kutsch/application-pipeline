@@ -1,5 +1,5 @@
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class ConfigError(Exception):
@@ -29,5 +29,9 @@ class Config:
     sources: list[SourceEntry]
     locations: list[str]
     include_remote: bool = False
-    relevance_prompt_path: pathlib.Path | None = None
-    match_prompt_path: pathlib.Path | None = None
+    classify_relevance_prompt: pathlib.Path = field(
+        default_factory=lambda: pathlib.Path("prompts/classify_relevance.md")
+    )
+    judge_match_prompt: pathlib.Path = field(
+        default_factory=lambda: pathlib.Path("prompts/judge_match.md")
+    )

@@ -48,22 +48,19 @@ def _validate(config: Config) -> None:
     if not config.locations:
         raise ConfigError("LOCATIONS must be non-empty")
 
-    string_fields: list[tuple[str, list[str]]] = [
-        ("KEYWORDS", config.keywords),
-        ("SKILLS", config.skills),
-        ("LOCATIONS", config.locations),
-    ]
-    for name, values in string_fields:
-        seen: set[str] = set()
-        for value in values:
-            if value in seen:
-                raise ConfigError(f"{name} contains duplicate value: {value!r}")
-            seen.add(value)
+    _check_unique("KEYWORDS", config.keywords, item_label="value")
+    _check_unique("SKILLS", config.skills, item_label="value")
+    _check_unique("LOCATIONS", config.locations, item_label="value")
+    _check_unique(
+        "SOURCES",
+        [entry.parser_type for entry in config.sources],
+        item_label="parser_type",
+    )
 
-    seen_parser_types: set[str] = set()
-    for entry in config.sources:
-        if entry.parser_type in seen_parser_types:
-            raise ConfigError(
-                f"SOURCES contains duplicate parser_type: {entry.parser_type!r}"
-            )
-        seen_parser_types.add(entry.parser_type)
+
+def _check_unique(name: str, values: list[str], *, item_label: str) -> None:
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            raise ConfigError(f"{name} contains duplicate {item_label}: {value!r}")
+        seen.add(value)

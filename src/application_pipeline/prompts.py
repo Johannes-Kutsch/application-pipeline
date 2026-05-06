@@ -12,8 +12,6 @@ class PromptError(UserSettingsError):
 
 _LANGS: tuple[Literal["de", "en"], ...] = ("de", "en")
 
-_CALL_SITES = ("classify_relevance", "judge_match")
-
 
 @dataclass(frozen=True)
 class Prompts:

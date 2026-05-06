@@ -85,11 +85,12 @@ def test_load_prompts_preserves_utf8(tmp_path: pathlib.Path) -> None:
     assert prompts.judge_match["en"] == "Judge — skills: π\n"
 
 
-def test_prompts_is_frozen(tmp_path: pathlib.Path) -> None:
-    write_prompts(tmp_path / "prompts")
-    config = make_config(tmp_path)
-    prompts = load_prompts(config)
-    with pytest.raises((dataclasses.FrozenInstanceError, TypeError)):
+def test_prompts_is_frozen() -> None:
+    prompts = Prompts(
+        classify_relevance={"de": "x", "en": "x"},
+        judge_match={"de": "y", "en": "y"},
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
         prompts.classify_relevance = {}  # type: ignore[misc]
 
 

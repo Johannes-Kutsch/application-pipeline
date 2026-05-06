@@ -23,7 +23,7 @@ def load(path: pathlib.Path) -> Config:
     relevance_prompt = getattr(module, "RELEVANCE_PROMPT_PATH", None)
     match_prompt = getattr(module, "MATCH_PROMPT_PATH", None)
 
-    return Config(
+    config = Config(
         keywords=module.KEYWORDS,
         skills=module.SKILLS,
         sources=module.SOURCES,
@@ -36,3 +36,34 @@ def load(path: pathlib.Path) -> Config:
             pathlib.Path(match_prompt) if match_prompt is not None else None
         ),
     )
+    _validate(config)
+    return config
+
+
+def _validate(config: Config) -> None:
+    if not config.keywords:
+        raise ConfigError("KEYWORDS must be non-empty")
+    if not config.sources:
+        raise ConfigError("SOURCES must be non-empty")
+    if not config.locations:
+        raise ConfigError("LOCATIONS must be non-empty")
+
+    string_fields: list[tuple[str, list[str]]] = [
+        ("KEYWORDS", config.keywords),
+        ("SKILLS", config.skills),
+        ("LOCATIONS", config.locations),
+    ]
+    for name, values in string_fields:
+        seen: set[str] = set()
+        for value in values:
+            if value in seen:
+                raise ConfigError(f"{name} contains duplicate value: {value!r}")
+            seen.add(value)
+
+    seen_parser_types: set[str] = set()
+    for entry in config.sources:
+        if entry.parser_type in seen_parser_types:
+            raise ConfigError(
+                f"SOURCES contains duplicate parser_type: {entry.parser_type!r}"
+            )
+        seen_parser_types.add(entry.parser_type)

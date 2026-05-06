@@ -13,7 +13,7 @@ REQUIRED_BODY = textwrap.dedent(
 
     KEYWORDS = ["python"]
     SKILLS = ["python"]
-    SOURCES = []
+    SOURCES = [SourceEntry(parser_type="bundesagentur")]
     LOCATIONS = ["Hamburg"]
     """
 )
@@ -127,8 +127,8 @@ def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> No
 
         KEYWORDS = ["first"]
         SKILLS = []
-        SOURCES = []
-        LOCATIONS = []
+        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        LOCATIONS = ["Hamburg"]
         """,
     )
     first = load(path)
@@ -141,9 +141,129 @@ def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> No
 
         KEYWORDS = ["second"]
         SKILLS = []
-        SOURCES = []
-        LOCATIONS = []
+        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        LOCATIONS = ["Hamburg"]
         """,
     )
     second = load(path)
     assert second.keywords == ["second"]
+
+
+@pytest.mark.parametrize("empty_field", ["KEYWORDS", "SOURCES", "LOCATIONS"])
+def test_load_raises_when_required_list_is_empty(
+    tmp_path: pathlib.Path, empty_field: str
+) -> None:
+    fields = {
+        "KEYWORDS": '["python"]',
+        "SKILLS": '["python"]',
+        "SOURCES": '[SourceEntry(parser_type="bundesagentur")]',
+        "LOCATIONS": '["Hamburg"]',
+    }
+    fields[empty_field] = "[]"
+    body = "from application_pipeline import SourceEntry\n" + "\n".join(
+        f"{name} = {value}" for name, value in fields.items()
+    )
+    path = write_config(tmp_path, body)
+
+    with pytest.raises(ConfigError, match=empty_field):
+        load(path)
+
+
+def test_load_accepts_empty_skills(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+        from application_pipeline import SourceEntry
+
+        KEYWORDS = ["python"]
+        SKILLS = []
+        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        LOCATIONS = ["Hamburg"]
+        """,
+    )
+
+    config = load(path)
+
+    assert config.skills == []
+
+
+@pytest.mark.parametrize("field", ["KEYWORDS", "SKILLS", "LOCATIONS"])
+def test_load_raises_on_duplicate_strings(tmp_path: pathlib.Path, field: str) -> None:
+    fields = {
+        "KEYWORDS": '["python"]',
+        "SKILLS": '["python"]',
+        "SOURCES": '[SourceEntry(parser_type="bundesagentur")]',
+        "LOCATIONS": '["Hamburg"]',
+    }
+    fields[field] = '["dup", "dup"]'
+    body = "from application_pipeline import SourceEntry\n" + "\n".join(
+        f"{name} = {value}" for name, value in fields.items()
+    )
+    path = write_config(tmp_path, body)
+
+    with pytest.raises(ConfigError, match=field) as exc_info:
+        load(path)
+    assert "dup" in str(exc_info.value)
+
+
+def test_load_raises_on_duplicate_parser_type(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+        from application_pipeline import SourceEntry
+
+        KEYWORDS = ["python"]
+        SKILLS = []
+        SOURCES = [
+            SourceEntry(parser_type="bundesagentur"),
+            SourceEntry(parser_type="bundesagentur", max_results=10),
+        ]
+        LOCATIONS = ["Hamburg"]
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="bundesagentur"):
+        load(path)
+
+
+@pytest.mark.parametrize("bad_parser_type", ["", "   "])
+def test_source_entry_rejects_empty_parser_type(bad_parser_type: str) -> None:
+    with pytest.raises(ConfigError, match="parser_type"):
+        SourceEntry(parser_type=bad_parser_type, max_results=10)
+
+
+@pytest.mark.parametrize("bad_max_results", [0, -1])
+def test_source_entry_rejects_non_positive_max_results(
+    bad_max_results: int,
+) -> None:
+    with pytest.raises(ConfigError, match="max_results"):
+        SourceEntry(parser_type="bundesagentur", max_results=bad_max_results)
+
+
+def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + "\nFOO = 42\n",
+    )
+
+    config = load(path)
+
+    assert config.keywords == ["python"]
+
+
+def test_load_passes_unknown_parser_type_through(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+        from application_pipeline import SourceEntry
+
+        KEYWORDS = ["python"]
+        SKILLS = []
+        SOURCES = [SourceEntry(parser_type="not_a_real_parser")]
+        LOCATIONS = ["Hamburg"]
+        """,
+    )
+
+    config = load(path)
+
+    assert config.sources == [SourceEntry(parser_type="not_a_real_parser")]

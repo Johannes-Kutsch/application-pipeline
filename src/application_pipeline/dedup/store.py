@@ -15,7 +15,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from application_pipeline.text import normalize as _normalize_text
+from application_pipeline.text import normalize
 
 from .errors import DedupStoreError
 
@@ -30,10 +30,6 @@ class _SeenKey(Protocol):
     company: str | None
     title: str | None
     city: str | None
-
-
-def _normalize(value: str | None) -> str | None:
-    return _normalize_text(value)
 
 
 class DeduplicationStore:
@@ -65,9 +61,9 @@ class DeduplicationStore:
         return index
 
     def _tuple_key(self, key: _SeenKey) -> tuple[str, str, str] | None:
-        company_lc = _normalize(key.company)
-        title_lc = _normalize(key.title)
-        city_lc = _normalize(key.city)
+        company_lc = normalize(key.company)
+        title_lc = normalize(key.title)
+        city_lc = normalize(key.city)
         if company_lc is None or title_lc is None or city_lc is None:
             return None
         return (company_lc, title_lc, city_lc)
@@ -109,9 +105,9 @@ class DeduplicationStore:
             logger.debug("mark_seen: no-op, url already recorded: %s", key.url)
             return
 
-        company_lc = _normalize(key.company)
-        title_lc = _normalize(key.title)
-        city_lc = _normalize(key.city)
+        company_lc = normalize(key.company)
+        title_lc = normalize(key.title)
+        city_lc = normalize(key.city)
         record = {
             "company_lc": company_lc,
             "title_lc": title_lc,

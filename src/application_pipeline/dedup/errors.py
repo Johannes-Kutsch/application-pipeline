@@ -1,0 +1,2 @@
+class DedupStoreError(Exception):
+    pass

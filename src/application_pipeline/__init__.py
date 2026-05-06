@@ -3,6 +3,7 @@ from .dedup import DedupStoreError, DeduplicationStore, SeenStatus
 from .prompts import Prompts, load_prompts
 from .results import ResultsFileError, ResultsFileManager
 from .results import load as load_results
+from .user_settings import UserSettingsError, load_user_module
 
 __all__ = [
     "Config",
@@ -14,7 +15,9 @@ __all__ = [
     "ResultsFileManager",
     "SeenStatus",
     "SourceEntry",
+    "UserSettingsError",
     "load",
     "load_prompts",
     "load_results",
+    "load_user_module",
 ]

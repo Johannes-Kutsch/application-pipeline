@@ -1,8 +1,10 @@
 import pathlib
 from dataclasses import dataclass, field
 
+from application_pipeline.user_settings import UserSettingsError
 
-class ConfigError(Exception):
+
+class ConfigError(UserSettingsError):
     pass
 
 

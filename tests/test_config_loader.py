@@ -7,6 +7,18 @@ import pytest
 from application_pipeline import Config, ConfigError, SourceEntry, load
 
 
+REQUIRED_BODY = textwrap.dedent(
+    """
+    from application_pipeline import SourceEntry
+
+    KEYWORDS = ["python"]
+    SKILLS = ["python"]
+    SOURCES = []
+    LOCATIONS = ["Hamburg"]
+    """
+)
+
+
 def write_config(tmp_path: pathlib.Path, body: str) -> pathlib.Path:
     path = tmp_path / "config.py"
     path.write_text(textwrap.dedent(body))
@@ -63,6 +75,48 @@ def test_config_is_frozen() -> None:
     config = Config(keywords=[], skills=[], sources=[], locations=[])
     with pytest.raises(dataclasses.FrozenInstanceError):
         config.keywords = ["x"]  # type: ignore[misc]
+
+
+def test_source_entry_max_results_defaults_to_1000() -> None:
+    entry = SourceEntry(parser_type="bundesagentur")
+    assert entry.max_results == 1000
+
+
+def test_load_defaults_when_optional_fields_absent(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.include_remote is False
+    assert config.relevance_prompt_path is None
+    assert config.match_prompt_path is None
+
+
+def test_load_reads_include_remote_when_set(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + "\nINCLUDE_REMOTE = True\n",
+    )
+
+    config = load(path)
+
+    assert config.include_remote is True
+
+
+def test_load_reads_prompt_path_overrides(tmp_path: pathlib.Path) -> None:
+    relevance = tmp_path / "relevance.txt"
+    match = tmp_path / "match.txt"
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + f'\nRELEVANCE_PROMPT_PATH = r"{relevance}"\n'
+        + f'MATCH_PROMPT_PATH = r"{match}"\n',
+    )
+
+    config = load(path)
+
+    assert config.relevance_prompt_path == relevance
+    assert config.match_prompt_path == match
 
 
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:

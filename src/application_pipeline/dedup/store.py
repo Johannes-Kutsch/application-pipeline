@@ -1,8 +1,9 @@
-"""Deduplication Store — URL-tier slice.
+"""Deduplication Store — URL-tier + tuple-tier with alias write.
 
 Single-writer module (Pi only, per ADR-0002): no cross-process locking.
-Tuple-tier match and the alias write described in ADR-0004 are deferred
-to a follow-up slice; this module currently only answers via URL.
+``is_seen`` is intentionally side-effecting on tuple-tier hits — it writes
+an alias entry under the new URL so subsequent runs short-circuit on the
+cheap URL lookup. See ADR-0004; do not "fix" this back to a pure read.
 """
 
 from __future__ import annotations
@@ -29,21 +30,79 @@ class _SeenKey(Protocol):
     city: str | None
 
 
-def _lc(value: str | None) -> str | None:
+def _normalize(value: str | None) -> str | None:
     if value is None:
         return None
-    return value.lower()
+    collapsed = " ".join(value.split()).lower()
+    return collapsed or None
 
 
 class DeduplicationStore:
     def __init__(self, path: Path, records: dict[str, dict[str, Any]]) -> None:
         self._path = path
         self._records = records
+        self._tuple_index: dict[tuple[str, str, str], str] = self._build_tuple_index(
+            records
+        )
+
+    @staticmethod
+    def _build_tuple_index(
+        records: dict[str, dict[str, Any]],
+    ) -> dict[tuple[str, str, str], str]:
+        index: dict[tuple[str, str, str], str] = {}
+        for url, record in records.items():
+            company_lc = record.get("company_lc")
+            title_lc = record.get("title_lc")
+            city_lc = record.get("city_lc")
+            if (
+                isinstance(company_lc, str)
+                and isinstance(title_lc, str)
+                and isinstance(city_lc, str)
+                and company_lc
+                and title_lc
+                and city_lc
+            ):
+                index.setdefault((company_lc, title_lc, city_lc), url)
+        return index
+
+    def _tuple_key(self, key: _SeenKey) -> tuple[str, str, str] | None:
+        company_lc = _normalize(key.company)
+        title_lc = _normalize(key.title)
+        city_lc = _normalize(key.city)
+        if company_lc is None or title_lc is None or city_lc is None:
+            return None
+        return (company_lc, title_lc, city_lc)
+
+    def _tuple_lookup(self, key: _SeenKey) -> str | None:
+        tkey = self._tuple_key(key)
+        if tkey is None:
+            return None
+        return self._tuple_index.get(tkey)
 
     def is_seen(self, key: _SeenKey) -> bool:
+        """Return whether ``key`` has been seen; on tuple match, write alias.
+
+        Side effect (per ADR-0004): when the URL tier misses but the
+        ``(company_lc, title_lc, city_lc)`` tuple matches a prior entry,
+        an alias entry is written under ``key.url`` carrying the original
+        record's ``status`` and ``first_seen`` so future runs short-circuit
+        on the cheap URL lookup. The return value is unaffected by the
+        alias write.
+        """
         if key.url in self._records:
             logger.debug("is_seen: url match for %s", key.url)
             return True
+
+        canonical_url = self._tuple_lookup(key)
+        if canonical_url is not None:
+            self._write_alias(key.url, canonical_url)
+            logger.debug(
+                "is_seen: tuple match for %s; alias written under %s",
+                canonical_url,
+                key.url,
+            )
+            return True
+
         return False
 
     def mark_seen(self, key: _SeenKey, status: SeenStatus) -> None:
@@ -51,10 +110,13 @@ class DeduplicationStore:
             logger.debug("mark_seen: no-op, url already recorded: %s", key.url)
             return
 
+        company_lc = _normalize(key.company)
+        title_lc = _normalize(key.title)
+        city_lc = _normalize(key.city)
         record = {
-            "company_lc": _lc(key.company),
-            "title_lc": _lc(key.title),
-            "city_lc": _lc(key.city),
+            "company_lc": company_lc,
+            "title_lc": title_lc,
+            "city_lc": city_lc,
             "status": status,
             "first_seen": date.today().isoformat(),
         }
@@ -63,7 +125,23 @@ class DeduplicationStore:
         new_records[key.url] = record
         self._persist(new_records)
         self._records = new_records
+        if company_lc and title_lc and city_lc:
+            self._tuple_index.setdefault((company_lc, title_lc, city_lc), key.url)
         logger.debug("mark_seen: recorded %s with status=%s", key.url, status)
+
+    def _write_alias(self, new_url: str, canonical_url: str) -> None:
+        original = self._records[canonical_url]
+        record = {
+            "company_lc": original["company_lc"],
+            "title_lc": original["title_lc"],
+            "city_lc": original["city_lc"],
+            "status": original["status"],
+            "first_seen": original["first_seen"],
+        }
+        new_records = dict(self._records)
+        new_records[new_url] = record
+        self._persist(new_records)
+        self._records = new_records
 
     def _persist(self, records: dict[str, dict[str, Any]]) -> None:
         tmp = self._path.with_name(self._path.name + ".tmp")

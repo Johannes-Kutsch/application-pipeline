@@ -105,21 +105,23 @@ class TestNextPositionNumber:
 
 
 class TestAppend:
-    def test_writes_block_verbatim(self, manager: ResultsFileManager) -> None:
+    def test_writes_block_verbatim(
+        self, manager: ResultsFileManager, results_path: Path
+    ) -> None:
         manager.ensure_initialized()
         block = "## 1. Test Position\nSome content\n"
         manager.append(block)
-        assert results_path_content(manager) == HEADER + block
+        assert results_path.read_text(encoding="utf-8") == HEADER + block
 
     def test_two_appends_concatenate_without_normalization(
-        self, manager: ResultsFileManager
+        self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         manager.ensure_initialized()
         block1 = "## 1. First\n"
         block2 = "## 2. Second\n"
         manager.append(block1)
         manager.append(block2)
-        assert results_path_content(manager) == HEADER + block1 + block2
+        assert results_path.read_text(encoding="utf-8") == HEADER + block1 + block2
 
     def test_durable_after_append(
         self, manager: ResultsFileManager, results_path: Path
@@ -166,7 +168,3 @@ class TestLoadFactory:
         mgr = load(results_path, HEADER)
         mgr.ensure_initialized()
         assert results_path.read_text(encoding="utf-8") == HEADER
-
-
-def results_path_content(manager: ResultsFileManager) -> str:
-    return manager._path.read_text(encoding="utf-8")

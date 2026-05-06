@@ -1,3 +1,4 @@
+import dataclasses
 import pathlib
 import textwrap
 
@@ -54,13 +55,13 @@ def test_load_raises_when_required_field_missing(
 
 def test_source_entry_is_frozen() -> None:
     entry = SourceEntry(parser_type="bundesagentur", max_results=1000)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         entry.parser_type = "other"  # type: ignore[misc]
 
 
 def test_config_is_frozen() -> None:
     config = Config(keywords=[], skills=[], sources=[], locations=[])
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         config.keywords = ["x"]  # type: ignore[misc]
 
 

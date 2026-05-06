@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from application_pipeline.llm import (
@@ -50,7 +52,7 @@ def test_relevance_verdict_in_domain_false():
 
 def test_relevance_verdict_is_frozen():
     v = RelevanceVerdict(in_domain=True)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         v.in_domain = False  # type: ignore[misc]
 
 
@@ -86,7 +88,7 @@ def test_match_verdict_red_tier():
 
 def test_match_verdict_is_frozen():
     v = MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok")
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         v.tier = MatchTier.red  # type: ignore[misc]
 
 

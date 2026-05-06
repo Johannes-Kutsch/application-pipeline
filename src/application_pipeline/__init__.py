@@ -1,4 +1,5 @@
 from .config import Config, ConfigError, SourceEntry, load
+from .renderer import render
 from .dedup import DedupStoreError, DeduplicationStore, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
@@ -37,4 +38,5 @@ __all__ = [
     "load_prompts",
     "load_results",
     "load_user_module",
+    "render",
 ]

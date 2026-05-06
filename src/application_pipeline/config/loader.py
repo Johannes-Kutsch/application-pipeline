@@ -9,12 +9,23 @@ _REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
 
 def load(path: pathlib.Path) -> Config:
     resolved = path.resolve()
+    if not resolved.exists():
+        raise ConfigError(f"Config file does not exist: {resolved}")
+    if not resolved.is_file():
+        raise ConfigError(f"Config path is not a regular file: {resolved}")
     module_name = f"_application_pipeline_user_config_{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(module_name, resolved)
     if spec is None or spec.loader is None:
         raise ConfigError(f"Could not load config from {resolved}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except SyntaxError as exc:
+        raise ConfigError(f"Syntax error in config file {resolved}: {exc.msg}") from exc
+    except ConfigError:
+        raise
+    except Exception as exc:
+        raise ConfigError(f"Error executing config file {resolved}: {exc}") from exc
 
     for name in _REQUIRED_FIELDS:
         if not hasattr(module, name):

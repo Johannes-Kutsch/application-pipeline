@@ -251,6 +251,42 @@ def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:
     assert config.keywords == ["python"]
 
 
+def test_load_raises_config_error_when_path_missing(tmp_path: pathlib.Path) -> None:
+    missing = tmp_path / "nope.py"
+
+    with pytest.raises(ConfigError, match=str(missing)):
+        load(missing)
+
+
+def test_load_raises_config_error_when_path_is_directory(
+    tmp_path: pathlib.Path,
+) -> None:
+    with pytest.raises(ConfigError, match=str(tmp_path)):
+        load(tmp_path)
+
+
+def test_load_wraps_syntax_error(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, "def broken(:\n")
+
+    with pytest.raises(ConfigError, match=str(path.resolve())):
+        load(path)
+
+
+def test_load_wraps_import_error(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, "import nonexistent_module_xyz\n")
+
+    with pytest.raises(ConfigError, match=str(path.resolve())) as exc_info:
+        load(path)
+    assert "nonexistent_module_xyz" in str(exc_info.value)
+
+
+def test_load_wraps_arbitrary_exception(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, "x = 1 / 0\n")
+
+    with pytest.raises(ConfigError, match=str(path.resolve())):
+        load(path)
+
+
 def test_load_passes_unknown_parser_type_through(tmp_path: pathlib.Path) -> None:
     path = write_config(
         tmp_path,

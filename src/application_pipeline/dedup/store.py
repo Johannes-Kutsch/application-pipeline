@@ -15,6 +15,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from application_pipeline.text import normalize as _normalize_text
+
 from .errors import DedupStoreError
 
 logger = logging.getLogger(__name__)
@@ -31,10 +33,7 @@ class _SeenKey(Protocol):
 
 
 def _normalize(value: str | None) -> str | None:
-    if value is None:
-        return None
-    collapsed = " ".join(value.split()).lower()
-    return collapsed or None
+    return _normalize_text(value)
 
 
 class DeduplicationStore:

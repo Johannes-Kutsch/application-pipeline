@@ -29,6 +29,8 @@ class Config:
     sources: list[SourceEntry]
     locations: list[str]
     include_remote: bool = False
+    inclusion_keywords: list[str] = field(default_factory=list)
+    negative_keywords: list[str] = field(default_factory=list)
     classify_relevance_prompt: pathlib.Path = field(
         default_factory=lambda: pathlib.Path("prompts/classify_relevance.md")
     )

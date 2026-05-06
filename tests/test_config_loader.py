@@ -297,6 +297,56 @@ def test_source_entry_rejects_non_positive_max_results(
         SourceEntry(parser_type="bundesagentur", max_results=bad_max_results)
 
 
+def test_inclusion_and_negative_keywords_default_to_empty(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.inclusion_keywords == []
+    assert config.negative_keywords == []
+
+
+def test_load_reads_inclusion_and_negative_keywords(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + "\nINCLUSION_KEYWORDS = ['Python', 'Data Science']\nNEGATIVE_KEYWORDS = ['Pflege', 'Reinigung']\n",
+    )
+
+    config = load(path)
+
+    assert config.inclusion_keywords == ["Python", "Data Science"]
+    assert config.negative_keywords == ["Pflege", "Reinigung"]
+
+
+@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
+def test_load_raises_when_keyword_entry_too_short(
+    tmp_path: pathlib.Path, field: str
+) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\n{field} = ['ab']\n",
+    )
+
+    with pytest.raises(ConfigError, match=field):
+        load(path)
+
+
+@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
+def test_load_raises_on_duplicate_keyword_entries(
+    tmp_path: pathlib.Path, field: str
+) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\n{field} = ['Python', 'Python']\n",
+    )
+
+    with pytest.raises(ConfigError, match=field):
+        load(path)
+
+
 def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:
     path = write_config(
         tmp_path,

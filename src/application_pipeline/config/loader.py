@@ -53,6 +53,8 @@ def load(path: pathlib.Path) -> Config:
         sources=module.SOURCES,
         locations=module.LOCATIONS,
         include_remote=getattr(module, "INCLUDE_REMOTE", False),
+        inclusion_keywords=getattr(module, "INCLUSION_KEYWORDS", []),
+        negative_keywords=getattr(module, "NEGATIVE_KEYWORDS", []),
         classify_relevance_prompt=classify_prompt,
         judge_match_prompt=judge_prompt,
     )
@@ -89,6 +91,17 @@ def _validate(config: Config) -> None:
         [entry.parser_type for entry in config.sources],
         item_label="parser_type",
     )
+    _check_keyword_entries("INCLUSION_KEYWORDS", config.inclusion_keywords)
+    _check_keyword_entries("NEGATIVE_KEYWORDS", config.negative_keywords)
+
+
+def _check_keyword_entries(name: str, values: list[str]) -> None:
+    for entry in values:
+        if len(entry) < 3:
+            raise ConfigError(
+                f"{name} entries must be at least 3 characters; got {entry!r}"
+            )
+    _check_unique(name, values, item_label="value")
 
 
 def _check_unique(name: str, values: list[str], *, item_label: str) -> None:

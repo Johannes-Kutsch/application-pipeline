@@ -22,7 +22,7 @@ def load_user_module(
         raise error_class(f"Could not load module from {resolved}")
     module = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        spec.loader.exec_module(module)
     except SyntaxError as exc:
         raise error_class(f"Syntax error in {resolved}: {exc.msg}") from exc
     except error_class:

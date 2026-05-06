@@ -2,6 +2,13 @@ from .config import Config, ConfigError, SourceEntry, load
 from .dedup import DedupStoreError, DeduplicationStore, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
+from .llm import (
+    LLMExtractor,
+    LLMExtractorError,
+    MatchTier,
+    MatchVerdict,
+    RelevanceVerdict,
+)
 from .prompts import Prompts, load_prompts
 from .results import ResultsFileError, ResultsFileManager
 from .results import load as load_results
@@ -12,9 +19,14 @@ __all__ = [
     "ConfigError",
     "DedupStoreError",
     "DeduplicationStore",
+    "LLMExtractor",
+    "LLMExtractorError",
     "Layout",
     "LayoutError",
+    "MatchTier",
+    "MatchVerdict",
     "Prompts",
+    "RelevanceVerdict",
     "ResultsFileError",
     "ResultsFileManager",
     "SeenStatus",

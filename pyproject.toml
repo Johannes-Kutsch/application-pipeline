@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "application-pipeline"
 version = "0.1.0"
 requires-python = ">=3.11.3"
-dependencies = []
+dependencies = [
+    "langdetect",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -20,3 +22,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+[[tool.mypy.overrides]]
+module = "langdetect.*"
+ignore_missing_imports = true

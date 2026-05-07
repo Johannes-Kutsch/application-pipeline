@@ -1,4 +1,5 @@
 from .config import Config, ConfigError, SourceEntry, load
+from .prefilter import DomainPreFilter, PreFilterVerdict
 from .dedup import DedupStoreError, DeduplicationStore, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
@@ -18,6 +19,8 @@ from .user_settings import UserSettingsError, load_user_module
 __all__ = [
     "Config",
     "ConfigError",
+    "DomainPreFilter",
+    "PreFilterVerdict",
     "DedupStoreError",
     "DeduplicationStore",
     "LLMExtractor",

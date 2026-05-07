@@ -5,7 +5,13 @@ from typing import Any, Callable, Literal
 from application_pipeline.config import Config
 from application_pipeline.prompts import Prompts
 
-from .types import LLMExtractorError, MatchVerdict, RelevanceVerdict
+from .types import (
+    ExtractorUnreachableError,
+    LLMExtractorError,
+    MatchTier,
+    MatchVerdict,
+    RelevanceVerdict,
+)
 
 _HttpPost = Callable[[str, dict[str, Any], float], dict[str, Any]]
 
@@ -13,6 +19,17 @@ _CLASSIFY_RELEVANCE_FORMAT = {
     "type": "object",
     "properties": {"in_domain": {"type": "boolean"}},
     "required": ["in_domain"],
+}
+
+_JUDGE_MATCH_FORMAT = {
+    "type": "object",
+    "properties": {
+        "tier": {"type": "string", "enum": ["green", "amber", "red"]},
+        "matched": {"type": "array", "items": {"type": "string"}},
+        "missing": {"type": "array", "items": {"type": "string"}},
+        "summary": {"type": "string"},
+    },
+    "required": ["tier", "matched", "missing", "summary"],
 }
 
 
@@ -38,14 +55,14 @@ class OllamaExtractor:
         self._config = config
         self._prompts = prompts
         self._http_post: _HttpPost = _http_post or _default_http_post
+        self._skills_block = "\n".join(f"- {s}" for s in config.skills)
 
     def classify_relevance(
         self, language: str, title: str, raw_description: str
     ) -> RelevanceVerdict:
         lang: Literal["de", "en"] = "de" if language == "de" else "en"
-        prompt = self._prompts.classify_relevance[lang].format(
-            title=title, raw_description=raw_description
-        )
+        classify_slots = {"title": title, "raw_description": raw_description}
+        prompt = self._prompts.classify_relevance[lang].format(**classify_slots)
         payload: dict[str, Any] = {
             "model": self._config.ollama_classify_model,
             "prompt": prompt,
@@ -69,7 +86,56 @@ class OllamaExtractor:
         ) from last_exc
 
     def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
-        raise NotImplementedError
+        lang: Literal["de", "en"] = "de" if language == "de" else "en"
+        judge_slots = {"skills": self._skills_block, "raw_description": raw_description}
+        prompt = self._prompts.judge_match[lang].format(**judge_slots)
+        payload: dict[str, Any] = {
+            "model": self._config.ollama_judge_model,
+            "prompt": prompt,
+            "format": _JUDGE_MATCH_FORMAT,
+            "stream": False,
+            "keep_alive": self._config.ollama_keep_alive,
+            "options": {"temperature": 0.2},
+        }
+        url = f"{self._config.ollama_base_url}/api/generate"
+        timeout = float(self._config.ollama_read_timeout_seconds)
+
+        last_exc: Exception | None = None
+        for _ in range(self._config.ollama_json_retries):
+            raw = self._call_with_http_retries(url, payload, timeout)
+            try:
+                data = json.loads(raw.get("response", "{}"))
+                return MatchVerdict(
+                    tier=MatchTier(data["tier"]),
+                    matched=list(data["matched"]),
+                    missing=list(data["missing"]),
+                    summary=str(data["summary"]),
+                )
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                last_exc = exc
+        raise LLMExtractorError(
+            f"judge_match: failed to parse Ollama response: {last_exc}"
+        ) from last_exc
+
+    def prewarm(self) -> None:
+        url = f"{self._config.ollama_base_url}/api/generate"
+        timeout = float(self._config.ollama_read_timeout_seconds)
+        models = [self._config.ollama_classify_model]
+        if self._config.ollama_judge_model != self._config.ollama_classify_model:
+            models.append(self._config.ollama_judge_model)
+        for model in models:
+            payload: dict[str, Any] = {
+                "model": model,
+                "prompt": "ok",
+                "options": {"num_predict": 1},
+                "keep_alive": self._config.ollama_keep_alive,
+            }
+            try:
+                self._http_post(url, payload, timeout)
+            except Exception as exc:
+                raise ExtractorUnreachableError(
+                    f"Ollama prewarm failed for model {model!r}: {exc}"
+                ) from exc
 
     def _call_with_http_retries(
         self, url: str, payload: dict[str, Any], timeout: float

@@ -4,12 +4,19 @@ import pytest
 
 from application_pipeline import (
     Config,
+    ExtractorUnreachableError,
     LLMExtractorError,
+    MatchTier,
+    MatchVerdict,
     RelevanceVerdict,
     SourceEntry,
 )
 from application_pipeline.llm import OllamaExtractor
-from application_pipeline.prompts import Prompts
+from application_pipeline.prompts import (
+    CLASSIFY_RELEVANCE_SLOTS,
+    JUDGE_MATCH_SLOTS,
+    Prompts,
+)
 
 
 def _config(**kwargs: object) -> Config:
@@ -20,6 +27,7 @@ def _config(**kwargs: object) -> Config:
         locations=["Hamburg"],
         ollama_base_url="http://localhost:11434",
         ollama_classify_model="test-model",
+        ollama_judge_model="test-judge-model",
         ollama_read_timeout_seconds=30,
         ollama_json_retries=1,
         ollama_http_retries=1,
@@ -32,11 +40,18 @@ def _config(**kwargs: object) -> Config:
 def _prompts(
     classify_de: str = "DE: {title} {raw_description}",
     classify_en: str = "EN: {title} {raw_description}",
+    judge_de: str = "DE judge: {skills} {raw_description}",
+    judge_en: str = "EN judge: {skills} {raw_description}",
 ) -> Prompts:
     return Prompts(
         classify_relevance={"de": classify_de, "en": classify_en},
-        judge_match={"de": "judge de", "en": "judge en"},
+        judge_match={"de": judge_de, "en": judge_en},
     )
+
+
+_JUDGE_RESPONSE = (
+    '{"tier": "green", "matched": ["python"], "missing": [], "summary": "Good match"}'
+)
 
 
 # --- classify_relevance: happy path ---
@@ -281,3 +296,301 @@ def test_ollama_extractor_is_llm_extractor():
     extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
 
     assert isinstance(extractor, LLMExtractor)
+
+
+# --- judge_match: happy path ---
+
+
+def test_judge_match_returns_match_verdict():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    result = extractor.judge_match("en", "Looking for Python dev")
+
+    assert isinstance(result, MatchVerdict)
+    assert result.tier == MatchTier.green
+    assert result.matched == ["python"]
+    assert result.missing == []
+    assert result.summary == "Good match"
+
+
+def test_judge_match_uses_german_prompt_for_de():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.judge_match("de", "Stelle")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["prompt"].startswith("DE judge:")
+
+
+def test_judge_match_uses_english_prompt_for_en():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.judge_match("en", "Job posting")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["prompt"].startswith("EN judge:")
+
+
+def test_judge_match_falls_back_to_english_for_unknown():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.judge_match("fr", "Job posting")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["prompt"].startswith("EN judge:")
+
+
+def test_judge_match_renders_skills_into_prompt():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(
+        _config(skills=["python", "docker"]),
+        _prompts(judge_en="skills={skills}"),
+        _http_post=http_post,
+    )
+
+    extractor.judge_match("en", "desc")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert "- python" in payload["prompt"]
+    assert "- docker" in payload["prompt"]
+
+
+def test_judge_match_sends_judge_model():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(
+        _config(ollama_judge_model="qwen3:14b"), _prompts(), _http_post=http_post
+    )
+
+    extractor.judge_match("en", "desc")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["model"] == "qwen3:14b"
+
+
+def test_judge_match_sends_temperature_02():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.judge_match("en", "desc")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["options"]["temperature"] == 0.2
+
+
+def test_judge_match_sends_stream_false():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.judge_match("en", "desc")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["stream"] is False
+
+
+# --- judge_match: error mapping ---
+
+
+def test_judge_match_raises_llm_extractor_error_after_http_retries_exhausted():
+    http_post = MagicMock(side_effect=OSError("connection refused"))
+    extractor = OllamaExtractor(
+        _config(ollama_http_retries=2), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(LLMExtractorError):
+        extractor.judge_match("en", "desc")
+
+
+def test_judge_match_retries_on_http_error():
+    http_post = MagicMock(
+        side_effect=[OSError("timeout"), {"response": _JUDGE_RESPONSE}]
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_http_retries=2), _prompts(), _http_post=http_post
+    )
+
+    result = extractor.judge_match("en", "desc")
+
+    assert result.tier == MatchTier.green
+    assert http_post.call_count == 2
+
+
+def test_judge_match_raises_llm_extractor_error_on_invalid_json():
+    http_post = MagicMock(return_value={"response": "not json"})
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(LLMExtractorError):
+        extractor.judge_match("en", "desc")
+
+
+def test_judge_match_raises_llm_extractor_error_on_missing_tier():
+    http_post = MagicMock(
+        return_value={"response": '{"matched": [], "missing": [], "summary": "x"}'}
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(LLMExtractorError):
+        extractor.judge_match("en", "desc")
+
+
+def test_judge_match_raises_llm_extractor_error_on_invalid_tier_value():
+    http_post = MagicMock(
+        return_value={
+            "response": '{"tier": "invalid", "matched": [], "missing": [], "summary": "x"}'
+        }
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(LLMExtractorError):
+        extractor.judge_match("en", "desc")
+
+
+def test_judge_match_retries_http_call_on_bad_json():
+    http_post = MagicMock(
+        side_effect=[
+            {"response": "bad json"},
+            {"response": _JUDGE_RESPONSE},
+        ]
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=2, ollama_http_retries=1),
+        _prompts(),
+        _http_post=http_post,
+    )
+
+    result = extractor.judge_match("en", "desc")
+
+    assert result.tier == MatchTier.green
+    assert http_post.call_count == 2
+
+
+# --- prewarm ---
+
+
+def test_prewarm_sends_two_pings_when_models_differ():
+    http_post = MagicMock(return_value={})
+    extractor = OllamaExtractor(
+        _config(ollama_classify_model="model-a", ollama_judge_model="model-b"),
+        _prompts(),
+        _http_post=http_post,
+    )
+
+    extractor.prewarm()
+
+    assert http_post.call_count == 2
+    models_called = [call.args[1]["model"] for call in http_post.call_args_list]
+    assert "model-a" in models_called
+    assert "model-b" in models_called
+
+
+def test_prewarm_sends_single_ping_when_models_equal():
+    http_post = MagicMock(return_value={})
+    extractor = OllamaExtractor(
+        _config(ollama_classify_model="same-model", ollama_judge_model="same-model"),
+        _prompts(),
+        _http_post=http_post,
+    )
+
+    extractor.prewarm()
+
+    assert http_post.call_count == 1
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["model"] == "same-model"
+
+
+def test_prewarm_uses_correct_body():
+    http_post = MagicMock(return_value={})
+    extractor = OllamaExtractor(
+        _config(
+            ollama_keep_alive="10m", ollama_classify_model="m", ollama_judge_model="m"
+        ),
+        _prompts(),
+        _http_post=http_post,
+    )
+
+    extractor.prewarm()
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["prompt"] == "ok"
+    assert payload["options"]["num_predict"] == 1
+    assert payload["keep_alive"] == "10m"
+
+
+def test_prewarm_raises_extractor_unreachable_on_failure():
+    http_post = MagicMock(side_effect=OSError("connection refused"))
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    with pytest.raises(ExtractorUnreachableError):
+        extractor.prewarm()
+
+
+def test_prewarm_does_not_send_second_ping_after_first_fails():
+    http_post = MagicMock(side_effect=OSError("connection refused"))
+    extractor = OllamaExtractor(
+        _config(ollama_classify_model="model-a", ollama_judge_model="model-b"),
+        _prompts(),
+        _http_post=http_post,
+    )
+
+    with pytest.raises(ExtractorUnreachableError):
+        extractor.prewarm()
+
+    assert http_post.call_count == 1
+
+
+# --- drift tests ---
+
+
+def test_classify_slots_match_inventory():
+    captured: dict[str, object] = {}
+
+    class _SpyStr(str):
+        def format(self, *args: object, **kwargs: object) -> str:
+            captured.update(kwargs)
+            return ""
+
+    http_post = MagicMock(return_value={"response": '{"in_domain": true}'})
+    prompts = Prompts(
+        classify_relevance={"de": _SpyStr(""), "en": _SpyStr("")},
+        judge_match={
+            "de": "judge de {skills} {raw_description}",
+            "en": "judge en {skills} {raw_description}",
+        },
+    )
+    extractor = OllamaExtractor(_config(), prompts, _http_post=http_post)
+
+    extractor.classify_relevance("en", "title", "desc")
+
+    assert set(captured.keys()) == CLASSIFY_RELEVANCE_SLOTS
+
+
+def test_judge_slots_match_inventory():
+    captured: dict[str, object] = {}
+
+    class _SpyStr(str):
+        def format(self, *args: object, **kwargs: object) -> str:
+            captured.update(kwargs)
+            return ""
+
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    prompts = Prompts(
+        classify_relevance={
+            "de": "DE: {title} {raw_description}",
+            "en": "EN: {title} {raw_description}",
+        },
+        judge_match={"de": _SpyStr(""), "en": _SpyStr("")},
+    )
+    extractor = OllamaExtractor(_config(), prompts, _http_post=http_post)
+
+    extractor.judge_match("en", "desc")
+
+    assert set(captured.keys()) == JUDGE_MATCH_SLOTS

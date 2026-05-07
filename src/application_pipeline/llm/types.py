@@ -7,6 +7,10 @@ class LLMExtractorError(Exception):
     pass
 
 
+class ExtractorUnreachableError(LLMExtractorError):
+    pass
+
+
 class MatchTier(str, Enum):
     green = "green"
     amber = "amber"

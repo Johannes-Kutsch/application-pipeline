@@ -1,3 +1,4 @@
+import dataclasses
 from dataclasses import dataclass
 
 import pytest
@@ -142,5 +143,5 @@ def test_strasse_and_straße_match_same_listing() -> None:
 
 def test_verdict_is_frozen() -> None:
     verdict = PreFilterVerdict(passes=True, language="de")
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         verdict.passes = False  # type: ignore[misc]

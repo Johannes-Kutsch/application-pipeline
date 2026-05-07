@@ -1,3 +1,4 @@
+from .ollama import OllamaExtractor
 from .types import (
     LLMExtractor,
     LLMExtractorError,
@@ -11,5 +12,6 @@ __all__ = [
     "LLMExtractorError",
     "MatchTier",
     "MatchVerdict",
+    "OllamaExtractor",
     "RelevanceVerdict",
 ]

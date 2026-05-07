@@ -30,6 +30,13 @@ def load(path: pathlib.Path) -> Config:
         inclusion_keywords=getattr(module, "INCLUSION_KEYWORDS", []),
         negative_keywords=getattr(module, "NEGATIVE_KEYWORDS", []),
         prompts_dir=prompts_dir,
+        ollama_base_url=getattr(module, "OLLAMA_BASE_URL", "http://localhost:11434"),
+        ollama_classify_model=getattr(module, "OLLAMA_CLASSIFY_MODEL", "qwen3:8b"),
+        ollama_judge_model=getattr(module, "OLLAMA_JUDGE_MODEL", "qwen3:8b"),
+        ollama_read_timeout_seconds=getattr(module, "OLLAMA_READ_TIMEOUT_SECONDS", 120),
+        ollama_json_retries=getattr(module, "OLLAMA_JSON_RETRIES", 3),
+        ollama_http_retries=getattr(module, "OLLAMA_HTTP_RETRIES", 3),
+        ollama_keep_alive=getattr(module, "OLLAMA_KEEP_ALIVE", "5m"),
     )
     _validate(config)
     return config

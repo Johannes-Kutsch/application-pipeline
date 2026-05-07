@@ -81,5 +81,5 @@ class OllamaExtractor:
             except Exception as exc:
                 last_exc = exc
         raise LLMExtractorError(
-            f"classify_relevance: HTTP request failed after retries: {last_exc}"
+            f"Ollama HTTP request failed after retries: {last_exc}"
         ) from last_exc

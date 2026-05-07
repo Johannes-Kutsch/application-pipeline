@@ -1,5 +1,6 @@
 import dataclasses
 import pathlib
+import re
 import textwrap
 
 import pytest
@@ -21,7 +22,7 @@ _MINIMAL_BODY = textwrap.dedent(
 
 def write_layout(tmp_path: pathlib.Path, body: str) -> pathlib.Path:
     path = tmp_path / "layout.py"
-    path.write_text(textwrap.dedent(body))
+    path.write_text(textwrap.dedent(body), encoding="utf-8")
     return path
 
 
@@ -179,21 +180,21 @@ def test_load_accepts_empty_placeholder_groups(tmp_path: pathlib.Path) -> None:
 def test_load_raises_layout_error_when_file_missing(tmp_path: pathlib.Path) -> None:
     missing = tmp_path / "layout.py"
 
-    with pytest.raises(LayoutError, match=str(missing)):
+    with pytest.raises(LayoutError, match=re.escape(str(missing))):
         load_layout(missing)
 
 
 def test_load_raises_layout_error_when_path_is_directory(
     tmp_path: pathlib.Path,
 ) -> None:
-    with pytest.raises(LayoutError, match=str(tmp_path)):
+    with pytest.raises(LayoutError, match=re.escape(str(tmp_path))):
         load_layout(tmp_path)
 
 
 def test_load_wraps_syntax_error(tmp_path: pathlib.Path) -> None:
     path = write_layout(tmp_path, "def broken(:\n")
 
-    with pytest.raises(LayoutError, match=str(path.resolve())):
+    with pytest.raises(LayoutError, match=re.escape(str(path.resolve()))):
         load_layout(path)
 
 
@@ -215,7 +216,7 @@ def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> No
         HEADLINE_TEMPLATE = "## {number}. {company}\\n"
         """
     )
-    path.write_text(second_body)
+    path.write_text(second_body, encoding="utf-8")
     second = load_layout(path)
 
     assert second.file_header == "# Changed Header for Second Run\n"

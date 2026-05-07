@@ -1,5 +1,6 @@
 import dataclasses
 import pathlib
+import re
 import textwrap
 
 import pytest
@@ -344,28 +345,28 @@ def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:
 def test_load_raises_config_error_when_path_missing(tmp_path: pathlib.Path) -> None:
     missing = tmp_path / "nope.py"
 
-    with pytest.raises(ConfigError, match=str(missing)):
+    with pytest.raises(ConfigError, match=re.escape(str(missing))):
         load(missing)
 
 
 def test_load_raises_config_error_when_path_is_directory(
     tmp_path: pathlib.Path,
 ) -> None:
-    with pytest.raises(ConfigError, match=str(tmp_path)):
+    with pytest.raises(ConfigError, match=re.escape(str(tmp_path))):
         load(tmp_path)
 
 
 def test_load_wraps_syntax_error(tmp_path: pathlib.Path) -> None:
     path = write_config(tmp_path, "def broken(:\n")
 
-    with pytest.raises(ConfigError, match=str(path.resolve())):
+    with pytest.raises(ConfigError, match=re.escape(str(path.resolve()))):
         load(path)
 
 
 def test_load_wraps_import_error(tmp_path: pathlib.Path) -> None:
     path = write_config(tmp_path, "import nonexistent_module_xyz\n")
 
-    with pytest.raises(ConfigError, match=str(path.resolve())) as exc_info:
+    with pytest.raises(ConfigError, match=re.escape(str(path.resolve()))) as exc_info:
         load(path)
     assert "nonexistent_module_xyz" in str(exc_info.value)
 
@@ -373,7 +374,7 @@ def test_load_wraps_import_error(tmp_path: pathlib.Path) -> None:
 def test_load_wraps_arbitrary_exception(tmp_path: pathlib.Path) -> None:
     path = write_config(tmp_path, "x = 1 / 0\n")
 
-    with pytest.raises(ConfigError, match=str(path.resolve())):
+    with pytest.raises(ConfigError, match=re.escape(str(path.resolve()))):
         load(path)
 
 

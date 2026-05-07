@@ -1,4 +1,5 @@
 import pathlib
+import re
 import types
 
 import pytest
@@ -27,12 +28,12 @@ def test_load_user_module_returns_module(tmp_path: pathlib.Path) -> None:
 def test_load_user_module_raises_when_file_missing(tmp_path: pathlib.Path) -> None:
     path = tmp_path / "missing.py"
 
-    with pytest.raises(UserSettingsError, match=str(path.resolve())):
+    with pytest.raises(UserSettingsError, match=re.escape(str(path.resolve()))):
         load_user_module(path, UserSettingsError)
 
 
 def test_load_user_module_raises_when_path_is_directory(tmp_path: pathlib.Path) -> None:
-    with pytest.raises(UserSettingsError, match=str(tmp_path.resolve())):
+    with pytest.raises(UserSettingsError, match=re.escape(str(tmp_path.resolve()))):
         load_user_module(tmp_path, UserSettingsError)
 
 
@@ -40,7 +41,7 @@ def test_load_user_module_raises_on_syntax_error(tmp_path: pathlib.Path) -> None
     path = tmp_path / "bad.py"
     path.write_text("def broken(:\n")
 
-    with pytest.raises(UserSettingsError, match=str(path.resolve())):
+    with pytest.raises(UserSettingsError, match=re.escape(str(path.resolve()))):
         load_user_module(path, UserSettingsError)
 
 
@@ -56,7 +57,7 @@ def test_load_user_module_raises_on_arbitrary_exception(tmp_path: pathlib.Path) 
     path = tmp_path / "bad.py"
     path.write_text("x = 1 / 0\n")
 
-    with pytest.raises(UserSettingsError, match=str(path.resolve())):
+    with pytest.raises(UserSettingsError, match=re.escape(str(path.resolve()))):
         load_user_module(path, UserSettingsError)
 
 

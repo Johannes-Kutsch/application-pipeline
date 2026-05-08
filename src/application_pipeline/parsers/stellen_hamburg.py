@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import html.parser
 import json
-import re
 import urllib.request
 from collections.abc import Iterator
-from datetime import date
 from typing import Any, Callable, Literal
 
 from application_pipeline.http import HttpRetryError
 
+from ._text import parse_iso_date, strip_html
 from .errors import ParserError
 from .http import (
     DEFAULT_RETRIES,
@@ -57,38 +56,6 @@ def _post_with_retry(
     ) from last_exc
 
 
-class _HtmlToText(html.parser.HTMLParser):
-    _BLOCK = frozenset(
-        ["p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "td"]
-    )
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._parts: list[str] = []
-
-    def handle_data(self, data: str) -> None:
-        self._parts.append(data)
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in self._BLOCK:
-            self._parts.append("\n\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in self._BLOCK:
-            self._parts.append("\n\n")
-
-    def result(self) -> str:
-        text = "".join(self._parts)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
-
-
-def _strip_html(html_text: str) -> str:
-    parser = _HtmlToText()
-    parser.feed(html_text)
-    return parser.result()
-
-
 class _JsonLdExtractor(html.parser.HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -125,15 +92,6 @@ def _extract_jsonld(html_bytes: bytes) -> dict[str, Any]:
     extractor = _JsonLdExtractor()
     extractor.feed(html_bytes.decode("utf-8", errors="replace"))
     return extractor.result()
-
-
-def _parse_date(value: str | None) -> date | None:
-    if not value:
-        return None
-    try:
-        return date.fromisoformat(value[:10])
-    except ValueError:
-        return None
 
 
 def _employment_type(
@@ -249,7 +207,7 @@ class StellenHamburgParser:
             ) from exc.__cause__
 
         job_data = _extract_jsonld(raw)
-        raw_description = _strip_html(job_data.get("description") or "")
+        raw_description = strip_html(job_data.get("description") or "")
 
         return Position(
             stub=stub,
@@ -257,8 +215,8 @@ class StellenHamburgParser:
             contract_type=None,
             employment_type=_employment_type(job_data.get("employmentType")),
             work_model=None,
-            posted_date=_parse_date(job_data.get("datePosted")),
-            deadline=_parse_date(job_data.get("validThrough")),
+            posted_date=parse_iso_date(job_data.get("datePosted")),
+            deadline=parse_iso_date(job_data.get("validThrough")),
             salary=None,
         )
 

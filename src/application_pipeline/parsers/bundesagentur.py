@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import html.parser
 import json
-import re
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
-from datetime import date
 from typing import Any, Literal
 
 from application_pipeline.http import HttpRetryError
 
+from ._text import parse_iso_date, strip_html
 from .errors import ParserError
 from .http import (
     DEFAULT_RETRIES,
@@ -31,47 +29,6 @@ def _default_http_get(url: str, timeout: float) -> bytes:
     req = urllib.request.Request(url, headers={"X-API-Key": _API_KEY})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()  # type: ignore[no-any-return]
-
-
-class _HtmlToText(html.parser.HTMLParser):
-    _BLOCK = frozenset(
-        ["p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "td"]
-    )
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._parts: list[str] = []
-
-    def handle_data(self, data: str) -> None:
-        self._parts.append(data)
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in self._BLOCK:
-            self._parts.append("\n\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in self._BLOCK:
-            self._parts.append("\n\n")
-
-    def result(self) -> str:
-        text = "".join(self._parts)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
-
-
-def _strip_html(html_text: str) -> str:
-    parser = _HtmlToText()
-    parser.feed(html_text)
-    return parser.result()
-
-
-def _parse_date(value: str | None) -> date | None:
-    if not value:
-        return None
-    try:
-        return date.fromisoformat(value[:10])
-    except ValueError:
-        return None
 
 
 def _contract_type(
@@ -185,7 +142,7 @@ class BundesagenturParser:
                 f"Bundesagentur enrich failed for {stub.url}: {exc}"
             ) from exc.__cause__
 
-        raw_description = _strip_html(data.get("stellenbeschreibung") or "")
+        raw_description = strip_html(data.get("stellenbeschreibung") or "")
 
         return Position(
             stub=stub,
@@ -193,8 +150,8 @@ class BundesagenturParser:
             contract_type=_contract_type(data.get("befristung")),
             employment_type=_employment_type(data.get("arbeitszeitModelle")),
             work_model=None,
-            posted_date=_parse_date(data.get("aktuelleVeroeffentlichungsdatum")),
-            deadline=_parse_date(data.get("bewerbungsschluss")),
+            posted_date=parse_iso_date(data.get("aktuelleVeroeffentlichungsdatum")),
+            deadline=parse_iso_date(data.get("bewerbungsschluss")),
         )
 
 

@@ -46,11 +46,11 @@ class _HtmlToText(html.parser.HTMLParser):
         self._parts.append(data)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() in self._BLOCK:
+        if tag in self._BLOCK:
             self._parts.append("\n\n")
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() in self._BLOCK:
+        if tag in self._BLOCK:
             self._parts.append("\n\n")
 
     def result(self) -> str:

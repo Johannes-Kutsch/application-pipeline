@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import pytest
 
@@ -64,6 +65,15 @@ def _make_get(responses: list[bytes]) -> HttpGet:
         return next(it)
 
     return http_get
+
+
+@pytest.fixture
+def stub() -> PositionStub:
+    return PositionStub(
+        url="https://example.com/jobdetails/abc",
+        title="Dev",
+        source="bundesagentur",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -280,24 +290,14 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_returns_position_with_raw_description() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_returns_position_with_raw_description(stub: PositionStub) -> None:
     get = _make_get([_detail_body(description="We are hiring.")])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.raw_description == "We are hiring."
 
 
-def test_enrich_strips_html_tags_from_description() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_strips_html_tags_from_description(stub: PositionStub) -> None:
     get = _make_get([_detail_body(description="<p>Hello</p><p>World</p>")])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
@@ -306,12 +306,7 @@ def test_enrich_strips_html_tags_from_description() -> None:
     assert "World" in pos.raw_description
 
 
-def test_enrich_decodes_html_entities_in_description() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_decodes_html_entities_in_description(stub: PositionStub) -> None:
     get = _make_get([_detail_body(description="Geh&auml;lter &amp; Benefits")])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
@@ -319,12 +314,7 @@ def test_enrich_decodes_html_entities_in_description() -> None:
     assert "&amp;" not in pos.raw_description
 
 
-def test_enrich_empty_description_when_field_absent() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_empty_description_when_field_absent(stub: PositionStub) -> None:
     body = json.dumps({"hashId": "abc", "titel": "Dev"}).encode()
     get = _make_get([body])
     with BundesagenturParser(locations=[], _http_get=get) as p:
@@ -337,36 +327,21 @@ def test_enrich_empty_description_when_field_absent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_maps_befristung_1_to_permanent() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_maps_befristung_1_to_permanent(stub: PositionStub) -> None:
     get = _make_get([_detail_body(befristung=1)])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.contract_type == "permanent"
 
 
-def test_enrich_maps_befristung_2_to_fixed_term() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_maps_befristung_2_to_fixed_term(stub: PositionStub) -> None:
     get = _make_get([_detail_body(befristung=2)])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.contract_type == "fixed-term"
 
 
-def test_enrich_contract_type_none_when_befristung_absent() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_contract_type_none_when_befristung_absent(stub: PositionStub) -> None:
     get = _make_get([_detail_body()])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
@@ -378,36 +353,23 @@ def test_enrich_contract_type_none_when_befristung_absent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_maps_vz_to_full_time() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_maps_vz_to_full_time(stub: PositionStub) -> None:
     get = _make_get([_detail_body(arbeitszeitModelle=["vz"])])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.employment_type == "full-time"
 
 
-def test_enrich_maps_tz_to_part_time() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_maps_tz_to_part_time(stub: PositionStub) -> None:
     get = _make_get([_detail_body(arbeitszeitModelle=["tz"])])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.employment_type == "part-time"
 
 
-def test_enrich_employment_type_none_when_arbeitszeitmodelle_absent() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_employment_type_none_when_arbeitszeitmodelle_absent(
+    stub: PositionStub,
+) -> None:
     get = _make_get([_detail_body()])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
@@ -419,40 +381,21 @@ def test_enrich_employment_type_none_when_arbeitszeitmodelle_absent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_parses_posted_date() -> None:
-    from datetime import date
-
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_parses_posted_date(stub: PositionStub) -> None:
     get = _make_get([_detail_body(aktuelleVeroeffentlichungsdatum="2024-03-15")])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.posted_date == date(2024, 3, 15)
 
 
-def test_enrich_parses_deadline() -> None:
-    from datetime import date
-
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_parses_deadline(stub: PositionStub) -> None:
     get = _make_get([_detail_body(bewerbungsschluss="2024-04-30")])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.deadline == date(2024, 4, 30)
 
 
-def test_enrich_posted_date_none_when_field_absent() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_posted_date_none_when_field_absent(stub: PositionStub) -> None:
     get = _make_get([_detail_body()])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)
@@ -486,12 +429,7 @@ def test_enrich_raises_parser_error_on_http_failure() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_position_references_original_stub() -> None:
-    stub = PositionStub(
-        url="https://example.com/jobdetails/abc",
-        title="Dev",
-        source="bundesagentur",
-    )
+def test_enrich_position_references_original_stub(stub: PositionStub) -> None:
     get = _make_get([_detail_body()])
     with BundesagenturParser(locations=[], _http_get=get) as p:
         pos = p.enrich(stub)

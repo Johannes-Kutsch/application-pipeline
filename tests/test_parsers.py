@@ -16,10 +16,6 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.registry import get_parser_class
 
 
-def _stub() -> PositionStub:
-    return PositionStub(url="https://example.com/1", title="Dev", source="test")
-
-
 class _ConcreteParser:
     def __enter__(self) -> "_ConcreteParser":
         return self
@@ -34,12 +30,30 @@ class _ConcreteParser:
         return Position(stub=stub, raw_description="")
 
 
+@pytest.fixture
+def parser() -> _ConcreteParser:
+    return _ConcreteParser()
+
+
+@pytest.fixture
+def stub() -> PositionStub:
+    return PositionStub(url="https://example.com/1", title="Dev", source="test")
+
+
+def _register_parser_module(
+    monkeypatch: pytest.MonkeyPatch,
+    parser_type: str,
+    *,
+    parser_class: type | None = None,
+) -> None:
+    name = f"application_pipeline.parsers.{parser_type}"
+    mod = types.ModuleType(name)
+    if parser_class is not None:
+        mod.parser_class = parser_class  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, name, mod)
+
+
 # --- Error hierarchy ---
-
-
-def test_parser_error_is_exception():
-    with pytest.raises(ParserError):
-        raise ParserError("boom")
 
 
 def test_parser_error_preserves_message():
@@ -48,11 +62,6 @@ def test_parser_error_preserves_message():
 
 
 def test_unknown_parser_error_is_parser_error():
-    err = UnknownParserError("no such parser")
-    assert isinstance(err, ParserError)
-
-
-def test_unknown_parser_error_can_be_raised_as_parser_error():
     with pytest.raises(ParserError):
         raise UnknownParserError("missing")
 
@@ -60,8 +69,8 @@ def test_unknown_parser_error_can_be_raised_as_parser_error():
 # --- Parser Protocol ---
 
 
-def test_conforming_class_satisfies_parser_protocol():
-    assert isinstance(_ConcreteParser(), Parser)
+def test_conforming_class_satisfies_parser_protocol(parser: _ConcreteParser):
+    assert isinstance(parser, Parser)
 
 
 def test_class_missing_discover_does_not_satisfy_parser_protocol():
@@ -92,16 +101,14 @@ def test_class_missing_enrich_does_not_satisfy_parser_protocol():
     assert not isinstance(_Bad(), Parser)
 
 
-def test_parser_protocol_works_as_context_manager():
-    with _ConcreteParser() as p:
+def test_parser_protocol_works_as_context_manager(parser: _ConcreteParser):
+    with parser as p:
         result = list(p.discover("python"))
     assert result == []
 
 
-def test_parser_enrich_returns_position():
-    p = _ConcreteParser()
-    stub = _stub()
-    position = p.enrich(stub)
+def test_parser_enrich_returns_position(parser: _ConcreteParser, stub: PositionStub):
+    position = parser.enrich(stub)
     assert isinstance(position, Position)
     assert position.stub is stub
 
@@ -117,8 +124,7 @@ def test_get_parser_class_raises_unknown_parser_error_for_missing_module():
 def test_get_parser_class_raises_unknown_parser_error_when_module_lacks_parser_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mod = types.ModuleType("application_pipeline.parsers.faketype")
-    monkeypatch.setitem(sys.modules, "application_pipeline.parsers.faketype", mod)
+    _register_parser_module(monkeypatch, "faketype")
     with pytest.raises(UnknownParserError, match="faketype"):
         get_parser_class("faketype")
 
@@ -126,19 +132,13 @@ def test_get_parser_class_raises_unknown_parser_error_when_module_lacks_parser_c
 def test_get_parser_class_returns_parser_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mod = types.ModuleType("application_pipeline.parsers.goodtype")
-    mod.parser_class = _ConcreteParser  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "application_pipeline.parsers.goodtype", mod)
-    result = get_parser_class("goodtype")
-    assert result is _ConcreteParser
+    _register_parser_module(monkeypatch, "goodtype", parser_class=_ConcreteParser)
+    assert get_parser_class("goodtype") is _ConcreteParser
 
 
 def test_get_parser_class_result_is_instantiable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mod = types.ModuleType("application_pipeline.parsers.instantiable")
-    mod.parser_class = _ConcreteParser  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "application_pipeline.parsers.instantiable", mod)
+    _register_parser_module(monkeypatch, "instantiable", parser_class=_ConcreteParser)
     cls = get_parser_class("instantiable")
-    instance = cls()
-    assert isinstance(instance, Parser)
+    assert isinstance(cls(), Parser)

@@ -2,17 +2,32 @@ from typing import Any
 
 from .layout.types import Layout
 from .llm.types import MatchTier, MatchVerdict
+from .parsers.types import Position
 
 
 def render(
-    position: dict[str, Any],
+    position: Position,
     verdict: MatchVerdict,
     number: int,
     layout: Layout,
 ) -> str:
     tier = verdict.tier
 
-    placeholders: dict[str, Any] = dict(position)
+    placeholders: dict[str, Any] = {
+        "url": position.stub.url,
+        "title": position.stub.title,
+        "source": position.stub.source,
+        "company": position.stub.company,
+        "location": position.stub.location,
+        "language": position.stub.language,
+        "raw_description": position.raw_description,
+        "salary": position.salary,
+        "contract_type": position.contract_type,
+        "employment_type": position.employment_type,
+        "work_model": position.work_model,
+        "posted_date": position.posted_date,
+        "deadline": position.deadline,
+    }
 
     placeholders["tier"] = tier.value
     placeholders["matched"] = ", ".join(verdict.matched)

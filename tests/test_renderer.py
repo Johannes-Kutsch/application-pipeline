@@ -1,6 +1,7 @@
 import pytest
 
 from application_pipeline import Layout, MatchTier, MatchVerdict
+from application_pipeline.parsers.types import Position, PositionStub
 from application_pipeline.renderer import render
 
 
@@ -17,22 +18,23 @@ def layout() -> Layout:
 
 
 @pytest.fixture
-def position() -> dict:
-    return {
-        "title": "Senior Engineer",
-        "company": "Acme GmbH",
-        "location": "Berlin",
-        "language": "de",
-        "url": "https://example.com/job/1",
-        "source": "test-source",
-        "raw_description": "Some description here.",
-        "salary": None,
-        "contract_type": None,
-        "employment_type": None,
-        "work_model": None,
-        "posted_date": None,
-        "deadline": None,
-    }
+def stub() -> PositionStub:
+    return PositionStub(
+        url="https://example.com/job/1",
+        title="Senior Engineer",
+        source="test-source",
+        company="Acme GmbH",
+        location="Berlin",
+        language="de",
+    )
+
+
+@pytest.fixture
+def position(stub: PositionStub) -> Position:
+    return Position(
+        stub=stub,
+        raw_description="Some description here.",
+    )
 
 
 @pytest.fixture
@@ -69,7 +71,7 @@ def red_verdict() -> MatchVerdict:
 
 
 def test_green_tier_renders_card(
-    layout: Layout, position: dict, green_verdict: MatchVerdict
+    layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
     result = render(position, green_verdict, 1, layout)
 
@@ -82,7 +84,7 @@ def test_green_tier_renders_card(
 
 
 def test_amber_tier_renders_headline(
-    layout: Layout, position: dict, amber_verdict: MatchVerdict
+    layout: Layout, position: Position, amber_verdict: MatchVerdict
 ) -> None:
     result = render(position, amber_verdict, 2, layout)
 
@@ -91,7 +93,7 @@ def test_amber_tier_renders_headline(
 
 
 def test_red_tier_renders_headline(
-    layout: Layout, position: dict, red_verdict: MatchVerdict
+    layout: Layout, position: Position, red_verdict: MatchVerdict
 ) -> None:
     result = render(position, red_verdict, 3, layout)
 
@@ -99,11 +101,11 @@ def test_red_tier_renders_headline(
     assert "Senior Engineer" in result
 
 
-# --- position fields substituted ---
+# --- stub fields flattened into placeholders ---
 
 
-def test_position_fields_appear_in_output(
-    layout: Layout, position: dict, green_verdict: MatchVerdict
+def test_stub_fields_available_as_top_level_placeholders(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
     result = render(position, green_verdict, 42, layout)
 
@@ -112,11 +114,19 @@ def test_position_fields_appear_in_output(
     assert "42" in result
 
 
+def test_stub_url_available_in_placeholder_group(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, 1, layout)
+
+    assert "https://example.com/job/1" in result
+
+
 # --- verdict fields substituted ---
 
 
 def test_matched_list_joined_in_output(
-    layout: Layout, position: dict, green_verdict: MatchVerdict
+    layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
     result = render(position, green_verdict, 1, layout)
 
@@ -124,7 +134,7 @@ def test_matched_list_joined_in_output(
 
 
 def test_missing_list_joined_in_output(
-    layout: Layout, position: dict, green_verdict: MatchVerdict
+    layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
     result = render(position, green_verdict, 1, layout)
 
@@ -132,7 +142,7 @@ def test_missing_list_joined_in_output(
 
 
 def test_empty_matched_list_renders_empty_string(
-    layout: Layout, position: dict, red_verdict: MatchVerdict
+    layout: Layout, position: Position, red_verdict: MatchVerdict
 ) -> None:
     simple_layout = Layout(
         tier_emoji=layout.tier_emoji,
@@ -151,14 +161,14 @@ def test_empty_matched_list_renders_empty_string(
 
 
 def test_emoji_derived_from_tier(
-    layout: Layout, position: dict, green_verdict: MatchVerdict
+    layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
     result = render(position, green_verdict, 1, layout)
 
     assert "🟢" in result
 
 
-def test_color_available_via_layout(layout: Layout, position: dict) -> None:
+def test_color_available_via_layout(layout: Layout, position: Position) -> None:
     color_layout = Layout(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
@@ -177,7 +187,7 @@ def test_color_available_via_layout(layout: Layout, position: dict) -> None:
 
 
 def test_placeholder_group_collapses_with_separator(
-    layout: Layout, position: dict, green_verdict: MatchVerdict
+    layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
     result = render(position, green_verdict, 1, layout)
 
@@ -185,9 +195,19 @@ def test_placeholder_group_collapses_with_separator(
 
 
 def test_placeholder_group_omits_none_values(
-    layout: Layout, position: dict, green_verdict: MatchVerdict
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
 ) -> None:
-    position["location"] = None
+    position = Position(
+        stub=PositionStub(
+            url=stub.url,
+            title=stub.title,
+            source=stub.source,
+            company=stub.company,
+            location=None,
+            language=stub.language,
+        ),
+        raw_description="",
+    )
     result = render(position, green_verdict, 1, layout)
 
     assert "de · https://example.com/job/1" in result
@@ -195,7 +215,7 @@ def test_placeholder_group_omits_none_values(
 
 
 def test_placeholder_group_all_none_renders_empty(
-    layout: Layout, position: dict, green_verdict: MatchVerdict
+    layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
     simple_layout = Layout(
         tier_emoji=layout.tier_emoji,
@@ -205,8 +225,16 @@ def test_placeholder_group_all_none_renders_empty(
         card_template="{meta}",
         headline_template="{meta}",
     )
-    position["location"] = None
-    result = render(position, green_verdict, 1, simple_layout)
+    position_no_location = Position(
+        stub=PositionStub(
+            url=position.stub.url,
+            title=position.stub.title,
+            source=position.stub.source,
+            location=None,
+        ),
+        raw_description="",
+    )
+    result = render(position_no_location, green_verdict, 1, simple_layout)
 
     assert result == ""
 
@@ -215,7 +243,7 @@ def test_placeholder_group_all_none_renders_empty(
 
 
 def test_number_substituted_correctly(
-    layout: Layout, position: dict, amber_verdict: MatchVerdict
+    layout: Layout, position: Position, amber_verdict: MatchVerdict
 ) -> None:
     result = render(position, amber_verdict, 99, layout)
 

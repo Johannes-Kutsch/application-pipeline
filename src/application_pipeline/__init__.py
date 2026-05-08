@@ -1,4 +1,5 @@
 from .config import Config, ConfigError, SourceEntry, load
+from .parsers import Position, PositionStub
 from .prefilter import DomainPreFilter, PreFilterVerdict
 from .dedup import DedupStoreError, DeduplicationStore, SeenStatus
 from .layout import Layout, LayoutError
@@ -33,6 +34,8 @@ __all__ = [
     "MatchTier",
     "MatchVerdict",
     "OllamaExtractor",
+    "Position",
+    "PositionStub",
     "PromptError",
     "Prompts",
     "RelevanceVerdict",

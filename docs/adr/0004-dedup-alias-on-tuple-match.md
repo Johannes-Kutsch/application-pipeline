@@ -1,6 +1,6 @@
 # Tuple-match writes a URL alias inside `is_seen`
 
-When the **Deduplication Store**'s `is_seen` finds a match via the lowercased `(company, title, city)` tuple under a *new* URL (a syndicated copy of a role first seen under a different URL), it internally writes an **alias entry** under the new URL — duplicating the original record's `status` and `first_seen` — so that subsequent runs short-circuit on the cheap URL lookup without re-checking the tuple. The `is_seen` call's return value is unaffected by this side effect.
+When the **Deduplication Store**'s `is_seen` finds a match via the lowercased `(company, title, location)` tuple under a *new* URL (a syndicated copy of a role first seen under a different URL), it internally writes an **alias entry** under the new URL — duplicating the original record's `status` and `first_seen` — so that subsequent runs short-circuit on the cheap URL lookup without re-checking the tuple. The `is_seen` call's return value is unaffected by this side effect.
 
 ## Why
 

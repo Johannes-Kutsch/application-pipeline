@@ -1,6 +1,6 @@
 # Deduplication state (`.seen.json`) is committed to git
 
-The **Deduplication** store (`.seen.json`, holding seen URLs with `(company_lc, title_lc, city_lc, status, first_seen)`) is checked into the repository instead of being gitignored.
+The **Deduplication** store (`.seen.json`, holding seen URLs with `(company_lc, title_lc, location_lc, status, first_seen)`) is checked into the repository instead of being gitignored.
 
 ## Why
 

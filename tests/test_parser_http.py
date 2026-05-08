@@ -61,7 +61,9 @@ def test_throttle_does_not_sleep_after_sufficient_delay():
 
 
 def test_request_with_retry_returns_bytes_on_success():
-    http_get = lambda url, timeout: b"ok"  # noqa: E731
+    def http_get(url: str, timeout: float) -> bytes:
+        return b"ok"
+
     result = request_with_retry("http://host/path", 30.0, 3, http_get)
     assert result == b"ok"
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 
 import pytest
 
 from application_pipeline.parsers import Parser, PositionStub
 from application_pipeline.parsers.bundesagentur import BundesagenturParser, parser_class
+from application_pipeline.parsers.http import HttpGet
 
 
 # ---------------------------------------------------------------------------
@@ -57,11 +57,7 @@ def _item(
     return result
 
 
-def _queue(*responses: bytes) -> Iterator[bytes]:
-    return iter(responses)
-
-
-def _make_get(responses: list[bytes]) -> object:
+def _make_get(responses: list[bytes]) -> HttpGet:
     it = iter(responses)
 
     def http_get(url: str, timeout: float) -> bytes:

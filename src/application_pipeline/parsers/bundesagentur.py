@@ -185,8 +185,7 @@ class BundesagenturParser:
                 f"Bundesagentur enrich failed for {stub.url}: {exc}"
             ) from exc.__cause__
 
-        desc_html: str = data.get("stellenbeschreibung") or ""
-        raw_description = _strip_html(desc_html) if desc_html else ""
+        raw_description = _strip_html(data.get("stellenbeschreibung") or "")
 
         return Position(
             stub=stub,

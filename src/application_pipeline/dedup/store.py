@@ -21,7 +21,7 @@ from .errors import DedupStoreError
 
 logger = logging.getLogger(__name__)
 
-SeenStatus = Literal["off_domain", "kept"]
+SeenStatus = Literal["off_domain", "kept", "enrich_failed"]
 
 
 @runtime_checkable
@@ -29,7 +29,7 @@ class _SeenKey(Protocol):
     url: str
     company: str | None
     title: str | None
-    city: str | None
+    location: str | None
 
 
 class DeduplicationStore:
@@ -48,25 +48,25 @@ class DeduplicationStore:
         for url, record in records.items():
             company_lc = record.get("company_lc")
             title_lc = record.get("title_lc")
-            city_lc = record.get("city_lc")
+            location_lc = record.get("location_lc")
             if (
                 isinstance(company_lc, str)
                 and isinstance(title_lc, str)
-                and isinstance(city_lc, str)
+                and isinstance(location_lc, str)
                 and company_lc
                 and title_lc
-                and city_lc
+                and location_lc
             ):
-                index.setdefault((company_lc, title_lc, city_lc), url)
+                index.setdefault((company_lc, title_lc, location_lc), url)
         return index
 
     def _tuple_key(self, key: _SeenKey) -> tuple[str, str, str] | None:
         company_lc = normalize(key.company)
         title_lc = normalize(key.title)
-        city_lc = normalize(key.city)
-        if company_lc is None or title_lc is None or city_lc is None:
+        location_lc = normalize(key.location)
+        if company_lc is None or title_lc is None or location_lc is None:
             return None
-        return (company_lc, title_lc, city_lc)
+        return (company_lc, title_lc, location_lc)
 
     def _tuple_lookup(self, key: _SeenKey) -> str | None:
         tkey = self._tuple_key(key)
@@ -78,7 +78,7 @@ class DeduplicationStore:
         """Return whether ``key`` has been seen; on tuple match, write alias.
 
         Side effect (per ADR-0004): when the URL tier misses but the
-        ``(company_lc, title_lc, city_lc)`` tuple matches a prior entry,
+        ``(company_lc, title_lc, location_lc)`` tuple matches a prior entry,
         an alias entry is written under ``key.url`` carrying the original
         record's ``status`` and ``first_seen`` so future runs short-circuit
         on the cheap URL lookup. The return value is unaffected by the
@@ -107,11 +107,11 @@ class DeduplicationStore:
 
         company_lc = normalize(key.company)
         title_lc = normalize(key.title)
-        city_lc = normalize(key.city)
+        location_lc = normalize(key.location)
         record = {
             "company_lc": company_lc,
             "title_lc": title_lc,
-            "city_lc": city_lc,
+            "location_lc": location_lc,
             "status": status,
             "first_seen": date.today().isoformat(),
         }
@@ -120,8 +120,8 @@ class DeduplicationStore:
         new_records[key.url] = record
         self._persist(new_records)
         self._records = new_records
-        if company_lc and title_lc and city_lc:
-            self._tuple_index.setdefault((company_lc, title_lc, city_lc), key.url)
+        if company_lc and title_lc and location_lc:
+            self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
         logger.debug("mark_seen: recorded %s with status=%s", key.url, status)
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
@@ -129,7 +129,7 @@ class DeduplicationStore:
         record = {
             "company_lc": original["company_lc"],
             "title_lc": original["title_lc"],
-            "city_lc": original["city_lc"],
+            "location_lc": original["location_lc"],
             "status": original["status"],
             "first_seen": original["first_seen"],
         }

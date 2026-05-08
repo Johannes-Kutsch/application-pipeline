@@ -20,7 +20,7 @@ class StubLike:
     url: str
     company: str | None = "Acme"
     title: str | None = "Engineer"
-    city: str | None = "Hamburg"
+    location: str | None = "Hamburg"
 
 
 @dataclass
@@ -28,7 +28,7 @@ class PositionLike:
     url: str
     company: str | None = "Acme"
     title: str | None = "Engineer"
-    city: str | None = "Hamburg"
+    location: str | None = "Hamburg"
     raw_description: str = "..."
 
 
@@ -72,8 +72,19 @@ def test_mark_seen_off_domain_persists_status(store_path: Path) -> None:
     assert record["status"] == "off_domain"
     assert record["company_lc"] == "acme"
     assert record["title_lc"] == "engineer"
-    assert record["city_lc"] == "hamburg"
+    assert record["location_lc"] == "hamburg"
     assert record["first_seen"] == date.today().isoformat()
+
+
+def test_mark_seen_enrich_failed_persists_status(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/ef")
+    store.mark_seen(stub, "enrich_failed")
+
+    assert store.is_seen(stub) is True
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk["https://example.com/ef"]["status"] == "enrich_failed"
 
 
 def test_second_mark_same_url_is_silent_no_op(store_path: Path) -> None:
@@ -183,16 +194,18 @@ def test_debug_log_on_mark_no_op(
     assert any("no-op" in r.getMessage().lower() for r in caplog.records)
 
 
-def test_handles_none_company_title_city(store_path: Path) -> None:
+def test_handles_none_company_title_location(store_path: Path) -> None:
     store = dedup_load(store_path)
-    stub = StubLike(url="https://example.com/n", company=None, title=None, city=None)
+    stub = StubLike(
+        url="https://example.com/n", company=None, title=None, location=None
+    )
     store.mark_seen(stub, "kept")
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     record = on_disk["https://example.com/n"]
     assert record["company_lc"] is None
     assert record["title_lc"] is None
-    assert record["city_lc"] is None
+    assert record["location_lc"] is None
 
 
 def test_tuple_match_under_new_url_returns_true(store_path: Path) -> None:
@@ -230,7 +243,7 @@ def test_alias_first_seen_is_originals_not_today(
                 "https://bundesagentur.de/old": {
                     "company_lc": "acme",
                     "title_lc": "engineer",
-                    "city_lc": "hamburg",
+                    "location_lc": "hamburg",
                     "status": "kept",
                     "first_seen": "2024-01-15",
                 }
@@ -255,7 +268,9 @@ def test_after_alias_reload_resolves_via_url_tier(store_path: Path) -> None:
 
     reloaded = dedup_load(store_path)
     # b.url is now in the URL dict; even if we changed the tuple fields, URL hits.
-    different_tuple = StubLike(url=b.url, company="Other", title="Other", city="Other")
+    different_tuple = StubLike(
+        url=b.url, company="Other", title="Other", location="Other"
+    )
     assert reloaded.is_seen(different_tuple) is True
 
 
@@ -266,7 +281,7 @@ def test_tuple_match_case_insensitive(store_path: Path) -> None:
             url="https://example.com/1",
             company="acme gmbh",
             title="engineer",
-            city="hamburg",
+            location="hamburg",
         ),
         "kept",
     )
@@ -276,7 +291,7 @@ def test_tuple_match_case_insensitive(store_path: Path) -> None:
                 url="https://example.com/2",
                 company="ACME GmbH",
                 title="Engineer",
-                city="Hamburg",
+                location="Hamburg",
             )
         )
         is True
@@ -290,7 +305,7 @@ def test_tuple_match_collapses_internal_whitespace(store_path: Path) -> None:
             url="https://example.com/1",
             company="ACME GmbH",
             title="Software Engineer",
-            city="Hamburg",
+            location="Hamburg",
         ),
         "kept",
     )
@@ -300,7 +315,7 @@ def test_tuple_match_collapses_internal_whitespace(store_path: Path) -> None:
                 url="https://example.com/2",
                 company="ACME  GmbH",
                 title="Software   Engineer",
-                city=" Hamburg ",
+                location=" Hamburg ",
             )
         )
         is True
@@ -311,18 +326,21 @@ def test_tuple_lookup_skipped_when_field_none(store_path: Path) -> None:
     store = dedup_load(store_path)
     store.mark_seen(
         StubLike(
-            url="https://example.com/1", company=None, title="Engineer", city="Hamburg"
+            url="https://example.com/1",
+            company=None,
+            title="Engineer",
+            location="Hamburg",
         ),
         "kept",
     )
-    # Different URL with same (None, title, city) must NOT match via tuple.
+    # Different URL with same (None, title, location) must NOT match via tuple.
     assert (
         store.is_seen(
             StubLike(
                 url="https://example.com/2",
                 company=None,
                 title="Engineer",
-                city="Hamburg",
+                location="Hamburg",
             )
         )
         is False
@@ -335,7 +353,10 @@ def test_tuple_lookup_skipped_when_field_empty_after_normalize(
     store = dedup_load(store_path)
     store.mark_seen(
         StubLike(
-            url="https://example.com/1", company="   ", title="Engineer", city="Hamburg"
+            url="https://example.com/1",
+            company="   ",
+            title="Engineer",
+            location="Hamburg",
         ),
         "kept",
     )
@@ -345,7 +366,7 @@ def test_tuple_lookup_skipped_when_field_empty_after_normalize(
                 url="https://example.com/2",
                 company="",
                 title="Engineer",
-                city="Hamburg",
+                location="Hamburg",
             )
         )
         is False
@@ -357,7 +378,7 @@ def test_none_company_url_match_still_works_on_second_is_seen(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(
-        url="https://example.com/n", company=None, title="Engineer", city="Hamburg"
+        url="https://example.com/n", company=None, title="Engineer", location="Hamburg"
     )
     store.mark_seen(stub, "kept")
     assert store.is_seen(stub) is True
@@ -370,7 +391,7 @@ def test_tuple_index_built_at_load_time(store_path: Path) -> None:
                 "https://example.com/seed": {
                     "company_lc": "acme",
                     "title_lc": "engineer",
-                    "city_lc": "hamburg",
+                    "location_lc": "hamburg",
                     "status": "kept",
                     "first_seen": "2024-01-01",
                 }
@@ -385,7 +406,7 @@ def test_tuple_index_built_at_load_time(store_path: Path) -> None:
                 url="https://other.example/x",
                 company="Acme",
                 title="Engineer",
-                city="Hamburg",
+                location="Hamburg",
             )
         )
         is True
@@ -394,9 +415,11 @@ def test_tuple_index_built_at_load_time(store_path: Path) -> None:
 
 def test_round_trip_mix_of_originals_and_aliases(store_path: Path) -> None:
     store = dedup_load(store_path)
-    a = StubLike(url="https://a.example/1", company="Acme", title="Eng", city="HH")
-    b = StubLike(url="https://b.example/1", company="Acme", title="Eng", city="HH")
-    c = StubLike(url="https://a.example/2", company="Beta", title="PM", city="Berlin")
+    a = StubLike(url="https://a.example/1", company="Acme", title="Eng", location="HH")
+    b = StubLike(url="https://b.example/1", company="Acme", title="Eng", location="HH")
+    c = StubLike(
+        url="https://a.example/2", company="Beta", title="PM", location="Berlin"
+    )
     store.mark_seen(a, "kept")
     store.is_seen(b)  # writes alias under b.url
     store.mark_seen(c, "off_domain")

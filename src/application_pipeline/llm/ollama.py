@@ -134,7 +134,16 @@ class OllamaExtractor:
         timeout = float(self._config.ollama_read_timeout_seconds)
         last_exc: Exception | None = None
         for _ in range(self._config.ollama_json_retries):
-            raw = self._call_with_http_retries(url, payload, timeout)
+            try:
+                raw = post_with_retries(
+                    url,
+                    payload,
+                    timeout,
+                    self._config.ollama_http_retries,
+                    self._http_post,
+                )
+            except HttpRetryError as exc:
+                raise LLMExtractorError(str(exc)) from exc.__cause__
             try:
                 return parser(json.loads(raw.get("response", "{}")))
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
@@ -142,13 +151,3 @@ class OllamaExtractor:
         raise LLMExtractorError(
             f"{method_name}: failed to parse Ollama response: {last_exc}"
         ) from last_exc
-
-    def _call_with_http_retries(
-        self, url: str, payload: dict[str, Any], timeout: float
-    ) -> dict[str, Any]:
-        try:
-            return post_with_retries(
-                url, payload, timeout, self._config.ollama_http_retries, self._http_post
-            )
-        except HttpRetryError as exc:
-            raise LLMExtractorError(str(exc)) from exc.__cause__

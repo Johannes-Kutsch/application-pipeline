@@ -3,6 +3,7 @@ import urllib.request
 from typing import Any, Callable, Literal, TypeVar
 
 from application_pipeline.config import Config
+from application_pipeline.http import HttpPost, HttpRetryError, post_with_retries
 from application_pipeline.prompts import Prompts
 
 from .types import (
@@ -13,7 +14,7 @@ from .types import (
     RelevanceVerdict,
 )
 
-_HttpPost = Callable[[str, dict[str, Any], float], dict[str, Any]]
+_HttpPost = HttpPost
 _T = TypeVar("_T")
 
 _CLASSIFY_RELEVANCE_FORMAT = {
@@ -146,12 +147,9 @@ class OllamaExtractor:
     def _call_with_http_retries(
         self, url: str, payload: dict[str, Any], timeout: float
     ) -> dict[str, Any]:
-        last_exc: Exception | None = None
-        for _ in range(self._config.ollama_http_retries):
-            try:
-                return self._http_post(url, payload, timeout)
-            except Exception as exc:
-                last_exc = exc
-        raise LLMExtractorError(
-            f"Ollama HTTP request failed after retries: {last_exc}"
-        ) from last_exc
+        try:
+            return post_with_retries(
+                url, payload, timeout, self._config.ollama_http_retries, self._http_post
+            )
+        except HttpRetryError as exc:
+            raise LLMExtractorError(str(exc)) from exc.__cause__

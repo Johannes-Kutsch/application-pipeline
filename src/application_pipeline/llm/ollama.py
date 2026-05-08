@@ -14,7 +14,6 @@ from .types import (
     RelevanceVerdict,
 )
 
-_HttpPost = HttpPost
 _T = TypeVar("_T")
 
 _CLASSIFY_RELEVANCE_FORMAT = {
@@ -52,11 +51,11 @@ class OllamaExtractor:
         config: Config,
         prompts: Prompts,
         *,
-        _http_post: _HttpPost | None = None,
+        _http_post: HttpPost | None = None,
     ) -> None:
         self._config = config
         self._prompts = prompts
-        self._http_post: _HttpPost = _http_post or _default_http_post
+        self._http_post: HttpPost = _http_post or _default_http_post
         self._skills_block = "\n".join(f"- {s}" for s in config.skills)
 
     def classify_relevance(

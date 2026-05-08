@@ -178,27 +178,21 @@ class JobsBeimStaatParser:
 
             title = link.get_text(strip=True)
             employer_tag = item.select_one(".joblist__employer")
-            company: str | None = (
-                employer_tag.get_text(strip=True) or None if employer_tag else None
-            )
+            company = employer_tag.get_text(strip=True) if employer_tag else None
             location_tag = item.select_one(".joblist__location")
-            location: str | None = (
-                location_tag.get_text(strip=True) or None if location_tag else None
-            )
+            location = location_tag.get_text(strip=True) if location_tag else None
             date_tag = item.select_one(".joblist__date")
-            posted_date = (
+            if date_tag:
+                # Called for its INFO-on-unparseable side effect; PositionStub
+                # has no posted_date field, so the value itself is unused here.
                 _parse_posted_date(date_tag.get_text(strip=True), today)
-                if date_tag
-                else None
-            )
-            _ = posted_date  # stub doesn't carry posted_date; used for ordering signal
 
             yield PositionStub(
                 url=full_url,
                 title=title,
-                source="jobs-beim-staat",
-                company=company,
-                location=location,
+                source=_DISPLAY_NAME,
+                company=company or None,
+                location=location or None,
                 language="de",
             )
 

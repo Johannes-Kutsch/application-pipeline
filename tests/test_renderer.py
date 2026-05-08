@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from application_pipeline import Layout, MatchTier, MatchVerdict
@@ -195,19 +197,9 @@ def test_placeholder_group_collapses_with_separator(
 
 
 def test_placeholder_group_omits_none_values(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+    layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
-    position = Position(
-        stub=PositionStub(
-            url=stub.url,
-            title=stub.title,
-            source=stub.source,
-            company=stub.company,
-            location=None,
-            language=stub.language,
-        ),
-        raw_description="",
-    )
+    position = replace(position, stub=replace(position.stub, location=None))
     result = render(position, green_verdict, 1, layout)
 
     assert "de · https://example.com/job/1" in result
@@ -225,15 +217,7 @@ def test_placeholder_group_all_none_renders_empty(
         card_template="{meta}",
         headline_template="{meta}",
     )
-    position_no_location = Position(
-        stub=PositionStub(
-            url=position.stub.url,
-            title=position.stub.title,
-            source=position.stub.source,
-            location=None,
-        ),
-        raw_description="",
-    )
+    position_no_location = replace(position, stub=replace(position.stub, location=None))
     result = render(position_no_location, green_verdict, 1, simple_layout)
 
     assert result == ""

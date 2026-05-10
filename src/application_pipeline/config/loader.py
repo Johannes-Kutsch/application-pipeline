@@ -35,15 +35,17 @@ def load(path: pathlib.Path) -> Config:
         getattr(module, "PROMPTS_DIR", pathlib.Path("prompts")),
     )
 
-    classify_relevance_prompt = _resolve_optional_prompt_file(
+    classify_relevance_prompt = _resolve_optional_file(
         "CLASSIFY_RELEVANCE_PROMPT",
         config_dir,
         getattr(module, "CLASSIFY_RELEVANCE_PROMPT", None),
+        must_be_nonempty=True,
     )
-    judge_match_prompt = _resolve_optional_prompt_file(
+    judge_match_prompt = _resolve_optional_file(
         "JUDGE_MATCH_PROMPT",
         config_dir,
         getattr(module, "JUDGE_MATCH_PROMPT", None),
+        must_be_nonempty=True,
     )
 
     config = Config(
@@ -79,29 +81,20 @@ def _resolve_dir(name: str, config_dir: pathlib.Path, value: object) -> pathlib.
 
 
 def _resolve_optional_file(
-    name: str, config_dir: pathlib.Path, value: object
+    name: str,
+    config_dir: pathlib.Path,
+    value: object,
+    *,
+    must_be_nonempty: bool = False,
 ) -> pathlib.Path | None:
     if value is None:
         return None
     path = pathlib.Path(value)  # type: ignore[arg-type]
     if not path.is_absolute():
         path = config_dir / path
-    if not path.exists() or not path.is_file():
+    if not path.is_file():
         raise ConfigError(f"{name}: {path} does not exist or is not a file")
-    return path
-
-
-def _resolve_optional_prompt_file(
-    name: str, config_dir: pathlib.Path, value: object
-) -> pathlib.Path | None:
-    if value is None:
-        return None
-    path = pathlib.Path(value)  # type: ignore[arg-type]
-    if not path.is_absolute():
-        path = config_dir / path
-    if not path.exists() or not path.is_file():
-        raise ConfigError(f"{name}: {path} does not exist or is not a file")
-    if path.stat().st_size == 0:
+    if must_be_nonempty and path.stat().st_size == 0:
         raise ConfigError(f"{name}: {path} must not be empty")
     return path
 

@@ -1,0 +1,19 @@
+{
+  "maxErgebnisse": 2,
+  "stellenangebote": [
+    {
+      "hashId": "abc123",
+      "titel": "Software Engineer",
+      "arbeitgeber": "Acme GmbH",
+      "arbeitsort": {"ort": "Hamburg", "plz": "20000"},
+      "aktuelleVeroeffentlichungsdatum": "2024-01-15"
+    },
+    {
+      "hashId": "def456",
+      "titel": "Data Scientist",
+      "arbeitgeber": "Tech AG",
+      "arbeitsort": {"ort": "Berlin", "plz": "10115"},
+      "aktuelleVeroeffentlichungsdatum": "2024-01-14"
+    }
+  ]
+}

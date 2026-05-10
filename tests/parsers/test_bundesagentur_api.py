@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -12,10 +14,16 @@ from application_pipeline.parsers.bundesagentur_api import (
 )
 from application_pipeline.parsers.http import HttpGet
 
+_FIXTURES = Path(__file__).parent / "fixtures" / "bundesagentur"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _load(name: str) -> bytes:
+    return (_FIXTURES / name).read_bytes()
 
 
 def _search_body(items: list[dict], total: int | None = None) -> bytes:
@@ -81,7 +89,7 @@ def stub() -> PositionStub:
     return PositionStub(
         url="https://example.com/jobdetails/abc",
         title="Dev",
-        source="bundesagentur",
+        source="Bundesagentur",
     )
 
 
@@ -133,11 +141,11 @@ def test_discover_stub_title_matches_api_titel() -> None:
     assert stub.title == "Data Scientist"
 
 
-def test_discover_stub_source_is_bundesagentur() -> None:
+def test_discover_stub_source_is_display_name() -> None:
     get = _make_get([_search_body([_item()]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
-    assert stub.source == "bundesagentur"
+    assert stub.source == "Bundesagentur"
 
 
 def test_discover_stub_language_is_de() -> None:
@@ -183,6 +191,22 @@ def test_discover_stub_location_none_when_arbeitsort_absent() -> None:
 
 
 # ---------------------------------------------------------------------------
+# discover — fixture-based
+# ---------------------------------------------------------------------------
+
+
+def test_discover_parses_search_fixture() -> None:
+    search = _load("search.json")
+    get = _make_get([search, _search_body([])])
+    with BundesagenturParser(_http_get=get) as p:
+        stubs = list(p.discover(_query()))
+    assert len(stubs) == 2
+    assert stubs[0].title == "Software Engineer"
+    assert stubs[0].source == "Bundesagentur"
+    assert stubs[1].title == "Data Scientist"
+
+
+# ---------------------------------------------------------------------------
 # discover — pagination
 # ---------------------------------------------------------------------------
 
@@ -206,11 +230,11 @@ def test_discover_stops_on_null_stellenangebote() -> None:
 
 
 # ---------------------------------------------------------------------------
-# discover — location and max_results
+# discover — location slug resolution
 # ---------------------------------------------------------------------------
 
 
-def test_discover_passes_location_in_url() -> None:
+def test_discover_resolves_location_to_slug_in_url() -> None:
     urls: list[str] = []
 
     def capturing_get(url: str, timeout: float) -> bytes:
@@ -220,10 +244,65 @@ def test_discover_passes_location_in_url() -> None:
     with BundesagenturParser(_http_get=capturing_get) as p:
         list(p.discover(_query(location="Hamburg")))
 
-    assert any("Hamburg" in u for u in urls)
+    assert any("wo=Hamburg" in u for u in urls)
 
 
-def test_discover_no_location_param_when_location_none() -> None:
+def test_discover_normalizes_location_before_slug_lookup() -> None:
+    urls: list[str] = []
+
+    def capturing_get(url: str, timeout: float) -> bytes:
+        urls.append(url)
+        return _search_body([])
+
+    with BundesagenturParser(_http_get=capturing_get) as p:
+        list(p.discover(_query(location="münchen")))
+
+    assert any("M%C3%BCnchen" in u or "München" in u for u in urls)
+
+
+def test_discover_unknown_location_yields_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def capturing_get(url: str, timeout: float) -> bytes:
+        return _search_body([])
+
+    with caplog.at_level(logging.WARNING):
+        with BundesagenturParser(_http_get=capturing_get) as p:
+            stubs = list(p.discover(_query(location="unknown_city_xyz")))
+
+    assert stubs == []
+    assert any("unmapped_location" in r.message for r in caplog.records)
+
+
+def test_discover_unknown_location_logs_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        with BundesagenturParser() as p:
+            list(p.discover(_query(location="atlantis")))
+
+    assert any("unmapped_location" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# discover — remote (location=None uses arbeitszeit=ho)
+# ---------------------------------------------------------------------------
+
+
+def test_discover_location_none_uses_arbeitszeit_ho() -> None:
+    urls: list[str] = []
+
+    def capturing_get(url: str, timeout: float) -> bytes:
+        urls.append(url)
+        return _search_body([])
+
+    with BundesagenturParser(_http_get=capturing_get) as p:
+        list(p.discover(_query(location=None)))
+
+    assert any("arbeitszeit=ho" in u for u in urls)
+
+
+def test_discover_location_none_omits_wo_param() -> None:
     urls: list[str] = []
 
     def capturing_get(url: str, timeout: float) -> bytes:
@@ -236,17 +315,9 @@ def test_discover_no_location_param_when_location_none() -> None:
     assert all("wo=" not in u for u in urls)
 
 
-def test_discover_passes_bundesweit_when_location_is_bundesweit() -> None:
-    urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        urls.append(url)
-        return _search_body([])
-
-    with BundesagenturParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location="bundesweit")))
-
-    assert any("bundesweit" in u.lower() for u in urls)
+# ---------------------------------------------------------------------------
+# discover — max_results
+# ---------------------------------------------------------------------------
 
 
 def test_discover_respects_max_results() -> None:
@@ -285,6 +356,21 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
     with BundesagenturParser(_http_get=failing_get, _retries=1) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
+
+
+# ---------------------------------------------------------------------------
+# enrich — fixture-based
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_parses_detail_fixture(stub: PositionStub) -> None:
+    get = _make_get([_load("detail.json")])
+    with BundesagenturParser(_http_get=get) as p:
+        pos = p.enrich(stub)
+    assert "Software Engineer" in pos.raw_description or pos.raw_description != ""
+    assert pos.contract_type == "permanent"
+    assert pos.employment_type == "full-time"
+    assert pos.posted_date == date(2024, 1, 15)
 
 
 # ---------------------------------------------------------------------------
@@ -412,10 +498,10 @@ def test_enrich_posted_date_none_when_field_absent(stub: PositionStub) -> None:
 def test_enrich_raises_parser_error_on_http_failure() -> None:
     from application_pipeline.parsers import ParserError
 
-    stub = PositionStub(
+    s = PositionStub(
         url="https://example.com/jobdetails/abc",
         title="Dev",
-        source="bundesagentur",
+        source="Bundesagentur",
     )
 
     def failing_get(url: str, timeout: float) -> bytes:
@@ -423,7 +509,7 @@ def test_enrich_raises_parser_error_on_http_failure() -> None:
 
     with BundesagenturParser(_http_get=failing_get, _retries=1) as p:
         with pytest.raises(ParserError):
-            p.enrich(stub)
+            p.enrich(s)
 
 
 # ---------------------------------------------------------------------------

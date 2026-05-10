@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal
@@ -8,6 +9,7 @@ from typing import Any, Literal
 import httpx
 
 from application_pipeline.http import HttpRetryError
+from application_pipeline.text import normalize
 
 from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
 from ._text import parse_iso_date, strip_html
@@ -22,9 +24,45 @@ from .http import (
 )
 from .types import ParserQuery, Position, PositionStub
 
+_log = logging.getLogger(__name__)
+
 _BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
 _API_KEY = "jobboerse-jobsuche-ui"
 _PAGE_SIZE = 25
+_DISPLAY_NAME = "Bundesagentur"
+
+# Keys are normalize()-ed location strings; values are the API's wo= slug.
+_LOCATION_SLUGS: dict[str, str] = {
+    "berlin": "Berlin",
+    "bonn": "Bonn",
+    "bremen": "Bremen",
+    "dortmund": "Dortmund",
+    "dresden": "Dresden",
+    "duesseldorf": "Düsseldorf",
+    "düsseldorf": "Düsseldorf",
+    "erfurt": "Erfurt",
+    "essen": "Essen",
+    "frankfurt": "Frankfurt am Main",
+    "frankfurt am main": "Frankfurt am Main",
+    "hamburg": "Hamburg",
+    "hannover": "Hannover",
+    "kiel": "Kiel",
+    "köln": "Köln",
+    "koeln": "Köln",
+    "leipzig": "Leipzig",
+    "magdeburg": "Magdeburg",
+    "mainz": "Mainz",
+    "münchen": "München",
+    "muenchen": "München",
+    "nürnberg": "Nürnberg",
+    "nuernberg": "Nürnberg",
+    "potsdam": "Potsdam",
+    "saarbrücken": "Saarbrücken",
+    "saarbruecken": "Saarbrücken",
+    "schwerin": "Schwerin",
+    "stuttgart": "Stuttgart",
+    "wiesbaden": "Wiesbaden",
+}
 
 
 def _default_http_get(url: str, timeout: float) -> bytes:
@@ -80,6 +118,21 @@ class BundesagenturParser:
         pass
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
+        extra_params: dict[str, object] = {}
+        if query.location is None:
+            # Remote search: PRD #51 decision 41 — use arbeitszeit=ho for homeoffice
+            extra_params["arbeitszeit"] = "ho"
+        else:
+            key = normalize(query.location)
+            slug = _LOCATION_SLUGS.get(key) if key else None
+            if slug is None:
+                _log.warning(
+                    "unmapped_location parser_type=bundesagentur_api location=%s",
+                    query.location,
+                )
+                return
+            extra_params["wo"] = slug
+
         seen: set[str] = set()
         count = 0
         page = 0
@@ -90,9 +143,8 @@ class BundesagenturParser:
                 "page": page,
                 "size": _PAGE_SIZE,
                 "angebotsart": 1,
+                **extra_params,
             }
-            if query.location is not None:
-                params["wo"] = query.location
             url = f"{_BASE_URL}/jobs?{urllib.parse.urlencode(params)}"
             try:
                 raw = request_with_retry(
@@ -119,7 +171,7 @@ class BundesagenturParser:
                 yield PositionStub(
                     url=f"{_BASE_URL}/jobdetails/{hash_id}",
                     title=item["titel"],
-                    source="bundesagentur",
+                    source=_DISPLAY_NAME,
                     company=item.get("arbeitgeber") or None,
                     location=arbeitsort.get("ort") or None,
                     language="de",
@@ -154,3 +206,14 @@ class BundesagenturParser:
 
 
 parser_class = BundesagenturParser
+
+
+if __name__ == "__main__":
+    import sys
+
+    keyword = sys.argv[1] if len(sys.argv) > 1 else "Python"
+    location = sys.argv[2] if len(sys.argv) > 2 else "Hamburg"
+    query = ParserQuery(keyword=keyword, location=location, max_results=5)
+    with BundesagenturParser() as p:
+        for stub in p.discover(query):
+            print(stub)

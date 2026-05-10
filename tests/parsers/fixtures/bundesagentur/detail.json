@@ -1,0 +1,10 @@
+{
+  "hashId": "abc123",
+  "titel": "Software Engineer",
+  "arbeitgeber": "Acme GmbH",
+  "stellenbeschreibung": "<p>We are looking for a Software Engineer.</p><p>Requirements include Python experience.</p>",
+  "befristung": 1,
+  "arbeitszeitModelle": ["vz"],
+  "aktuelleVeroeffentlichungsdatum": "2024-01-15",
+  "bewerbungsschluss": "2024-02-29"
+}

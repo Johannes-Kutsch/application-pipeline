@@ -255,12 +255,12 @@ def test_discover_normalizes_location_before_slug_lookup() -> None:
         return _search_body([])
 
     with BundesagenturParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location="münchen")))
+        list(p.discover(_query(location="  MÜNCHEN  ")))
 
     assert any("M%C3%BCnchen" in u or "München" in u for u in urls)
 
 
-def test_discover_unknown_location_yields_nothing(
+def test_discover_unknown_location_yields_nothing_and_logs_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     def capturing_get(url: str, timeout: float) -> bytes:
@@ -271,16 +271,6 @@ def test_discover_unknown_location_yields_nothing(
             stubs = list(p.discover(_query(location="unknown_city_xyz")))
 
     assert stubs == []
-    assert any("unmapped_location" in r.message for r in caplog.records)
-
-
-def test_discover_unknown_location_logs_warning(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.WARNING):
-        with BundesagenturParser() as p:
-            list(p.discover(_query(location="atlantis")))
-
     assert any("unmapped_location" in r.message for r in caplog.records)
 
 

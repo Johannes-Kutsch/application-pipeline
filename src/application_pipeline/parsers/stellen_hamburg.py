@@ -2,12 +2,27 @@ from __future__ import annotations
 
 import html.parser
 import json
-import urllib.request
+import time
 from collections.abc import Iterator
 from typing import Any, Callable, Literal
 
-from application_pipeline.http import HttpRetryError
+import httpx
 
+from application_pipeline.http import HttpRetryError
+from application_pipeline.http.retry import (
+    HttpNotRetryableError,
+    exponential_backoff,
+    retry,
+)
+
+from ._http import (
+    BACKOFF_INITIAL,
+    BACKOFF_MAX,
+    BACKOFF_MULTIPLIER,
+    HTTP_CONNECT_TIMEOUT,
+    HTTP_READ_TIMEOUT,
+    USER_AGENT,
+)
 from ._text import parse_iso_date, strip_html
 from .errors import ParserError
 from .http import (
@@ -15,6 +30,7 @@ from .http import (
     DEFAULT_TIMEOUT,
     HttpGet,
     Throttle,
+    check_response_status,
     request_with_retry,
 )
 from .types import Position, PositionStub
@@ -26,16 +42,23 @@ HttpPost = Callable[[str, bytes, float], bytes]
 
 
 def _default_http_post(url: str, body: bytes, timeout: float) -> bytes:
-    req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()  # type: ignore[no-any-return]
+    with httpx.Client(
+        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+    ) as client:
+        resp = client.post(url, content=body, timeout=timeout)
+        check_response_status(resp, url)
+        return resp.content
 
 
 def _default_http_get(url: str, timeout: float) -> bytes:
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return resp.read()  # type: ignore[no-any-return]
+    with httpx.Client(
+        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
+        headers={"User-Agent": USER_AGENT},
+    ) as client:
+        resp = client.get(url, timeout=timeout)
+        check_response_status(resp, url)
+        return resp.content
 
 
 def _post_with_retry(
@@ -44,16 +67,21 @@ def _post_with_retry(
     timeout: float,
     retries: int,
     http_post: HttpPost,
+    *,
+    _sleep: Callable[[float], None] = time.sleep,
 ) -> bytes:
-    last_exc: Exception | None = None
-    for _ in range(retries):
-        try:
-            return http_post(url, body, timeout)
-        except Exception as exc:
-            last_exc = exc
-    raise HttpRetryError(
-        f"HTTP POST failed after {retries} retries: {last_exc}"
-    ) from last_exc
+    return retry(
+        lambda: http_post(url, body, timeout),
+        predicate=lambda exc: not isinstance(exc, HttpNotRetryableError),
+        backoff_policy=exponential_backoff(
+            BACKOFF_INITIAL, BACKOFF_MULTIPLIER, BACKOFF_MAX
+        ),
+        max_retries=retries,
+        error_factory=lambda n, exc: HttpRetryError(
+            f"HTTP POST failed after {n} retries: {exc}"
+        ),
+        _sleep=_sleep,
+    )
 
 
 class _JsonLdExtractor(html.parser.HTMLParser):

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-import urllib.request
 from collections.abc import Iterator
 from typing import Any, Literal
+
+import httpx
 
 from application_pipeline.http import HttpRetryError
 
@@ -15,8 +16,10 @@ from .http import (
     DEFAULT_TIMEOUT,
     HttpGet,
     Throttle,
+    check_response_status,
     request_with_retry,
 )
+from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
 from .types import Position, PositionStub
 
 _BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
@@ -26,9 +29,13 @@ _REMOTE_LOCATION = "bundesweit"
 
 
 def _default_http_get(url: str, timeout: float) -> bytes:
-    req = urllib.request.Request(url, headers={"X-API-Key": _API_KEY})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()  # type: ignore[no-any-return]
+    with httpx.Client(
+        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
+        headers={"User-Agent": USER_AGENT, "X-API-Key": _API_KEY},
+    ) as client:
+        resp = client.get(url, timeout=timeout)
+        check_response_status(resp, url)
+        return resp.content
 
 
 def _contract_type(

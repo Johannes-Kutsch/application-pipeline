@@ -2,21 +2,23 @@ from __future__ import annotations
 
 import logging
 import re
-import urllib.request
 from collections.abc import Iterator
 from datetime import date, timedelta
 
+import httpx
 from bs4 import BeautifulSoup
 
 from application_pipeline.http import HttpRetryError
 from application_pipeline.text import normalize
 
+from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
 from .errors import ParserError
 from .http import (
     DEFAULT_RETRIES,
     DEFAULT_TIMEOUT,
     HttpGet,
     Throttle,
+    check_response_status,
     request_with_retry,
 )
 from .types import Position, PositionStub
@@ -95,8 +97,13 @@ def _normalize_description(text: str) -> str:
 
 
 def _default_http_get(url: str, timeout: float) -> bytes:
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return resp.read()  # type: ignore[no-any-return]
+    with httpx.Client(
+        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
+        headers={"User-Agent": USER_AGENT},
+    ) as client:
+        resp = client.get(url, timeout=timeout)
+        check_response_status(resp, url)
+        return resp.content
 
 
 class JobsBeimStaatParser:

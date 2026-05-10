@@ -62,9 +62,7 @@ def _read(
     path = prompts_dir / filename
     try:
         text = path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise PromptError(f"{path}: {exc}") from exc
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise PromptError(f"{path}: {exc}") from exc
     if not text.strip():
         raise PromptError(f"{path}: file is empty")

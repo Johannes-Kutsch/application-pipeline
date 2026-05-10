@@ -9,8 +9,9 @@ from application_pipeline.http import HttpPost, HttpRetryError, post_with_retrie
 from application_pipeline.prompts import Prompts
 
 from .types import (
+    ExtractorMalformedJSONError,
+    ExtractorSchemaError,
     ExtractorUnreachableError,
-    LLMExtractorError,
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
@@ -81,7 +82,7 @@ class OllamaExtractor:
         }
         return self._generate_with_retries(
             payload,
-            lambda data: RelevanceVerdict(in_domain=bool(data["in_domain"])),
+            lambda data: RelevanceVerdict(in_domain=data["in_domain"]),
             "classify_relevance",
         )
 
@@ -141,6 +142,7 @@ class OllamaExtractor:
         url = f"{self._config.ollama_base_url}/api/generate"
         timeout = float(self._config.ollama_read_timeout_seconds)
         last_exc: Exception | None = None
+        is_malformed_json = False
         for _ in range(self._config.ollama_json_retries):
             try:
                 raw = post_with_retries(
@@ -152,11 +154,22 @@ class OllamaExtractor:
                     _sleep=self._sleep,
                 )
             except HttpRetryError as exc:
-                raise LLMExtractorError(str(exc)) from exc.__cause__
+                raise ExtractorUnreachableError(str(exc)) from exc.__cause__
             try:
-                return parser(json.loads(raw.get("response", "{}")))
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                data = json.loads(raw.get("response", "{}"))
+            except json.JSONDecodeError as exc:
                 last_exc = exc
-        raise LLMExtractorError(
-            f"{method_name}: failed to parse Ollama response: {last_exc}"
+                is_malformed_json = True
+                continue
+            try:
+                return parser(data)
+            except (KeyError, TypeError, ValueError, ExtractorSchemaError) as exc:
+                last_exc = exc
+                is_malformed_json = False
+        if is_malformed_json:
+            raise ExtractorMalformedJSONError(
+                f"{method_name}: failed to parse Ollama JSON: {last_exc}"
+            ) from last_exc
+        raise ExtractorSchemaError(
+            f"{method_name}: failed to validate Ollama response: {last_exc}"
         ) from last_exc

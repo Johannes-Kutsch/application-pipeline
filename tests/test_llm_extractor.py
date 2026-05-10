@@ -4,23 +4,23 @@ import pytest
 
 from application_pipeline.llm import (
     LLMExtractor,
-    LLMExtractorError,
+    ExtractorError,
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
 )
 
 
-# --- LLMExtractorError ---
+# --- ExtractorError ---
 
 
-def test_llm_extractor_error_is_exception():
-    with pytest.raises(LLMExtractorError):
-        raise LLMExtractorError("boom")
+def test_extractor_error_is_exception():
+    with pytest.raises(ExtractorError):
+        raise ExtractorError("boom")
 
 
-def test_llm_extractor_error_preserves_message():
-    exc = LLMExtractorError("network timeout")
+def test_extractor_error_preserves_message():
+    exc = ExtractorError("network timeout")
     assert str(exc) == "network timeout"
 
 

@@ -5,9 +5,11 @@ from .dedup import DedupStoreError, DeduplicationStore, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
 from .llm import (
+    ExtractorError,
+    ExtractorMalformedJSONError,
+    ExtractorSchemaError,
     ExtractorUnreachableError,
     LLMExtractor,
-    LLMExtractorError,
     MatchTier,
     MatchVerdict,
     OllamaExtractor,
@@ -26,9 +28,11 @@ __all__ = [
     "PreFilterVerdict",
     "DedupStoreError",
     "DeduplicationStore",
+    "ExtractorError",
+    "ExtractorMalformedJSONError",
+    "ExtractorSchemaError",
     "ExtractorUnreachableError",
     "LLMExtractor",
-    "LLMExtractorError",
     "Layout",
     "LayoutError",
     "MatchTier",

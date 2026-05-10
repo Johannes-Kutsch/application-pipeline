@@ -1,0 +1,25 @@
+{
+  "SearchResult": {
+    "SearchResultCountAll": 2,
+    "SearchResultItems": [
+      {
+        "MatchedObjectId": "11111",
+        "MatchedObjectDescriptor": {
+          "PositionTitle": "Softwareentwickler/in (m/w/d)",
+          "OrganizationName": "Stadtverwaltung Hamburg",
+          "PositionURI": "https://stellen.hamburg.de/jobad/11111",
+          "PositionLocation": [{"CountrySubDivisionName": "Hamburg"}]
+        }
+      },
+      {
+        "MatchedObjectId": "22222",
+        "MatchedObjectDescriptor": {
+          "PositionTitle": "IT-Projektleiter/in (m/w/d)",
+          "OrganizationName": "Hamburgische Investitions- und Förderbank",
+          "PositionURI": "https://stellen.hamburg.de/jobad/22222",
+          "PositionLocation": [{"CountrySubDivisionName": "Hamburg"}]
+        }
+      }
+    ]
+  }
+}

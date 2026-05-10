@@ -101,7 +101,7 @@ def _make_get(responses: list[bytes]) -> HttpGet:
 
 
 def _query(**kwargs: object) -> ParserQuery:
-    defaults: dict = {"keyword": "python", "location": None, "max_results": 100}
+    defaults: dict = {"keyword": "python", "location": "hamburg", "max_results": 100}
     defaults.update(kwargs)
     return ParserQuery(**defaults)  # type: ignore[arg-type]
 
@@ -166,7 +166,7 @@ def test_discover_stub_source_is_stellen_hamburg() -> None:
     post = _make_post([_search_body([_item()])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
-    assert stub.source == "stellen_hamburg"
+    assert stub.source == "stellen.hamburg"
 
 
 def test_discover_stub_language_is_de() -> None:

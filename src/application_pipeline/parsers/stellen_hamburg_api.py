@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html.parser
 import json
+import logging
 import time
 from collections.abc import Iterator
 from typing import Any, Callable, Literal
@@ -14,6 +15,7 @@ from application_pipeline.http.retry import (
     exponential_backoff,
     retry,
 )
+from application_pipeline.text import normalize
 
 from ._http import (
     BACKOFF_INITIAL,
@@ -35,8 +37,16 @@ from .http import (
 )
 from .types import ParserQuery, Position, PositionStub
 
+_log = logging.getLogger(__name__)
+
+_DISPLAY_NAME = "stellen.hamburg"
 _SEARCH_URL = "https://api-stellen.hamburg.de/search/"
 _PAGE_SIZE = 25
+
+# Keys are normalize()-ed location names.
+_LOCATION_SLUGS: dict[str, str] = {
+    "hamburg": "Hamburg",
+}
 
 HttpPost = Callable[[str, bytes, float], bytes]
 
@@ -44,7 +54,12 @@ HttpPost = Callable[[str, bytes, float], bytes]
 def _default_http_post(url: str, body: bytes, timeout: float) -> bytes:
     with httpx.Client(
         timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
-        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+            "Origin": "https://stellen.hamburg.de",
+            "Referer": "https://stellen.hamburg.de/",
+        },
     ) as client:
         resp = client.post(url, content=body, timeout=timeout)
         check_response_status(resp, url)
@@ -157,17 +172,29 @@ class StellenHamburgParser:
         pass
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
+        if query.location is None:
+            return
+
+        slug = _LOCATION_SLUGS.get(normalize(query.location) or "")
+        if slug is None:
+            _log.warning(
+                "unmapped_location parser=%s location=%r",
+                _DISPLAY_NAME,
+                query.location,
+            )
+            return
+
         seen: set[str] = set()
         count = 0
-        offset = 0
+        first_item = 0
         while True:
             self._throttle.wait()
             body = json.dumps(
                 {
                     "SearchParameters": {
                         "PositionTitle": query.keyword,
-                        "NumberOfResults": _PAGE_SIZE,
-                        "Offset": offset,
+                        "CountItem": _PAGE_SIZE,
+                        "FirstItem": first_item,
                     }
                 }
             ).encode()
@@ -200,8 +227,8 @@ class StellenHamburgParser:
                 count += 1
 
             total: int = result.get("SearchResultCountAll") or 0
-            offset += len(items)
-            if not any_new or offset >= total:
+            first_item += len(items)
+            if not any_new or first_item >= total:
                 break
 
     def _to_stub(self, descriptor: dict[str, Any], obj_id: str) -> PositionStub:
@@ -217,7 +244,7 @@ class StellenHamburgParser:
         return PositionStub(
             url=url,
             title=descriptor.get("PositionTitle") or obj_id,
-            source="stellen_hamburg",
+            source=_DISPLAY_NAME,
             company=descriptor.get("OrganizationName") or None,
             location=location,
             language="de",
@@ -250,3 +277,19 @@ class StellenHamburgParser:
 
 
 parser_class = StellenHamburgParser
+
+if __name__ == "__main__":
+    import sys
+
+    query = ParserQuery(
+        keyword=sys.argv[1] if len(sys.argv) > 1 else "*",
+        location="hamburg",
+        max_results=5,
+    )
+    with StellenHamburgParser() as p:
+        stubs = list(p.discover(query))
+    print(f"discover: {len(stubs)} stubs")
+    if stubs:
+        with StellenHamburgParser() as p:
+            pos = p.enrich(stubs[0])
+        print(f"enrich: {len(pos.raw_description)} chars")

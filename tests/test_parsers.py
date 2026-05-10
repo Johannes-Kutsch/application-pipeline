@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import sys
-import types
-from collections.abc import Iterator
+import logging
+from collections.abc import Iterable
 
 import pytest
 
 from application_pipeline.parsers import (
     Parser,
     ParserError,
+    ParserQuery,
     Position,
     PositionStub,
-    UnknownParserError,
 )
-from application_pipeline.parsers.registry import get_parser_class
+from application_pipeline.parsers.registry import get
 
 
 class _ConcreteParser:
@@ -23,7 +22,7 @@ class _ConcreteParser:
     def __exit__(self, *args: object) -> None:
         pass
 
-    def discover(self, query: str) -> Iterator[PositionStub]:
+    def discover(self, query: ParserQuery) -> Iterable[PositionStub]:
         return iter([])
 
     def enrich(self, stub: PositionStub) -> Position:
@@ -40,17 +39,34 @@ def stub() -> PositionStub:
     return PositionStub(url="https://example.com/1", title="Dev", source="test")
 
 
-def _register_parser_module(
-    monkeypatch: pytest.MonkeyPatch,
-    parser_type: str,
-    *,
-    parser_class: type | None = None,
-) -> None:
-    name = f"application_pipeline.parsers.{parser_type}"
-    mod = types.ModuleType(name)
-    if parser_class is not None:
-        mod.parser_class = parser_class  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, name, mod)
+# --- ParserQuery ---
+
+
+def test_parser_query_valid():
+    q = ParserQuery(keyword="python", location="Hamburg", max_results=10)
+    assert q.keyword == "python"
+    assert q.location == "Hamburg"
+    assert q.max_results == 10
+
+
+def test_parser_query_location_none_is_valid():
+    q = ParserQuery(keyword="java", location=None, max_results=50)
+    assert q.location is None
+
+
+def test_parser_query_rejects_empty_keyword():
+    with pytest.raises(ValueError, match="keyword"):
+        ParserQuery(keyword="", location=None, max_results=10)
+
+
+def test_parser_query_rejects_zero_max_results():
+    with pytest.raises(ValueError, match="max_results"):
+        ParserQuery(keyword="python", location=None, max_results=0)
+
+
+def test_parser_query_rejects_negative_max_results():
+    with pytest.raises(ValueError, match="max_results"):
+        ParserQuery(keyword="python", location=None, max_results=-1)
 
 
 # --- Error hierarchy ---
@@ -59,11 +75,6 @@ def _register_parser_module(
 def test_parser_error_preserves_message():
     err = ParserError("network timeout")
     assert str(err) == "network timeout"
-
-
-def test_unknown_parser_error_is_parser_error():
-    with pytest.raises(ParserError):
-        raise UnknownParserError("missing")
 
 
 # --- Parser Protocol ---
@@ -95,15 +106,16 @@ def test_class_missing_enrich_does_not_satisfy_parser_protocol():
         def __exit__(self, *args: object) -> None:
             pass
 
-        def discover(self, query: str) -> Iterator[PositionStub]:
+        def discover(self, query: ParserQuery) -> Iterable[PositionStub]:
             return iter([])
 
     assert not isinstance(_Bad(), Parser)
 
 
 def test_parser_protocol_works_as_context_manager(parser: _ConcreteParser):
+    q = ParserQuery(keyword="python", location=None, max_results=10)
     with parser as p:
-        result = list(p.discover("python"))
+        result = list(p.discover(q))
     assert result == []
 
 
@@ -116,29 +128,42 @@ def test_parser_enrich_returns_position(parser: _ConcreteParser, stub: PositionS
 # --- Registry ---
 
 
-def test_get_parser_class_raises_unknown_parser_error_for_missing_module():
-    with pytest.raises(UnknownParserError, match="nonexistent_xyz"):
-        get_parser_class("nonexistent_xyz")
+def test_registry_get_returns_bundesagentur_api():
+    from application_pipeline.parsers.bundesagentur_api import BundesagenturParser
+
+    assert get("bundesagentur_api") is BundesagenturParser
 
 
-def test_get_parser_class_raises_unknown_parser_error_when_module_lacks_parser_class(
-    monkeypatch: pytest.MonkeyPatch,
+def test_registry_get_returns_stellen_hamburg_api():
+    from application_pipeline.parsers.stellen_hamburg_api import StellenHamburgParser
+
+    assert get("stellen_hamburg_api") is StellenHamburgParser
+
+
+def test_registry_get_returns_jobs_beim_staat_html():
+    from application_pipeline.parsers.jobs_beim_staat_html import JobsBeimStaatParser
+
+    assert get("jobs_beim_staat_html") is JobsBeimStaatParser
+
+
+def test_registry_get_returns_none_for_unknown(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    _register_parser_module(monkeypatch, "faketype")
-    with pytest.raises(UnknownParserError, match="faketype"):
-        get_parser_class("faketype")
+    with caplog.at_level(logging.WARNING):
+        result = get("nonexistent_xyz")
+    assert result is None
 
 
-def test_get_parser_class_returns_parser_class(
-    monkeypatch: pytest.MonkeyPatch,
+def test_registry_get_logs_warning_for_unknown(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    _register_parser_module(monkeypatch, "goodtype", parser_class=_ConcreteParser)
-    assert get_parser_class("goodtype") is _ConcreteParser
+    with caplog.at_level(logging.WARNING):
+        get("nonexistent_xyz")
+    assert "unknown_parser_type" in caplog.text
+    assert "nonexistent_xyz" in caplog.text
 
 
-def test_get_parser_class_result_is_instantiable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _register_parser_module(monkeypatch, "instantiable", parser_class=_ConcreteParser)
-    cls = get_parser_class("instantiable")
+def test_registry_get_result_is_instantiable() -> None:
+    cls = get("bundesagentur_api")
+    assert cls is not None
     assert isinstance(cls(), Parser)

@@ -21,7 +21,7 @@ from .http import (
     check_response_status,
     request_with_retry,
 )
-from .types import Position, PositionStub
+from .types import ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ _LOCATION_SLUGS: dict[str, str] = {
     "frankfurt am main": "frankfurt-am-main",
     "hamburg": "hamburg",
     "hannover": "hannover",
+    "homeoffice": "homeoffice",
     "kiel": "kiel",
     "köln": "koeln",
     "koeln": "koeln",
@@ -109,17 +110,11 @@ def _default_http_get(url: str, timeout: float) -> bytes:
 class JobsBeimStaatParser:
     def __init__(
         self,
-        locations: list[str],
-        include_remote: bool = False,
-        max_results: int = 1000,
         *,
         _http_get: HttpGet | None = None,
         _timeout: float = DEFAULT_TIMEOUT,
         _retries: int = DEFAULT_RETRIES,
     ) -> None:
-        self._locations = locations
-        self._include_remote = include_remote
-        self._max_results = max_results
         self._http_get: HttpGet = _http_get or _default_http_get
         self._timeout = _timeout
         self._retries = _retries
@@ -131,32 +126,24 @@ class JobsBeimStaatParser:
     def __exit__(self, *args: object) -> None:
         pass
 
-    def discover(self, query: str) -> Iterator[PositionStub]:
+    def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
+        if query.location is None:
+            return
+        key = normalize(query.location)
+        slug = _LOCATION_SLUGS.get(key) if key else None
+        if slug is None:
+            _log.warning(
+                "unknown_location parser_type=jobs_beim_staat_html location=%s",
+                query.location,
+            )
+            return
         seen: set[str] = set()
         count = 0
-        slugs: list[str] = []
-
-        for loc in self._locations:
-            key = normalize(loc)
-            slug = _LOCATION_SLUGS.get(key) if key else None
-            if slug is None:
-                _log.warning(
-                    "unknown_location parser_type=jobs_beim_staat_html location=%s", loc
-                )
-                continue
-            slugs.append(slug)
-
-        if self._include_remote:
-            slugs.append("homeoffice")
-
-        for slug in slugs:
-            if count >= self._max_results:
-                break
-            for stub in self._fetch_listing_page(slug, seen):
-                if count >= self._max_results:
-                    break
-                yield stub
-                count += 1
+        for stub in self._fetch_listing_page(slug, seen):
+            if count >= query.max_results:
+                return
+            yield stub
+            count += 1
 
     def _fetch_listing_page(self, slug: str, seen: set[str]) -> Iterator[PositionStub]:
         url = f"{_BASE_URL}/jobs/{slug}"
@@ -226,15 +213,3 @@ class JobsBeimStaatParser:
 
 
 parser_class = JobsBeimStaatParser
-
-
-if __name__ == "__main__":
-    import sys
-
-    query = sys.argv[1] if len(sys.argv) > 1 else "python"
-    locations = sys.argv[2:] if len(sys.argv) > 2 else ["hamburg"]
-    with JobsBeimStaatParser(locations=locations, max_results=10) as p:
-        for stub in p.discover(query):
-            print(stub.url, "|", stub.title, "|", stub.company, "|", stub.location)
-            pos = p.enrich(stub)
-            print("  description:", pos.raw_description[:80])

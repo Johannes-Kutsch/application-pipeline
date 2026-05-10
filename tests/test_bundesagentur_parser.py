@@ -5,8 +5,11 @@ from datetime import date
 
 import pytest
 
-from application_pipeline.parsers import Parser, PositionStub
-from application_pipeline.parsers.bundesagentur import BundesagenturParser, parser_class
+from application_pipeline.parsers import Parser, ParserQuery, PositionStub
+from application_pipeline.parsers.bundesagentur_api import (
+    BundesagenturParser,
+    parser_class,
+)
 from application_pipeline.parsers.http import HttpGet
 
 
@@ -67,6 +70,12 @@ def _make_get(responses: list[bytes]) -> HttpGet:
     return http_get
 
 
+def _query(**kwargs: object) -> ParserQuery:
+    defaults: dict = {"keyword": "python", "location": "Hamburg", "max_results": 100}
+    defaults.update(kwargs)
+    return ParserQuery(**defaults)  # type: ignore[arg-type]
+
+
 @pytest.fixture
 def stub() -> PositionStub:
     return PositionStub(
@@ -91,12 +100,12 @@ def test_parser_class_attribute_is_bundesagentur_parser() -> None:
 
 
 def test_parser_satisfies_parser_protocol() -> None:
-    p = BundesagenturParser(locations=["Hamburg"])
+    p = BundesagenturParser()
     assert isinstance(p, Parser)
 
 
 def test_parser_is_usable_as_context_manager() -> None:
-    with BundesagenturParser(locations=["Hamburg"]) as p:
+    with BundesagenturParser() as p:
         assert isinstance(p, BundesagenturParser)
 
 
@@ -112,64 +121,64 @@ def test_discover_yields_one_stub_per_result() -> None:
             _search_body([]),
         ]
     )
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        stubs = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        stubs = list(p.discover(_query()))
     assert len(stubs) == 2
 
 
 def test_discover_stub_title_matches_api_titel() -> None:
     get = _make_get([_search_body([_item("x", "Data Scientist")]), _search_body([])])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        (stub,) = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        (stub,) = list(p.discover(_query()))
     assert stub.title == "Data Scientist"
 
 
 def test_discover_stub_source_is_bundesagentur() -> None:
     get = _make_get([_search_body([_item()]), _search_body([])])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        (stub,) = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        (stub,) = list(p.discover(_query()))
     assert stub.source == "bundesagentur"
 
 
 def test_discover_stub_language_is_de() -> None:
     get = _make_get([_search_body([_item()]), _search_body([])])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        (stub,) = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        (stub,) = list(p.discover(_query()))
     assert stub.language == "de"
 
 
 def test_discover_stub_company_from_arbeitgeber() -> None:
     get = _make_get([_search_body([_item(company="Muster GmbH")]), _search_body([])])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        (stub,) = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        (stub,) = list(p.discover(_query()))
     assert stub.company == "Muster GmbH"
 
 
 def test_discover_stub_location_from_arbeitsort_ort() -> None:
     get = _make_get([_search_body([_item(city="Berlin")]), _search_body([])])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        (stub,) = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        (stub,) = list(p.discover(_query()))
     assert stub.location == "Berlin"
 
 
 def test_discover_stub_url_contains_hash_id() -> None:
     get = _make_get([_search_body([_item("myhash")]), _search_body([])])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        (stub,) = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        (stub,) = list(p.discover(_query()))
     assert "myhash" in stub.url
 
 
 def test_discover_stub_company_none_when_arbeitgeber_absent() -> None:
     get = _make_get([_search_body([_item(company=None)]), _search_body([])])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        (stub,) = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        (stub,) = list(p.discover(_query()))
     assert stub.company is None
 
 
 def test_discover_stub_location_none_when_arbeitsort_absent() -> None:
     get = _make_get([_search_body([_item(city=None)]), _search_body([])])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        (stub,) = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        (stub,) = list(p.discover(_query()))
     assert stub.location is None
 
 
@@ -183,87 +192,82 @@ def test_discover_paginates_until_empty_page() -> None:
     page1 = _search_body([_item("id3")])
     page2 = _search_body([])
     get = _make_get([page0, page1, page2])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        stubs = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        stubs = list(p.discover(_query()))
     assert len(stubs) == 3
 
 
 def test_discover_stops_on_null_stellenangebote() -> None:
     body = json.dumps({"maxErgebnisse": 0, "stellenangebote": None}).encode()
     get = _make_get([body])
-    with BundesagenturParser(locations=["Hamburg"], _http_get=get) as p:
-        stubs = list(p.discover("python"))
+    with BundesagenturParser(_http_get=get) as p:
+        stubs = list(p.discover(_query()))
     assert stubs == []
 
 
 # ---------------------------------------------------------------------------
-# discover — locations and remote
+# discover — location and max_results
 # ---------------------------------------------------------------------------
 
 
-def test_discover_queries_each_location() -> None:
+def test_discover_passes_location_in_url() -> None:
     urls: list[str] = []
 
     def capturing_get(url: str, timeout: float) -> bytes:
         urls.append(url)
         return _search_body([])
 
-    with BundesagenturParser(
-        locations=["Hamburg", "Berlin"], _http_get=capturing_get
-    ) as p:
-        list(p.discover("python"))
+    with BundesagenturParser(_http_get=capturing_get) as p:
+        list(p.discover(_query(location="Hamburg")))
 
     assert any("Hamburg" in u for u in urls)
-    assert any("Berlin" in u for u in urls)
 
 
-def test_discover_includes_bundesweit_when_include_remote() -> None:
+def test_discover_no_location_param_when_location_none() -> None:
     urls: list[str] = []
 
     def capturing_get(url: str, timeout: float) -> bytes:
         urls.append(url)
         return _search_body([])
 
-    with BundesagenturParser(
-        locations=["Hamburg"], include_remote=True, _http_get=capturing_get
-    ) as p:
-        list(p.discover("python"))
+    with BundesagenturParser(_http_get=capturing_get) as p:
+        list(p.discover(_query(location=None)))
+
+    assert all("wo=" not in u for u in urls)
+
+
+def test_discover_passes_bundesweit_when_location_is_bundesweit() -> None:
+    urls: list[str] = []
+
+    def capturing_get(url: str, timeout: float) -> bytes:
+        urls.append(url)
+        return _search_body([])
+
+    with BundesagenturParser(_http_get=capturing_get) as p:
+        list(p.discover(_query(location="bundesweit")))
 
     assert any("bundesweit" in u.lower() for u in urls)
 
 
-def test_discover_does_not_include_bundesweit_when_flag_false() -> None:
-    urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        urls.append(url)
-        return _search_body([])
-
-    with BundesagenturParser(
-        locations=["Hamburg"], include_remote=False, _http_get=capturing_get
-    ) as p:
-        list(p.discover("python"))
-
-    assert not any("bundesweit" in u.lower() for u in urls)
+def test_discover_respects_max_results() -> None:
+    items = [_item(f"id{i}") for i in range(10)]
+    get = _make_get([_search_body(items)])
+    with BundesagenturParser(_http_get=get) as p:
+        stubs = list(p.discover(_query(max_results=3)))
+    assert len(stubs) == 3
 
 
 # ---------------------------------------------------------------------------
-# discover — deduplication across locations
+# discover — deduplication
 # ---------------------------------------------------------------------------
 
 
-def test_discover_deduplicates_same_hash_across_locations() -> None:
+def test_discover_deduplicates_same_hash_id() -> None:
     shared = _item("same_hash", "Dev")
-    get = _make_get(
-        [
-            _search_body([shared]),
-            _search_body([]),
-            _search_body([shared]),
-            _search_body([]),
-        ]
-    )
-    with BundesagenturParser(locations=["Hamburg", "Berlin"], _http_get=get) as p:
-        stubs = list(p.discover("python"))
+    page0 = _search_body([shared, shared])
+    get = _make_get([page0, _search_body([])])
+    with BundesagenturParser(_http_get=get) as p:
+        stubs = list(p.discover(_query()))
     assert len(stubs) == 1
 
 
@@ -278,11 +282,9 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("refused")
 
-    with BundesagenturParser(
-        locations=["Hamburg"], _http_get=failing_get, _retries=1
-    ) as p:
+    with BundesagenturParser(_http_get=failing_get, _retries=1) as p:
         with pytest.raises(ParserError):
-            list(p.discover("python"))
+            list(p.discover(_query()))
 
 
 # ---------------------------------------------------------------------------
@@ -292,14 +294,14 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
 
 def test_enrich_returns_position_with_raw_description(stub: PositionStub) -> None:
     get = _make_get([_detail_body(description="We are hiring.")])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.raw_description == "We are hiring."
 
 
 def test_enrich_strips_html_tags_from_description(stub: PositionStub) -> None:
     get = _make_get([_detail_body(description="<p>Hello</p><p>World</p>")])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert "<p>" not in pos.raw_description
     assert "Hello" in pos.raw_description
@@ -308,7 +310,7 @@ def test_enrich_strips_html_tags_from_description(stub: PositionStub) -> None:
 
 def test_enrich_decodes_html_entities_in_description(stub: PositionStub) -> None:
     get = _make_get([_detail_body(description="Geh&auml;lter &amp; Benefits")])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert "Gehälter" in pos.raw_description
     assert "&amp;" not in pos.raw_description
@@ -317,7 +319,7 @@ def test_enrich_decodes_html_entities_in_description(stub: PositionStub) -> None
 def test_enrich_empty_description_when_field_absent(stub: PositionStub) -> None:
     body = json.dumps({"hashId": "abc", "titel": "Dev"}).encode()
     get = _make_get([body])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.raw_description == ""
 
@@ -329,21 +331,21 @@ def test_enrich_empty_description_when_field_absent(stub: PositionStub) -> None:
 
 def test_enrich_maps_befristung_1_to_permanent(stub: PositionStub) -> None:
     get = _make_get([_detail_body(befristung=1)])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.contract_type == "permanent"
 
 
 def test_enrich_maps_befristung_2_to_fixed_term(stub: PositionStub) -> None:
     get = _make_get([_detail_body(befristung=2)])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.contract_type == "fixed-term"
 
 
 def test_enrich_contract_type_none_when_befristung_absent(stub: PositionStub) -> None:
     get = _make_get([_detail_body()])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.contract_type is None
 
@@ -355,14 +357,14 @@ def test_enrich_contract_type_none_when_befristung_absent(stub: PositionStub) ->
 
 def test_enrich_maps_vz_to_full_time(stub: PositionStub) -> None:
     get = _make_get([_detail_body(arbeitszeitModelle=["vz"])])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.employment_type == "full-time"
 
 
 def test_enrich_maps_tz_to_part_time(stub: PositionStub) -> None:
     get = _make_get([_detail_body(arbeitszeitModelle=["tz"])])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.employment_type == "part-time"
 
@@ -371,7 +373,7 @@ def test_enrich_employment_type_none_when_arbeitszeitmodelle_absent(
     stub: PositionStub,
 ) -> None:
     get = _make_get([_detail_body()])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.employment_type is None
 
@@ -383,21 +385,21 @@ def test_enrich_employment_type_none_when_arbeitszeitmodelle_absent(
 
 def test_enrich_parses_posted_date(stub: PositionStub) -> None:
     get = _make_get([_detail_body(aktuelleVeroeffentlichungsdatum="2024-03-15")])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.posted_date == date(2024, 3, 15)
 
 
 def test_enrich_parses_deadline(stub: PositionStub) -> None:
     get = _make_get([_detail_body(bewerbungsschluss="2024-04-30")])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.deadline == date(2024, 4, 30)
 
 
 def test_enrich_posted_date_none_when_field_absent(stub: PositionStub) -> None:
     get = _make_get([_detail_body()])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.posted_date is None
 
@@ -419,7 +421,7 @@ def test_enrich_raises_parser_error_on_http_failure() -> None:
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("refused")
 
-    with BundesagenturParser(locations=[], _http_get=failing_get, _retries=1) as p:
+    with BundesagenturParser(_http_get=failing_get, _retries=1) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
 
@@ -431,6 +433,6 @@ def test_enrich_raises_parser_error_on_http_failure() -> None:
 
 def test_enrich_position_references_original_stub(stub: PositionStub) -> None:
     get = _make_get([_detail_body()])
-    with BundesagenturParser(locations=[], _http_get=get) as p:
+    with BundesagenturParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.stub is stub

@@ -5,6 +5,19 @@ from datetime import date
 from typing import Literal
 
 
+@dataclass
+class ParserQuery:
+    keyword: str
+    location: str | None
+    max_results: int
+
+    def __post_init__(self) -> None:
+        if not self.keyword:
+            raise ValueError("keyword must be non-empty")
+        if self.max_results <= 0:
+            raise ValueError("max_results must be positive")
+
+
 @dataclass(frozen=True)
 class PositionStub:
     url: str

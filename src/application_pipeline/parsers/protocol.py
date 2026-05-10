@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
-from .types import Position, PositionStub
+from .types import ParserQuery, Position, PositionStub
 
 
 @runtime_checkable
@@ -17,6 +17,6 @@ class Parser(Protocol):
         exc_tb: object,
     ) -> None: ...
 
-    def discover(self, query: str) -> Iterator[PositionStub]: ...
+    def discover(self, query: ParserQuery) -> Iterable[PositionStub]: ...
 
     def enrich(self, stub: PositionStub) -> Position: ...

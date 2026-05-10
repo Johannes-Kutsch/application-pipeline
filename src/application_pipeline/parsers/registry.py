@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-import importlib
+import logging
 
-from .errors import UnknownParserError
+from .bundesagentur_api import BundesagenturParser
+from .jobs_beim_staat_html import JobsBeimStaatParser
 from .protocol import Parser
+from .stellen_hamburg_api import StellenHamburgParser
+
+_log = logging.getLogger(__name__)
+
+_PARSERS: dict[str, type[Parser]] = {
+    "bundesagentur_api": BundesagenturParser,
+    "stellen_hamburg_api": StellenHamburgParser,
+    "jobs_beim_staat_html": JobsBeimStaatParser,
+}
 
 
-def get_parser_class(parser_type: str) -> type[Parser]:
-    try:
-        module = importlib.import_module(f"application_pipeline.parsers.{parser_type}")
-    except ImportError:
-        raise UnknownParserError(f"No parser module found for type {parser_type!r}")
-
-    parser_class = getattr(module, "parser_class", None)
-    if parser_class is None:
-        raise UnknownParserError(
-            f"Parser module {parser_type!r} does not expose a 'parser_class' attribute"
-        )
-    return parser_class  # type: ignore[return-value]
+def get(parser_type: str) -> type[Parser] | None:
+    cls = _PARSERS.get(parser_type)
+    if cls is None:
+        _log.warning("unknown_parser_type parser_type=%s", parser_type)
+    return cls

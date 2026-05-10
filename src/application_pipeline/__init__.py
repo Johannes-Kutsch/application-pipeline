@@ -13,7 +13,7 @@ from .llm import (
     OllamaExtractor,
     RelevanceVerdict,
 )
-from .prompts import PromptError, Prompts, load_prompts
+from .prompts import PromptError, PromptTemplate, Prompts, load_prompts
 from .renderer import render
 from .results import ResultsFileError, ResultsFileManager
 from .results import load as load_results
@@ -37,6 +37,7 @@ __all__ = [
     "Position",
     "PositionStub",
     "PromptError",
+    "PromptTemplate",
     "Prompts",
     "RelevanceVerdict",
     "ResultsFileError",

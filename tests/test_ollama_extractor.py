@@ -15,6 +15,7 @@ from application_pipeline.llm import OllamaExtractor
 from application_pipeline.prompts import (
     CLASSIFY_RELEVANCE_SLOTS,
     JUDGE_MATCH_SLOTS,
+    PromptTemplate,
     Prompts,
 )
 
@@ -44,8 +45,14 @@ def _prompts(
     judge_en: str = "EN judge: {skills} {raw_description}",
 ) -> Prompts:
     return Prompts(
-        classify_relevance={"de": classify_de, "en": classify_en},
-        judge_match={"de": judge_de, "en": judge_en},
+        classify_relevance={
+            "de": PromptTemplate(classify_de, CLASSIFY_RELEVANCE_SLOTS),
+            "en": PromptTemplate(classify_en, CLASSIFY_RELEVANCE_SLOTS),
+        },
+        judge_match={
+            "de": PromptTemplate(judge_de, JUDGE_MATCH_SLOTS),
+            "en": PromptTemplate(judge_en, JUDGE_MATCH_SLOTS),
+        },
     )
 
 
@@ -548,49 +555,36 @@ def test_prewarm_does_not_send_second_ping_after_first_fails():
 
 
 # --- drift tests ---
+# PromptTemplate.render() raises PromptError on any slot mismatch, so these
+# tests verify OllamaExtractor passes exactly the right slots by confirming
+# no exception is raised and the rendered content appears in the HTTP payload.
 
 
 def test_classify_slots_match_inventory():
-    captured: dict[str, object] = {}
-
-    class _SpyStr(str):
-        def format(self, *args: object, **kwargs: object) -> str:
-            captured.update(kwargs)
-            return ""
-
     http_post = MagicMock(return_value={"response": '{"in_domain": true}'})
-    prompts = Prompts(
-        classify_relevance={"de": _SpyStr(""), "en": _SpyStr("")},
-        judge_match={
-            "de": "judge de {skills} {raw_description}",
-            "en": "judge en {skills} {raw_description}",
-        },
+    extractor = OllamaExtractor(
+        _config(),
+        _prompts(classify_en="t={title} d={raw_description}"),
+        _http_post=http_post,
     )
-    extractor = OllamaExtractor(_config(), prompts, _http_post=http_post)
 
-    extractor.classify_relevance("en", "title", "desc")
+    extractor.classify_relevance("en", "MY_TITLE", "MY_DESC")
 
-    assert set(captured.keys()) == CLASSIFY_RELEVANCE_SLOTS
+    (_, payload, _) = http_post.call_args.args
+    assert "t=MY_TITLE" in payload["prompt"]
+    assert "d=MY_DESC" in payload["prompt"]
 
 
 def test_judge_slots_match_inventory():
-    captured: dict[str, object] = {}
-
-    class _SpyStr(str):
-        def format(self, *args: object, **kwargs: object) -> str:
-            captured.update(kwargs)
-            return ""
-
     http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
-    prompts = Prompts(
-        classify_relevance={
-            "de": "DE: {title} {raw_description}",
-            "en": "EN: {title} {raw_description}",
-        },
-        judge_match={"de": _SpyStr(""), "en": _SpyStr("")},
+    extractor = OllamaExtractor(
+        _config(skills=["python"]),
+        _prompts(judge_en="s={skills} d={raw_description}"),
+        _http_post=http_post,
     )
-    extractor = OllamaExtractor(_config(), prompts, _http_post=http_post)
 
-    extractor.judge_match("en", "desc")
+    extractor.judge_match("en", "MY_DESC")
 
-    assert set(captured.keys()) == JUDGE_MATCH_SLOTS
+    (_, payload, _) = http_post.call_args.args
+    assert "d=MY_DESC" in payload["prompt"]
+    assert "- python" in payload["prompt"]

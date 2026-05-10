@@ -63,7 +63,7 @@ class OllamaExtractor:
     ) -> RelevanceVerdict:
         lang = self._lang_or_en(language)
         slots = {"title": title, "raw_description": raw_description}
-        prompt = self._prompts.classify_relevance[lang].format(**slots)
+        prompt = self._prompts.classify_relevance[lang].render(**slots)
         payload: dict[str, Any] = {
             "model": self._config.ollama_classify_model,
             "prompt": prompt,
@@ -80,7 +80,7 @@ class OllamaExtractor:
     def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
         lang = self._lang_or_en(language)
         slots = {"skills": self._skills_block, "raw_description": raw_description}
-        prompt = self._prompts.judge_match[lang].format(**slots)
+        prompt = self._prompts.judge_match[lang].render(**slots)
         payload: dict[str, Any] = {
             "model": self._config.ollama_judge_model,
             "prompt": prompt,

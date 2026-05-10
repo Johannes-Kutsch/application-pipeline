@@ -97,8 +97,19 @@ def test_load_defaults_when_optional_fields_absent(tmp_path: pathlib.Path) -> No
 
     config = load(path)
 
-    assert config.include_remote is False
+    assert config.include_remote is True
     assert config.prompts_dir == tmp_path / "prompts"
+
+
+def test_include_remote_can_be_set_to_false(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + "\nINCLUDE_REMOTE = False\n",
+    )
+
+    config = load(path)
+
+    assert config.include_remote is False
 
 
 def test_load_reads_include_remote_when_set(tmp_path: pathlib.Path) -> None:
@@ -110,6 +121,113 @@ def test_load_reads_include_remote_when_set(tmp_path: pathlib.Path) -> None:
     config = load(path)
 
     assert config.include_remote is True
+
+
+# --- seen_store_path ---
+
+
+def test_seen_store_path_defaults_to_seen_json(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.seen_store_path == pathlib.Path(".seen.json")
+
+
+def test_seen_store_path_read_from_env(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    custom = tmp_path / "custom.json"
+    monkeypatch.setenv("SEEN_STORE_PATH", str(custom))
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.seen_store_path == custom
+
+
+def test_seen_store_path_coerces_string_from_env(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SEEN_STORE_PATH", "/tmp/store.json")
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert isinstance(config.seen_store_path, pathlib.Path)
+    assert config.seen_store_path == pathlib.Path("/tmp/store.json")
+
+
+def test_seen_store_path_no_existence_check(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nonexistent = tmp_path / "does_not_exist.json"
+    monkeypatch.setenv("SEEN_STORE_PATH", str(nonexistent))
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)  # must not raise
+
+    assert config.seen_store_path == nonexistent
+
+
+# --- layout ---
+
+
+def test_layout_defaults_to_none(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.layout is None
+
+
+def test_layout_accepted_when_valid_file(tmp_path: pathlib.Path) -> None:
+    layout_file = tmp_path / "layout.py"
+    layout_file.write_text("# layout\n")
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\nimport pathlib\nLAYOUT = pathlib.Path(r'{layout_file}')\n",
+    )
+
+    config = load(path)
+
+    assert config.layout == layout_file
+
+
+def test_layout_raises_when_file_missing(tmp_path: pathlib.Path) -> None:
+    missing = tmp_path / "no_layout.py"
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\nimport pathlib\nLAYOUT = pathlib.Path(r'{missing}')\n",
+    )
+
+    with pytest.raises(ConfigError, match="LAYOUT"):
+        load(path)
+
+
+def test_layout_raises_when_path_is_directory(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\nimport pathlib\nLAYOUT = pathlib.Path(r'{tmp_path}')\n",
+    )
+
+    with pytest.raises(ConfigError, match="LAYOUT"):
+        load(path)
+
+
+# --- prompts_dir ---
+
+
+def test_prompts_dir_raises_when_not_a_directory(tmp_path: pathlib.Path) -> None:
+    missing_dir = tmp_path / "no_such_prompts"
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + f"\nimport pathlib\nPROMPTS_DIR = pathlib.Path(r'{missing_dir}')\n",
+    )
+
+    with pytest.raises(ConfigError, match="PROMPTS_DIR"):
+        load(path)
 
 
 def test_load_resolves_relative_prompts_dir_against_config_dir(
@@ -158,6 +276,185 @@ def test_load_passes_absolute_prompts_dir_through(tmp_path: pathlib.Path) -> Non
     config = load(path)
 
     assert config.prompts_dir == abs_prompts
+
+
+# --- per-prompt-file fields ---
+
+
+def test_classify_relevance_prompt_defaults_to_none(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.classify_relevance_prompt is None
+
+
+def test_judge_match_prompt_defaults_to_none(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.judge_match_prompt is None
+
+
+def test_classify_relevance_prompt_accepted_when_valid(tmp_path: pathlib.Path) -> None:
+    prompt_file = tmp_path / "classify.md"
+    prompt_file.write_text("prompt content\n")
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + f"\nimport pathlib\nCLASSIFY_RELEVANCE_PROMPT = pathlib.Path(r'{prompt_file}')\n",
+    )
+
+    config = load(path)
+
+    assert config.classify_relevance_prompt == prompt_file
+
+
+def test_classify_relevance_prompt_raises_when_missing(tmp_path: pathlib.Path) -> None:
+    missing = tmp_path / "missing.md"
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + f"\nimport pathlib\nCLASSIFY_RELEVANCE_PROMPT = pathlib.Path(r'{missing}')\n",
+    )
+
+    with pytest.raises(ConfigError, match="CLASSIFY_RELEVANCE_PROMPT"):
+        load(path)
+
+
+def test_classify_relevance_prompt_raises_when_empty(tmp_path: pathlib.Path) -> None:
+    empty_file = tmp_path / "empty.md"
+    empty_file.write_text("")
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + f"\nimport pathlib\nCLASSIFY_RELEVANCE_PROMPT = pathlib.Path(r'{empty_file}')\n",
+    )
+
+    with pytest.raises(ConfigError, match="CLASSIFY_RELEVANCE_PROMPT"):
+        load(path)
+
+
+def test_judge_match_prompt_raises_when_missing(tmp_path: pathlib.Path) -> None:
+    missing = tmp_path / "missing.md"
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + f"\nimport pathlib\nJUDGE_MATCH_PROMPT = pathlib.Path(r'{missing}')\n",
+    )
+
+    with pytest.raises(ConfigError, match="JUDGE_MATCH_PROMPT"):
+        load(path)
+
+
+# --- LLM defaults ---
+
+
+def test_ollama_defaults(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.ollama_json_retries == 1
+    assert config.ollama_http_retries == 2
+    assert config.ollama_keep_alive == "24h"
+    assert config.ollama_read_timeout_seconds == 300
+
+
+# --- ollama validation ---
+
+
+def test_ollama_base_url_must_start_with_http(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + '\nOLLAMA_BASE_URL = "ftp://localhost:11434"\n',
+    )
+
+    with pytest.raises(ConfigError, match="ollama_base_url"):
+        load(path)
+
+
+def test_ollama_base_url_accepts_https(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + '\nOLLAMA_BASE_URL = "https://remote:11434"\n',
+    )
+
+    config = load(path)
+
+    assert config.ollama_base_url == "https://remote:11434"
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["OLLAMA_JSON_RETRIES", "OLLAMA_HTTP_RETRIES", "OLLAMA_READ_TIMEOUT_SECONDS"],
+)
+def test_ollama_retry_timeout_rejects_negative(
+    tmp_path: pathlib.Path, field: str
+) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\n{field} = -1\n",
+    )
+
+    with pytest.raises(ConfigError, match=field.lower()):
+        load(path)
+
+
+def test_ollama_retry_fields_accept_zero(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + "\nOLLAMA_JSON_RETRIES = 0\nOLLAMA_HTTP_RETRIES = 0\n",
+    )
+
+    config = load(path)
+
+    assert config.ollama_json_retries == 0
+    assert config.ollama_http_retries == 0
+
+
+# --- keyword normalize length check ---
+
+
+@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
+def test_load_raises_when_keyword_entry_too_short(
+    tmp_path: pathlib.Path, field: str
+) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\n{field} = ['ab']\n",
+    )
+
+    with pytest.raises(ConfigError, match=field):
+        load(path)
+
+
+@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
+def test_keyword_length_uses_normalized_value(
+    tmp_path: pathlib.Path, field: str
+) -> None:
+    # "  ab  " normalizes to "ab" (length 2) — must still be rejected
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\n{field} = ['  ab  ']\n",
+    )
+
+    with pytest.raises(ConfigError, match=field):
+        load(path)
+
+
+@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
+def test_load_raises_on_duplicate_keyword_entries(
+    tmp_path: pathlib.Path, field: str
+) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + f"\n{field} = ['Python', 'Python']\n",
+    )
+
+    with pytest.raises(ConfigError, match=field):
+        load(path)
 
 
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:
@@ -303,32 +600,6 @@ def test_load_reads_inclusion_and_negative_keywords(tmp_path: pathlib.Path) -> N
 
     assert config.inclusion_keywords == ["Python", "Data Science"]
     assert config.negative_keywords == ["Pflege", "Reinigung"]
-
-
-@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
-def test_load_raises_when_keyword_entry_too_short(
-    tmp_path: pathlib.Path, field: str
-) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + f"\n{field} = ['ab']\n",
-    )
-
-    with pytest.raises(ConfigError, match=field):
-        load(path)
-
-
-@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
-def test_load_raises_on_duplicate_keyword_entries(
-    tmp_path: pathlib.Path, field: str
-) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + f"\n{field} = ['Python', 'Python']\n",
-    )
-
-    with pytest.raises(ConfigError, match=field):
-        load(path)
 
 
 def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:

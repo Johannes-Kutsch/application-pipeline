@@ -26,6 +26,7 @@ class PositionStub:
     company: str | None = None
     location: str | None = None
     language: str | None = None
+    posted_date: date | None = None
 
 
 @dataclass(frozen=True)

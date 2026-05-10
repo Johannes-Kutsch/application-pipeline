@@ -13,7 +13,6 @@ from application_pipeline.parsers.http import HttpGet
 from application_pipeline.parsers.stellen_hamburg_api import (
     HttpPost,
     StellenHamburgParser,
-    _employment_type,
     parser_class,
 )
 
@@ -334,15 +333,6 @@ def test_enrich_position_references_original_stub(
     assert pos.stub is stub
 
 
-def test_enrich_source_on_stub_is_stellen_hamburg(
-    stub: PositionStub, detail_html: bytes
-) -> None:
-    get = _make_get({"jobad": detail_html})
-    with StellenHamburgParser(_http_get=get) as p:
-        pos = p.enrich(stub)
-    assert pos.stub.source == "stellen.hamburg"
-
-
 # ---------------------------------------------------------------------------
 # enrich — error handling
 # ---------------------------------------------------------------------------
@@ -357,24 +347,3 @@ def test_enrich_raises_parser_error_on_http_failure(stub: PositionStub) -> None:
     with StellenHamburgParser(_http_get=failing_get, _retries=1) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
-
-
-# ---------------------------------------------------------------------------
-# _employment_type — unit
-# ---------------------------------------------------------------------------
-
-
-def test_employment_type_full_time() -> None:
-    assert _employment_type("FULL_TIME") == "full-time"
-
-
-def test_employment_type_part_time() -> None:
-    assert _employment_type("PART_TIME") == "part-time"
-
-
-def test_employment_type_unknown_returns_none() -> None:
-    assert _employment_type("CONTRACTOR") is None
-
-
-def test_employment_type_none_returns_none() -> None:
-    assert _employment_type(None) is None

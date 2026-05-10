@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html.parser
 import json
+import time
 from collections.abc import Iterator
 from typing import Any, Callable, Literal
 
@@ -67,7 +68,7 @@ def _post_with_retry(
     retries: int,
     http_post: HttpPost,
     *,
-    _sleep: Callable[[float], None] = __import__("time").sleep,
+    _sleep: Callable[[float], None] = time.sleep,
 ) -> bytes:
     return retry(
         lambda: http_post(url, body, timeout),

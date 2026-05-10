@@ -7,9 +7,6 @@ class ExtractorError(Exception):
     pass
 
 
-LLMExtractorError = ExtractorError
-
-
 class ExtractorUnreachableError(ExtractorError):
     pass
 

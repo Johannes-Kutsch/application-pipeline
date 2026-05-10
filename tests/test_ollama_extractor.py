@@ -197,6 +197,36 @@ def test_classify_relevance_sends_stream_false():
     assert payload["stream"] is False
 
 
+def test_classify_relevance_sends_format_json_string():
+    http_post = MagicMock(return_value={"response": '{"in_domain": true}'})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.classify_relevance("en", "title", "desc")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["format"] == "json"
+
+
+def test_classify_relevance_sends_options_temperature_zero():
+    http_post = MagicMock(return_value={"response": '{"in_domain": true}'})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.classify_relevance("en", "title", "desc")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["options"]["temperature"] == 0.0
+
+
+def test_classify_relevance_sends_options_num_ctx_4096():
+    http_post = MagicMock(return_value={"response": '{"in_domain": true}'})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.classify_relevance("en", "title", "desc")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["options"]["num_ctx"] == 4096
+
+
 def test_classify_relevance_formats_title_and_description_into_prompt():
     http_post = MagicMock(return_value={"response": '{"in_domain": true}'})
     extractor = OllamaExtractor(
@@ -392,6 +422,16 @@ def test_judge_match_sends_temperature_02():
 
     (url, payload, timeout) = http_post.call_args.args
     assert payload["options"]["temperature"] == 0.2
+
+
+def test_judge_match_sends_num_ctx_4096():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    extractor.judge_match("en", "desc")
+
+    (url, payload, timeout) = http_post.call_args.args
+    assert payload["options"]["num_ctx"] == 4096
 
 
 def test_judge_match_sends_stream_false():

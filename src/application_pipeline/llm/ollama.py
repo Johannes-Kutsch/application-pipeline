@@ -18,12 +18,6 @@ from .types import (
 
 _T = TypeVar("_T")
 
-_CLASSIFY_RELEVANCE_FORMAT = {
-    "type": "object",
-    "properties": {"in_domain": {"type": "boolean"}},
-    "required": ["in_domain"],
-}
-
 _JUDGE_MATCH_FORMAT = {
     "type": "object",
     "properties": {
@@ -75,9 +69,10 @@ class OllamaExtractor:
         payload: dict[str, Any] = {
             "model": self._config.ollama_classify_model,
             "prompt": prompt,
-            "format": _CLASSIFY_RELEVANCE_FORMAT,
+            "format": "json",
             "stream": False,
             "keep_alive": self._config.ollama_keep_alive,
+            "options": {"temperature": 0.0, "num_ctx": 4096},
         }
         return self._generate_with_retries(
             payload,
@@ -95,7 +90,7 @@ class OllamaExtractor:
             "format": _JUDGE_MATCH_FORMAT,
             "stream": False,
             "keep_alive": self._config.ollama_keep_alive,
-            "options": {"temperature": 0.2},
+            "options": {"temperature": 0.2, "num_ctx": 4096},
         }
         return self._generate_with_retries(
             payload,

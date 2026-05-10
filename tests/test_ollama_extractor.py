@@ -4,8 +4,10 @@ import pytest
 
 from application_pipeline import (
     Config,
+    ExtractorError,
+    ExtractorMalformedJSONError,
+    ExtractorSchemaError,
     ExtractorUnreachableError,
-    LLMExtractorError,
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
@@ -236,7 +238,7 @@ def test_classify_relevance_raises_llm_extractor_error_after_http_retries_exhaus
         _sleep=lambda _: None,
     )
 
-    with pytest.raises(LLMExtractorError):
+    with pytest.raises(ExtractorError):
         extractor.classify_relevance("en", "title", "desc")
 
 
@@ -266,7 +268,7 @@ def test_classify_relevance_raises_llm_extractor_error_on_invalid_json():
         _config(ollama_json_retries=1), _prompts(), _http_post=http_post
     )
 
-    with pytest.raises(LLMExtractorError):
+    with pytest.raises(ExtractorError):
         extractor.classify_relevance("en", "title", "desc")
 
 
@@ -276,7 +278,7 @@ def test_classify_relevance_raises_llm_extractor_error_when_in_domain_key_missin
         _config(ollama_json_retries=1), _prompts(), _http_post=http_post
     )
 
-    with pytest.raises(LLMExtractorError):
+    with pytest.raises(ExtractorError):
         extractor.classify_relevance("en", "title", "desc")
 
 
@@ -416,7 +418,7 @@ def test_judge_match_raises_llm_extractor_error_after_http_retries_exhausted():
         _sleep=lambda _: None,
     )
 
-    with pytest.raises(LLMExtractorError):
+    with pytest.raises(ExtractorError):
         extractor.judge_match("en", "desc")
 
 
@@ -443,7 +445,7 @@ def test_judge_match_raises_llm_extractor_error_on_invalid_json():
         _config(ollama_json_retries=1), _prompts(), _http_post=http_post
     )
 
-    with pytest.raises(LLMExtractorError):
+    with pytest.raises(ExtractorError):
         extractor.judge_match("en", "desc")
 
 
@@ -455,7 +457,7 @@ def test_judge_match_raises_llm_extractor_error_on_missing_tier():
         _config(ollama_json_retries=1), _prompts(), _http_post=http_post
     )
 
-    with pytest.raises(LLMExtractorError):
+    with pytest.raises(ExtractorError):
         extractor.judge_match("en", "desc")
 
 
@@ -469,7 +471,7 @@ def test_judge_match_raises_llm_extractor_error_on_invalid_tier_value():
         _config(ollama_json_retries=1), _prompts(), _http_post=http_post
     )
 
-    with pytest.raises(LLMExtractorError):
+    with pytest.raises(ExtractorError):
         extractor.judge_match("en", "desc")
 
 
@@ -600,3 +602,153 @@ def test_judge_slots_match_inventory():
     (_, payload, _) = http_post.call_args.args
     assert "d=MY_DESC" in payload["prompt"]
     assert "- python" in payload["prompt"]
+
+
+# --- error subclass specificity ---
+
+
+def test_http_failure_raises_extractor_unreachable_error():
+    http_post = MagicMock(side_effect=OSError("connection refused"))
+    extractor = OllamaExtractor(
+        _config(ollama_http_retries=1),
+        _prompts(),
+        _http_post=http_post,
+        _sleep=lambda _: None,
+    )
+
+    with pytest.raises(ExtractorUnreachableError):
+        extractor.classify_relevance("en", "title", "desc")
+
+
+def test_invalid_json_response_raises_malformed_json_error():
+    http_post = MagicMock(return_value={"response": "not valid json {"})
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(ExtractorMalformedJSONError):
+        extractor.classify_relevance("en", "title", "desc")
+
+
+def test_invalid_tier_raises_extractor_schema_error():
+    http_post = MagicMock(
+        return_value={
+            "response": '{"tier": "invalid", "matched": [], "missing": [], "summary": "x"}'
+        }
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(ExtractorSchemaError):
+        extractor.judge_match("en", "desc")
+
+
+def test_missing_required_field_raises_extractor_schema_error():
+    http_post = MagicMock(
+        return_value={"response": '{"matched": [], "missing": [], "summary": "x"}'}
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(ExtractorSchemaError):
+        extractor.judge_match("en", "desc")
+
+
+def test_judge_match_malformed_json_after_retries_raises_malformed_json_error():
+    http_post = MagicMock(return_value={"response": "not json"})
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=2), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(ExtractorMalformedJSONError):
+        extractor.judge_match("en", "desc")
+
+
+# --- verdict validation via __post_init__ ---
+
+
+def test_match_verdict_rejects_summary_over_600_chars():
+    http_post = MagicMock(
+        return_value={
+            "response": '{"tier": "green", "matched": [], "missing": [], "summary": "'
+            + "x" * 601
+            + '"}'
+        }
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(ExtractorSchemaError):
+        extractor.judge_match("en", "desc")
+
+
+def test_match_verdict_rejects_entry_over_80_chars():
+    long_entry = "x" * 81
+    http_post = MagicMock(
+        return_value={
+            "response": f'{{"tier": "green", "matched": ["{long_entry}"], "missing": [], "summary": "ok"}}'
+        }
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(ExtractorSchemaError):
+        extractor.judge_match("en", "desc")
+
+
+def test_match_verdict_rejects_more_than_10_matched():
+    entries = ["skill"] * 11
+    import json as _json
+
+    http_post = MagicMock(
+        return_value={
+            "response": _json.dumps(
+                {
+                    "tier": "green",
+                    "matched": entries,
+                    "missing": [],
+                    "summary": "ok",
+                }
+            )
+        }
+    )
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(ExtractorSchemaError):
+        extractor.judge_match("en", "desc")
+
+
+def test_relevance_verdict_rejects_non_bool_in_domain():
+    http_post = MagicMock(return_value={"response": '{"in_domain": 1}'})
+    extractor = OllamaExtractor(
+        _config(ollama_json_retries=1), _prompts(), _http_post=http_post
+    )
+
+    with pytest.raises(ExtractorSchemaError):
+        extractor.classify_relevance("en", "title", "desc")
+
+
+def test_match_verdict_accepts_valid_verdict():
+    http_post = MagicMock(return_value={"response": _JUDGE_RESPONSE})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    result = extractor.judge_match("en", "desc")
+
+    assert result.tier == MatchTier.green
+    assert result.matched == ["python"]
+    assert result.summary == "Good match"
+
+
+def test_relevance_verdict_accepts_valid_verdict():
+    http_post = MagicMock(return_value={"response": '{"in_domain": true}'})
+    extractor = OllamaExtractor(_config(), _prompts(), _http_post=http_post)
+
+    result = extractor.classify_relevance("en", "title", "desc")
+
+    assert result.in_domain is True

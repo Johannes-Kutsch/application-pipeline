@@ -1,5 +1,8 @@
 from .ollama import OllamaExtractor
 from .types import (
+    ExtractorError,
+    ExtractorMalformedJSONError,
+    ExtractorSchemaError,
     ExtractorUnreachableError,
     LLMExtractor,
     LLMExtractorError,
@@ -9,6 +12,9 @@ from .types import (
 )
 
 __all__ = [
+    "ExtractorError",
+    "ExtractorMalformedJSONError",
+    "ExtractorSchemaError",
     "ExtractorUnreachableError",
     "LLMExtractor",
     "LLMExtractorError",

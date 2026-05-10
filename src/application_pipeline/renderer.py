@@ -1,8 +1,11 @@
+import dataclasses
 from typing import Any
 
 from .layout.types import Layout
 from .llm.types import MatchTier, MatchVerdict
 from .parsers.types import Position
+
+_EXCLUDED_POSITION_FIELDS = frozenset({"stub", "raw_description"})
 
 
 def render(
@@ -13,34 +16,51 @@ def render(
 ) -> str:
     tier = verdict.tier
 
-    placeholders: dict[str, Any] = {
-        "url": position.stub.url,
-        "title": position.stub.title,
-        "source": position.stub.source,
-        "company": position.stub.company,
-        "location": position.stub.location,
-        "language": position.stub.language,
-        "raw_description": position.raw_description,
-        "salary": position.salary,
-        "contract_type": position.contract_type,
-        "employment_type": position.employment_type,
-        "work_model": position.work_model,
-        "posted_date": position.posted_date,
-        "deadline": position.deadline,
-    }
+    placeholders: dict[str, Any] = {}
 
+    # Flatten Position fields (excluding stub and raw_description)
+    for f in dataclasses.fields(position):
+        if f.name in _EXCLUDED_POSITION_FIELDS:
+            continue
+        placeholders[f.name] = getattr(position, f.name)
+
+    # Flatten PositionStub fields
+    for f in dataclasses.fields(position.stub):
+        placeholders[f.name] = getattr(position.stub, f.name)
+
+    # Normalize language to uppercase
+    if placeholders.get("language") is not None:
+        placeholders["language"] = str(placeholders["language"]).upper()
+
+    # Verdict and derived fields
     placeholders["tier"] = tier.value
-    placeholders["matched"] = ", ".join(verdict.matched)
-    placeholders["missing"] = ", ".join(verdict.missing)
     placeholders["summary"] = verdict.summary
     placeholders["emoji"] = layout.tier_emoji[tier.value]
     placeholders["color"] = layout.tier_color[tier.value]
     placeholders["number"] = number
 
+    # List placeholders with empty fallback
+    empty = layout.empty_list_placeholder
+    placeholders["matched"] = ", ".join(verdict.matched) if verdict.matched else empty
+    placeholders["missing"] = ", ".join(verdict.missing) if verdict.missing else empty
+    placeholders["matched_bullets"] = (
+        "\n".join(f"- {item}" for item in verdict.matched) if verdict.matched else empty
+    )
+    placeholders["missing_bullets"] = (
+        "\n".join(f"- {item}" for item in verdict.missing) if verdict.missing else empty
+    )
+
+    # Placeholder groups — wrap URL values in autolink form
     for group_name, (separator, fields) in layout.placeholder_groups.items():
-        parts = [
-            str(placeholders[f]) for f in fields if placeholders.get(f) is not None
-        ]
+        parts = []
+        for field in fields:
+            val = placeholders.get(field)
+            if val is None:
+                continue
+            s = str(val)
+            if s.startswith("http://") or s.startswith("https://"):
+                s = f"<{s}>"
+            parts.append(s)
         placeholders[group_name] = separator.join(parts)
 
     template = (

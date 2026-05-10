@@ -16,12 +16,19 @@ PLACEHOLDER_GROUPS = {
     "meta": (" · ", ["location", "language", "url"]),
 }
 
-FILE_HEADER = "# Job Pipeline Results\n\n"
+EMPTY_LIST_PLACEHOLDER = "—"
 
-HEADLINE_TEMPLATE = "## {number}. {company} — {title}  {emoji}\n{meta}\n\n"
+FILE_HEADER = """\
+# Job Pipeline Results
+<!-- schema-version: 1 -->
+<!-- Delete this file and re-run the pipeline to reset -->
+
+"""
+
+HEADLINE_TEMPLATE = '## <span style="color:{color}">{number}. {company} — {title}  {emoji}</span>\n{meta}\n\n'
 
 CARD_TEMPLATE = """\
-## {number}. {company} — {title}  {emoji}
+## <span style="color:{color}">{number}. {company} — {title}  {emoji}</span>
 {meta}
 
 **Matched:** {matched}

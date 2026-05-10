@@ -231,3 +231,142 @@ def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:
     layout = load_layout(path)
 
     assert layout.file_header == "# Results\n"
+
+
+# --- EMPTY_LIST_PLACEHOLDER optional field ---
+
+
+def test_load_reads_empty_list_placeholder_from_module(tmp_path: pathlib.Path) -> None:
+    path = write_layout(tmp_path, _MINIMAL_BODY + '\nEMPTY_LIST_PLACEHOLDER = "n/a"\n')
+
+    layout = load_layout(path)
+
+    assert layout.empty_list_placeholder == "n/a"
+
+
+def test_load_defaults_empty_list_placeholder_when_absent(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_layout(tmp_path, _MINIMAL_BODY)
+
+    layout = load_layout(path)
+
+    assert layout.empty_list_placeholder == "—"
+
+
+# --- TIER_EMOJI / TIER_COLOR must not contain unknown tiers ---
+
+
+@pytest.mark.parametrize("extra_tier", ["gold", "silver", "unknown"])
+def test_load_raises_when_tier_emoji_contains_unknown_tier(
+    tmp_path: pathlib.Path, extra_tier: str
+) -> None:
+    tiers = {"green": "🟢", "amber": "🟡", "red": "🔴", extra_tier: "❓"}
+    body = (
+        f"TIER_EMOJI = {tiers!r}\n"
+        'TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}\n'
+        "PLACEHOLDER_GROUPS = {}\n"
+        'FILE_HEADER = ""\n'
+        'CARD_TEMPLATE = ""\n'
+        'HEADLINE_TEMPLATE = ""\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    with pytest.raises(LayoutError, match="TIER_EMOJI"):
+        load_layout(path)
+
+
+@pytest.mark.parametrize("extra_tier", ["gold", "silver", "unknown"])
+def test_load_raises_when_tier_color_contains_unknown_tier(
+    tmp_path: pathlib.Path, extra_tier: str
+) -> None:
+    colors = {
+        "green": "#2ea043",
+        "amber": "#d29922",
+        "red": "#da3633",
+        extra_tier: "#000",
+    }
+    body = (
+        'TIER_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}\n'
+        f"TIER_COLOR = {colors!r}\n"
+        "PLACEHOLDER_GROUPS = {}\n"
+        'FILE_HEADER = ""\n'
+        'CARD_TEMPLATE = ""\n'
+        'HEADLINE_TEMPLATE = ""\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    with pytest.raises(LayoutError, match="TIER_COLOR"):
+        load_layout(path)
+
+
+# --- LayoutError carries structured field + resolved_path ---
+
+
+def test_layout_error_carries_field_and_resolved_path(tmp_path: pathlib.Path) -> None:
+    body = (
+        'TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}\n'
+        "PLACEHOLDER_GROUPS = {}\n"
+        'FILE_HEADER = ""\n'
+        'CARD_TEMPLATE = ""\n'
+        'HEADLINE_TEMPLATE = ""\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    with pytest.raises(LayoutError) as exc_info:
+        load_layout(path)
+
+    err = exc_info.value
+    assert err.field == "TIER_EMOJI"
+    assert err.resolved_path == path.resolve()
+
+
+# --- Non-groupable fields rejected in PLACEHOLDER_GROUPS ---
+
+
+@pytest.mark.parametrize(
+    "forbidden_field",
+    [
+        "matched",
+        "missing",
+        "summary",
+        "number",
+        "emoji",
+        "color",
+        "tier",
+        "raw_description",
+    ],
+)
+def test_load_raises_when_placeholder_group_references_non_groupable_field(
+    tmp_path: pathlib.Path, forbidden_field: str
+) -> None:
+    body = (
+        'TIER_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}\n'
+        'TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}\n'
+        f'PLACEHOLDER_GROUPS = {{"meta": (" · ", ["{forbidden_field}"])}}\n'
+        'FILE_HEADER = ""\n'
+        'CARD_TEMPLATE = ""\n'
+        'HEADLINE_TEMPLATE = ""\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    with pytest.raises(LayoutError, match=forbidden_field):
+        load_layout(path)
+
+
+def test_load_accepts_matched_bullets_in_placeholder_group(
+    tmp_path: pathlib.Path,
+) -> None:
+    body = (
+        'TIER_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}\n'
+        'TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}\n'
+        'PLACEHOLDER_GROUPS = {"skills": ("\\n", ["matched_bullets", "missing_bullets"])}\n'
+        'FILE_HEADER = ""\n'
+        'CARD_TEMPLATE = ""\n'
+        'HEADLINE_TEMPLATE = ""\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    layout = load_layout(path)
+
+    assert "skills" in layout.placeholder_groups

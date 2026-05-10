@@ -143,7 +143,7 @@ def test_missing_list_joined_in_output(
     assert "Rust" in result
 
 
-def test_empty_matched_list_renders_empty_string(
+def test_empty_matched_list_renders_empty_list_placeholder(
     layout: Layout, position: Position, red_verdict: MatchVerdict
 ) -> None:
     simple_layout = Layout(
@@ -153,10 +153,11 @@ def test_empty_matched_list_renders_empty_string(
         file_header=layout.file_header,
         card_template="{matched}",
         headline_template="{matched}",
+        empty_list_placeholder="—",
     )
     result = render(position, red_verdict, 1, simple_layout)
 
-    assert result == ""
+    assert result == "—"
 
 
 # --- tier-derived fields ---
@@ -193,7 +194,7 @@ def test_placeholder_group_collapses_with_separator(
 ) -> None:
     result = render(position, green_verdict, 1, layout)
 
-    assert "Berlin · de · https://example.com/job/1" in result
+    assert "Berlin · DE · <https://example.com/job/1>" in result
 
 
 def test_placeholder_group_omits_none_values(
@@ -202,7 +203,7 @@ def test_placeholder_group_omits_none_values(
     position = replace(position, stub=replace(position.stub, location=None))
     result = render(position, green_verdict, 1, layout)
 
-    assert "de · https://example.com/job/1" in result
+    assert "DE · <https://example.com/job/1>" in result
     assert "None" not in result
 
 
@@ -223,6 +224,118 @@ def test_placeholder_group_all_none_renders_empty(
     assert result == ""
 
 
+# --- URL autolink in placeholder groups ---
+
+
+def test_url_in_placeholder_group_is_autolinked(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    url_layout = Layout(
+        tier_emoji=layout.tier_emoji,
+        tier_color=layout.tier_color,
+        placeholder_groups={"link": (" ", ["url"])},
+        file_header=layout.file_header,
+        card_template="{link}",
+        headline_template="{link}",
+    )
+    result = render(position, green_verdict, 1, url_layout)
+
+    assert result == "<https://example.com/job/1>"
+
+
+# --- language uppercasing ---
+
+
+def test_language_is_uppercased_in_placeholder(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    lang_layout = Layout(
+        tier_emoji=layout.tier_emoji,
+        tier_color=layout.tier_color,
+        placeholder_groups={},
+        file_header=layout.file_header,
+        card_template="{language}",
+        headline_template="{language}",
+    )
+    result = render(position, green_verdict, 1, lang_layout)
+
+    assert result == "DE"
+
+
+# --- matched_bullets and missing_bullets placeholders ---
+
+
+def test_matched_bullets_renders_bullet_list(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    bullets_layout = Layout(
+        tier_emoji=layout.tier_emoji,
+        tier_color=layout.tier_color,
+        placeholder_groups={},
+        file_header=layout.file_header,
+        card_template="{matched_bullets}",
+        headline_template="{matched_bullets}",
+    )
+    result = render(position, green_verdict, 1, bullets_layout)
+
+    assert result == "- Python\n- Data Engineering"
+
+
+def test_missing_bullets_renders_bullet_list(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    bullets_layout = Layout(
+        tier_emoji=layout.tier_emoji,
+        tier_color=layout.tier_color,
+        placeholder_groups={},
+        file_header=layout.file_header,
+        card_template="{missing_bullets}",
+        headline_template="{missing_bullets}",
+    )
+    result = render(position, green_verdict, 1, bullets_layout)
+
+    assert result == "- Rust"
+
+
+def test_empty_matched_bullets_renders_empty_list_placeholder(
+    layout: Layout, position: Position, red_verdict: MatchVerdict
+) -> None:
+    bullets_layout = Layout(
+        tier_emoji=layout.tier_emoji,
+        tier_color=layout.tier_color,
+        placeholder_groups={},
+        file_header=layout.file_header,
+        card_template="{matched_bullets}",
+        headline_template="{matched_bullets}",
+        empty_list_placeholder="—",
+    )
+    result = render(position, red_verdict, 1, bullets_layout)
+
+    assert result == "—"
+
+
+# --- null language AND null company simultaneously ---
+
+
+def test_null_language_and_null_company_skipped_in_group(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    group_layout = Layout(
+        tier_emoji=layout.tier_emoji,
+        tier_color=layout.tier_color,
+        placeholder_groups={"meta": (" · ", ["company", "language", "url"])},
+        file_header=layout.file_header,
+        card_template="{meta}",
+        headline_template="{meta}",
+    )
+    stub_nulls = replace(position.stub, language=None, company=None)
+    position_nulls = replace(position, stub=stub_nulls)
+    result = render(position_nulls, green_verdict, 1, group_layout)
+
+    assert "None" not in result
+    assert "<https://example.com/job/1>" in result
+
+
 # --- number substitution ---
 
 
@@ -232,3 +345,21 @@ def test_number_substituted_correctly(
     result = render(position, amber_verdict, 99, layout)
 
     assert "99." in result
+
+
+# --- raw_description excluded from placeholders ---
+
+
+def test_raw_description_not_available_as_template_placeholder(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    raw_desc_layout = Layout(
+        tier_emoji=layout.tier_emoji,
+        tier_color=layout.tier_color,
+        placeholder_groups={},
+        file_header=layout.file_header,
+        card_template="{raw_description}",
+        headline_template="{raw_description}",
+    )
+    with pytest.raises(KeyError):
+        render(position, green_verdict, 1, raw_desc_layout)

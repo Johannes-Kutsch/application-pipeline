@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -367,3 +367,18 @@ def test_enrich_raises_parser_error_on_http_failure(stub: PositionStub) -> None:
     with JobsBeimStaatParser(_http_get=failing_get, _retries=1) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
+
+
+# ---------------------------------------------------------------------------
+# posted_date — threaded from listing page through to Position
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_posted_date_set_from_vor_2_tagen(
+    list_html: bytes, detail_html: bytes
+) -> None:
+    get = _make_get({"jobs/hamburg": list_html, "stellenangebote": detail_html})
+    with JobsBeimStaatParser(_http_get=get) as p:
+        (first_stub, *_) = list(p.discover(_query()))
+        pos = p.enrich(first_stub)
+    assert pos.posted_date == date.today() - timedelta(days=2)

@@ -175,11 +175,10 @@ class JobsBeimStaatParser:
             company = employer_tag.get_text(strip=True) if employer_tag else None
             location_tag = item.select_one(".joblist__location")
             location = location_tag.get_text(strip=True) if location_tag else None
+            posted_date: date | None = None
             date_tag = item.select_one(".joblist__date")
             if date_tag:
-                # Called for its INFO-on-unparseable side effect; PositionStub
-                # has no posted_date field, so the value itself is unused here.
-                _parse_posted_date(date_tag.get_text(strip=True), today)
+                posted_date = _parse_posted_date(date_tag.get_text(strip=True), today)
 
             yield PositionStub(
                 url=full_url,
@@ -188,6 +187,7 @@ class JobsBeimStaatParser:
                 company=company or None,
                 location=location or None,
                 language="de",
+                posted_date=posted_date,
             )
 
     def enrich(self, stub: PositionStub) -> Position:
@@ -209,6 +209,7 @@ class JobsBeimStaatParser:
         return Position(
             stub=stub,
             raw_description=raw_description,
+            posted_date=stub.posted_date,
         )
 
 

@@ -1,6 +1,8 @@
 import json
-import urllib.request
+import time
 from typing import Any, Callable, Literal, TypeVar
+
+import httpx
 
 from application_pipeline.config import Config
 from application_pipeline.http import HttpPost, HttpRetryError, post_with_retries
@@ -34,15 +36,19 @@ _JUDGE_MATCH_FORMAT = {
 }
 
 
+_OLLAMA_CONNECT_TIMEOUT = 5.0
+
+
 def _default_http_post(
     url: str, payload: dict[str, Any], timeout: float
 ) -> dict[str, Any]:
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read())  # type: ignore[no-any-return]
+    with httpx.Client(
+        timeout=httpx.Timeout(timeout, connect=_OLLAMA_CONNECT_TIMEOUT),
+        headers={"Content-Type": "application/json"},
+    ) as client:
+        resp = client.post(url, content=json.dumps(payload).encode())
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
 
 
 class OllamaExtractor:
@@ -52,10 +58,12 @@ class OllamaExtractor:
         prompts: Prompts,
         *,
         _http_post: HttpPost | None = None,
+        _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._config = config
         self._prompts = prompts
         self._http_post: HttpPost = _http_post or _default_http_post
+        self._sleep = _sleep
         self._skills_block = "\n".join(f"- {s}" for s in config.skills)
 
     def classify_relevance(
@@ -141,6 +149,7 @@ class OllamaExtractor:
                     timeout,
                     self._config.ollama_http_retries,
                     self._http_post,
+                    _sleep=self._sleep,
                 )
             except HttpRetryError as exc:
                 raise LLMExtractorError(str(exc)) from exc.__cause__

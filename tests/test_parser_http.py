@@ -1,6 +1,11 @@
 import pytest
 
 from application_pipeline.http import HttpRetryError
+from application_pipeline.parsers._http import (
+    MAX_RETRIES,
+    HTTP_READ_TIMEOUT,
+    REQUEST_PACING,
+)
 from application_pipeline.parsers.http import (
     DEFAULT_RETRIES,
     DEFAULT_TIMEOUT,
@@ -8,6 +13,8 @@ from application_pipeline.parsers.http import (
     Throttle,
     request_with_retry,
 )
+
+_NO_SLEEP = lambda _: None  # noqa: E731
 
 
 # --- Constants ---
@@ -23,6 +30,18 @@ def test_default_retries_is_positive():
 
 def test_throttle_interval_is_half_second():
     assert THROTTLE_INTERVAL == 0.5
+
+
+def test_http_read_timeout_matches_default_timeout():
+    assert HTTP_READ_TIMEOUT == DEFAULT_TIMEOUT
+
+
+def test_max_retries_matches_default_retries():
+    assert MAX_RETRIES == DEFAULT_RETRIES
+
+
+def test_request_pacing_is_half_second():
+    assert REQUEST_PACING == 0.5
 
 
 # --- Throttle ---
@@ -64,7 +83,7 @@ def test_request_with_retry_returns_bytes_on_success():
     def http_get(url: str, timeout: float) -> bytes:
         return b"ok"
 
-    result = request_with_retry("http://host/path", 30.0, 3, http_get)
+    result = request_with_retry("http://host/path", 30.0, 3, http_get, _sleep=_NO_SLEEP)
     assert result == b"ok"
 
 
@@ -75,7 +94,7 @@ def test_request_with_retry_passes_url_and_timeout():
         calls.append((url, timeout))
         return b""
 
-    request_with_retry("http://host/path", 15.0, 1, http_get)
+    request_with_retry("http://host/path", 15.0, 1, http_get, _sleep=_NO_SLEEP)
     assert calls == [("http://host/path", 15.0)]
 
 
@@ -89,7 +108,7 @@ def test_request_with_retry_retries_on_failure_then_succeeds():
             raise OSError("timeout")
         return b"ok"
 
-    result = request_with_retry("http://host/path", 30.0, 2, http_get)
+    result = request_with_retry("http://host/path", 30.0, 2, http_get, _sleep=_NO_SLEEP)
     assert result == b"ok"
     assert attempt == 2
 
@@ -99,7 +118,7 @@ def test_request_with_retry_raises_http_retry_error_after_exhausting_retries():
         raise OSError("refused")
 
     with pytest.raises(HttpRetryError):
-        request_with_retry("http://host/path", 30.0, 3, http_get)
+        request_with_retry("http://host/path", 30.0, 3, http_get, _sleep=_NO_SLEEP)
 
 
 def test_request_with_retry_chains_original_exception():
@@ -109,7 +128,7 @@ def test_request_with_retry_chains_original_exception():
         raise cause
 
     with pytest.raises(HttpRetryError) as exc_info:
-        request_with_retry("http://host/path", 30.0, 1, http_get)
+        request_with_retry("http://host/path", 30.0, 1, http_get, _sleep=_NO_SLEEP)
 
     assert exc_info.value.__cause__ is cause
 
@@ -122,7 +141,7 @@ def test_request_with_retry_raises_immediately_when_retries_zero():
         return b""
 
     with pytest.raises(HttpRetryError):
-        request_with_retry("http://host/path", 30.0, 0, http_get)
+        request_with_retry("http://host/path", 30.0, 0, http_get, _sleep=_NO_SLEEP)
 
     assert calls == []
 
@@ -132,4 +151,4 @@ def test_request_with_retry_error_message_includes_retry_count():
         raise OSError("refused")
 
     with pytest.raises(HttpRetryError, match="2 retries"):
-        request_with_retry("http://host/path", 30.0, 2, http_get)
+        request_with_retry("http://host/path", 30.0, 2, http_get, _sleep=_NO_SLEEP)

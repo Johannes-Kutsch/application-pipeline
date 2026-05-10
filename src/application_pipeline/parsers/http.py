@@ -1,13 +1,68 @@
+from __future__ import annotations
+
 import time
 from typing import Callable
 
-from application_pipeline.http import HttpRetryError
+import httpx
 
-DEFAULT_TIMEOUT: float = 30.0
-DEFAULT_RETRIES: int = 3
-THROTTLE_INTERVAL: float = 0.5
+from application_pipeline.http import HttpRetryError
+from application_pipeline.http.retry import (
+    HttpNotRetryableError,
+    exponential_backoff,
+    retry,
+)
+
+from ._http import (
+    BACKOFF_INITIAL,
+    BACKOFF_MAX,
+    BACKOFF_MULTIPLIER,
+    HTTP_CONNECT_TIMEOUT,
+    HTTP_READ_TIMEOUT,
+    MAX_RETRIES,
+    REQUEST_PACING,
+    RETRY_STATUSES,
+    USER_AGENT,
+)
+
+# Backward-compatible aliases kept so existing callers compile without changes.
+DEFAULT_TIMEOUT = HTTP_READ_TIMEOUT
+DEFAULT_RETRIES = MAX_RETRIES
+THROTTLE_INTERVAL = REQUEST_PACING
 
 HttpGet = Callable[[str, float], bytes]
+
+
+def check_response_status(resp: httpx.Response, url: str) -> None:
+    """Raise an appropriate error for non-2xx responses.
+
+    Retryable statuses (RETRY_STATUSES) raise httpx.HTTPStatusError so the
+    retry loop can pick them up.  All other non-2xx statuses raise
+    HttpNotRetryableError with a tagged prefix so retries are skipped.
+    """
+    if resp.is_success:
+        return
+    status = resp.status_code
+    if status == 404:
+        raise HttpNotRetryableError(f"not found: {url}")
+    if status in (401, 403):
+        raise HttpNotRetryableError(f"auth: {url} status={status}")
+    if status in (400, 422):
+        raise HttpNotRetryableError(f"malformed: {url} status={status}")
+    if 500 <= status < 600 and status not in RETRY_STATUSES:
+        raise HttpNotRetryableError(f"upstream: {url} status={status}")
+    # Retryable statuses (429, 502, 503, 504) and any unclassified codes
+    # become httpx.HTTPStatusError so the retry predicate allows them.
+    resp.raise_for_status()
+
+
+def _default_http_get(url: str, timeout: float) -> bytes:
+    with httpx.Client(
+        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
+        headers={"User-Agent": USER_AGENT},
+    ) as client:
+        resp = client.get(url, timeout=timeout)
+        check_response_status(resp, url)
+        return resp.content
 
 
 class Throttle:
@@ -15,7 +70,7 @@ class Throttle:
 
     def __init__(
         self,
-        interval: float = THROTTLE_INTERVAL,
+        interval: float = REQUEST_PACING,
         _now: Callable[[], float] = time.monotonic,
         _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -37,13 +92,18 @@ def request_with_retry(
     timeout: float,
     retries: int,
     http_get: HttpGet,
+    *,
+    _sleep: Callable[[float], None] = time.sleep,
 ) -> bytes:
-    last_exc: Exception | None = None
-    for _ in range(retries):
-        try:
-            return http_get(url, timeout)
-        except Exception as exc:
-            last_exc = exc
-    raise HttpRetryError(
-        f"HTTP request failed after {retries} retries: {last_exc}"
-    ) from last_exc
+    return retry(
+        lambda: http_get(url, timeout),
+        predicate=lambda exc: not isinstance(exc, HttpNotRetryableError),
+        backoff_policy=exponential_backoff(
+            BACKOFF_INITIAL, BACKOFF_MULTIPLIER, BACKOFF_MAX
+        ),
+        max_retries=retries,
+        error_factory=lambda n, exc: HttpRetryError(
+            f"HTTP request failed after {n} retries: {exc}"
+        ),
+        _sleep=_sleep,
+    )

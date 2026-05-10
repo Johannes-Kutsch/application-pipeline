@@ -223,7 +223,10 @@ def test_classify_relevance_passes_timeout_to_http_post():
 def test_classify_relevance_raises_llm_extractor_error_after_http_retries_exhausted():
     http_post = MagicMock(side_effect=OSError("connection refused"))
     extractor = OllamaExtractor(
-        _config(ollama_http_retries=2), _prompts(), _http_post=http_post
+        _config(ollama_http_retries=2),
+        _prompts(),
+        _http_post=http_post,
+        _sleep=lambda _: None,
     )
 
     with pytest.raises(LLMExtractorError):
@@ -235,7 +238,10 @@ def test_classify_relevance_retries_on_http_error():
         side_effect=[OSError("timeout"), {"response": '{"in_domain": true}'}]
     )
     extractor = OllamaExtractor(
-        _config(ollama_http_retries=2), _prompts(), _http_post=http_post
+        _config(ollama_http_retries=2),
+        _prompts(),
+        _http_post=http_post,
+        _sleep=lambda _: None,
     )
 
     result = extractor.classify_relevance("en", "title", "desc")
@@ -397,7 +403,10 @@ def test_judge_match_sends_stream_false():
 def test_judge_match_raises_llm_extractor_error_after_http_retries_exhausted():
     http_post = MagicMock(side_effect=OSError("connection refused"))
     extractor = OllamaExtractor(
-        _config(ollama_http_retries=2), _prompts(), _http_post=http_post
+        _config(ollama_http_retries=2),
+        _prompts(),
+        _http_post=http_post,
+        _sleep=lambda _: None,
     )
 
     with pytest.raises(LLMExtractorError):
@@ -409,7 +418,10 @@ def test_judge_match_retries_on_http_error():
         side_effect=[OSError("timeout"), {"response": _JUDGE_RESPONSE}]
     )
     extractor = OllamaExtractor(
-        _config(ollama_http_retries=2), _prompts(), _http_post=http_post
+        _config(ollama_http_retries=2),
+        _prompts(),
+        _http_post=http_post,
+        _sleep=lambda _: None,
     )
 
     result = extractor.judge_match("en", "desc")

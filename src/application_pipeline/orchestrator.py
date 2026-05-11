@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-import traceback as _traceback
 import time
+import traceback
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -107,18 +107,15 @@ class _ParserThread(threading.Thread):
                             except ParserError as exc:
                                 self._outbound.put((self._parser_id, exc))
                         elif decision is _SKIP_AND_END_QUERY:
-                            _close = getattr(gen, "close", None)
-                            if _close is not None:
-                                _close()
                             break
                         # else: _SKIP — continue to next stub
                 finally:
-                    _close = getattr(gen, "close", None)
-                    if _close is not None:
-                        _close()
+                    close = getattr(gen, "close", None)
+                    if close is not None:
+                        close()
         except BaseException as exc:
             self._outbound.put(
-                (self._parser_id, _ParserDead(exc, _traceback.format_exc()))
+                (self._parser_id, _ParserDead(exc, traceback.format_exc()))
             )
         else:
             self._outbound.put((self._parser_id, _PARSER_DONE))
@@ -311,7 +308,7 @@ def run(
                     dedup_store.mark_seen(stub, "enrich_failed")
                 enrich_failed += 1
 
-            elif isinstance(payload, _ParserDone):
+            elif payload is _PARSER_DONE:
                 parsers_remaining.discard(pid)
 
             elif isinstance(payload, _ParserDead):

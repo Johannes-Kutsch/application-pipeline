@@ -230,12 +230,13 @@ This manually performs the first deploy that the cron wrapper (`scripts/pi-tick.
     ```
     Expected: `ok` printed, no import errors.
 
-31. Confirm the **Pipeline Orchestrator** entry point is reachable:
+31. Confirm the **Pipeline Orchestrator** entry point is reachable. The CLI takes exactly one positional argument (the config path); invoking it with no arguments triggers a usage message and exit 2 — that is the smoke test:
     ```bash
     ~/application-pipeline/releases/"$TAG"/.venv/bin/python \
-        -m application_pipeline --help
+        -m application_pipeline
+    echo "exit=$?"
     ```
-    Expected: help text or usage message, no traceback.
+    Expected: `usage: python -m application_pipeline <config>` on stderr, `exit=2`, no traceback.
 
 32. Flip the `current` symlink:
     ```bash
@@ -244,6 +245,13 @@ This manually performs the first deploy that the cron wrapper (`scripts/pi-tick.
     readlink ~/application-pipeline/current
     ```
     Expected: path ends with `releases/v1.0.0` (or chosen tag).
+
+    Belt-and-braces: ensure `pi-tick.sh` is executable. Tags cut before the executable bit was committed to the repo will not have this set, and cron + the manual run in step 37 both need it:
+    ```bash
+    chmod +x ~/application-pipeline/current/scripts/pi-tick.sh
+    test -x ~/application-pipeline/current/scripts/pi-tick.sh && echo ok
+    ```
+    Expected: `ok`.
 
 ---
 

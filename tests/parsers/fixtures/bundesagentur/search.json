@@ -1,19 +1,27 @@
 {
   "maxErgebnisse": 2,
-  "stellenangebote": [
+  "ergebnisliste": [
     {
-      "hashId": "abc123",
-      "titel": "Software Engineer",
-      "arbeitgeber": "Acme GmbH",
-      "arbeitsort": {"ort": "Hamburg", "plz": "20000"},
-      "aktuelleVeroeffentlichungsdatum": "2024-01-15"
+      "referenznummer": "abc123",
+      "stellenangebotsTitel": "Software Engineer",
+      "firma": "Acme GmbH",
+      "stellenlokationen": [{"adresse": {"ort": "Hamburg", "plz": "20000"}}],
+      "veroeffentlichungszeitraum": {"von": "2024-01-15"},
+      "vertragsdauer": "UNBEFRISTET",
+      "arbeitszeitVollzeit": true,
+      "arbeitszeitTeilzeitVormittag": false,
+      "arbeitszeitTeilzeitNachmittag": false
     },
     {
-      "hashId": "def456",
-      "titel": "Data Scientist",
-      "arbeitgeber": "Tech AG",
-      "arbeitsort": {"ort": "Berlin", "plz": "10115"},
-      "aktuelleVeroeffentlichungsdatum": "2024-01-14"
+      "referenznummer": "def456",
+      "stellenangebotsTitel": "Data Scientist",
+      "firma": "Tech AG",
+      "stellenlokationen": [{"adresse": {"ort": "Berlin", "plz": "10115"}}],
+      "veroeffentlichungszeitraum": {"von": "2024-01-14"},
+      "vertragsdauer": "BEFRISTET",
+      "arbeitszeitVollzeit": false,
+      "arbeitszeitTeilzeitVormittag": true,
+      "arbeitszeitTeilzeitNachmittag": false
     }
   ]
 }

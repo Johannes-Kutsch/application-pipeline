@@ -26,8 +26,8 @@ from .types import ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
 
-_BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
-_API_KEY = "jobboerse-jobsuche-ui"
+_BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6"
+_API_KEY = "jobboerse-jobsuche"
 _PAGE_SIZE = 25
 _DISPLAY_NAME = "Bundesagentur"
 
@@ -76,24 +76,22 @@ def _default_http_get(url: str, timeout: float) -> bytes:
 
 
 def _contract_type(
-    befristung: int | None,
+    vertragsdauer: str | None,
 ) -> Literal["permanent", "fixed-term", "freelance"] | None:
-    if befristung == 1:
+    if vertragsdauer == "UNBEFRISTET":
         return "permanent"
-    if befristung == 2:
+    if vertragsdauer == "BEFRISTET":
         return "fixed-term"
     return None
 
 
 def _employment_type(
-    modelle: list[str] | None,
+    vollzeit: bool,
+    teilzeit: bool,
 ) -> Literal["full-time", "part-time", "internship"] | None:
-    if not modelle:
-        return None
-    lower = {m.lower() for m in modelle}
-    if "vz" in lower:
+    if vollzeit:
         return "full-time"
-    if "tz" in lower:
+    if teilzeit:
         return "part-time"
     return None
 
@@ -135,7 +133,7 @@ class BundesagenturParser:
 
         seen: set[str] = set()
         count = 0
-        page = 0
+        page = 1
         while True:
             self._throttle.wait()
             params: dict[str, object] = {
@@ -156,24 +154,26 @@ class BundesagenturParser:
                     f"Bundesagentur search failed: {exc}"
                 ) from exc.__cause__
 
-            items: list[dict[str, Any]] = data.get("stellenangebote") or []
+            items: list[dict[str, Any]] = data.get("ergebnisliste") or []
             if not items:
                 break
 
             for item in items:
                 if count >= query.max_results:
                     return
-                hash_id: str = item.get("hashId") or ""
-                if not hash_id or hash_id in seen:
+                ref: str = item.get("referenznummer") or ""
+                if not ref or ref in seen:
                     continue
-                seen.add(hash_id)
-                arbeitsort = item.get("arbeitsort") or {}
+                seen.add(ref)
+                lokationen: list[dict[str, Any]] = item.get("stellenlokationen") or []
+                first_address = lokationen[0].get("adresse") or {} if lokationen else {}
+                city: str | None = first_address.get("ort") or None
                 yield PositionStub(
-                    url=f"{_BASE_URL}/jobdetails/{hash_id}",
-                    title=item["titel"],
+                    url=f"{_BASE_URL}/jobdetails/{ref}",
+                    title=item["stellenangebotsTitel"],
                     source=_DISPLAY_NAME,
-                    company=item.get("arbeitgeber") or None,
-                    location=arbeitsort.get("ort") or None,
+                    company=item.get("firma") or None,
+                    location=city,
                     language="de",
                 )
                 count += 1
@@ -193,14 +193,19 @@ class BundesagenturParser:
             ) from exc.__cause__
 
         raw_description = strip_html(data.get("stellenbeschreibung") or "")
+        veroeffentlichung = data.get("veroeffentlichungszeitraum") or {}
+        vollzeit = bool(data.get("arbeitszeitVollzeit"))
+        teilzeit = any(
+            bool(v) for k, v in data.items() if k.startswith("arbeitszeitTeilzeit")
+        )
 
         return Position(
             stub=stub,
             raw_description=raw_description,
-            contract_type=_contract_type(data.get("befristung")),
-            employment_type=_employment_type(data.get("arbeitszeitModelle")),
+            contract_type=_contract_type(data.get("vertragsdauer")),
+            employment_type=_employment_type(vollzeit, teilzeit),
             work_model=None,
-            posted_date=parse_iso_date(data.get("aktuelleVeroeffentlichungsdatum")),
+            posted_date=parse_iso_date(veroeffentlichung.get("von")),
             deadline=parse_iso_date(data.get("bewerbungsschluss")),
         )
 

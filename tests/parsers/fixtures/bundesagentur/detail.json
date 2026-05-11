@@ -2,7 +2,7 @@
   "referenznummer": "abc123",
   "stellenangebotsTitel": "Software Engineer",
   "firma": "Acme GmbH",
-  "stellenbeschreibung": "<p>We are looking for a Software Engineer.</p><p>Requirements include Python experience.</p>",
+  "stellenangebotsBeschreibung": "<p>We are looking for a Software Engineer.</p><p>Requirements include Python experience.</p>",
   "vertragsdauer": "UNBEFRISTET",
   "arbeitszeitVollzeit": true,
   "arbeitszeitTeilzeitVormittag": false,

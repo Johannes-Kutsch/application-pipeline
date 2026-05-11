@@ -46,7 +46,7 @@ def _detail_body(
         {
             "referenznummer": ref,
             "stellenangebotsTitel": title,
-            "stellenbeschreibung": description,
+            "stellenangebotsBeschreibung": description,
             **extra,
         }
     ).encode()
@@ -174,11 +174,15 @@ def test_discover_stub_location_from_stellenlokationen_first_ort() -> None:
     assert stub.location == "Berlin"
 
 
-def test_discover_stub_url_contains_referenznummer() -> None:
-    get = _make_get([_search_body([_item("myhash")]), _search_body([])])
+def test_discover_stub_url_contains_base64_encoded_referenznummer() -> None:
+    import base64
+
+    ref = "myhash"
+    ref_b64 = base64.b64encode(ref.encode()).decode()
+    get = _make_get([_search_body([_item(ref)]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
-    assert "myhash" in stub.url
+    assert ref_b64 in stub.url
 
 
 def test_discover_stub_company_none_when_firma_absent() -> None:
@@ -222,6 +226,8 @@ def test_discover_multi_location_uses_first_entry() -> None:
 
 
 def test_discover_skips_item_without_referenznummer() -> None:
+    import base64
+
     bad_item = {
         "stellenangebotsTitel": "Dev",
         "veroeffentlichungszeitraum": {"von": "2024-01-15"},
@@ -231,7 +237,7 @@ def test_discover_skips_item_without_referenznummer() -> None:
     with BundesagenturParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 1
-    assert "good1" in stubs[0].url
+    assert base64.b64encode(b"good1").decode() in stubs[0].url
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +330,9 @@ def test_discover_unknown_location_yields_nothing_and_logs_info(
     def capturing_get(url: str, timeout: float) -> bytes:
         return _search_body([])
 
-    with caplog.at_level(logging.INFO, logger="application_pipeline.parsers.bundesagentur_api"):
+    with caplog.at_level(
+        logging.INFO, logger="application_pipeline.parsers.bundesagentur_api"
+    ):
         with BundesagenturParser(_http_get=capturing_get) as p:
             stubs = list(p.discover(_query(location=City("unknown_city_xyz"))))
 

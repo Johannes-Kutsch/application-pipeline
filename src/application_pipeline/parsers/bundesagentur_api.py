@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import sys
@@ -28,6 +29,7 @@ from .types import City, ParserQuery, Position, PositionStub
 _log = logging.getLogger(__name__)
 
 _BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6"
+_DETAIL_BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
 _API_KEY = "jobboerse-jobsuche"
 _PAGE_SIZE = 25
 _DISPLAY_NAME = "Bundesagentur"
@@ -182,8 +184,9 @@ class BundesagenturParser:
                 lokationen: list[dict[str, Any]] = item.get("stellenlokationen") or []
                 first_address = lokationen[0].get("adresse") or {} if lokationen else {}
                 city: str | None = first_address.get("ort") or None
+                ref_b64 = base64.b64encode(ref.encode()).decode()
                 yield PositionStub(
-                    url=f"{_BASE_URL}/jobdetails/{ref}",
+                    url=f"{_DETAIL_BASE_URL}/jobdetails/{ref_b64}",
                     title=item["stellenangebotsTitel"],
                     source=_DISPLAY_NAME,
                     company=item.get("firma") or None,
@@ -206,7 +209,7 @@ class BundesagenturParser:
                 f"Bundesagentur enrich failed for {stub.url}: {exc}"
             ) from exc.__cause__
 
-        raw_description = strip_html(data.get("stellenbeschreibung") or "")
+        raw_description = strip_html(data.get("stellenangebotsBeschreibung") or "")
         veroeffentlichung = data.get("veroeffentlichungszeitraum") or {}
         vollzeit = bool(data.get("arbeitszeitVollzeit"))
         teilzeit = any(

@@ -86,11 +86,12 @@ def _contract_type(
 
 
 def _employment_type(
-    item: dict[str, Any],
+    vollzeit: bool,
+    teilzeit: bool,
 ) -> Literal["full-time", "part-time", "internship"] | None:
-    if item.get("arbeitszeitVollzeit"):
+    if vollzeit:
         return "full-time"
-    if any(v for k, v in item.items() if k.startswith("arbeitszeitTeilzeit")):
+    if teilzeit:
         return "part-time"
     return None
 
@@ -165,9 +166,8 @@ class BundesagenturParser:
                     continue
                 seen.add(ref)
                 lokationen: list[dict[str, Any]] = item.get("stellenlokationen") or []
-                city: str | None = None
-                if lokationen:
-                    city = (lokationen[0].get("adresse") or {}).get("ort") or None
+                first_address = lokationen[0].get("adresse") or {} if lokationen else {}
+                city: str | None = first_address.get("ort") or None
                 yield PositionStub(
                     url=f"{_BASE_URL}/jobdetails/{ref}",
                     title=item["stellenangebotsTitel"],
@@ -194,12 +194,16 @@ class BundesagenturParser:
 
         raw_description = strip_html(data.get("stellenbeschreibung") or "")
         veroeffentlichung = data.get("veroeffentlichungszeitraum") or {}
+        vollzeit = bool(data.get("arbeitszeitVollzeit"))
+        teilzeit = any(
+            bool(v) for k, v in data.items() if k.startswith("arbeitszeitTeilzeit")
+        )
 
         return Position(
             stub=stub,
             raw_description=raw_description,
             contract_type=_contract_type(data.get("vertragsdauer")),
-            employment_type=_employment_type(data),
+            employment_type=_employment_type(vollzeit, teilzeit),
             work_model=None,
             posted_date=parse_iso_date(veroeffentlichung.get("von")),
             deadline=parse_iso_date(data.get("bewerbungsschluss")),

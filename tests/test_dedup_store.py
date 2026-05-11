@@ -9,6 +9,7 @@ import pytest
 from application_pipeline import (
     DedupStoreError,
     DeduplicationStore,
+    SeenResult,
     SeenStatus,
     load,
 )
@@ -48,16 +49,17 @@ def test_package_reexports_dedup_api() -> None:
     assert DeduplicationStore is not None
     assert DedupStoreError is not None
     assert SeenStatus is not None
+    assert SeenResult is not None
 
 
-def test_is_seen_false_on_fresh_store(store: DeduplicationStore) -> None:
-    assert store.is_seen(StubLike(url="https://example.com/1")) is False
+def test_is_seen_miss_on_fresh_store(store: DeduplicationStore) -> None:
+    assert store.is_seen(StubLike(url="https://example.com/1")) == "miss"
 
 
-def test_mark_then_is_seen_returns_true(store: DeduplicationStore) -> None:
+def test_mark_then_is_seen_returns_url_hit(store: DeduplicationStore) -> None:
     stub = StubLike(url="https://example.com/1")
     store.mark_seen(stub, "kept")
-    assert store.is_seen(stub) is True
+    assert store.is_seen(stub) == "url_hit"
 
 
 def test_mark_seen_off_domain_persists_status(store_path: Path) -> None:
@@ -65,7 +67,7 @@ def test_mark_seen_off_domain_persists_status(store_path: Path) -> None:
     stub = StubLike(url="https://example.com/x")
     store.mark_seen(stub, "off_domain")
 
-    assert store.is_seen(stub) is True
+    assert store.is_seen(stub) == "url_hit"
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     record = on_disk["https://example.com/x"]
@@ -81,7 +83,7 @@ def test_mark_seen_enrich_failed_persists_status(store_path: Path) -> None:
     stub = StubLike(url="https://example.com/ef")
     store.mark_seen(stub, "enrich_failed")
 
-    assert store.is_seen(stub) is True
+    assert store.is_seen(stub) == "url_hit"
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     assert on_disk["https://example.com/ef"]["status"] == "enrich_failed"
@@ -106,7 +108,7 @@ def test_first_seen_preserved_across_reload(store_path: Path) -> None:
     store.mark_seen(stub, "kept")
 
     reloaded = dedup_load(store_path)
-    assert reloaded.is_seen(stub) is True
+    assert reloaded.is_seen(stub) == "url_hit"
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     assert on_disk["https://example.com/keep"]["first_seen"] == date.today().isoformat()
@@ -115,13 +117,13 @@ def test_first_seen_preserved_across_reload(store_path: Path) -> None:
 def test_missing_file_initialises_empty(tmp_path: Path) -> None:
     path = tmp_path / "does_not_exist.json"
     store = dedup_load(path)
-    assert store.is_seen(StubLike(url="https://example.com/none")) is False
+    assert store.is_seen(StubLike(url="https://example.com/none")) == "miss"
 
 
 def test_zero_byte_file_initialises_empty(store_path: Path) -> None:
     store_path.write_bytes(b"")
     store = dedup_load(store_path)
-    assert store.is_seen(StubLike(url="https://example.com/none")) is False
+    assert store.is_seen(StubLike(url="https://example.com/none")) == "miss"
 
 
 @pytest.mark.parametrize(
@@ -165,7 +167,7 @@ def test_os_replace_failure_propagates_unwrapped(
 def test_mark_seen_accepts_stub_and_position(store_path: Path, obj: object) -> None:
     store = dedup_load(store_path)
     store.mark_seen(obj, "kept")  # type: ignore[arg-type]
-    assert store.is_seen(obj) is True  # type: ignore[arg-type]
+    assert store.is_seen(obj) == "url_hit"  # type: ignore[arg-type]
 
 
 def test_debug_log_on_url_match(
@@ -176,7 +178,7 @@ def test_debug_log_on_url_match(
     store.mark_seen(stub, "kept")
 
     with caplog.at_level(logging.DEBUG, logger="application_pipeline.dedup.store"):
-        assert store.is_seen(stub) is True
+        assert store.is_seen(stub) == "url_hit"
 
     assert any("url" in r.getMessage().lower() for r in caplog.records)
 
@@ -208,12 +210,12 @@ def test_handles_none_company_title_location(store_path: Path) -> None:
     assert record["location_lc"] is None
 
 
-def test_tuple_match_under_new_url_returns_true(store_path: Path) -> None:
+def test_tuple_match_under_new_url_returns_tuple_hit(store_path: Path) -> None:
     store = dedup_load(store_path)
     a = StubLike(url="https://bundesagentur.de/job/1")
     b = StubLike(url="https://stellen.hamburg/job/42")
     store.mark_seen(a, "kept")
-    assert store.is_seen(b) is True
+    assert store.is_seen(b) == "tuple_hit"
 
 
 def test_tuple_match_writes_alias_with_original_status_and_first_seen(
@@ -271,7 +273,7 @@ def test_after_alias_reload_resolves_via_url_tier(store_path: Path) -> None:
     different_tuple = StubLike(
         url=b.url, company="Other", title="Other", location="Other"
     )
-    assert reloaded.is_seen(different_tuple) is True
+    assert reloaded.is_seen(different_tuple) == "url_hit"
 
 
 def test_tuple_match_case_insensitive(store_path: Path) -> None:
@@ -294,7 +296,7 @@ def test_tuple_match_case_insensitive(store_path: Path) -> None:
                 location="Hamburg",
             )
         )
-        is True
+        == "tuple_hit"
     )
 
 
@@ -318,7 +320,7 @@ def test_tuple_match_collapses_internal_whitespace(store_path: Path) -> None:
                 location=" Hamburg ",
             )
         )
-        is True
+        == "tuple_hit"
     )
 
 
@@ -343,7 +345,7 @@ def test_tuple_lookup_skipped_when_field_none(store_path: Path) -> None:
                 location="Hamburg",
             )
         )
-        is False
+        == "miss"
     )
 
 
@@ -369,7 +371,7 @@ def test_tuple_lookup_skipped_when_field_empty_after_normalize(
                 location="Hamburg",
             )
         )
-        is False
+        == "miss"
     )
 
 
@@ -381,7 +383,7 @@ def test_none_company_url_match_still_works_on_second_is_seen(
         url="https://example.com/n", company=None, title="Engineer", location="Hamburg"
     )
     store.mark_seen(stub, "kept")
-    assert store.is_seen(stub) is True
+    assert store.is_seen(stub) == "url_hit"
 
 
 def test_tuple_index_built_at_load_time(store_path: Path) -> None:
@@ -409,7 +411,7 @@ def test_tuple_index_built_at_load_time(store_path: Path) -> None:
                 location="Hamburg",
             )
         )
-        is True
+        == "tuple_hit"
     )
 
 
@@ -426,9 +428,9 @@ def test_round_trip_mix_of_originals_and_aliases(store_path: Path) -> None:
 
     before = json.loads(store_path.read_text(encoding="utf-8"))
     reloaded = dedup_load(store_path)
-    assert reloaded.is_seen(a) is True
-    assert reloaded.is_seen(b) is True
-    assert reloaded.is_seen(c) is True
+    assert reloaded.is_seen(a) == "url_hit"
+    assert reloaded.is_seen(b) == "url_hit"
+    assert reloaded.is_seen(c) == "url_hit"
     after = json.loads(store_path.read_text(encoding="utf-8"))
     assert before == after
 

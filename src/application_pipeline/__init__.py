@@ -1,7 +1,7 @@
 from .config import Config, ConfigError, SourceEntry, load
 from .parsers import Position, PositionStub
 from .prefilter import DomainPreFilter, PreFilterVerdict
-from .dedup import DedupStoreError, DeduplicationStore, SeenStatus
+from .dedup import DedupStoreError, DeduplicationStore, SeenResult, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
 from .llm import (
@@ -46,6 +46,7 @@ __all__ = [
     "RelevanceVerdict",
     "ResultsFileError",
     "ResultsFileManager",
+    "SeenResult",
     "SeenStatus",
     "SourceEntry",
     "UserSettingsError",

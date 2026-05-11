@@ -22,6 +22,7 @@ from .errors import DedupStoreError
 logger = logging.getLogger(__name__)
 
 SeenStatus = Literal["off_domain", "kept", "enrich_failed"]
+SeenResult = Literal["url_hit", "tuple_hit", "miss"]
 
 
 @runtime_checkable
@@ -74,8 +75,8 @@ class DeduplicationStore:
             return None
         return self._tuple_index.get(tkey)
 
-    def is_seen(self, key: _SeenKey) -> bool:
-        """Return whether ``key`` has been seen; on tuple match, write alias.
+    def is_seen(self, key: _SeenKey) -> SeenResult:
+        """Return which dedup tier matched ``key``; on tuple match, write alias.
 
         Side effect (per ADR-0004): when the URL tier misses but the
         ``(company_lc, title_lc, location_lc)`` tuple matches a prior entry,
@@ -86,7 +87,7 @@ class DeduplicationStore:
         """
         if key.url in self._records:
             logger.debug("is_seen: url match for %s", key.url)
-            return True
+            return "url_hit"
 
         canonical_url = self._tuple_lookup(key)
         if canonical_url is not None:
@@ -96,9 +97,9 @@ class DeduplicationStore:
                 canonical_url,
                 key.url,
             )
-            return True
+            return "tuple_hit"
 
-        return False
+        return "miss"
 
     def mark_seen(self, key: _SeenKey, status: SeenStatus) -> None:
         if key.url in self._records:

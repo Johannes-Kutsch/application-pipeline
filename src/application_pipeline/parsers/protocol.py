@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
-from .types import ParserQuery, Position, PositionStub
+from .types import ExternalRedirect, ParserQuery, Position, PositionStub
 
 
 @runtime_checkable
@@ -19,4 +19,4 @@ class Parser(Protocol):
 
     def discover(self, query: ParserQuery) -> Iterable[PositionStub]: ...
 
-    def enrich(self, stub: PositionStub) -> Position: ...
+    def enrich(self, stub: PositionStub) -> Position | ExternalRedirect: ...

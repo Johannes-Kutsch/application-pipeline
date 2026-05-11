@@ -23,6 +23,7 @@ from typing import Any, assert_never
 import httpx
 from bs4 import BeautifulSoup, Tag
 
+from application_pipeline import debug_log
 from application_pipeline.http import HttpRetryError
 
 from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
@@ -36,7 +37,7 @@ from .http import (
     request_with_retry,
 )
 from .location import NotServed, RemoteWire, Resolved, resolve
-from .types import City, ParserQuery, Position, PositionStub
+from .types import City, ExternalRedirect, ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
 
@@ -94,8 +95,7 @@ def _id_from_query(url: str) -> str | None:
     return params["id"][0] if "id" in params else None
 
 
-def _extract_job_id(wrapper_html: bytes) -> str | None:
-    soup = BeautifulSoup(wrapper_html, "html.parser")
+def _extract_job_id(soup: BeautifulSoup) -> str | None:
     raw_url_input = soup.find("input", {"name": "raw-url"})
     if isinstance(raw_url_input, Tag):
         job_id = _id_from_query(str(raw_url_input.get("value", "")))
@@ -104,6 +104,15 @@ def _extract_job_id(wrapper_html: bytes) -> str | None:
     iframe = soup.find("iframe")
     if isinstance(iframe, Tag):
         return _id_from_query(str(iframe.get("src", "")))
+    return None
+
+
+def _find_outbound_href(soup: BeautifulSoup) -> str | None:
+    for a in soup.find_all("a", href=True):
+        href = str(a["href"])
+        host = urllib.parse.urlparse(href).netloc
+        if host and "jobs-beim-staat.de" not in host:
+            return href
     return None
 
 
@@ -263,7 +272,7 @@ class JobsBeimStaatParser:
 
             start += step
 
-    def enrich(self, stub: PositionStub) -> Position:
+    def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
         self._throttle.wait()
         try:
             wrapper_raw = request_with_retry(
@@ -274,8 +283,16 @@ class JobsBeimStaatParser:
                 f"jobs-beim-staat enrich failed for {stub.url}: {exc}"
             ) from exc.__cause__
 
-        job_id = _extract_job_id(wrapper_raw)
+        wrapper_soup = BeautifulSoup(wrapper_raw, "html.parser")
+        job_id = _extract_job_id(wrapper_soup)
         if job_id is None:
+            outbound = _find_outbound_href(wrapper_soup)
+            if outbound is not None:
+                debug_log.append(
+                    "jobs_beim_staat_html",
+                    f"external_redirect stub_url={stub.url} outbound={outbound}",
+                )
+                return ExternalRedirect(stub, outbound)
             raise ParserError(
                 f"jobs-beim-staat enrich: no iframe target found in wrapper {stub.url}"
             )
@@ -291,8 +308,8 @@ class JobsBeimStaatParser:
                 f"jobs-beim-staat enrich failed for {iframe_url}: {exc}"
             ) from exc.__cause__
 
-        soup = BeautifulSoup(iframe_raw, "html.parser")
-        raw_description = _normalize_description(soup.get_text(separator="\n"))
+        iframe_soup = BeautifulSoup(iframe_raw, "html.parser")
+        raw_description = _normalize_description(iframe_soup.get_text(separator="\n"))
 
         return Position(
             stub=stub,
@@ -316,5 +333,8 @@ if __name__ == "__main__":
     print(f"discover: {len(stubs)} stubs")
     if stubs:
         with JobsBeimStaatParser() as p:
-            pos = p.enrich(stubs[0])
-        print(f"enrich: {len(pos.raw_description)} chars")
+            result = p.enrich(stubs[0])
+        if isinstance(result, Position):
+            print(f"enrich: {len(result.raw_description)} chars")
+        else:
+            print(f"enrich: external_redirect outbound={result.outbound_url}")

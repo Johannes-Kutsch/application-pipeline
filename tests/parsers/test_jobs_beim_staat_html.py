@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 
+import application_pipeline.debug_log as debug_log_module
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.types import City, Remote
+from application_pipeline.parsers.types import City, ExternalRedirect, Position, Remote
 from application_pipeline.parsers.http import HttpGet
 from application_pipeline.parsers import jobs_beim_staat_html as parser_module
 from application_pipeline.parsers.jobs_beim_staat_html import (
@@ -405,6 +406,7 @@ def test_enrich_returns_position_with_raw_description(
     get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(_http_get=get) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.raw_description != ""
 
 
@@ -414,6 +416,7 @@ def test_enrich_description_contains_job_text(
     get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(_http_get=get) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert (
         "Softwareentwickler" in pos.raw_description
         or "Webanwendungen" in pos.raw_description
@@ -426,6 +429,7 @@ def test_enrich_description_has_no_html_tags(
     get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(_http_get=get) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "<p>" not in pos.raw_description
     assert "<ul>" not in pos.raw_description
 
@@ -509,4 +513,82 @@ def test_enrich_posted_date_set_from_vor_2_tagen(
     with JobsBeimStaatParser(_http_get=get) as p:
         (first_stub, *_) = list(p.discover(_query()))
         pos = p.enrich(first_stub)
+    assert isinstance(pos, Position)
     assert pos.posted_date == date.today() - timedelta(days=2)
+
+
+# ---------------------------------------------------------------------------
+# enrich — external redirect detection
+# ---------------------------------------------------------------------------
+
+_OUTBOUND_WRAPPER = (
+    b"<html><body>"
+    b'<a href="https://go.opportuno.de/job/123">Apply here</a>'
+    b"</body></html>"
+)
+
+
+def test_enrich_emits_external_redirect_for_outbound_link(stub: PositionStub) -> None:
+    get = _make_get([_OUTBOUND_WRAPPER])
+    with JobsBeimStaatParser(_http_get=get) as p:
+        result = p.enrich(stub)
+    assert isinstance(result, ExternalRedirect)
+    assert result.outbound_url == "https://go.opportuno.de/job/123"
+    assert result.stub is stub
+
+
+def test_enrich_external_redirect_outbound_url_matches_href(stub: PositionStub) -> None:
+    wrapper = (
+        b"<html><body>"
+        b'<a href="https://external.example.com/jobs/456">Apply</a>'
+        b"</body></html>"
+    )
+    get = _make_get([wrapper])
+    with JobsBeimStaatParser(_http_get=get) as p:
+        result = p.enrich(stub)
+    assert isinstance(result, ExternalRedirect)
+    assert result.outbound_url == "https://external.example.com/jobs/456"
+
+
+def test_enrich_raises_parser_error_with_no_iframe_and_no_outbound(
+    stub: PositionStub,
+) -> None:
+    from application_pipeline.parsers import ParserError
+
+    no_link_wrapper = b"<html><body><p>No links here</p></body></html>"
+    get = _make_get([no_link_wrapper])
+    with JobsBeimStaatParser(_http_get=get) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)
+
+
+def test_enrich_iframe_wins_over_stray_outbound_link(
+    stub: PositionStub, iframe_target_html: bytes
+) -> None:
+    wrapper_with_both = (
+        b"<html><body>"
+        b'<input name="raw-url" value="/stellenanzeigen-details/?id=22630" />'
+        b'<a href="https://go.opportuno.de/job/999">External link</a>'
+        b"</body></html>"
+    )
+    get = _make_get([wrapper_with_both, iframe_target_html])
+    with JobsBeimStaatParser(_http_get=get) as p:
+        result = p.enrich(stub)
+    assert isinstance(result, Position)
+
+
+def test_enrich_external_redirect_appends_outbound_url_to_debug_log(
+    stub: PositionStub, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    monkeypatch.setattr(debug_log_module, "_logs_dir", logs_dir)
+
+    get = _make_get([_OUTBOUND_WRAPPER])
+    with JobsBeimStaatParser(_http_get=get) as p:
+        p.enrich(stub)
+
+    log_file = logs_dir / "jobs_beim_staat_html.log"
+    assert log_file.exists()
+    content = log_file.read_text(encoding="utf-8")
+    assert "go.opportuno.de/job/123" in content

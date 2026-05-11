@@ -27,10 +27,17 @@ SeenResult = Literal["url_hit", "tuple_hit", "miss"]
 
 @runtime_checkable
 class _SeenKey(Protocol):
-    url: str
-    company: str | None
-    title: str | None
-    location: str | None
+    @property
+    def url(self) -> str: ...
+
+    @property
+    def company(self) -> str | None: ...
+
+    @property
+    def title(self) -> str | None: ...
+
+    @property
+    def location(self) -> str | None: ...
 
 
 class DeduplicationStore:

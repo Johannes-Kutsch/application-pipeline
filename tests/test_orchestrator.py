@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
 from application_pipeline.llm import ExtractorUnreachableError
 from application_pipeline.orchestrator import RunSummary, run
+from application_pipeline.parsers import ParserQuery, Position, PositionStub
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import ResultsFileError
 
@@ -25,6 +28,9 @@ def _write_config(
     sources: str = '[SourceEntry(parser_type="bundesagentur_api")]',
     seen_store_path: str | None = None,
     with_prompt_files: bool = True,
+    keywords: str = '["python"]',
+    locations: str = '["Hamburg"]',
+    include_remote: bool = True,
 ) -> Path:
     """Write a minimal valid config.py and a prompts dir into tmp_path."""
     seen_line = (
@@ -34,10 +40,11 @@ def _write_config(
     config_path.write_text(
         textwrap.dedent(f"""
             from application_pipeline import SourceEntry
-            KEYWORDS = ["python"]
+            KEYWORDS = {keywords}
             SKILLS = ["django"]
             SOURCES = {sources}
-            LOCATIONS = ["Hamburg"]
+            LOCATIONS = {locations}
+            INCLUDE_REMOTE = {include_remote!r}
             {seen_line}
         """),
         encoding="utf-8",
@@ -79,6 +86,7 @@ def test_zero_summary_on_empty_run(tmp_path: Path) -> None:
     summary = run(
         config_path,
         extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
         dedup_store=MagicMock(),
         results_manager=_stub_results_manager(),
     )
@@ -88,6 +96,9 @@ def test_zero_summary_on_empty_run(tmp_path: Path) -> None:
     assert summary.total_seen == 0
     assert summary.total_kept == 0
     assert summary.duration_seconds >= 0.0
+    assert summary.discovered == 0
+    assert summary.skipped == 0
+    assert summary.enriched == ()
 
 
 # ---------------------------------------------------------------------------
@@ -209,3 +220,138 @@ def test_unknown_parser_type_run_continues(tmp_path: Path) -> None:
 
     assert isinstance(summary, RunSummary)
     assert summary.total_discovered == 0
+
+
+# ---------------------------------------------------------------------------
+# Integration: discover + dedup gating + enrich (no LLM)
+# ---------------------------------------------------------------------------
+
+_STUB_URLS = [f"https://stub.example/{i}" for i in range(6)]
+
+
+class _StubParser:
+    """Returns 3 stubs per discover() call (deterministic URLs), enriches trivially."""
+
+    def __init__(self) -> None:
+        self._call = 0
+
+    def __enter__(self) -> "_StubParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        base = self._call * 3
+        self._call += 1
+        return [
+            PositionStub(
+                url=_STUB_URLS[base + i], title=f"Job {base + i}", source="stub"
+            )
+            for i in range(3)
+        ]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        return Position(stub=stub, raw_description="test description")
+
+
+def test_integration_discover_and_enrich(tmp_path: Path) -> None:
+    """2 keywords × 1 location, 3 stubs each → discovered==6, skipped==0, enriched==6."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python", "django"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    summary = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.discovered == 6
+    assert summary.skipped == 0
+    assert len(summary.enriched) == 6
+    assert all(isinstance(p, Position) for p in summary.enriched)
+
+
+def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
+    """Pre-seed all 6 URLs → discovered==6, skipped==6, enriched empty."""
+    seen_path = tmp_path / ".seen.json"
+    seen_data = {
+        url: {
+            "company_lc": None,
+            "title_lc": None,
+            "location_lc": None,
+            "status": "off_domain",
+            "first_seen": "2024-01-01",
+        }
+        for url in _STUB_URLS
+    }
+    seen_path.write_text(json.dumps(seen_data), encoding="utf-8")
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python", "django"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    summary = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.discovered == 6
+    assert summary.skipped == 6
+    assert summary.enriched == ()
+
+
+def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -> None:
+    """include_remote=True adds one (keyword, None) call per keyword per source."""
+    queries_received: list[ParserQuery] = []
+
+    class _TrackingParser:
+        def __enter__(self) -> "_TrackingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            queries_received.append(query)
+            return []
+
+        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
+            raise NotImplementedError
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=True,
+    )
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert len(queries_received) == 2
+    geo_calls = [q for q in queries_received if q.location is not None]
+    remote_calls = [q for q in queries_received if q.location is None]
+    assert len(geo_calls) == 1
+    assert len(remote_calls) == 1
+    assert geo_calls[0].location == "Hamburg"

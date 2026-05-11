@@ -10,14 +10,14 @@ from pathlib import Path
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline import layout as layout_module
-from application_pipeline.config import ConfigError
+from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.llm import (
     ExtractorUnreachableError,
     LLMExtractor,
     OllamaExtractor,
 )
-from application_pipeline.parsers import Parser
+from application_pipeline.parsers import Parser, ParserQuery, Position
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.prefilter import DomainPreFilter
 from application_pipeline.prompts import PromptError, load_prompts
@@ -32,6 +32,9 @@ class RunSummary:
     total_seen: int = 0
     total_kept: int = 0
     duration_seconds: float = 0.0
+    discovered: int = 0
+    skipped: int = 0
+    enriched: tuple[Position, ...] = ()
 
 
 def run(
@@ -77,11 +80,11 @@ def run(
 
     # Step 6: Resolve parser classes; unknown types are skipped (registry logs WARNING)
     _resolve = parser_registry if parser_registry is not None else _default_registry.get
-    resolved: list[type[Parser]] = []
+    resolved: list[tuple[type[Parser], SourceEntry]] = []
     for source in cfg.sources:
         cls = _resolve(source.parser_type)
         if cls is not None:
-            resolved.append(cls)
+            resolved.append((cls, source))
 
     # Step 7: Dedup store
     if dedup_store is None:
@@ -104,10 +107,36 @@ def run(
         _log.error("startup failed — results file: %s", exc)
         raise
 
-    # Step 9: Enter parsers via ExitStack, iterate (empty in this skeleton)
-    with ExitStack() as stack:
-        for cls in resolved:
-            stack.enter_context(cls())
-        # TODO: parser iteration — 4b/4c/4d
+    # Step 9: Enter parsers via ExitStack, iterate sources × keywords × locations
+    discovered = 0
+    skipped = 0
+    enriched: list[Position] = []
 
-    return RunSummary(duration_seconds=time.monotonic() - _start)
+    with ExitStack() as stack:
+        parsers: list[tuple[Parser, SourceEntry]] = [
+            (stack.enter_context(cls()), source) for cls, source in resolved
+        ]
+        for parser, source in parsers:
+            locations: list[str | None] = list(cfg.locations)
+            if cfg.include_remote:
+                locations.append(None)
+            for keyword in cfg.keywords:
+                for location in locations:
+                    query = ParserQuery(
+                        keyword=keyword,
+                        location=location,
+                        max_results=source.max_results,
+                    )
+                    for stub in parser.discover(query):
+                        discovered += 1
+                        if dedup_store.is_seen(stub) == "miss":
+                            enriched.append(parser.enrich(stub))
+                        else:
+                            skipped += 1
+
+    return RunSummary(
+        duration_seconds=time.monotonic() - _start,
+        discovered=discovered,
+        skipped=skipped,
+        enriched=tuple(enriched),
+    )

@@ -257,7 +257,7 @@ This manually performs the first deploy that the cron wrapper (`scripts/pi-tick.
 
 ## 7. Initialise settings
 
-This step seeds `data/synched/` with the default `config.py` and `layout.py` templates. Run it once after the venv exists but before the crontab is installed.
+This step seeds `data/synched/` with the default `config.py`, `layout.py`, and the four per-language prompt templates required by ADR-0006. Run it once after the venv exists but before the crontab is installed.
 
 33. Run `init` against the synched data directory:
     ```bash
@@ -265,7 +265,9 @@ This step seeds `data/synched/` with the default `config.py` and `layout.py` tem
         -m application_pipeline init \
         ~/application-pipeline/data/synched
     ```
-    Expected: `wrote config.py` and `wrote layout.py` printed; both files present in `~/application-pipeline/data/synched/`.
+    Expected: six lines printed — `wrote config.py`, `wrote layout.py`, and `wrote prompts/<name>` for each of the four prompt files (`classify_relevance.de.md`, `classify_relevance.en.md`, `judge_match.de.md`, `judge_match.en.md`). All six files are present under `~/application-pipeline/data/synched/`.
+
+    The prompt files in `data/synched/prompts/` are working v0.1.1 defaults. The first cron tick will reach the LLM step without further manual intervention. Before the first tick fires you may open a prompt file on the laptop's paired Syncthing copy and tune it to your persona; Syncthing propagates changes back to the Pi automatically.
 
     **Optional:** Before the first cron tick fires, open `config.py` on the laptop's paired Syncthing copy and edit keywords, skills, and sources to match your search criteria. Syncthing will propagate the edits back to the Pi automatically.
 

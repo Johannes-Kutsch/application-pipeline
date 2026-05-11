@@ -265,3 +265,9 @@ def test_resolve_normalizes_city_name_before_lookup() -> None:
     parser = _FakeParser(served_cities={"münchen"}, serves_remote=False)
     result = resolve(City(name="München"), parser)
     assert result == Resolved(wire="münchen_wire")
+
+
+def test_resolve_whitespace_only_city_returns_not_served() -> None:
+    parser = _FakeParser(served_cities={"hamburg"}, serves_remote=False)
+    result = resolve(City(name="   "), parser)
+    assert result == NotServed()

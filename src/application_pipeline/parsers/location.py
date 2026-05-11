@@ -36,9 +36,9 @@ def resolve(
     match location:
         case City(name=name):
             normalized = normalize(name)
-            if normalized is None or not parser_module.serves(normalized):
-                return NotServed()
-            return Resolved(parser_module.to_wire(normalized))
+            if normalized is not None and parser_module.serves(normalized):
+                return Resolved(parser_module.to_wire(normalized))
+            return NotServed()
         case Remote():
             if parser_module.serves_remote:
                 return RemoteWire(parser_module.remote_wire())

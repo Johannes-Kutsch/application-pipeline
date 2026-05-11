@@ -89,20 +89,21 @@ def _parse_posted_date(raw: str, today: date) -> date | None:
     return None
 
 
+def _id_from_query(url: str) -> str | None:
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    return params["id"][0] if "id" in params else None
+
+
 def _extract_job_id(wrapper_html: bytes) -> str | None:
     soup = BeautifulSoup(wrapper_html, "html.parser")
     raw_url_input = soup.find("input", {"name": "raw-url"})
     if isinstance(raw_url_input, Tag):
-        value = str(raw_url_input.get("value", ""))
-        params = urllib.parse.parse_qs(urllib.parse.urlparse(value).query)
-        if "id" in params:
-            return params["id"][0]
+        job_id = _id_from_query(str(raw_url_input.get("value", "")))
+        if job_id is not None:
+            return job_id
     iframe = soup.find("iframe")
     if isinstance(iframe, Tag):
-        src = str(iframe.get("src", ""))
-        params = urllib.parse.parse_qs(urllib.parse.urlparse(src).query)
-        if "id" in params:
-            return params["id"][0]
+        return _id_from_query(str(iframe.get("src", "")))
     return None
 
 

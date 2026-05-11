@@ -374,6 +374,158 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
 
 
 # ---------------------------------------------------------------------------
+# Integration: discover short-circuit on consecutive url_hits (issue #111)
+# ---------------------------------------------------------------------------
+
+
+def test_discover_short_circuits_after_n_consecutive_url_hits(tmp_path: Path) -> None:
+    """3 misses + 60 url_hits → short-circuit after 50th url_hit; 53 stubs consumed."""
+    consumed: list[int] = [0]
+
+    all_stubs = [
+        PositionStub(url=f"https://sc.example/{i}", title=f"Job {i}", source="stub")
+        for i in range(63)
+    ]
+
+    class _GenParser:
+        def __enter__(self) -> "_GenParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            for stub in all_stubs:
+                consumed[0] += 1
+                yield stub
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="test")
+
+    dedup = MagicMock()
+    dedup.is_seen.side_effect = ["miss"] * 3 + ["url_hit"] * 60
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="stub")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _GenParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+    )
+
+    assert consumed[0] == 53  # 3 misses + 50 url_hits before close
+    assert summary.discovered == 53
+    assert summary.skipped == 50
+
+
+def test_discover_counter_resets_on_miss(tmp_path: Path) -> None:
+    """3 url_hits, 1 miss, 49 url_hits → counter resets at miss; all 53 consumed without short-circuit."""
+    consumed: list[int] = [0]
+
+    all_stubs = [
+        PositionStub(url=f"https://sc.example/{i}", title=f"Job {i}", source="stub")
+        for i in range(53)
+    ]
+
+    class _GenParser:
+        def __enter__(self) -> "_GenParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            for stub in all_stubs:
+                consumed[0] += 1
+                yield stub
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="test")
+
+    dedup = MagicMock()
+    dedup.is_seen.side_effect = ["url_hit"] * 3 + ["miss"] + ["url_hit"] * 49
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="stub")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _GenParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+    )
+
+    assert consumed[0] == 53  # all consumed — miss reset the counter after 3
+    assert summary.discovered == 53
+    assert summary.skipped == 52  # 3 + 49 url_hits
+
+
+def test_discover_tuple_hit_resets_url_hit_counter(tmp_path: Path) -> None:
+    """tuple_hits interspersed in url_hits reset the counter; no false short-circuit."""
+    consumed: list[int] = [0]
+
+    # 25 url_hits, tuple_hit (resets), 25 url_hits, tuple_hit (resets), 25 url_hits = 77
+    all_stubs = [
+        PositionStub(url=f"https://sc.example/{i}", title=f"Job {i}", source="stub")
+        for i in range(77)
+    ]
+
+    class _GenParser:
+        def __enter__(self) -> "_GenParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            for stub in all_stubs:
+                consumed[0] += 1
+                yield stub
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="test")
+
+    dedup = MagicMock()
+    dedup.is_seen.side_effect = (
+        ["url_hit"] * 25
+        + ["tuple_hit"]
+        + ["url_hit"] * 25
+        + ["tuple_hit"]
+        + ["url_hit"] * 25
+    )
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="stub")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _GenParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+    )
+
+    assert (
+        consumed[0] == 77
+    )  # all consumed — tuple_hits reset counter, never reached 50 consecutive
+    assert summary.discovered == 77
+    assert summary.skipped == 77
+
+
+# ---------------------------------------------------------------------------
 # Integration: language resolution + Pre-Filter pass (slice 4c)
 # ---------------------------------------------------------------------------
 

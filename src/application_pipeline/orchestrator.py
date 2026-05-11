@@ -32,6 +32,8 @@ from application_pipeline.results import ResultsFileError, ResultsFileManager
 
 _log = logging.getLogger(__name__)
 
+_DISCOVER_SHORT_CIRCUIT_FALLBACK = 50
+
 
 @dataclass(frozen=True)
 class RunSummary:
@@ -146,10 +148,17 @@ def run(
                         location=location,
                         max_results=source.max_results,
                     )
+                    threshold = getattr(
+                        parser, "page_size", _DISCOVER_SHORT_CIRCUIT_FALLBACK
+                    )
+                    consecutive_url_hits = 0
+                    gen = iter(parser.discover(query))
                     try:
-                        for stub in parser.discover(query):
+                        for stub in gen:
                             discovered += 1
-                            if dedup_store.is_seen(stub) == "miss":
+                            seen_result = dedup_store.is_seen(stub)
+                            if seen_result == "miss":
+                                consecutive_url_hits = 0
                                 try:
                                     position = parser.enrich(stub)
                                 except ParserError as exc:
@@ -169,7 +178,16 @@ def run(
                                 else:
                                     dedup_store.mark_seen(stub, "off_domain")
                                     prefilter_dropped += 1
-                            else:
+                            elif seen_result == "url_hit":
+                                consecutive_url_hits += 1
+                                skipped += 1
+                                if consecutive_url_hits >= threshold:
+                                    close = getattr(gen, "close", None)
+                                    if close is not None:
+                                        close()
+                                    break
+                            else:  # tuple_hit
+                                consecutive_url_hits = 0
                                 skipped += 1
                     except ParserError as exc:
                         _log.warning(

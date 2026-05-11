@@ -176,7 +176,7 @@ The Pi clones the public repo over HTTPS — no SSH key or token required (see [
 
 24. Create the top-level layout (see [ADR-0011](adr/0011-atomic-deploy-via-staging-symlink.md)):
     ```bash
-    mkdir -p ~/application-pipeline/{releases,data/synched/failures,logs}
+    mkdir -p ~/application-pipeline/{releases,data/synched/failures,data/synched/logs}
     ```
 
 25. Clone the repo into `repo/` (bootstrap copy — used only for `git fetch --tags` by the wrapper):
@@ -191,7 +191,7 @@ The Pi clones the public repo over HTTPS — no SSH key or token required (see [
     ```
     Expected:
     ```
-    data/  logs/  releases/  repo/
+    data/  releases/  repo/
     ```
     The `current` symlink does not exist yet — it is created in step 32.
 
@@ -346,7 +346,7 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
 
 43. Review the cron log for any warnings:
     ```bash
-    tail -40 ~/application-pipeline/logs/cron.log
+    tail -40 ~/application-pipeline/data/synched/logs/cron.log
     ```
     Expected: timestamped log lines, no `ERROR` or `FAILURE` entries.
 

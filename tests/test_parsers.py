@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from dataclasses import FrozenInstanceError
+from typing import assert_never
 
 import pytest
 
@@ -173,42 +175,26 @@ def test_registry_get_result_is_instantiable() -> None:
 # --- Location types ---
 
 
-def test_city_is_frozen():
+def test_city_is_frozen() -> None:
     city = City(name="Hamburg")
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         city.name = "Berlin"  # type: ignore[misc]
 
 
-def test_remote_is_frozen():
+def test_remote_is_frozen() -> None:
     remote = Remote()
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         remote.x = 1  # type: ignore[attr-defined]
 
 
-def test_location_match_city_arm():
-    loc: Location = City(name="Hamburg")
-    match loc:
-        case City(name=n):
-            result = f"city:{n}"
-        case Remote():
-            result = "remote"
-    assert result == "city:Hamburg"
-
-
-def test_location_match_remote_arm():
-    loc: Location = Remote()
-    match loc:
-        case City(name=n):
-            result = f"city:{n}"
-        case Remote():
-            result = "remote"
-    assert result == "remote"
-
-
-def test_location_match_is_exhaustive_via_assert_never():
-    from typing import assert_never
-
-    loc: Location = City(name="Berlin")
+@pytest.mark.parametrize(
+    ("loc", "expected"),
+    [
+        (City(name="Hamburg"), "city:Hamburg"),
+        (Remote(), "remote"),
+    ],
+)
+def test_location_match_is_exhaustive(loc: Location, expected: str) -> None:
     match loc:
         case City(name=n):
             result = f"city:{n}"
@@ -216,4 +202,4 @@ def test_location_match_is_exhaustive_via_assert_never():
             result = "remote"
         case _ as unreachable:
             assert_never(unreachable)
-    assert result == "city:Berlin"
+    assert result == expected

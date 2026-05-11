@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal, Union
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,7 @@ class Remote:
     pass
 
 
-Location = Union[City, Remote]
+Location = City | Remote
 
 
 @dataclass

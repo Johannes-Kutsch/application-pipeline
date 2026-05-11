@@ -111,7 +111,7 @@ def _parse_card(card: Tag, today: date) -> PositionStub | None:
     link = card.select_one("h3 > a")
     if not isinstance(link, Tag):
         return None
-    href = str(link.get("href", "") or "")
+    href = str(link.get("href") or "")
     if not href:
         return None
     full_url = f"{_BASE_URL}{href}" if href.startswith("/") else href
@@ -180,10 +180,10 @@ class JobsBeimStaatParser:
     def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
         place: str
         match resolve(query.location, sys.modules[__name__]):
-            case Resolved(wire=w):
-                place = w
-            case RemoteWire(payload=p):
-                place = str(p)
+            case Resolved(wire):
+                place = wire
+            case RemoteWire(payload):
+                place = str(payload)
             case NotServed():
                 _log.info(
                     "location_not_served parser_type=jobs_beim_staat_html location=%r",

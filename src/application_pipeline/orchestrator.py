@@ -129,9 +129,7 @@ class _ParserThread(threading.Thread):
 
 def _discover_release_tag() -> str | None:
     try:
-        target = Path("current").readlink()
-        name = target.name
-        return name if name else None
+        return Path("current").readlink().name or None
     except OSError:
         return None
 

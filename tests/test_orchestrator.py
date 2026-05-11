@@ -1134,8 +1134,6 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(tmp_path: Path) -
 # Run Divider (issue #116)
 # ---------------------------------------------------------------------------
 
-_RUN_DIVIDER_RE = re.compile(r"^<!-- run \S+", re.MULTILINE)
-
 
 def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
     """Successful run appends a Run Divider HTML comment with all expected metric keys."""

@@ -30,15 +30,6 @@ from application_pipeline.results import ResultsFileError, ResultsFileManager
 
 _log = logging.getLogger(__name__)
 
-_DEFAULT_LAYOUT = Layout(
-    tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
-    tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
-    placeholder_groups={},
-    file_header="# Results\n\n",
-    card_template="## {number}. {title}  {emoji}\n\n",
-    headline_template="## {number}. {title}  {emoji}\n\n",
-)
-
 
 @dataclass(frozen=True)
 class RunSummary:
@@ -116,7 +107,7 @@ def run(
         if cfg.layout is not None:
             layout = layout_module.load(cfg.layout)
         else:
-            layout = _DEFAULT_LAYOUT
+            layout = layout_module.default()
 
     if results_manager is None:
         results_manager = ResultsFileManager(

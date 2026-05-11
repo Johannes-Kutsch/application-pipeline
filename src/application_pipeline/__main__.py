@@ -9,7 +9,7 @@ from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
 from application_pipeline.failure_report import write_failure
 from application_pipeline.llm import ExtractorUnreachableError
-from application_pipeline.orchestrator import run
+from application_pipeline.orchestrator import current_stage, run
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import ResultsFileError
 
@@ -50,12 +50,11 @@ def main() -> None:
         sys.exit(2)
 
     config_path = Path(sys.argv[1])
-    stage_out: list[str] = ["orchestrator"]
     try:
-        summary = run(config_path, _stage_out=stage_out)
+        summary = run(config_path)
     except _FATAL as exc:
         try:
-            write_failure(stage_out[0], exc, _tail.tail(), Path("results"))
+            write_failure(current_stage.get(), exc, _tail.tail(), Path("results"))
         except Exception:
             pass
         sys.exit(1)

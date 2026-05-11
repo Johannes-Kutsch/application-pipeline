@@ -1263,7 +1263,9 @@ def test_fatal_error_writes_failure_report_and_exits_one(
 
 
 def test_results_write_stage_label_on_append_failure(tmp_path: Path) -> None:
-    """ResultsFileError in step 12 → _stage_out set to 'results_write'."""
+    """ResultsFileError in step 12 → current_stage set to 'results_write'."""
+    from application_pipeline.orchestrator import current_stage
+
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="stub")]',
@@ -1277,15 +1279,17 @@ def test_results_write_stage_label_on_append_failure(tmp_path: Path) -> None:
     crashing_rm.next_position_number.return_value = 1
     crashing_rm.append.side_effect = ResultsFileError("disk full")
 
-    stage_out: list[str] = ["orchestrator"]
-    with pytest.raises(ResultsFileError):
-        run(
-            config_path,
-            extractor=_FakeExtractor(),
-            parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
-            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_manager=crashing_rm,
-            _stage_out=stage_out,
-        )
+    token = current_stage.set("orchestrator")
+    try:
+        with pytest.raises(ResultsFileError):
+            run(
+                config_path,
+                extractor=_FakeExtractor(),
+                parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+                dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+                results_manager=crashing_rm,
+            )
 
-    assert stage_out[0] == "results_write"
+        assert current_stage.get() == "results_write"
+    finally:
+        current_stage.reset(token)

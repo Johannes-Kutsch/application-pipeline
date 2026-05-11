@@ -41,8 +41,8 @@ class Config:
     classify_relevance_prompt: pathlib.Path | None = None
     judge_match_prompt: pathlib.Path | None = None
     ollama_base_url: str = "http://localhost:11434"
-    ollama_classify_model: str = "qwen3:8b"
-    ollama_judge_model: str = "qwen3:8b"
+    ollama_classify_model: str = "qwen3:0.6b"
+    ollama_judge_model: str = "qwen3:4b"
     ollama_read_timeout_seconds: int = 300
     ollama_json_retries: int = 1
     ollama_http_retries: int = 2

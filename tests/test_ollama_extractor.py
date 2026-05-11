@@ -168,13 +168,13 @@ def test_classify_relevance_posts_to_generate_endpoint():
 def test_classify_relevance_sends_configured_model():
     http_post = MagicMock(return_value={"response": '{"in_domain": true}'})
     extractor = OllamaExtractor(
-        _config(ollama_classify_model="qwen3:8b"), _prompts(), _http_post=http_post
+        _config(ollama_classify_model="qwen3:0.6b"), _prompts(), _http_post=http_post
     )
 
     extractor.classify_relevance("en", "title", "desc")
 
     (url, payload, timeout) = http_post.call_args.args
-    assert payload["model"] == "qwen3:8b"
+    assert payload["model"] == "qwen3:0.6b"
 
 
 def test_classify_relevance_sends_keep_alive():

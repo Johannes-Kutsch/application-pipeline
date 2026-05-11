@@ -8,6 +8,7 @@ import traceback
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from application_pipeline import config as config_module
@@ -119,6 +120,53 @@ class _ParserThread(threading.Thread):
             )
         else:
             self._outbound.put((self._parser_id, _PARSER_DONE))
+
+
+# ---------------------------------------------------------------------------
+# Run Divider helpers
+# ---------------------------------------------------------------------------
+
+
+def _discover_release_tag() -> str | None:
+    try:
+        target = Path("current").readlink()
+        name = target.name
+        return name if name else None
+    except OSError:
+        return None
+
+
+def _format_run_divider(
+    *,
+    timestamp: str,
+    tag: str | None,
+    sources: dict[str, int],
+    kept: int,
+    errors: int,
+    classify_calls: int,
+    classify_total_s: float,
+    judge_calls: int,
+    judge_total_s: float,
+    elapsed_s: float,
+) -> str:
+    parts = [f"run {timestamp}"]
+    if tag is not None:
+        parts.append(f"tag={tag}")
+    if sources:
+        sources_str = ",".join(f"{k}:{v}" for k, v in sources.items())
+        parts.append(f"sources={sources_str}")
+    parts.extend(
+        [
+            f"kept={kept}",
+            f"errors={errors}",
+            f"classify_calls={classify_calls}",
+            f"classify_total_s={classify_total_s:.1f}",
+            f"judge_calls={judge_calls}",
+            f"judge_total_s={judge_total_s:.1f}",
+            f"elapsed_s={elapsed_s:.1f}",
+        ]
+    )
+    return f"<!-- {' '.join(parts)} -->\n"
 
 
 # ---------------------------------------------------------------------------
@@ -326,12 +374,17 @@ def run(
     # Step 10: Classify batch — all classify_relevance calls before any judge_match call
     classifier_dropped = 0
     errored = 0
+    classify_calls = 0
+    classify_total_s = 0.0
     in_domain: list[tuple[Position, Language]] = []
     for position, language in survivors:
         try:
+            _t0 = time.monotonic()
             rel_verdict = extractor.classify_relevance(
                 language, position.title, position.raw_description
             )
+            classify_total_s += time.monotonic() - _t0
+            classify_calls += 1
         except ExtractorError as exc:
             _log.warning("classify_relevance failed: %s", exc)
             errored += 1
@@ -344,9 +397,14 @@ def run(
 
     # Step 11: Judge batch — all judge_match calls after classify batch
     judged: list[tuple[Position, MatchVerdict]] = []
+    judge_calls = 0
+    judge_total_s = 0.0
     for position, language in in_domain:
         try:
+            _t0 = time.monotonic()
             match_verdict = extractor.judge_match(language, position.raw_description)
+            judge_total_s += time.monotonic() - _t0
+            judge_calls += 1
         except ExtractorError as exc:
             _log.warning("judge_match failed: %s", exc)
             errored += 1
@@ -358,6 +416,7 @@ def run(
     green = 0
     amber = 0
     red = 0
+    written_per_source: dict[str, int] = {}
     for position, match_verdict in judged:
         number = results_manager.next_position_number()
         rendered = render(position, match_verdict, number, layout)
@@ -371,12 +430,34 @@ def run(
             raise
         dedup_store.mark_seen(position.stub, "kept")
         written += 1
+        src = position.stub.source
+        written_per_source[src] = written_per_source.get(src, 0) + 1
         if match_verdict.tier == MatchTier.green:
             green += 1
         elif match_verdict.tier == MatchTier.amber:
             amber += 1
         else:
             red += 1
+
+    # Step 13: Append Run Divider — only on successful completion
+    elapsed_s = time.monotonic() - _start
+    divider = _format_run_divider(
+        timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        tag=_discover_release_tag(),
+        sources=written_per_source,
+        kept=written,
+        errors=errored,
+        classify_calls=classify_calls,
+        classify_total_s=classify_total_s,
+        judge_calls=judge_calls,
+        judge_total_s=judge_total_s,
+        elapsed_s=elapsed_s,
+    )
+    try:
+        results_manager.append(divider)
+    except ResultsFileError as exc:
+        _log.error("run divider append failed: %s", exc)
+        raise
 
     _log.info(
         "run complete: discovered=%d skipped=%d prefilter_dropped=%d "
@@ -396,7 +477,7 @@ def run(
     )
 
     return RunSummary(
-        duration_seconds=time.monotonic() - _start,
+        duration_seconds=elapsed_s,
         discovered=discovered,
         skipped=skipped,
         prefilter_dropped=prefilter_dropped,

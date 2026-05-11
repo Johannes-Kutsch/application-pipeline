@@ -722,7 +722,9 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     first = _make_run()
     assert first.written == 4
 
-    content_after_first = results_path.read_text(encoding="utf-8")
+    numbers_after_first = re.findall(
+        r"^## (\d+)\.", results_path.read_text(encoding="utf-8"), re.MULTILINE
+    )
 
     second = _make_run()
     assert second.discovered == 6
@@ -734,7 +736,11 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     assert second.amber == 0
     assert second.red == 0
 
-    assert results_path.read_text(encoding="utf-8") == content_after_first
+    # No new position entries added; second run only appends its own Run Divider
+    numbers_after_second = re.findall(
+        r"^## (\d+)\.", results_path.read_text(encoding="utf-8"), re.MULTILINE
+    )
+    assert numbers_after_second == numbers_after_first
 
 
 def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
@@ -1122,3 +1128,99 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(tmp_path: Path) -
     # No position must be marked kept
     kept = [url for url, rec in seen_data.items() if rec.get("status") == "kept"]
     assert kept == []
+
+
+# ---------------------------------------------------------------------------
+# Run Divider (issue #116)
+# ---------------------------------------------------------------------------
+
+_RUN_DIVIDER_RE = re.compile(r"^<!-- run \S+", re.MULTILINE)
+
+
+def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
+    """Successful run appends a Run Divider HTML comment with all expected metric keys."""
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    # File ends with a Run Divider (strip trailing newline before split)
+    last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert last_block.startswith("<!-- run "), (
+        f"last line is not a run divider: {last_block!r}"
+    )
+
+    # All expected metric keys present
+    for key in (
+        "kept=",
+        "errors=",
+        "classify_calls=",
+        "classify_total_s=",
+        "judge_calls=",
+        "judge_total_s=",
+        "elapsed_s=",
+    ):
+        assert key in last_block, (
+            f"metric key {key!r} missing from divider: {last_block!r}"
+        )
+
+    # Per-source count present for the stub source
+    assert "sources=stub:" in last_block, f"sources key missing: {last_block!r}"
+
+    # Divider is a well-formed HTML comment
+    assert last_block.endswith(" -->"), f"divider not closed: {last_block!r}"
+
+
+def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
+    """An exception escaping the main run path does not produce a Run Divider."""
+    results_path = tmp_path / "current.md"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    class _CrashingExtractor:
+        def prewarm(self) -> None:
+            pass
+
+        def classify_relevance(
+            self, language: str, title: str, raw_description: str
+        ) -> RelevanceVerdict:
+            raise RuntimeError("unexpected crash escaping main path")
+
+        def judge_match(
+            self, language: str, raw_description: str
+        ) -> MatchVerdict:  # pragma: no cover
+            raise NotImplementedError
+
+    with pytest.raises(RuntimeError):
+        run(
+            config_path,
+            extractor=_CrashingExtractor(),
+            parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        )
+
+    content = results_path.read_text(encoding="utf-8")
+    assert "<!-- run " not in content, (
+        "run divider must not be written when run crashes"
+    )

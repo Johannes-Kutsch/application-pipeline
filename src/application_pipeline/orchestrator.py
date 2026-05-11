@@ -28,7 +28,7 @@ from application_pipeline.llm import (
     OllamaExtractor,
 )
 from application_pipeline.parsers import Parser, ParserQuery, Position, PositionStub
-from application_pipeline.parsers.types import City, Remote
+from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.prefilter import DomainPreFilter
@@ -277,7 +277,7 @@ def run(
     parsers_dead = 0
     survivors: list[tuple[Position, Language]] = []
 
-    locations: list[City | Remote] = [City(loc) for loc in cfg.locations]
+    locations: list[Location] = [City(loc) for loc in cfg.locations]
     if cfg.include_remote:
         locations.append(Remote())
 

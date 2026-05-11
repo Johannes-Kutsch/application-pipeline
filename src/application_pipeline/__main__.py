@@ -45,11 +45,20 @@ logging.getLogger().addHandler(_tail)
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+
+    if len(args) == 2 and args[0] == "init":
+        from application_pipeline.init_cmd import init
+
+        init(Path(args[1]))
+        return
+
+    if len(args) != 1:
         print("usage: python -m application_pipeline <config>", file=sys.stderr)
+        print("       python -m application_pipeline init <dir>", file=sys.stderr)
         sys.exit(2)
 
-    config_path = Path(sys.argv[1])
+    config_path = Path(args[0])
     try:
         summary = run(config_path)
     except _FATAL as exc:

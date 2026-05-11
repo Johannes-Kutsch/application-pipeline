@@ -197,7 +197,12 @@ def run(
     dedup_store: DeduplicationStore | None = None,
     results_manager: ResultsFileManager | None = None,
     layout: Layout | None = None,
+    _stage_out: list[str] | None = None,
 ) -> RunSummary:
+    def _set_stage(s: str) -> None:
+        if _stage_out is not None:
+            _stage_out[0] = s
+
     _start = time.monotonic()
 
     # Step 1: Load config
@@ -310,6 +315,7 @@ def run(
 
         while parsers_remaining:
             pid, payload = outbound.get()
+            _set_stage(f"parser:{pid}")
 
             if isinstance(payload, PositionStub):
                 discovered += 1
@@ -370,6 +376,7 @@ def run(
             t.join()
 
     # Step 10: Classify batch — all classify_relevance calls before any judge_match call
+    _set_stage("classify")
     classifier_dropped = 0
     errored = 0
     classify_calls = 0
@@ -394,6 +401,7 @@ def run(
             classifier_dropped += 1
 
     # Step 11: Judge batch — all judge_match calls after classify batch
+    _set_stage("judge")
     judged: list[tuple[Position, MatchVerdict]] = []
     judge_calls = 0
     judge_total_s = 0.0
@@ -410,6 +418,7 @@ def run(
         judged.append((position, match_verdict))
 
     # Step 12: Render → append+fsync → mark_seen("kept"), strictly in order
+    _set_stage("results_write")
     written = 0
     green = 0
     amber = 0

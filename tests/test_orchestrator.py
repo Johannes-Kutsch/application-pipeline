@@ -1222,3 +1222,70 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
     assert "<!-- run " not in content, (
         "run divider must not be written when run crashes"
     )
+
+
+# ---------------------------------------------------------------------------
+# Failure Report (issue #117)
+# ---------------------------------------------------------------------------
+
+
+def test_fatal_error_writes_failure_report_and_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ExtractorUnreachableError → failure report written, stage=orchestrator, exit 1."""
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+
+    class _FailingExtractor:
+        def prewarm(self) -> None:
+            raise ExtractorUnreachableError("test: ollama unreachable")
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.OllamaExtractor",
+        lambda *a, **kw: _FailingExtractor(),
+    )
+
+    from application_pipeline.__main__ import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+
+    failures_dir = tmp_path / "results" / "failures"
+    reports = list(failures_dir.glob("*.md"))
+    assert len(reports) == 1, f"expected one failure report, got {reports}"
+
+    body = reports[0].read_text(encoding="utf-8")
+    assert "orchestrator" in body
+    assert "startup failed" in body  # log tail captured before exception propagated
+
+
+def test_results_write_stage_label_on_append_failure(tmp_path: Path) -> None:
+    """ResultsFileError in step 12 → _stage_out set to 'results_write'."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+    crashing_rm = MagicMock()
+    crashing_rm.ensure_initialized.return_value = None
+    crashing_rm.next_position_number.return_value = 1
+    crashing_rm.append.side_effect = ResultsFileError("disk full")
+
+    stage_out: list[str] = ["orchestrator"]
+    with pytest.raises(ResultsFileError):
+        run(
+            config_path,
+            extractor=_FakeExtractor(),
+            parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            results_manager=crashing_rm,
+            _stage_out=stage_out,
+        )
+
+    assert stage_out[0] == "results_write"

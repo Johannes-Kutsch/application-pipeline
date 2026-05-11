@@ -14,11 +14,13 @@ from application_pipeline.parsers import (
     Position,
     PositionStub,
 )
+from application_pipeline.config.types import ConfigError
 from application_pipeline.parsers.location import (
     NotServed,
     RemoteWire,
     Resolved,
     resolve,
+    validate_coverage,
 )
 from application_pipeline.parsers.registry import get
 from application_pipeline.parsers.types import City, Location, Remote
@@ -271,3 +273,55 @@ def test_resolve_whitespace_only_city_returns_not_served() -> None:
     parser = _FakeParser(served_cities={"hamburg"}, serves_remote=False)
     result = resolve(City(name="   "), parser)
     assert result == NotServed()
+
+
+# --- validate_coverage() ---
+
+
+def test_validate_coverage_valid_config_passes_silently() -> None:
+    parser = _FakeParser(served_cities={"hamburg", "berlin"}, serves_remote=True)
+    validate_coverage([parser], locations=["Hamburg", "Berlin"], include_remote=True)
+
+
+def test_validate_coverage_unservable_city_raises_with_offending_entry() -> None:
+    parser = _FakeParser(served_cities={"hamburg"}, serves_remote=False)
+    with pytest.raises(ConfigError, match="Atlantis"):
+        validate_coverage([parser], locations=["Atlantis"], include_remote=False)
+
+
+def test_validate_coverage_unservable_city_message_includes_close_match_hint() -> None:
+    parser = _FakeParser(
+        served_cities={"hamburg", "berlin", "munich"}, serves_remote=False
+    )
+    with pytest.raises(ConfigError, match="hamburg"):
+        validate_coverage([parser], locations=["hamburh"], include_remote=False)
+
+
+def test_validate_coverage_include_remote_without_remote_source_raises() -> None:
+    class _NamedFake(_FakeParser):
+        __name__ = "stellen_hamburg_api"
+
+    parser = _NamedFake(served_cities={"hamburg"}, serves_remote=False)
+    with pytest.raises(ConfigError) as excinfo:
+        validate_coverage([parser], locations=["Hamburg"], include_remote=True)
+    msg = str(excinfo.value)
+    assert "remote" in msg.lower()
+    assert "stellen_hamburg_api" in msg
+
+
+def test_validate_coverage_lambda_true_parser_does_not_crash() -> None:
+    class _NationwideFake:
+        serves_remote = False
+
+        def serves(self, name: str) -> bool:
+            return True
+
+        def to_wire(self, name: str) -> str:
+            return name
+
+        def remote_wire(self) -> str:
+            return ""
+
+    validate_coverage(
+        [_NationwideFake()], locations=["Atlantis", "Hamburg"], include_remote=False
+    )

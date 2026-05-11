@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import html.parser
 import json
+import logging
+import sys
 import time
 from collections.abc import Iterator
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, NoReturn
 
 import httpx
 
@@ -14,6 +16,7 @@ from application_pipeline.http.retry import (
     exponential_backoff,
     retry,
 )
+from application_pipeline.text import normalize
 
 from ._http import (
     BACKOFF_INITIAL,
@@ -33,10 +36,29 @@ from .http import (
     check_response_status,
     request_with_retry,
 )
-from .types import Position, PositionStub
+from .location import NotServed, RemoteWire, Resolved, resolve
+from .types import City, ParserQuery, Position, PositionStub
 
+_log = logging.getLogger(__name__)
+
+_PARSER_TYPE = "stellen_hamburg"
 _SEARCH_URL = "https://api-stellen.hamburg.de/search/"
 _PAGE_SIZE = 25
+
+
+def serves(name: str) -> bool:
+    return normalize(name) == "hamburg"
+
+
+def to_wire(name: str) -> str:
+    return "Hamburg"
+
+
+serves_remote: bool = False
+
+
+def remote_wire() -> NoReturn:
+    raise AssertionError("stellen_hamburg does not serve remote")
 
 HttpPost = Callable[[str, bytes, float], bytes]
 
@@ -138,16 +160,12 @@ def _employment_type(
 class StellenHamburgParser:
     def __init__(
         self,
-        locations: list[str],
-        include_remote: bool = False,
         *,
         _http_get: HttpGet | None = None,
         _http_post: HttpPost | None = None,
         _timeout: float = DEFAULT_TIMEOUT,
         _retries: int = DEFAULT_RETRIES,
     ) -> None:
-        self._locations = locations
-        self._include_remote = include_remote
         self._http_get: HttpGet = _http_get or _default_http_get
         self._http_post: HttpPost = _http_post or _default_http_post
         self._timeout = _timeout
@@ -160,7 +178,20 @@ class StellenHamburgParser:
     def __exit__(self, *args: object) -> None:
         pass
 
-    def discover(self, query: str) -> Iterator[PositionStub]:
+    def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
+        match resolve(query.location, sys.modules[__name__]):
+            case NotServed():
+                _log.info(
+                    "not_served parser_type=%s location=%r",
+                    _PARSER_TYPE,
+                    query.location,
+                )
+                return
+            case RemoteWire(_):
+                return
+            case Resolved(_):
+                pass
+
         seen: set[str] = set()
         offset = 0
         while True:
@@ -168,7 +199,7 @@ class StellenHamburgParser:
             body = json.dumps(
                 {
                     "SearchParameters": {
-                        "PositionTitle": query,
+                        "PositionTitle": query.keyword,
                         "NumberOfResults": _PAGE_SIZE,
                         "Offset": offset,
                     }
@@ -250,3 +281,19 @@ class StellenHamburgParser:
 
 
 parser_class = StellenHamburgParser
+
+if __name__ == "__main__":
+    import sys as _sys
+
+    query = ParserQuery(
+        keyword=_sys.argv[1] if len(_sys.argv) > 1 else "*",
+        location=City("hamburg"),
+        max_results=5,
+    )
+    with StellenHamburgParser() as p:
+        stubs = list(p.discover(query))
+    print(f"discover: {len(stubs)} stubs")
+    if stubs:
+        with StellenHamburgParser() as p:
+            pos = p.enrich(stubs[0])
+        print(f"enrich: {len(pos.raw_description)} chars")

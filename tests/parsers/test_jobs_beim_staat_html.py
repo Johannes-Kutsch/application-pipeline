@@ -8,6 +8,7 @@ import pytest
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.types import City, Remote
 from application_pipeline.parsers.http import HttpGet
+from application_pipeline.parsers import jobs_beim_staat_html as parser_module
 from application_pipeline.parsers.jobs_beim_staat_html import (
     JobsBeimStaatParser,
     _parse_posted_date,
@@ -121,6 +122,35 @@ def test_parse_posted_date_case_insensitive_gestern() -> None:
 
 
 # ---------------------------------------------------------------------------
+# LocationCoverage module-level symbols
+# ---------------------------------------------------------------------------
+
+
+def test_module_serves_known_city() -> None:
+    assert parser_module.serves("hamburg") is True
+
+
+def test_module_does_not_serve_unknown_city() -> None:
+    assert parser_module.serves("atlantis") is False
+
+
+def test_module_to_wire_returns_ascii_slug_for_umlaut_city() -> None:
+    assert parser_module.to_wire("köln") == "koeln"
+
+
+def test_module_to_wire_returns_slug_for_compound_city() -> None:
+    assert parser_module.to_wire("frankfurt am main") == "frankfurt-am-main"
+
+
+def test_module_serves_remote_is_true() -> None:
+    assert parser_module.serves_remote is True
+
+
+def test_module_remote_wire_returns_homeoffice_slug() -> None:
+    assert parser_module.remote_wire() == "homeoffice"
+
+
+# ---------------------------------------------------------------------------
 # parser_class attribute / Protocol
 # ---------------------------------------------------------------------------
 
@@ -225,7 +255,7 @@ def test_discover_uses_homeoffice_slug_when_location_is_homeoffice(
     assert any("homeoffice" in u for u in fetched_urls)
 
 
-def test_discover_unknown_location_logs_warning_and_yields_nothing(
+def test_discover_not_served_logs_info_and_yields_nothing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     import logging
@@ -233,22 +263,27 @@ def test_discover_unknown_location_logs_warning_and_yields_nothing(
     def never_called(url: str, timeout: float) -> bytes:
         raise AssertionError("should not fetch")
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         with JobsBeimStaatParser(_http_get=never_called) as p:
             stubs = list(p.discover(_query(location=City("UnknownCity99"))))
 
     assert stubs == []
-    assert "unknown_location" in caplog.text
+    assert "location_not_served" in caplog.text
+    assert "jobs_beim_staat_html" in caplog.text
+    assert "UnknownCity99" in caplog.text
 
 
-def test_discover_yields_nothing_when_location_is_none() -> None:
-    def never_called(url: str, timeout: float) -> bytes:
-        raise AssertionError("should not fetch")
+def test_discover_remote_fetches_homeoffice_slug(list_html: bytes) -> None:
+    fetched_urls: list[str] = []
 
-    with JobsBeimStaatParser(_http_get=never_called) as p:
-        stubs = list(p.discover(_query(location=Remote())))
+    def capturing_get(url: str, timeout: float) -> bytes:
+        fetched_urls.append(url)
+        return list_html
 
-    assert stubs == []
+    with JobsBeimStaatParser(_http_get=capturing_get) as p:
+        list(p.discover(_query(location=Remote())))
+
+    assert any("jobs/homeoffice" in u for u in fetched_urls)
 
 
 def test_discover_fetches_correct_slug_for_location(list_html: bytes) -> None:

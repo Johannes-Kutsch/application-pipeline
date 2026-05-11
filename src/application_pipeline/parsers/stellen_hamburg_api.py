@@ -3,9 +3,10 @@ from __future__ import annotations
 import html.parser
 import json
 import logging
+import sys
 import time
 from collections.abc import Iterator
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, NoReturn
 
 import httpx
 
@@ -35,18 +36,30 @@ from .http import (
     check_response_status,
     request_with_retry,
 )
+from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import City, ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
 
+_PARSER_TYPE = "stellen_hamburg_api"
 _DISPLAY_NAME = "stellen.hamburg"
 _SEARCH_URL = "https://api-stellen.hamburg.de/search/"
 _PAGE_SIZE = 25
 
-# Keys are normalize()-ed location names.
-_LOCATION_SLUGS: dict[str, str] = {
-    "hamburg": "Hamburg",
-}
+
+def serves(name: str) -> bool:
+    return normalize(name) == "hamburg"
+
+
+def to_wire(name: str) -> str:
+    return "Hamburg"
+
+
+serves_remote: bool = False
+
+
+def remote_wire() -> NoReturn:
+    raise AssertionError("stellen_hamburg_api does not serve remote")
 
 HttpPost = Callable[[str, bytes, float], bytes]
 
@@ -175,17 +188,18 @@ class StellenHamburgParser:
         pass
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
-        if query.location is None:
-            return
-
-        slug = _LOCATION_SLUGS.get(normalize(query.location) or "")
-        if slug is None:
-            _log.warning(
-                "unmapped_location parser=%s location=%r",
-                _DISPLAY_NAME,
-                query.location,
-            )
-            return
+        match resolve(query.location, sys.modules[__name__]):
+            case NotServed():
+                _log.info(
+                    "not_served parser_type=%s location=%r",
+                    _PARSER_TYPE,
+                    query.location,
+                )
+                return
+            case RemoteWire(_):
+                return
+            case Resolved(_):
+                pass
 
         seen: set[str] = set()
         count = 0

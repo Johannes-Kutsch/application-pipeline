@@ -318,7 +318,30 @@ def test_discover_normalizes_location_before_slug_lookup() -> None:
     assert any("M%C3%BCnchen" in u or "München" in u for u in urls)
 
 
-def test_discover_unknown_location_yields_nothing_and_logs_warning(
+def test_discover_unknown_location_yields_nothing_and_logs_info(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def capturing_get(url: str, timeout: float) -> bytes:
+        return _search_body([])
+
+    with caplog.at_level(logging.INFO, logger="application_pipeline.parsers.bundesagentur_api"):
+        with BundesagenturParser(_http_get=capturing_get) as p:
+            stubs = list(p.discover(_query(location=City("unknown_city_xyz"))))
+
+    assert stubs == []
+    not_served = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.INFO and "bundesagentur_api" in r.getMessage()
+    ]
+    assert not_served, "expected an INFO log line for NotServed"
+    msg = not_served[0].getMessage()
+    assert "parser_type" in msg
+    assert "location" in msg
+    assert "unknown_city_xyz" in msg
+
+
+def test_discover_unknown_location_does_not_log_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     def capturing_get(url: str, timeout: float) -> bytes:
@@ -326,10 +349,9 @@ def test_discover_unknown_location_yields_nothing_and_logs_warning(
 
     with caplog.at_level(logging.WARNING):
         with BundesagenturParser(_http_get=capturing_get) as p:
-            stubs = list(p.discover(_query(location=City("unknown_city_xyz"))))
+            list(p.discover(_query(location=City("unknown_city_xyz"))))
 
-    assert stubs == []
-    assert any("unmapped_location" in r.message for r in caplog.records)
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 # ---------------------------------------------------------------------------

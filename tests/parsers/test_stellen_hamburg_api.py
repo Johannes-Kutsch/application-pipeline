@@ -115,25 +115,38 @@ def test_discover_yields_nothing_when_location_unmapped(
     def never_called(url: str, body: bytes, timeout: float) -> bytes:
         raise AssertionError("should not POST")
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(
+        logging.INFO, logger="application_pipeline.parsers.stellen_hamburg_api"
+    ):
         with StellenHamburgParser(_http_post=never_called) as p:
             stubs = list(p.discover(_query(location=City("berlin"))))
 
     assert stubs == []
-    assert "unmapped_location" in caplog.text
+    info_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.INFO and "not_served" in r.getMessage()
+    ]
+    assert info_records, "expected an INFO log line for NotServed"
+    msg = info_records[0].getMessage()
+    assert "parser_type" in msg
+    assert "location" in msg
+    assert "berlin" in msg
 
 
-def test_discover_unmapped_location_warning_names_parser(
+def test_discover_unmapped_location_info_names_parser_type(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     def never_called(url: str, body: bytes, timeout: float) -> bytes:
         raise AssertionError("should not POST")
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(
+        logging.INFO, logger="application_pipeline.parsers.stellen_hamburg_api"
+    ):
         with StellenHamburgParser(_http_post=never_called) as p:
             list(p.discover(_query(location=City("munich"))))
 
-    assert "stellen.hamburg" in caplog.text
+    assert "stellen_hamburg_api" in caplog.text
 
 
 def test_discover_normalizes_location_case(search_json: bytes) -> None:

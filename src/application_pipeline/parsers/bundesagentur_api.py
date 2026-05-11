@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal
@@ -9,7 +10,6 @@ from typing import Any, Literal
 import httpx
 
 from application_pipeline.http import HttpRetryError
-from application_pipeline.text import normalize
 
 from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
 from ._text import parse_iso_date, strip_html
@@ -22,6 +22,7 @@ from .http import (
     check_response_status,
     request_with_retry,
 )
+from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import City, ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
@@ -31,8 +32,7 @@ _API_KEY = "jobboerse-jobsuche"
 _PAGE_SIZE = 25
 _DISPLAY_NAME = "Bundesagentur"
 
-# Keys are normalize()-ed location strings; values are the API's wo= slug.
-_LOCATION_SLUGS: dict[str, str] = {
+_WIRE_BY_NAME: dict[str, str] = {
     "berlin": "Berlin",
     "bonn": "Bonn",
     "bremen": "Bremen",
@@ -63,6 +63,22 @@ _LOCATION_SLUGS: dict[str, str] = {
     "stuttgart": "Stuttgart",
     "wiesbaden": "Wiesbaden",
 }
+
+
+def serves(name: str) -> bool:
+    return name in _WIRE_BY_NAME
+
+
+def to_wire(name: str) -> str:
+    return _WIRE_BY_NAME[name]
+
+
+serves_remote: bool = True
+
+
+def remote_wire() -> dict[str, str]:
+    # PRD #51 decision 41: use arbeitszeit=ho for homeoffice
+    return {"arbeitszeit": "ho"}
 
 
 def _default_http_get(url: str, timeout: float) -> bytes:
@@ -116,20 +132,18 @@ class BundesagenturParser:
         pass
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
-        extra_params: dict[str, object] = {}
-        if query.location is None:
-            # Remote search: PRD #51 decision 41 — use arbeitszeit=ho for homeoffice
-            extra_params["arbeitszeit"] = "ho"
-        else:
-            key = normalize(query.location)
-            slug = _LOCATION_SLUGS.get(key) if key else None
-            if slug is None:
-                _log.warning(
-                    "unmapped_location parser_type=bundesagentur_api location=%s",
+        extra_params: dict[str, object]
+        match resolve(query.location, sys.modules[__name__]):
+            case Resolved(wire):
+                extra_params = {"wo": wire}
+            case RemoteWire(payload):
+                extra_params = dict(payload)
+            case NotServed():
+                _log.info(
+                    "not_served parser_type=bundesagentur_api location=%s",
                     query.location,
                 )
                 return
-            extra_params["wo"] = slug
 
         seen: set[str] = set()
         count = 0

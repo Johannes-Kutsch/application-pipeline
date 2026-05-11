@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 from collections.abc import Iterator
 from datetime import date, timedelta
+from typing import assert_never
 
 import httpx
 from bs4 import BeautifulSoup
 
 from application_pipeline.http import HttpRetryError
-from application_pipeline.text import normalize
 
 from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
 from .errors import ParserError
@@ -21,6 +22,7 @@ from .http import (
     check_response_status,
     request_with_retry,
 )
+from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
@@ -61,6 +63,21 @@ _LOCATION_SLUGS: dict[str, str] = {
     "stuttgart": "stuttgart",
     "wiesbaden": "wiesbaden",
 }
+
+serves_remote = True
+
+
+def serves(name: str) -> bool:
+    return name in _LOCATION_SLUGS
+
+
+def to_wire(name: str) -> str:
+    return _LOCATION_SLUGS[name]
+
+
+def remote_wire() -> str:
+    return "homeoffice"
+
 
 _HEUTE_RE = re.compile(r"^heute$", re.IGNORECASE)
 _GESTERN_RE = re.compile(r"^gestern$", re.IGNORECASE)
@@ -127,16 +144,19 @@ class JobsBeimStaatParser:
         pass
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
-        if query.location is None:
-            return
-        key = normalize(query.location)
-        slug = _LOCATION_SLUGS.get(key) if key else None
-        if slug is None:
-            _log.warning(
-                "unknown_location parser_type=jobs_beim_staat_html location=%s",
-                query.location,
-            )
-            return
+        match resolve(query.location, sys.modules[__name__]):
+            case Resolved(wire=slug):
+                pass
+            case RemoteWire(payload=slug):
+                pass
+            case NotServed():
+                _log.info(
+                    "location_not_served parser_type=jobs_beim_staat_html location=%r",
+                    query.location,
+                )
+                return
+            case _ as unreachable:
+                assert_never(unreachable)
         seen: set[str] = set()
         count = 0
         for stub in self._fetch_listing_page(slug, seen):

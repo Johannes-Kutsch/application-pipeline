@@ -112,14 +112,15 @@ def run(
     skipped = 0
     enriched: list[Position] = []
 
+    locations: list[str | None] = list(cfg.locations)
+    if cfg.include_remote:
+        locations.append(None)
+
     with ExitStack() as stack:
         parsers: list[tuple[Parser, SourceEntry]] = [
             (stack.enter_context(cls()), source) for cls, source in resolved
         ]
         for parser, source in parsers:
-            locations: list[str | None] = list(cfg.locations)
-            if cfg.include_remote:
-                locations.append(None)
             for keyword in cfg.keywords:
                 for location in locations:
                     query = ParserQuery(

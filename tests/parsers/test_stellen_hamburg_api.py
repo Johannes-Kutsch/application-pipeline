@@ -347,3 +347,67 @@ def test_enrich_raises_parser_error_on_http_failure(stub: PositionStub) -> None:
     with StellenHamburgParser(_http_get=failing_get, _retries=1) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
+
+
+# ---------------------------------------------------------------------------
+# enrich — list-wrapped JSON-LD payload
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def detail_list_wrapped_html() -> bytes:
+    return _load("detail_list_wrapped.html")
+
+
+@pytest.fixture
+def detail_no_job_posting_html() -> bytes:
+    return _load("detail_no_job_posting.html")
+
+
+def test_enrich_list_wrapped_jsonld_returns_nonempty_description(
+    stub: PositionStub, detail_list_wrapped_html: bytes
+) -> None:
+    get = _make_get({"jobad": detail_list_wrapped_html})
+    with StellenHamburgParser(_http_get=get) as p:
+        pos = p.enrich(stub)
+    assert pos.raw_description != ""
+
+
+def test_enrich_list_wrapped_jsonld_description_has_no_html_tags(
+    stub: PositionStub, detail_list_wrapped_html: bytes
+) -> None:
+    get = _make_get({"jobad": detail_list_wrapped_html})
+    with StellenHamburgParser(_http_get=get) as p:
+        pos = p.enrich(stub)
+    assert "<p>" not in pos.raw_description
+    assert "<strong>" not in pos.raw_description
+
+
+def test_enrich_list_wrapped_jsonld_decodes_umlauts(
+    stub: PositionStub, detail_list_wrapped_html: bytes
+) -> None:
+    get = _make_get({"jobad": detail_list_wrapped_html})
+    with StellenHamburgParser(_http_get=get) as p:
+        pos = p.enrich(stub)
+    assert "&uuml;" not in pos.raw_description
+    assert "ü" in pos.raw_description
+
+
+def test_enrich_list_selects_first_job_posting_entry(
+    stub: PositionStub, detail_list_wrapped_html: bytes
+) -> None:
+    get = _make_get({"jobad": detail_list_wrapped_html})
+    with StellenHamburgParser(_http_get=get) as p:
+        pos = p.enrich(stub)
+    assert pos.posted_date == date(2026, 5, 1)
+    assert pos.deadline == date(2026, 7, 31)
+    assert pos.employment_type == "full-time"
+
+
+def test_enrich_list_without_job_posting_yields_empty_description(
+    stub: PositionStub, detail_no_job_posting_html: bytes
+) -> None:
+    get = _make_get({"jobad": detail_no_job_posting_html})
+    with StellenHamburgParser(_http_get=get) as p:
+        pos = p.enrich(stub)
+    assert pos.raw_description == ""

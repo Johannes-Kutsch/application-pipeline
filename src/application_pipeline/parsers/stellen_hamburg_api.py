@@ -120,6 +120,14 @@ class _JsonLdExtractor(html.parser.HTMLParser):
                 data = json.loads("".join(self._chunks))
                 if isinstance(data, dict) and data.get("@type") == "JobPosting":
                     self._job_posting = data
+                elif isinstance(data, list):
+                    for entry in data:
+                        if (
+                            isinstance(entry, dict)
+                            and entry.get("@type") == "JobPosting"
+                        ):
+                            self._job_posting = entry
+                            break
             except (json.JSONDecodeError, ValueError):
                 pass
 

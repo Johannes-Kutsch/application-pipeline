@@ -47,7 +47,7 @@ def write_failure(
     failures_dir.mkdir(parents=True, exist_ok=True)
 
     target = failures_dir / f"{timestamp}.md"
-    tmp = Path(str(target) + ".tmp")
+    tmp = target.with_name(target.name + ".tmp")
 
     body = _render(timestamp, stage, error, log_tail, _discover_tag())
     tmp.write_text(body, encoding="utf-8")

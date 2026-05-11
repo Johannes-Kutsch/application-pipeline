@@ -1,14 +1,27 @@
+"""jobs-beim-staat HTML parser.
+
+Fetches job cards from the jobsearchRestApi JSON-envelope endpoint at
+jobs-beim-staat.de.  The ``jobs`` field in each envelope is an HTML
+fragment; cards are parsed from it with BeautifulSoup.
+
+``q="*"`` maps to an empty ``q=`` value — the REST endpoint returns all
+jobs matching place/radius when the keyword field is empty (parser-local
+convention).
+"""
+
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sys
+import urllib.parse
 from collections.abc import Iterator
 from datetime import date, timedelta
-from typing import assert_never
+from typing import Any, assert_never
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from application_pipeline.http import HttpRetryError
 
@@ -28,51 +41,19 @@ from .types import ParserQuery, Position, PositionStub
 _log = logging.getLogger(__name__)
 
 _BASE_URL = "https://www.jobs-beim-staat.de"
+_REST_PATH = "/jobsearchRestApi"
 _DISPLAY_NAME = "jobs-beim-staat"
-
-# Keys are normalize()-ed city names; values are URL path slugs.
-_LOCATION_SLUGS: dict[str, str] = {
-    "bonn": "bonn",
-    "berlin": "berlin",
-    "bremen": "bremen",
-    "dortmund": "dortmund",
-    "dresden": "dresden",
-    "duesseldorf": "duesseldorf",
-    "düsseldorf": "duesseldorf",
-    "erfurt": "erfurt",
-    "essen": "essen",
-    "frankfurt": "frankfurt-am-main",
-    "frankfurt am main": "frankfurt-am-main",
-    "hamburg": "hamburg",
-    "hannover": "hannover",
-    "homeoffice": "homeoffice",
-    "kiel": "kiel",
-    "köln": "koeln",
-    "koeln": "koeln",
-    "leipzig": "leipzig",
-    "magdeburg": "magdeburg",
-    "mainz": "mainz",
-    "münchen": "muenchen",
-    "muenchen": "muenchen",
-    "nürnberg": "nuernberg",
-    "nuernberg": "nuernberg",
-    "potsdam": "potsdam",
-    "saarbrücken": "saarbruecken",
-    "saarbruecken": "saarbruecken",
-    "schwerin": "schwerin",
-    "stuttgart": "stuttgart",
-    "wiesbaden": "wiesbaden",
-}
+_MAX_START = 10_000
 
 serves_remote = True
 
 
 def serves(name: str) -> bool:
-    return name in _LOCATION_SLUGS
+    return True
 
 
 def to_wire(name: str) -> str:
-    return _LOCATION_SLUGS[name]
+    return name
 
 
 def remote_wire() -> str:
@@ -114,14 +95,51 @@ def _normalize_description(text: str) -> str:
     return collapsed.strip()
 
 
-def _default_http_get(url: str, timeout: float) -> bytes:
-    with httpx.Client(
-        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
-        headers={"User-Agent": USER_AGENT},
-    ) as client:
-        resp = client.get(url, timeout=timeout)
-        check_response_status(resp, url)
-        return resp.content
+def _text_after_icon(card: Tag, icon_suffix: str) -> str | None:
+    for span in card.select(".serp-jobcontet-cards-container-text"):
+        img = span.find("img")
+        if not isinstance(img, Tag):
+            continue
+        if str(img.get("src", "")).endswith(icon_suffix):
+            for el in span.find_all("img"):
+                el.extract()
+            return span.get_text(strip=True) or None
+    return None
+
+
+def _parse_card(card: Tag, today: date) -> PositionStub | None:
+    link = card.select_one("h3 > a")
+    if not isinstance(link, Tag):
+        return None
+    href = str(link.get("href", "") or "")
+    if not href:
+        return None
+    full_url = f"{_BASE_URL}{href}" if href.startswith("/") else href
+    title = link.get_text(strip=True)
+
+    company: str | None = None
+    company_el = card.select_one("[data-company]")
+    if isinstance(company_el, Tag):
+        raw = str(company_el.get("data-company") or "").strip()
+        company = raw or None
+    if company is None:
+        fw500 = card.select_one(".serp-jobcontet-cards-container-text.fw-500")
+        if fw500:
+            company = fw500.get_text(strip=True) or None
+
+    location = _text_after_icon(card, "location-pin.png")
+    raw_date = _text_after_icon(card, "history.png")
+    posted_date = _parse_posted_date(raw_date, today) if raw_date else None
+
+    return PositionStub(
+        url=full_url,
+        title=title,
+        source=_DISPLAY_NAME,
+        company=company,
+        location=location,
+        language="de",
+        posted_date=posted_date,
+    )
 
 
 class JobsBeimStaatParser:
@@ -132,23 +150,40 @@ class JobsBeimStaatParser:
         _timeout: float = DEFAULT_TIMEOUT,
         _retries: int = DEFAULT_RETRIES,
     ) -> None:
-        self._http_get: HttpGet = _http_get or _default_http_get
         self._timeout = _timeout
         self._retries = _retries
         self._throttle = Throttle()
+        if _http_get is None:
+            self._client: httpx.Client | None = httpx.Client(
+                timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
+                headers={"User-Agent": USER_AGENT},
+            )
+            _client = self._client
+
+            def _default_get(url: str, timeout: float) -> bytes:
+                resp = _client.get(url, timeout=timeout)
+                check_response_status(resp, url)
+                return resp.content
+
+            self._http_get: HttpGet = _default_get
+        else:
+            self._client = None
+            self._http_get = _http_get
 
     def __enter__(self) -> "JobsBeimStaatParser":
         return self
 
     def __exit__(self, *args: object) -> None:
-        pass
+        if self._client is not None:
+            self._client.close()
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
+        place: str
         match resolve(query.location, sys.modules[__name__]):
-            case Resolved(wire=slug):
-                pass
-            case RemoteWire(payload=slug):
-                pass
+            case Resolved(wire=w):
+                place = w
+            case RemoteWire(payload=p):
+                place = str(p)
             case NotServed():
                 _log.info(
                     "location_not_served parser_type=jobs_beim_staat_html location=%r",
@@ -157,58 +192,58 @@ class JobsBeimStaatParser:
                 return
             case _ as unreachable:
                 assert_never(unreachable)
-        seen: set[str] = set()
+
+        q = "" if query.keyword == "*" else query.keyword
         count = 0
-        for stub in self._fetch_listing_page(slug, seen):
-            if count >= query.max_results:
-                return
-            yield stub
-            count += 1
-
-    def _fetch_listing_page(self, slug: str, seen: set[str]) -> Iterator[PositionStub]:
-        url = f"{_BASE_URL}/jobs/{slug}"
-        self._throttle.wait()
-        try:
-            raw = request_with_retry(url, self._timeout, self._retries, self._http_get)
-        except HttpRetryError as exc:
-            raise ParserError(
-                f"jobs-beim-staat discover failed for {url}: {exc}"
-            ) from exc.__cause__
-
-        soup = BeautifulSoup(raw, "html.parser")
+        step: int | None = None
+        start = 0
         today = date.today()
 
-        for item in soup.select("article.joblist__item"):
-            link = item.select_one("a")
-            if not link:
-                continue
-            href: str = link.get("href") or ""  # type: ignore[assignment]
-            if not href:
-                continue
-            full_url = f"{_BASE_URL}{href}" if href.startswith("/") else href
-            if full_url in seen:
-                continue
-            seen.add(full_url)
+        while True:
+            if start >= _MAX_START:
+                break
 
-            title = link.get_text(strip=True)
-            employer_tag = item.select_one(".joblist__employer")
-            company = employer_tag.get_text(strip=True) if employer_tag else None
-            location_tag = item.select_one(".joblist__location")
-            location = location_tag.get_text(strip=True) if location_tag else None
-            posted_date: date | None = None
-            date_tag = item.select_one(".joblist__date")
-            if date_tag:
-                posted_date = _parse_posted_date(date_tag.get_text(strip=True), today)
+            params: dict[str, str] = {
+                "q": q,
+                "place": place,
+                "radius": "20",
+                "sort": "date",
+                "start": str(start),
+                "viewType": "card",
+            }
+            url = f"{_BASE_URL}{_REST_PATH}?{urllib.parse.urlencode(params)}"
 
-            yield PositionStub(
-                url=full_url,
-                title=title,
-                source=_DISPLAY_NAME,
-                company=company or None,
-                location=location or None,
-                language="de",
-                posted_date=posted_date,
-            )
+            self._throttle.wait()
+            try:
+                raw = request_with_retry(
+                    url, self._timeout, self._retries, self._http_get
+                )
+            except HttpRetryError as exc:
+                raise ParserError(
+                    f"jobs-beim-staat discover failed for {url}: {exc}"
+                ) from exc.__cause__
+
+            envelope: dict[str, Any] = json.loads(raw)
+            jobs_html = str(envelope.get("jobs", ""))
+            soup = BeautifulSoup(jobs_html, "html.parser")
+            cards = soup.select("div.serp-jobcontet-cards-container-joblist.jobcard")
+
+            if not cards:
+                break
+
+            if step is None:
+                step = len(cards)
+
+            for card in cards:
+                if count >= query.max_results:
+                    return
+                stub = _parse_card(card, today)
+                if stub is None:
+                    continue
+                yield stub
+                count += 1
+
+            start += step
 
     def enrich(self, stub: PositionStub) -> Position:
         self._throttle.wait()

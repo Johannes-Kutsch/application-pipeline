@@ -1,10 +1,12 @@
 {
-  "hashId": "abc123",
-  "titel": "Software Engineer",
-  "arbeitgeber": "Acme GmbH",
+  "referenznummer": "abc123",
+  "stellenangebotsTitel": "Software Engineer",
+  "firma": "Acme GmbH",
   "stellenbeschreibung": "<p>We are looking for a Software Engineer.</p><p>Requirements include Python experience.</p>",
-  "befristung": 1,
-  "arbeitszeitModelle": ["vz"],
-  "aktuelleVeroeffentlichungsdatum": "2024-01-15",
+  "vertragsdauer": "UNBEFRISTET",
+  "arbeitszeitVollzeit": true,
+  "arbeitszeitTeilzeitVormittag": false,
+  "arbeitszeitTeilzeitNachmittag": false,
+  "veroeffentlichungszeitraum": {"von": "2024-01-15"},
   "bewerbungsschluss": "2024-02-29"
 }

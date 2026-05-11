@@ -23,7 +23,7 @@ The threads are **pure producers**: the parser thread runs `discover()` *and* `e
 ## Consequences
 
 - The orchestrator (out of scope for the parsers PRD #19; deferred to a follow-on issue) gains a producer/consumer skeleton built on `queue.Queue` and `threading.Thread`. One thread per `parser_type` plus the main thread.
-- The `Parser` Protocol contract pins **"no shared mutable module-level state"** as a binding rule. Parser modules may have module-level *constants* (e.g., `_LOCATION_SLUGS`, `_DISPLAY_NAME`) but no caches, no global counters, no module-level `httpx.Client`.
+- The `Parser` Protocol contract pins **"no shared mutable module-level state"** as a binding rule. Parser modules may have module-level *constants* (e.g., `_DISPLAY_NAME`) and module-level pure functions implementing the **Location Coverage** protocol (`serves`, `to_wire`, `serves_remote`, `remote_wire` — per ADR-0014) but no caches, no global counters, no module-level `httpx.Client`.
 - `DeduplicationStore` and the Results File Manager keep their current single-thread design — no `threading.Lock`, no atomicity helpers beyond the existing `os.fsync` pattern.
 - `Config` does not gain a `MAX_PARSER_CONCURRENCY` knob. The number of parser threads equals the number of distinct `parser_type` strings in `Config.SOURCES` — bounded naturally by the number of registered parsers.
 - The `python -m application_pipeline.parsers.<name>` dev script remains useful and unaffected — it exercises a parser on the main thread without the orchestrator, perfect for fixture re-capture and manual drift checks (the live counterpart to the offline-by-default test suite).

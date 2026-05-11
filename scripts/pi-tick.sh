@@ -137,6 +137,16 @@ else
     done
 fi
 
+# ── step 4: seed missing settings files ──────────────────────────────────────
+# init is idempotent — skips files that already exist. Running it every tick
+# self-heals when a new release introduces a seed file (e.g. v0.1.2's prompts/).
+
+log "Seeding settings (init)"
+if ! init_out="$("${CURRENT_LINK}/.venv/bin/python" -m application_pipeline init "${SYNCHED_DIR}" 2>&1)"; then
+    write_failure "init" "application_pipeline init failed" "${init_out}"
+    exit 1
+fi
+
 # ── step 5: exec pipeline ─────────────────────────────────────────────────────
 
 log "Exec'ing pipeline"

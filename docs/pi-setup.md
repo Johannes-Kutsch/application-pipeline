@@ -114,12 +114,12 @@ Syncthing carries the **Results File** (`current.md`), **Seen State** (`.seen.js
 ### 4b. Install Syncthing on the laptop
 
 14. Install Syncthing on the laptop. Pick the instructions for your OS:
-    - **Windows**: download from <https://syncthing.net/downloads/>. The easiest option is the [SyncTrayzor](https://github.com/canton7/SyncTrayzor) bundle — it includes a tray icon and a Windows autostart toggle. Run the installer.
+    - **Windows**: the easiest option is **[SyncTrayzor v2](https://github.com/GermanCoding/SyncTrayzor)** (the maintained fork of the original SyncTrayzor, which is now unmaintained and recommends this fork). It bundles Syncthing with a tray icon and a Windows autostart toggle. Grab the latest `SyncTrayzorSetup-x64.exe` from the [releases page](https://github.com/GermanCoding/SyncTrayzor/releases/latest) and run it. Or, for a bare install without a GUI, download `syncthing.exe` from <https://syncthing.net/downloads/>.
     - **macOS**: `brew install syncthing` (Homebrew). For a GUI, use [Syncthing-macOS](https://github.com/syncthing/syncthing-macos).
     - **Linux**: `sudo apt-get install -y syncthing` (Debian/Ubuntu) or the equivalent for your distro.
 
 15. Enable autostart on the laptop so Syncthing runs whenever you log in:
-    - **Windows (SyncTrayzor)**: open SyncTrayzor → File → Settings → tick **Start automatically with Windows**.
+    - **Windows (SyncTrayzor v2)**: open SyncTrayzor → File → Settings → tick **Start automatically with Windows**.
     - **Windows (bare `syncthing.exe`)**: press `Win+R`, run `shell:startup`, and drop a shortcut to `syncthing.exe` into that folder.
     - **macOS (Homebrew)**: `brew services start syncthing` (starts now and on every login).
     - **Linux (systemd user service)**:

@@ -36,7 +36,7 @@ from .http import (
     request_with_retry,
 )
 from .location import NotServed, RemoteWire, Resolved, resolve
-from .types import ParserQuery, Position, PositionStub
+from .types import City, ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
 
@@ -86,6 +86,23 @@ def _parse_posted_date(raw: str, today: date) -> date | None:
         except ValueError:
             pass
     _log.info("unparseable_date parser_type=jobs_beim_staat_html raw=%s", raw)
+    return None
+
+
+def _extract_job_id(wrapper_html: bytes) -> str | None:
+    soup = BeautifulSoup(wrapper_html, "html.parser")
+    raw_url_input = soup.find("input", {"name": "raw-url"})
+    if isinstance(raw_url_input, Tag):
+        value = str(raw_url_input.get("value", ""))
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(value).query)
+        if "id" in params:
+            return params["id"][0]
+    iframe = soup.find("iframe")
+    if isinstance(iframe, Tag):
+        src = str(iframe.get("src", ""))
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(src).query)
+        if "id" in params:
+            return params["id"][0]
     return None
 
 
@@ -248,7 +265,7 @@ class JobsBeimStaatParser:
     def enrich(self, stub: PositionStub) -> Position:
         self._throttle.wait()
         try:
-            raw = request_with_retry(
+            wrapper_raw = request_with_retry(
                 stub.url, self._timeout, self._retries, self._http_get
             )
         except HttpRetryError as exc:
@@ -256,10 +273,25 @@ class JobsBeimStaatParser:
                 f"jobs-beim-staat enrich failed for {stub.url}: {exc}"
             ) from exc.__cause__
 
-        soup = BeautifulSoup(raw, "html.parser")
-        desc_tag = soup.select_one(".stellenangebot__description")
-        raw_text = desc_tag.get_text(separator="\n") if desc_tag else ""
-        raw_description = _normalize_description(raw_text)
+        job_id = _extract_job_id(wrapper_raw)
+        if job_id is None:
+            raise ParserError(
+                f"jobs-beim-staat enrich: no iframe target found in wrapper {stub.url}"
+            )
+
+        iframe_url = f"{_BASE_URL}/stellenanzeigen-details/?id={job_id}"
+        self._throttle.wait()
+        try:
+            iframe_raw = request_with_retry(
+                iframe_url, self._timeout, self._retries, self._http_get
+            )
+        except HttpRetryError as exc:
+            raise ParserError(
+                f"jobs-beim-staat enrich failed for {iframe_url}: {exc}"
+            ) from exc.__cause__
+
+        soup = BeautifulSoup(iframe_raw, "html.parser")
+        raw_description = _normalize_description(soup.get_text(separator="\n"))
 
         return Position(
             stub=stub,
@@ -269,3 +301,19 @@ class JobsBeimStaatParser:
 
 
 parser_class = JobsBeimStaatParser
+
+if __name__ == "__main__":
+    import sys as _sys
+
+    query = ParserQuery(
+        keyword=_sys.argv[1] if len(_sys.argv) > 1 else "*",
+        location=City("hamburg"),
+        max_results=5,
+    )
+    with JobsBeimStaatParser() as p:
+        stubs = list(p.discover(query))
+    print(f"discover: {len(stubs)} stubs")
+    if stubs:
+        with JobsBeimStaatParser() as p:
+            pos = p.enrich(stubs[0])
+        print(f"enrich: {len(pos.raw_description)} chars")

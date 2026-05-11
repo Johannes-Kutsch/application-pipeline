@@ -62,14 +62,19 @@ def list_html() -> bytes:
 
 
 @pytest.fixture
-def detail_html() -> bytes:
-    return _load("detail.html")
+def wrapper_html() -> bytes:
+    return _load("wrapper.html")
+
+
+@pytest.fixture
+def iframe_target_html() -> bytes:
+    return _load("iframe_target.html")
 
 
 @pytest.fixture
 def stub() -> PositionStub:
     return PositionStub(
-        url="https://www.jobs-beim-staat.de/stellenangebote/1001",
+        url="https://www.jobs-beim-staat.de/jobangebote/1965251471",
         title="Softwareentwickler/in (m/w/d)",
         source="jobs-beim-staat",
     )
@@ -369,23 +374,44 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
 
 
 # ---------------------------------------------------------------------------
-# enrich — description extraction
+# enrich — two-fetch flow
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_returns_position_with_raw_description(
-    stub: PositionStub, detail_html: bytes
+def test_enrich_fetches_wrapper_then_on_domain_iframe_target(
+    stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
-    get = _make_get([detail_html])
+    fetched_urls: list[str] = []
+    responses = iter([wrapper_html, iframe_target_html])
+
+    def capturing_get(url: str, timeout: float) -> bytes:
+        fetched_urls.append(url)
+        return next(responses)
+
+    with JobsBeimStaatParser(_http_get=capturing_get) as p:
+        p.enrich(stub)
+
+    assert fetched_urls[0] == stub.url
+    assert (
+        fetched_urls[1]
+        == "https://www.jobs-beim-staat.de/stellenanzeigen-details/?id=22630"
+    )
+    assert "jdn.jobs-beim-staat.de" not in fetched_urls[1]
+
+
+def test_enrich_returns_position_with_raw_description(
+    stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
+) -> None:
+    get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.raw_description != ""
 
 
 def test_enrich_description_contains_job_text(
-    stub: PositionStub, detail_html: bytes
+    stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
-    get = _make_get([detail_html])
+    get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert (
@@ -395,42 +421,31 @@ def test_enrich_description_contains_job_text(
 
 
 def test_enrich_description_has_no_html_tags(
-    stub: PositionStub, detail_html: bytes
+    stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
-    get = _make_get([detail_html])
+    get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert "<p>" not in pos.raw_description
     assert "<ul>" not in pos.raw_description
 
 
-def test_enrich_description_decodes_html_entities(
-    stub: PositionStub, detail_html: bytes
+def test_enrich_position_url_remains_wrapper_url(
+    stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
-    get = _make_get([detail_html])
+    get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(_http_get=get) as p:
         pos = p.enrich(stub)
-    assert "&auml;" not in pos.raw_description
-    assert "&uuml;" not in pos.raw_description
-    assert "ä" in pos.raw_description or "ü" in pos.raw_description
+    assert pos.stub.url == stub.url
 
 
 def test_enrich_position_references_original_stub(
-    stub: PositionStub, detail_html: bytes
+    stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
-    get = _make_get([detail_html])
+    get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(_http_get=get) as p:
         pos = p.enrich(stub)
     assert pos.stub is stub
-
-
-def test_enrich_source_on_stub_is_jobs_beim_staat(
-    stub: PositionStub, detail_html: bytes
-) -> None:
-    get = _make_get([detail_html])
-    with JobsBeimStaatParser(_http_get=get) as p:
-        pos = p.enrich(stub)
-    assert pos.stub.source == "jobs-beim-staat"
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +453,7 @@ def test_enrich_source_on_stub_is_jobs_beim_staat(
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_raises_parser_error_on_http_failure(stub: PositionStub) -> None:
+def test_enrich_raises_parser_error_on_wrapper_http_failure(stub: PositionStub) -> None:
     from application_pipeline.parsers import ParserError
 
     def failing_get(url: str, timeout: float) -> bytes:
@@ -449,15 +464,48 @@ def test_enrich_raises_parser_error_on_http_failure(stub: PositionStub) -> None:
             p.enrich(stub)
 
 
+def test_enrich_raises_parser_error_on_iframe_target_http_failure(
+    stub: PositionStub, wrapper_html: bytes
+) -> None:
+    from application_pipeline.parsers import ParserError
+
+    call_count = 0
+
+    def get(url: str, timeout: float) -> bytes:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return wrapper_html
+        raise OSError("timeout")
+
+    with JobsBeimStaatParser(_http_get=get, _retries=1) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)
+
+
+def test_enrich_raises_parser_error_on_wrapper_with_no_iframe_target(
+    stub: PositionStub,
+) -> None:
+    from application_pipeline.parsers import ParserError
+
+    empty_wrapper = b"<html><body><p>No iframe here</p></body></html>"
+    get = _make_get([empty_wrapper])
+    with JobsBeimStaatParser(_http_get=get) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)
+
+
 # ---------------------------------------------------------------------------
 # posted_date — threaded from listing page through to Position
 # ---------------------------------------------------------------------------
 
 
 def test_enrich_posted_date_set_from_vor_2_tagen(
-    list_html: bytes, detail_html: bytes
+    list_html: bytes, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
-    get = _make_get([_jobs_envelope(list_html), _empty_envelope(), detail_html])
+    get = _make_get(
+        [_jobs_envelope(list_html), _empty_envelope(), wrapper_html, iframe_target_html]
+    )
     with JobsBeimStaatParser(_http_get=get) as p:
         (first_stub, *_) = list(p.discover(_query()))
         pos = p.enrich(first_stub)

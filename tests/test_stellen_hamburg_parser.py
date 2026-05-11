@@ -7,6 +7,7 @@ from typing import Callable
 import pytest
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
+from application_pipeline.parsers.types import City
 from application_pipeline.parsers.http import HttpGet
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
@@ -101,7 +102,11 @@ def _make_get(responses: list[bytes]) -> HttpGet:
 
 
 def _query(**kwargs: object) -> ParserQuery:
-    defaults: dict = {"keyword": "python", "location": "hamburg", "max_results": 100}
+    defaults: dict = {
+        "keyword": "python",
+        "location": City("hamburg"),
+        "max_results": 100,
+    }
     defaults.update(kwargs)
     return ParserQuery(**defaults)  # type: ignore[arg-type]
 

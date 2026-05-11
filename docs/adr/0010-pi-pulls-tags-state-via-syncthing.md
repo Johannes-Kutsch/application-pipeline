@@ -18,4 +18,4 @@ The Pi 5 is a pure consumer of code and a pure producer of state. Code reaches t
 
 - **Pi cron wrapper** does `git fetch --tags`, picks the highest `v*` tag, and switches to it (via the staging-clone + symlink flip pattern, per ADR-0011) before invoking `python -m application_pipeline`.
 - **Pi setup runbook** clones the repo over HTTPS (public), so no SSH host key dance, no deploy-key generation.
-- **Syncthing folder** carries `current.md` (per the **Results File** definition in CONTEXT.md), `.seen.json` (per ADR-0002), and `results/failures/` (per ADR-0012). Folder is send-receive; the laptop is a read-only consumer by convention.
+- **Syncthing folder** carries `current.md` (per the **Results File** definition in CONTEXT.md), `.seen.json` (per ADR-0002), and `synched/failures/` (per ADR-0012). Folder is send-receive; the laptop is a read-only consumer by convention.

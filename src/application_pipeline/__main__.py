@@ -63,7 +63,7 @@ def main() -> None:
         summary = run(config_path)
     except _FATAL as exc:
         try:
-            write_failure(current_stage.get(), exc, _tail.tail(), Path("results"))
+            write_failure(current_stage.get(), exc, _tail.tail(), Path("synched"))
         except Exception:
             pass
         sys.exit(1)

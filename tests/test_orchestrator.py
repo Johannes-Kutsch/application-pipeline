@@ -1253,7 +1253,7 @@ def test_fatal_error_writes_failure_report_and_exits_one(
 
     assert exc_info.value.code == 1
 
-    failures_dir = tmp_path / "results" / "failures"
+    failures_dir = tmp_path / "synched" / "failures"
     reports = list(failures_dir.glob("*.md"))
     assert len(reports) == 1, f"expected one failure report, got {reports}"
 

@@ -87,7 +87,7 @@ Ollama is the local LLM runtime required by the **Relevance Classifier** and **M
 
 ## 4. Syncthing installation + folder pairing
 
-Syncthing carries the **Results File** (`current.md`), **Seen State** (`.seen.json`), and **Failure Reports** (`data/results/failures/`) from the Pi to your laptop (see [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md) and [ADR-0012](adr/0012-failures-as-syncthing-files.md)). Install on **both** machines, then pair them.
+Syncthing carries the **Results File** (`current.md`), **Seen State** (`.seen.json`), and **Failure Reports** (`data/synched/failures/`) from the Pi to your laptop (see [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md) and [ADR-0012](adr/0012-failures-as-syncthing-files.md)). Install on **both** machines, then pair them.
 
 ### 4a. Install Syncthing on the Pi
 
@@ -151,13 +151,13 @@ Syncthing carries the **Results File** (`current.md`), **Seen State** (`.seen.js
 
 21. On the Pi's Syncthing UI:
     - Click **Add Folder**.
-    - **Folder Label**: `application-pipeline-results`
-    - **Folder Path**: `/home/pi/application-pipeline/data/results`
+    - **Folder Label**: `application-pipeline-synched`
+    - **Folder Path**: `/home/pi/application-pipeline/data/synched`
     - **Folder Type**: Send & Receive
     - Under **Sharing**, tick the laptop device.
     - Click **Save**.
 
-22. Accept the shared folder on the **laptop's** Syncthing UI, choosing a local path (e.g. `~/application-pipeline-results` or `D:\application-pipeline-results` on Windows).
+22. Accept the shared folder on the **laptop's** Syncthing UI, choosing a local path (e.g. `~/application-pipeline-synched` or `D:\application-pipeline-synched` on Windows).
 
 23. Confirm pairing is complete:
     ```bash
@@ -166,7 +166,7 @@ Syncthing carries the **Results File** (`current.md`), **Seen State** (`.seen.js
     ```
     Expected: laptop device listed as `Connected`.
 
-    Note: `.seen.json` and `current.md` will appear on the laptop after the first successful pipeline run (step 41).
+    Note: `.seen.json` and `current.md` will appear on the laptop after the first successful pipeline run (step 42).
 
 ---
 
@@ -176,7 +176,7 @@ The Pi clones the public repo over HTTPS — no SSH key or token required (see [
 
 24. Create the top-level layout (see [ADR-0011](adr/0011-atomic-deploy-via-staging-symlink.md)):
     ```bash
-    mkdir -p ~/application-pipeline/{releases,data/results/failures,logs}
+    mkdir -p ~/application-pipeline/{releases,data/synched/failures,logs}
     ```
 
 25. Clone the repo into `repo/` (bootstrap copy — used only for `git fetch --tags` by the wrapper):
@@ -246,7 +246,7 @@ This manually performs the first deploy that the cron wrapper (`scripts/pi-tick.
     ```
     Expected: path ends with `releases/v1.0.0` (or chosen tag).
 
-    Belt-and-braces: ensure `pi-tick.sh` is executable. Tags cut before the executable bit was committed to the repo will not have this set, and cron + the manual run in step 37 both need it:
+    Belt-and-braces: ensure `pi-tick.sh` is executable. Tags cut before the executable bit was committed to the repo will not have this set, and cron + the manual run in step 38 both need it:
     ```bash
     chmod +x ~/application-pipeline/current/scripts/pi-tick.sh
     test -x ~/application-pipeline/current/scripts/pi-tick.sh && echo ok
@@ -255,70 +255,88 @@ This manually performs the first deploy that the cron wrapper (`scripts/pi-tick.
 
 ---
 
-## 7. Crontab install
+## 7. Initialise settings
+
+This step seeds `data/synched/` with the default `config.py` and `layout.py` templates. Run it once after the venv exists but before the crontab is installed.
+
+33. Run `init` against the synched data directory:
+    ```bash
+    ~/application-pipeline/current/.venv/bin/python \
+        -m application_pipeline init \
+        ~/application-pipeline/data/synched
+    ```
+    Expected: `wrote config.py` and `wrote layout.py` printed; both files present in `~/application-pipeline/data/synched/`.
+
+    **Optional:** Before the first cron tick fires, open `config.py` on the laptop's paired Syncthing copy and edit keywords, skills, and sources to match your search criteria. Syncthing will propagate the edits back to the Pi automatically.
+
+    Re-running `init` is safe — it skips files that already exist, so it will not overwrite any edits you have made.
+
+---
+
+## 8. Crontab install
 
 The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock` to enforce the single-writer invariant (see [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md)).
 
-33. Copy `crontab.example` from the repo:
+34. Copy `crontab.example` from the repo:
     ```bash
     cp ~/application-pipeline/repo/crontab.example ~/crontab.tmp
     ```
 
-34. Replace the `<user>` placeholder with your actual Pi username:
+35. Replace the `<user>` placeholder with your actual Pi username:
     ```bash
     sed -i "s|<user>|$(whoami)|g" ~/crontab.tmp
     cat ~/crontab.tmp
     ```
     Verify: the path `/home/pi/application-pipeline/...` (or your username) appears, no `<user>` placeholder remains.
 
-35. Install the crontab:
+36. Install the crontab:
     ```bash
     crontab ~/crontab.tmp
     crontab -l
     ```
     Expected: one line scheduling `pi-tick.sh` at 8, 12, 16, and 20 UTC daily.
 
-36. Remove the temporary file:
+37. Remove the temporary file:
     ```bash
     rm ~/crontab.tmp
     ```
 
 ---
 
-## 8. Verification
+## 9. Verification
 
-37. Trigger one manual run of the cron wrapper:
+38. Trigger one manual run of the cron wrapper:
     ```bash
     ~/application-pipeline/current/scripts/pi-tick.sh
     ```
     Watch for: fetch → identify tag → (skip deploy if already current) → pipeline run → exit 0.
 
-38. Confirm the **Results File** was written:
+39. Confirm the **Results File** was written:
     ```bash
-    ls -lh ~/application-pipeline/data/results/current.md
-    grep -c "---" ~/application-pipeline/data/results/current.md
+    ls -lh ~/application-pipeline/data/synched/current.md
+    grep -c "---" ~/application-pipeline/data/synched/current.md
     ```
     Expected: file exists, at least one **Run Divider** (`---`) present.
 
-39. Confirm the **Seen State** file was written:
+40. Confirm the **Seen State** file was written:
     ```bash
-    ls -lh ~/application-pipeline/data/results/.seen.json
+    ls -lh ~/application-pipeline/data/synched/.seen.json
     ```
     Expected: file exists, non-zero size.
 
-40. Confirm no **Failure Reports** were created:
+41. Confirm no **Failure Reports** were created:
     ```bash
-    ls ~/application-pipeline/data/results/failures/
+    ls ~/application-pipeline/data/synched/failures/
     ```
     Expected: empty directory (no `*.md` files).
 
-41. Confirm Syncthing sync to laptop:
+42. Confirm Syncthing sync to laptop:
     - Within Syncthing's normal sync window (typically under 30 seconds on a local network), open the laptop's paired folder.
     - Expected: `current.md` present with at least one **Run Divider**.
     - Expected: `.seen.json` present alongside `current.md`.
     - Expected: `failures/` directory present and empty.
 
-42. Review the cron log for any warnings:
+43. Review the cron log for any warnings:
     ```bash
     tail -40 ~/application-pipeline/logs/cron.log
     ```
@@ -330,18 +348,20 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
 
 The **Seen State** file (`.seen.json`) tracks which **Position** URLs have already been shown in the **Results File**. Losing it causes the next pipeline run to treat all previously-seen positions as new (a one-time flood of duplicates). Because `.seen.json` is continuously synced to the laptop via Syncthing (see [ADR-0002](adr/0002-seen-state-durable-via-syncthing.md) and [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md)), the recovery procedure is:
 
-43. After re-imaging the Pi, complete steps 1–32 and **stop before installing the crontab** (step 35). Copy `.seen.json` from the laptop's Syncthing folder back to the Pi while no scheduled tick can fire:
+`config.py` and `layout.py` ride the same Syncthing channel as `.seen.json` and will be restored automatically once the Pi's Syncthing folder is re-paired. Running `init` again during recovery is safe — it skips files that already exist, so it will not overwrite the restored copies.
+
+44. After re-imaging the Pi, complete steps 1–33 and **stop before installing the crontab** (step 36). Copy `.seen.json` from the laptop's Syncthing folder back to the Pi while no scheduled tick can fire:
     ```bash
     # Run on the Pi, substituting the laptop's IP and your Syncthing folder path:
     scp <laptop-user>@<laptop-ip>:<syncthing-folder>/.seen.json \
-        ~/application-pipeline/data/results/.seen.json
+        ~/application-pipeline/data/synched/.seen.json
     ```
     Or restore via the Syncthing UI: on the Pi, pause and then resume the shared folder — Syncthing will pull the laptop's copy.
 
-44. Verify the restored file is non-empty before triggering a run:
+45. Verify the restored file is non-empty before triggering a run:
     ```bash
-    wc -c ~/application-pipeline/data/results/.seen.json
+    wc -c ~/application-pipeline/data/synched/.seen.json
     ```
     Expected: size > 0 bytes.
 
-45. Resume the remaining bootstrap steps (33–36) to install the crontab, then trigger a manual run (step 37) and confirm no duplicate flood in `current.md`.
+46. Resume the remaining bootstrap steps (34–37) to install the crontab, then trigger a manual run (step 38) and confirm no duplicate flood in `current.md`.

@@ -19,8 +19,8 @@ BASE_DIR="${HOME}/application-pipeline"
 REPO_DIR="${BASE_DIR}/repo"
 RELEASES_DIR="${BASE_DIR}/releases"
 CURRENT_LINK="${BASE_DIR}/current"
-RESULTS_DIR="${BASE_DIR}/data/results"
-FAILURES_DIR="${RESULTS_DIR}/failures"
+SYNCHED_DIR="${BASE_DIR}/data/synched"
+FAILURES_DIR="${SYNCHED_DIR}/failures"
 KEEP_RELEASES=3
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -140,4 +140,4 @@ fi
 # ── step 5: exec pipeline ─────────────────────────────────────────────────────
 
 log "Exec'ing pipeline"
-exec "${CURRENT_LINK}/.venv/bin/python" -m application_pipeline
+exec "${CURRENT_LINK}/.venv/bin/python" -m application_pipeline "${SYNCHED_DIR}/config.py"

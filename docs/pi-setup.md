@@ -281,7 +281,7 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
 
 37. Trigger one manual run of the cron wrapper:
     ```bash
-    ~/application-pipeline/scripts/pi-tick.sh
+    ~/application-pipeline/current/scripts/pi-tick.sh
     ```
     Watch for: fetch → identify tag → (skip deploy if already current) → pipeline run → exit 0.
 

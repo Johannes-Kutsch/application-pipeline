@@ -21,9 +21,10 @@ def _seed(
             _seed(item, target_dir, item_rel)
         else:
             dest = target_dir / item_rel
+            display = item_rel.as_posix()
             if dest.exists():
-                print(f"skipped {item_rel} (already exists)")
+                print(f"skipped {display} (already exists)")
             else:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(item.read_bytes())
-                print(f"wrote {item_rel}")
+                print(f"wrote {display}")

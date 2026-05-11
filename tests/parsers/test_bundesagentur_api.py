@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from datetime import date
@@ -175,8 +176,6 @@ def test_discover_stub_location_from_stellenlokationen_first_ort() -> None:
 
 
 def test_discover_stub_url_contains_base64_encoded_referenznummer() -> None:
-    import base64
-
     ref = "myhash"
     ref_b64 = base64.b64encode(ref.encode()).decode()
     get = _make_get([_search_body([_item(ref)]), _search_body([])])
@@ -226,8 +225,6 @@ def test_discover_multi_location_uses_first_entry() -> None:
 
 
 def test_discover_skips_item_without_referenznummer() -> None:
-    import base64
-
     bad_item = {
         "stellenangebotsTitel": "Dev",
         "veroeffentlichungszeitraum": {"von": "2024-01-15"},

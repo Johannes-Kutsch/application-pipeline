@@ -19,7 +19,13 @@ from application_pipeline.llm import (
     RelevanceVerdict,
 )
 from application_pipeline.orchestrator import RunSummary, run
-from application_pipeline.parsers import Parser, ParserQuery, Position, PositionStub
+from application_pipeline.parsers import (
+    ExternalRedirect,
+    Parser,
+    ParserQuery,
+    Position,
+    PositionStub,
+)
 from application_pipeline.parsers.types import City, Remote
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.prompts import PromptError
@@ -956,6 +962,65 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data[_ERR_URLS[1]]["status"] == "enrich_failed"
+
+
+def test_external_redirect_marks_seen_and_increments_counter(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ExternalRedirect: stub marked external_redirect, external_redirects increments, enrich_failed unchanged, INFO logged, no WARNING."""
+    import logging
+
+    seen_path = tmp_path / ".seen.json"
+
+    class _RedirectParser:
+        def __enter__(self) -> "_RedirectParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
+                )
+                for i in range(2)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
+            if stub.url == _ERR_URLS[0]:
+                return ExternalRedirect(
+                    stub=stub, outbound_url="https://external.example/job"
+                )
+            return Position(stub=stub, raw_description="good description")
+
+    with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
+        summary = run(
+            _write_config(
+                tmp_path,
+                sources='[SourceEntry(parser_type="bundesagentur_api")]',
+                keywords='["python"]',
+                locations='["Hamburg"]',
+                include_remote=False,
+            ),
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(seen_path),
+            results_manager=_stub_results_manager(),
+        )
+
+    assert summary.external_redirects == 1
+    assert summary.enrich_failed == 0
+    assert summary.written == 1
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_ERR_URLS[0]]["status"] == "external_redirect"
+
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warning_records == [], f"unexpected WARNING(s): {warning_records}"
+
+    info_records = [r for r in caplog.records if "external_redirect" in r.getMessage()]
+    assert info_records, "expected at least one INFO log mentioning external_redirect"
 
 
 def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> None:

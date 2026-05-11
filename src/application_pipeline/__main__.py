@@ -81,6 +81,7 @@ def main() -> None:
         f"  amber={summary.amber}"
         f"  red={summary.red}"
         f"  enrich_failed={summary.enrich_failed}"
+        f"  external_redirects={summary.external_redirects}"
         f"  errored={summary.errored}"
         f"  duration={summary.duration_seconds:.1f}s"
     )

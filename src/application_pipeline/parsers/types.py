@@ -43,6 +43,12 @@ class PositionStub:
 
 
 @dataclass(frozen=True)
+class ExternalRedirect:
+    stub: PositionStub
+    outbound_url: str
+
+
+@dataclass(frozen=True)
 class Position:
     stub: PositionStub
     raw_description: str

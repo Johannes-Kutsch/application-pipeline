@@ -61,6 +61,7 @@ serves_remote: bool = False
 def remote_wire() -> NoReturn:
     raise AssertionError("stellen_hamburg_api does not serve remote")
 
+
 HttpPost = Callable[[str, bytes, float], bytes]
 
 

@@ -27,7 +27,13 @@ from application_pipeline.llm import (
     MatchVerdict,
     OllamaExtractor,
 )
-from application_pipeline.parsers import Parser, ParserQuery, Position, PositionStub
+from application_pipeline.parsers import (
+    ExternalRedirect,
+    Parser,
+    ParserQuery,
+    Position,
+    PositionStub,
+)
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.parsers.errors import ParserError
@@ -189,6 +195,7 @@ class RunSummary:
     amber: int = 0
     red: int = 0
     enrich_failed: int = 0
+    external_redirects: int = 0
     errored: int = 0
     parsers_dead: int = 0
     duration_seconds: float = 0.0
@@ -274,6 +281,7 @@ def run(
     skipped = 0
     prefilter_dropped = 0
     enrich_failed = 0
+    external_redirects = 0
     parsers_dead = 0
     survivors: list[tuple[Position, Language]] = []
 
@@ -360,6 +368,18 @@ def run(
                     )
                     dedup_store.mark_seen(stub, "enrich_failed")
                 enrich_failed += 1
+
+            elif isinstance(payload, ExternalRedirect):
+                stub = _pending_enrich.pop(pid, None)
+                if stub is not None:
+                    _log.info(
+                        "external_redirect parser_id=%s stub_url=%s outbound=%s",
+                        pid,
+                        stub.url,
+                        payload.outbound_url,
+                    )
+                    dedup_store.mark_seen(stub, "external_redirect")
+                external_redirects += 1
 
             elif payload is _PARSER_DONE:
                 parsers_remaining.discard(pid)
@@ -470,7 +490,7 @@ def run(
     _log.info(
         "run complete: discovered=%d skipped=%d prefilter_dropped=%d "
         "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
-        "enrich_failed=%d errored=%d parsers_dead=%d",
+        "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
         discovered,
         skipped,
         prefilter_dropped,
@@ -480,6 +500,7 @@ def run(
         amber,
         red,
         enrich_failed,
+        external_redirects,
         errored,
         parsers_dead,
     )
@@ -495,6 +516,7 @@ def run(
         amber=amber,
         red=red,
         enrich_failed=enrich_failed,
+        external_redirects=external_redirects,
         errored=errored,
         parsers_dead=parsers_dead,
     )

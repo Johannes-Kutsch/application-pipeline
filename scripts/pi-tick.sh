@@ -27,6 +27,11 @@ KEEP_RELEASES=3
 
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"; }
 
+current_tag() {
+    [[ -L "${CURRENT_LINK}" ]] || return 0
+    basename "$(readlink "${CURRENT_LINK}")"
+}
+
 write_failure() {
     local stage="$1" error_msg="$2" captured_output="$3"
     local timestamp
@@ -36,10 +41,8 @@ write_failure() {
     local target="${FAILURES_DIR}/${timestamp}.md"
     local tmp="${target}.tmp"
 
-    local tag=""
-    if [[ -L "${CURRENT_LINK}" ]]; then
-        tag="$(basename "$(readlink "${CURRENT_LINK}")")"
-    fi
+    local tag
+    tag="$(current_tag)"
 
     local heading="# Run failed at ${timestamp}"
     [[ -n "${tag}" ]] && heading="${heading} (tag ${tag})"
@@ -79,10 +82,7 @@ log "Latest tag: ${LATEST_TAG}"
 
 # ── step 3: deploy if tag changed ────────────────────────────────────────────
 
-CURRENT_TAG=""
-if [[ -L "${CURRENT_LINK}" ]]; then
-    CURRENT_TAG="$(basename "$(readlink "${CURRENT_LINK}")")"
-fi
+CURRENT_TAG="$(current_tag)"
 
 if [[ "${LATEST_TAG}" == "${CURRENT_TAG}" ]]; then
     log "Already on ${LATEST_TAG}; skipping deploy"

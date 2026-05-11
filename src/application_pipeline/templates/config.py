@@ -15,7 +15,7 @@ SKILLS = [
 ]
 
 SOURCES = [
-    SourceEntry(parser_type="bundesagentur"),
+    SourceEntry(parser_type="bundesagentur_api"),
 ]
 
 LOCATIONS: list[str] = []

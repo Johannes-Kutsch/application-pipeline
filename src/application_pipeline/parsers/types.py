@@ -33,13 +33,13 @@ class PositionStub:
 class Position:
     stub: PositionStub
     raw_description: str
-
-    @property
-    def title(self) -> str:
-        return self.stub.title
     salary: str | None = None
     contract_type: Literal["permanent", "fixed-term", "freelance"] | None = None
     employment_type: Literal["full-time", "part-time", "internship"] | None = None
     work_model: Literal["remote", "hybrid", "on-site"] | None = None
     posted_date: date | None = None
     deadline: date | None = None
+
+    @property
+    def title(self) -> str:
+        return self.stub.title

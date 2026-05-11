@@ -19,7 +19,7 @@ from application_pipeline.llm import (
     RelevanceVerdict,
 )
 from application_pipeline.orchestrator import RunSummary, run
-from application_pipeline.parsers import ParserQuery, Position, PositionStub
+from application_pipeline.parsers import Parser, ParserQuery, Position, PositionStub
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import ResultsFileError, ResultsFileManager
@@ -172,8 +172,6 @@ def test_prewarm_failure_no_parsers_instantiated(tmp_path: Path) -> None:
 
     failing = MagicMock()
     failing.prewarm.side_effect = ExtractorUnreachableError("down")
-
-    from application_pipeline.parsers import Parser
 
     def _registry(_: str) -> type[Parser] | None:
         return TrackingParser  # type: ignore[return-value]
@@ -992,6 +990,112 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
 
     assert summary.discovered == 3
     assert summary.written == 3
+
+
+# ---------------------------------------------------------------------------
+# Threading: PARSER_DEAD (issue #112)
+# ---------------------------------------------------------------------------
+
+
+def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
+    """Uncaught exception in parser thread → parsers_dead==1, run completes (no hang)."""
+
+    class _DeadParser:
+        def __enter__(self) -> "_DeadParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            raise RuntimeError("unexpected crash")
+            yield  # pragma: no cover — makes this a generator
+
+        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
+            raise NotImplementedError
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="stub")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _DeadParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.parsers_dead == 1
+    assert summary.discovered == 0
+    assert summary.written == 0
+
+
+def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
+    """One dead parser + one healthy parser → dead counted, healthy stubs written."""
+
+    class _DeadParser:
+        def __enter__(self) -> "_DeadParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            raise RuntimeError("boom")
+            yield  # pragma: no cover
+
+        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
+            raise NotImplementedError
+
+    class _HealthyParser:
+        def __enter__(self) -> "_HealthyParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://ok.example/0",
+                    title="Job 0",
+                    source="healthy",
+                    language="en",
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    def _registry(parser_type: str) -> type[Parser] | None:
+        if parser_type == "dead":
+            return _DeadParser  # type: ignore[return-value]
+        if parser_type == "healthy":
+            return _HealthyParser  # type: ignore[return-value]
+        return None
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="dead"), SourceEntry(parser_type="healthy")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    summary = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=_registry,
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.parsers_dead == 1
+    assert summary.discovered == 1
+    assert summary.written == 1
 
 
 def test_append_failure_exits_nonzero_position_not_marked_seen(tmp_path: Path) -> None:

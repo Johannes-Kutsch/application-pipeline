@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import queue
+import threading
+import traceback as _traceback
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
@@ -22,7 +25,7 @@ from application_pipeline.llm import (
     MatchVerdict,
     OllamaExtractor,
 )
-from application_pipeline.parsers import Parser, ParserQuery, Position
+from application_pipeline.parsers import Parser, ParserQuery, Position, PositionStub
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.prefilter import DomainPreFilter
@@ -33,6 +36,97 @@ from application_pipeline.results import ResultsFileError, ResultsFileManager
 _log = logging.getLogger(__name__)
 
 _DISCOVER_SHORT_CIRCUIT_FALLBACK = 50
+
+
+# ---------------------------------------------------------------------------
+# Queue protocol sentinels
+# ---------------------------------------------------------------------------
+
+
+class _ParserDone:
+    __slots__ = ()
+
+
+@dataclass
+class _ParserDead:
+    exc: BaseException
+    traceback_str: str
+
+
+class _Enrich:
+    __slots__ = ()
+
+
+class _Skip:
+    __slots__ = ()
+
+
+class _SkipAndEndQuery:
+    __slots__ = ()
+
+
+_PARSER_DONE = _ParserDone()
+_ENRICH = _Enrich()
+_SKIP = _Skip()
+_SKIP_AND_END_QUERY = _SkipAndEndQuery()
+
+
+# ---------------------------------------------------------------------------
+# Parser thread — pure producer
+# ---------------------------------------------------------------------------
+
+
+class _ParserThread(threading.Thread):
+    def __init__(
+        self,
+        parser_id: str,
+        parser: Parser,
+        worklist: list[ParserQuery],
+        outbound: queue.Queue[tuple[str, object]],
+        inbound: queue.Queue[object],
+    ) -> None:
+        super().__init__(name=f"parser-{parser_id}", daemon=True)
+        self._parser_id = parser_id
+        self._parser = parser
+        self._worklist = worklist
+        self._outbound = outbound
+        self._inbound = inbound
+
+    def run(self) -> None:
+        try:
+            for query in self._worklist:
+                gen = iter(self._parser.discover(query))
+                try:
+                    for stub in gen:
+                        self._outbound.put((self._parser_id, stub))
+                        decision = self._inbound.get()
+                        if decision is _ENRICH:
+                            try:
+                                position = self._parser.enrich(stub)
+                                self._outbound.put((self._parser_id, position))
+                            except ParserError as exc:
+                                self._outbound.put((self._parser_id, exc))
+                        elif decision is _SKIP_AND_END_QUERY:
+                            _close = getattr(gen, "close", None)
+                            if _close is not None:
+                                _close()
+                            break
+                        # else: _SKIP — continue to next stub
+                finally:
+                    _close = getattr(gen, "close", None)
+                    if _close is not None:
+                        _close()
+        except BaseException as exc:
+            self._outbound.put(
+                (self._parser_id, _ParserDead(exc, _traceback.format_exc()))
+            )
+        else:
+            self._outbound.put((self._parser_id, _PARSER_DONE))
+
+
+# ---------------------------------------------------------------------------
+# RunSummary
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -47,6 +141,7 @@ class RunSummary:
     red: int = 0
     enrich_failed: int = 0
     errored: int = 0
+    parsers_dead: int = 0
     duration_seconds: float = 0.0
 
 
@@ -125,78 +220,111 @@ def run(
         _log.error("startup failed — results file: %s", exc)
         raise
 
-    # Step 9: Enter parsers via ExitStack, iterate sources × keywords × locations
+    # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
     discovered = 0
     skipped = 0
     prefilter_dropped = 0
     enrich_failed = 0
+    parsers_dead = 0
     survivors: list[tuple[Position, Language]] = []
 
     locations: list[str | None] = list(cfg.locations)
     if cfg.include_remote:
         locations.append(None)
 
+    outbound: queue.Queue[tuple[str, object]] = queue.Queue()
+
     with ExitStack() as stack:
-        parsers: list[tuple[Parser, SourceEntry]] = [
+        parsers_list: list[tuple[Parser, SourceEntry]] = [
             (stack.enter_context(cls()), source) for cls, source in resolved
         ]
-        for parser, source in parsers:
-            for keyword in cfg.keywords:
-                for location in locations:
-                    query = ParserQuery(
-                        keyword=keyword,
-                        location=location,
-                        max_results=source.max_results,
+
+        parser_inbound: dict[str, queue.Queue[object]] = {}
+        parser_thresholds: dict[str, int] = {}
+        threads: list[_ParserThread] = []
+
+        for parser, source in parsers_list:
+            parser_id = source.parser_type
+            inbound: queue.Queue[object] = queue.Queue()
+            parser_inbound[parser_id] = inbound
+            parser_thresholds[parser_id] = getattr(
+                parser, "page_size", _DISCOVER_SHORT_CIRCUIT_FALLBACK
+            )
+            worklist = [
+                ParserQuery(keyword=kw, location=loc, max_results=source.max_results)
+                for kw in cfg.keywords
+                for loc in locations
+            ]
+            t = _ParserThread(parser_id, parser, worklist, outbound, inbound)
+            threads.append(t)
+
+        for t in threads:
+            t.start()
+
+        parsers_remaining: set[str] = set(parser_inbound.keys())
+        consecutive_url_hits: dict[str, int] = {pid: 0 for pid in parsers_remaining}
+        _pending_enrich: dict[str, PositionStub] = {}
+
+        while parsers_remaining:
+            pid, payload = outbound.get()
+
+            if isinstance(payload, PositionStub):
+                discovered += 1
+                seen_result = dedup_store.is_seen(payload)
+                threshold = parser_thresholds[pid]
+
+                if seen_result == "miss":
+                    consecutive_url_hits[pid] = 0
+                    _pending_enrich[pid] = payload
+                    parser_inbound[pid].put(_ENRICH)
+                elif seen_result == "url_hit":
+                    consecutive_url_hits[pid] += 1
+                    skipped += 1
+                    if consecutive_url_hits[pid] >= threshold:
+                        consecutive_url_hits[pid] = 0
+                        parser_inbound[pid].put(_SKIP_AND_END_QUERY)
+                    else:
+                        parser_inbound[pid].put(_SKIP)
+                else:  # tuple_hit
+                    consecutive_url_hits[pid] = 0
+                    skipped += 1
+                    parser_inbound[pid].put(_SKIP)
+
+            elif isinstance(payload, Position):
+                language = resolve_language(payload)
+                verdict = prefilter.classify(payload, language)
+                if verdict.passes:
+                    survivors.append((payload, language))
+                else:
+                    dedup_store.mark_seen(payload.stub, "off_domain")
+                    prefilter_dropped += 1
+
+            elif isinstance(payload, ParserError):
+                stub = _pending_enrich.pop(pid, None)
+                if stub is not None:
+                    _log.warning(
+                        "enrich failed: parser_id=%s stub_url=%s message=%s",
+                        pid,
+                        stub.url,
+                        payload,
                     )
-                    threshold = getattr(
-                        parser, "page_size", _DISCOVER_SHORT_CIRCUIT_FALLBACK
-                    )
-                    consecutive_url_hits = 0
-                    gen = iter(parser.discover(query))
-                    try:
-                        for stub in gen:
-                            discovered += 1
-                            seen_result = dedup_store.is_seen(stub)
-                            if seen_result == "miss":
-                                consecutive_url_hits = 0
-                                try:
-                                    position = parser.enrich(stub)
-                                except ParserError as exc:
-                                    _log.warning(
-                                        "enrich failed: parser_type=%s stub_url=%s message=%s",
-                                        source.parser_type,
-                                        stub.url,
-                                        exc,
-                                    )
-                                    dedup_store.mark_seen(stub, "enrich_failed")
-                                    enrich_failed += 1
-                                    continue
-                                language = resolve_language(position)
-                                verdict = prefilter.classify(position, language)
-                                if verdict.passes:
-                                    survivors.append((position, language))
-                                else:
-                                    dedup_store.mark_seen(stub, "off_domain")
-                                    prefilter_dropped += 1
-                            elif seen_result == "url_hit":
-                                consecutive_url_hits += 1
-                                skipped += 1
-                                if consecutive_url_hits >= threshold:
-                                    close = getattr(gen, "close", None)
-                                    if close is not None:
-                                        close()
-                                    break
-                            else:  # tuple_hit
-                                consecutive_url_hits = 0
-                                skipped += 1
-                    except ParserError as exc:
-                        _log.warning(
-                            "discover failed mid-run: parser_type=%s keyword=%s location=%s message=%s",
-                            source.parser_type,
-                            keyword,
-                            location,
-                            exc,
-                        )
+                    dedup_store.mark_seen(stub, "enrich_failed")
+                enrich_failed += 1
+
+            elif isinstance(payload, _ParserDone):
+                parsers_remaining.discard(pid)
+
+            elif isinstance(payload, _ParserDead):
+                _log.error(
+                    "parser thread died: parser_id=%s\n%s",
+                    pid,
+                    payload.traceback_str,
+                )
+                parsers_dead += 1
+                parsers_remaining.discard(pid)
+
+        for t in threads:
+            t.join()
 
     # Step 10: Classify batch — all classify_relevance calls before any judge_match call
     classifier_dropped = 0
@@ -256,7 +384,7 @@ def run(
     _log.info(
         "run complete: discovered=%d skipped=%d prefilter_dropped=%d "
         "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
-        "enrich_failed=%d errored=%d",
+        "enrich_failed=%d errored=%d parsers_dead=%d",
         discovered,
         skipped,
         prefilter_dropped,
@@ -267,6 +395,7 @@ def run(
         red,
         enrich_failed,
         errored,
+        parsers_dead,
     )
 
     return RunSummary(
@@ -281,4 +410,5 @@ def run(
         red=red,
         enrich_failed=enrich_failed,
         errored=errored,
+        parsers_dead=parsers_dead,
     )

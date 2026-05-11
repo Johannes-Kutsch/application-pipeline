@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 from langdetect import LangDetectException, detect_langs
 
@@ -13,7 +13,7 @@ _CONFIDENCE_FLOOR = 0.5
 
 def resolve_language(position: Position) -> Language:
     if position.stub.language is not None:
-        return position.stub.language  # type: ignore[return-value]
+        return cast(Language, position.stub.language)
     text = position.stub.title + " " + position.raw_description
     return _detect(text)
 
@@ -27,5 +27,5 @@ def _detect(text: str) -> Language:
         return "unknown"
     detected = langs[0].lang
     if detected in ("de", "en"):
-        return detected  # type: ignore[return-value]
+        return cast(Language, detected)
     return "other"

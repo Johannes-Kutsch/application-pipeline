@@ -582,6 +582,7 @@ def test_prewarm_uses_correct_body():
 
     (url, payload, timeout) = http_post.call_args.args
     assert payload["prompt"] == "ok"
+    assert payload["stream"] is False
     assert payload["options"]["num_predict"] == 1
     assert payload["keep_alive"] == "10m"
 

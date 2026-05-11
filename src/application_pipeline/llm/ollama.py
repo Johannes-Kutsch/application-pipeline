@@ -114,6 +114,7 @@ class OllamaExtractor:
             payload: dict[str, Any] = {
                 "model": model,
                 "prompt": "ok",
+                "stream": False,
                 "options": {"num_predict": 1},
                 "keep_alive": self._config.ollama_keep_alive,
             }

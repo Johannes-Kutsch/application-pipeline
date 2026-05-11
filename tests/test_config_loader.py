@@ -14,7 +14,7 @@ REQUIRED_BODY = textwrap.dedent(
 
     KEYWORDS = ["python"]
     SKILLS = ["python"]
-    SOURCES = [SourceEntry(parser_type="bundesagentur")]
+    SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
     LOCATIONS = ["Hamburg"]
     """
 )
@@ -43,7 +43,7 @@ def test_load_returns_populated_config(tmp_path: pathlib.Path) -> None:
 
         KEYWORDS = ["python", "ml engineer"]
         SKILLS = ["python", "pytorch"]
-        SOURCES = [SourceEntry(parser_type="bundesagentur", max_results=500)]
+        SOURCES = [SourceEntry(parser_type="bundesagentur_api", max_results=500)]
         LOCATIONS = ["Hamburg"]
         """,
     )
@@ -53,7 +53,9 @@ def test_load_returns_populated_config(tmp_path: pathlib.Path) -> None:
     assert isinstance(config, Config)
     assert config.keywords == ["python", "ml engineer"]
     assert config.skills == ["python", "pytorch"]
-    assert config.sources == [SourceEntry(parser_type="bundesagentur", max_results=500)]
+    assert config.sources == [
+        SourceEntry(parser_type="bundesagentur_api", max_results=500)
+    ]
     assert config.locations == ["Hamburg"]
 
 
@@ -76,7 +78,7 @@ def test_load_raises_when_required_field_missing(
 
 
 def test_source_entry_is_frozen() -> None:
-    entry = SourceEntry(parser_type="bundesagentur", max_results=1000)
+    entry = SourceEntry(parser_type="bundesagentur_api", max_results=1000)
     with pytest.raises(dataclasses.FrozenInstanceError):
         entry.parser_type = "other"  # type: ignore[misc]
 
@@ -88,7 +90,7 @@ def test_config_is_frozen() -> None:
 
 
 def test_source_entry_max_results_defaults_to_1000() -> None:
-    entry = SourceEntry(parser_type="bundesagentur")
+    entry = SourceEntry(parser_type="bundesagentur_api")
     assert entry.max_results == 1000
 
 
@@ -465,7 +467,7 @@ def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> No
 
         KEYWORDS = ["first"]
         SKILLS = []
-        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
         LOCATIONS = ["Hamburg"]
         """,
     )
@@ -479,7 +481,7 @@ def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> No
 
         KEYWORDS = ["second"]
         SKILLS = []
-        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
         LOCATIONS = ["Hamburg"]
         """,
     )
@@ -494,7 +496,7 @@ def test_load_raises_when_required_list_is_empty(
     fields = {
         "KEYWORDS": '["python"]',
         "SKILLS": '["python"]',
-        "SOURCES": '[SourceEntry(parser_type="bundesagentur")]',
+        "SOURCES": '[SourceEntry(parser_type="bundesagentur_api")]',
         "LOCATIONS": '["Hamburg"]',
     }
     fields[empty_field] = "[]"
@@ -517,7 +519,7 @@ def test_empty_locations_with_include_remote_false_raises(
 
         KEYWORDS = ["python"]
         SKILLS = []
-        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
         LOCATIONS = []
         INCLUDE_REMOTE = False
         """,
@@ -537,7 +539,7 @@ def test_empty_locations_with_include_remote_true_is_valid(
 
         KEYWORDS = ["python"]
         SKILLS = []
-        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
         LOCATIONS = []
         INCLUDE_REMOTE = True
         """,
@@ -557,7 +559,7 @@ def test_load_accepts_empty_skills(tmp_path: pathlib.Path) -> None:
 
         KEYWORDS = ["python"]
         SKILLS = []
-        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
         LOCATIONS = ["Hamburg"]
         """,
     )
@@ -572,7 +574,7 @@ def test_load_raises_on_duplicate_strings(tmp_path: pathlib.Path, field: str) ->
     fields = {
         "KEYWORDS": '["python"]',
         "SKILLS": '["python"]',
-        "SOURCES": '[SourceEntry(parser_type="bundesagentur")]',
+        "SOURCES": '[SourceEntry(parser_type="bundesagentur_api")]',
         "LOCATIONS": '["Hamburg"]',
     }
     fields[field] = '["dup", "dup"]'
@@ -595,8 +597,8 @@ def test_load_raises_on_duplicate_parser_type(tmp_path: pathlib.Path) -> None:
         KEYWORDS = ["python"]
         SKILLS = []
         SOURCES = [
-            SourceEntry(parser_type="bundesagentur"),
-            SourceEntry(parser_type="bundesagentur", max_results=10),
+            SourceEntry(parser_type="bundesagentur_api"),
+            SourceEntry(parser_type="bundesagentur_api", max_results=10),
         ]
         LOCATIONS = ["Hamburg"]
         """,
@@ -617,7 +619,7 @@ def test_source_entry_rejects_non_positive_max_results(
     bad_max_results: int,
 ) -> None:
     with pytest.raises(ConfigError, match="max_results"):
-        SourceEntry(parser_type="bundesagentur", max_results=bad_max_results)
+        SourceEntry(parser_type="bundesagentur_api", max_results=bad_max_results)
 
 
 def test_inclusion_and_negative_keywords_default_to_empty(
@@ -699,11 +701,75 @@ def test_load_passes_unknown_parser_type_through(tmp_path: pathlib.Path) -> None
 
         KEYWORDS = ["python"]
         SKILLS = []
-        SOURCES = [SourceEntry(parser_type="not_a_real_parser")]
+        SOURCES = [
+            SourceEntry(parser_type="bundesagentur_api"),
+            SourceEntry(parser_type="not_a_real_parser"),
+        ]
         LOCATIONS = ["Hamburg"]
         """,
     )
 
     config = load(path)
 
-    assert config.sources == [SourceEntry(parser_type="not_a_real_parser")]
+    assert SourceEntry(parser_type="not_a_real_parser") in config.sources
+
+
+# --- location coverage validation ---
+
+
+def test_unknown_location_raises_config_error(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+        from application_pipeline import SourceEntry
+
+        KEYWORDS = ["python"]
+        SKILLS = []
+        SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
+        LOCATIONS = ["Atlantis"]
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="Atlantis"):
+        load(path)
+
+
+def test_include_remote_without_remote_capable_source_raises(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(
+        tmp_path,
+        """
+        from application_pipeline import SourceEntry
+
+        KEYWORDS = ["python"]
+        SKILLS = []
+        SOURCES = [SourceEntry(parser_type="stellen_hamburg_api")]
+        LOCATIONS = ["Hamburg"]
+        INCLUDE_REMOTE = True
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="include_remote"):
+        load(path)
+
+
+def test_valid_locations_and_sources_pass_silently(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+        from application_pipeline import SourceEntry
+
+        KEYWORDS = ["python"]
+        SKILLS = []
+        SOURCES = [
+            SourceEntry(parser_type="bundesagentur_api"),
+            SourceEntry(parser_type="stellen_hamburg_api"),
+        ]
+        LOCATIONS = ["Hamburg"]
+        """,
+    )
+
+    config = load(path)
+
+    assert config.locations == ["Hamburg"]

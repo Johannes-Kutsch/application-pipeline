@@ -20,7 +20,7 @@ from application_pipeline import SourceEntry
 
 KEYWORDS = ["python"]
 SKILLS = ["python"]
-SOURCES = [SourceEntry(parser_type="bundesagentur")]
+SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
 LOCATIONS = ["Hamburg"]
 """
 

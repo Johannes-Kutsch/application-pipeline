@@ -223,13 +223,12 @@ def test_results_file_error_propagates(tmp_path: Path) -> None:
 
 
 def test_unknown_parser_type_run_continues(tmp_path: Path) -> None:
-    config_path = _write_config(
-        tmp_path, sources='[SourceEntry(parser_type="no_such_parser")]'
-    )
+    config_path = _write_config(tmp_path)
 
     summary = run(
         config_path,
         extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
         dedup_store=MagicMock(),
         results_manager=_stub_results_manager(),
     )
@@ -275,7 +274,7 @@ def test_integration_discover_and_enrich(tmp_path: Path) -> None:
     """2 keywords × 1 location, 3 stubs each → discovered==6, skipped==0, written==6."""
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python", "django"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -311,7 +310,7 @@ def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
 
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python", "django"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -350,7 +349,7 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
 
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=True,
@@ -407,7 +406,7 @@ def test_discover_short_circuits_after_n_consecutive_url_hits(tmp_path: Path) ->
     summary = run(
         _write_config(
             tmp_path,
-            sources='[SourceEntry(parser_type="stub")]',
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
@@ -453,7 +452,7 @@ def test_discover_counter_resets_on_miss(tmp_path: Path) -> None:
     summary = run(
         _write_config(
             tmp_path,
-            sources='[SourceEntry(parser_type="stub")]',
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
@@ -506,7 +505,7 @@ def test_discover_tuple_hit_resets_url_hit_counter(tmp_path: Path) -> None:
     summary = run(
         _write_config(
             tmp_path,
-            sources='[SourceEntry(parser_type="stub")]',
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
@@ -561,7 +560,7 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
     seen_path = tmp_path / ".seen.json"
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -657,7 +656,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     results_path = tmp_path / "current.md"
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -704,7 +703,7 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     results_path = tmp_path / "current.md"
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -789,7 +788,7 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
 
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -844,7 +843,7 @@ class _TwoStubParser:
 def _two_stub_config(tmp_path: Path) -> Path:
     return _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -941,7 +940,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
     summary = run(
         _write_config(
             tmp_path,
-            sources='[SourceEntry(parser_type="stub")]',
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
@@ -984,7 +983,7 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
     summary = run(
         _write_config(
             tmp_path,
-            sources='[SourceEntry(parser_type="stub")]',
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
@@ -1024,7 +1023,7 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
     summary = run(
         _write_config(
             tmp_path,
-            sources='[SourceEntry(parser_type="stub")]',
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
@@ -1086,7 +1085,7 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
 
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="dead"), SourceEntry(parser_type="healthy")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api"), SourceEntry(parser_type="dead"), SourceEntry(parser_type="healthy")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -1142,7 +1141,7 @@ def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
     results_path = tmp_path / "current.md"
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -1190,7 +1189,7 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
     results_path = tmp_path / "current.md"
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
@@ -1269,7 +1268,7 @@ def test_results_write_stage_label_on_append_failure(tmp_path: Path) -> None:
 
     config_path = _write_config(
         tmp_path,
-        sources='[SourceEntry(parser_type="stub")]',
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,

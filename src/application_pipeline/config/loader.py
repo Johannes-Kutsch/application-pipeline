@@ -1,10 +1,13 @@
+import importlib
 import os
 import pathlib
+from typing import Any
 
+from application_pipeline.parsers.location import validate_coverage
 from application_pipeline.text.normalize import normalize
 from application_pipeline.user_settings import load_user_module
 
-from .types import Config, ConfigError
+from .types import Config, ConfigError, SourceEntry
 
 _REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
 
@@ -99,6 +102,20 @@ def _resolve_optional_file(
     return path
 
 
+def _resolve_parser_modules(sources: list[SourceEntry]) -> list[Any]:
+    modules = []
+    for source in sources:
+        try:
+            modules.append(
+                importlib.import_module(
+                    f"application_pipeline.parsers.{source.parser_type}"
+                )
+            )
+        except ImportError:
+            pass
+    return modules
+
+
 def _validate(config: Config) -> None:
     if not config.keywords:
         raise ConfigError("KEYWORDS must be non-empty")
@@ -137,6 +154,11 @@ def _validate(config: Config) -> None:
     )
     _check_keyword_entries("INCLUSION_KEYWORDS", config.inclusion_keywords)
     _check_keyword_entries("NEGATIVE_KEYWORDS", config.negative_keywords)
+    validate_coverage(
+        _resolve_parser_modules(config.sources),
+        config.locations,
+        config.include_remote,
+    )
 
 
 def _check_keyword_entries(name: str, values: list[str]) -> None:

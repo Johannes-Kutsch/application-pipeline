@@ -38,9 +38,15 @@ def main() -> None:
         sys.exit(1)
 
     print(
-        f"done  discovered={summary.total_discovered}"
-        f"  seen={summary.total_seen}"
-        f"  kept={summary.total_kept}"
+        f"done"
+        f"  discovered={summary.discovered}"
+        f"  skipped={summary.skipped}"
+        f"  prefilter_dropped={summary.prefilter_dropped}"
+        f"  classifier_dropped={summary.classifier_dropped}"
+        f"  written={summary.written}"
+        f"  green={summary.green}"
+        f"  amber={summary.amber}"
+        f"  red={summary.red}"
         f"  duration={summary.duration_seconds:.1f}s"
     )
 

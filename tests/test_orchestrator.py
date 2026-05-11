@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -10,11 +11,16 @@ import pytest
 from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
-from application_pipeline.llm import ExtractorUnreachableError
+from application_pipeline.llm import (
+    ExtractorUnreachableError,
+    MatchTier,
+    MatchVerdict,
+    RelevanceVerdict,
+)
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import ParserQuery, Position, PositionStub
 from application_pipeline.prompts import PromptError
-from application_pipeline.results import ResultsFileError
+from application_pipeline.results import ResultsFileError, ResultsFileManager
 
 
 # ---------------------------------------------------------------------------
@@ -68,12 +74,17 @@ def _write_config(
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
     ext.prewarm.return_value = None
+    ext.classify_relevance.return_value = RelevanceVerdict(in_domain=True)
+    ext.judge_match.return_value = MatchVerdict(
+        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    )
     return ext
 
 
 def _stub_results_manager() -> MagicMock:
     rm = MagicMock()
     rm.ensure_initialized.return_value = None
+    rm.next_position_number.return_value = 1
     return rm
 
 
@@ -94,13 +105,15 @@ def test_zero_summary_on_empty_run(tmp_path: Path) -> None:
     )
 
     assert isinstance(summary, RunSummary)
-    assert summary.total_discovered == 0
-    assert summary.total_seen == 0
-    assert summary.total_kept == 0
-    assert summary.duration_seconds >= 0.0
     assert summary.discovered == 0
     assert summary.skipped == 0
-    assert summary.enriched == ()
+    assert summary.written == 0
+    assert summary.classifier_dropped == 0
+    assert summary.prefilter_dropped == 0
+    assert summary.green == 0
+    assert summary.amber == 0
+    assert summary.red == 0
+    assert summary.duration_seconds >= 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +234,7 @@ def test_unknown_parser_type_run_continues(tmp_path: Path) -> None:
     )
 
     assert isinstance(summary, RunSummary)
-    assert summary.total_discovered == 0
+    assert summary.discovered == 0
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +271,7 @@ class _StubParser:
 
 
 def test_integration_discover_and_enrich(tmp_path: Path) -> None:
-    """2 keywords × 1 location, 3 stubs each → discovered==6, skipped==0, enriched==6."""
+    """2 keywords × 1 location, 3 stubs each → discovered==6, skipped==0, written==6."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="stub")]',
@@ -277,12 +290,11 @@ def test_integration_discover_and_enrich(tmp_path: Path) -> None:
 
     assert summary.discovered == 6
     assert summary.skipped == 0
-    assert len(summary.enriched) == 6
-    assert all(isinstance(p, Position) for p, _lang in summary.enriched)
+    assert summary.written == 6
 
 
 def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
-    """Pre-seed all 6 URLs → discovered==6, skipped==6, enriched empty."""
+    """Pre-seed all 6 URLs → discovered==6, skipped==6, written==0."""
     seen_path = tmp_path / ".seen.json"
     seen_data = {
         url: {
@@ -314,7 +326,7 @@ def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
 
     assert summary.discovered == 6
     assert summary.skipped == 6
-    assert summary.enriched == ()
+    assert summary.written == 0
 
 
 def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -> None:
@@ -392,7 +404,7 @@ class _PreFilterStubParser:
 
 
 def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
-    """1 of 6 positions fails Pre-Filter → prefilter_dropped==1, URL in .seen.json as off_domain, 5 survivors."""
+    """1 of 6 positions fails Pre-Filter → prefilter_dropped==1, URL in .seen.json as off_domain, 5 written."""
     seen_path = tmp_path / ".seen.json"
     config_path = _write_config(
         tmp_path,
@@ -414,9 +426,229 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
     assert summary.discovered == 6
     assert summary.skipped == 0
     assert summary.prefilter_dropped == 1
-    assert len(summary.enriched) == 5
+    assert summary.written == 5
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data[_REJECTED_URL]["status"] == "off_domain"
-    surviving_urls = {p.stub.url for p, _lang in summary.enriched}
-    assert _REJECTED_URL not in surviving_urls
+
+
+# ---------------------------------------------------------------------------
+# Integration: classify + judge + render + write + mark (slice 5 / issue #109)
+# ---------------------------------------------------------------------------
+
+_STUB_URLS_LLM = [f"https://stub.example/llm/{i}" for i in range(6)]
+_PF_REJECTED_LLM_URL = _STUB_URLS_LLM[0]  # prefilter rejects: "excluded" in description
+_CLS_REJECTED_LLM_URL = _STUB_URLS_LLM[1]  # classifier rejects: title "Job 1"
+# URLs 2-5 are judged with tiers: green, amber, red, amber
+_LLM_JUDGE_TIERS = {
+    _STUB_URLS_LLM[2]: MatchTier.green,
+    _STUB_URLS_LLM[3]: MatchTier.amber,
+    _STUB_URLS_LLM[4]: MatchTier.red,
+    _STUB_URLS_LLM[5]: MatchTier.amber,
+}
+
+
+class _LLMStubParser:
+    """6 stubs with distinct descriptions for prefilter/classifier/judge discrimination."""
+
+    def __enter__(self) -> "_LLMStubParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [
+            PositionStub(
+                url=_STUB_URLS_LLM[i],
+                title=f"Job {i}",
+                source="stub",
+                language="en",
+            )
+            for i in range(6)
+        ]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        if stub.url == _PF_REJECTED_LLM_URL:
+            desc = "excluded position"
+        else:
+            # Encode URL index in description so judge can return the right tier
+            idx = _STUB_URLS_LLM.index(stub.url)
+            desc = f"description for job {idx}"
+        return Position(stub=stub, raw_description=desc)
+
+
+class _FakeExtractor:
+    """Deterministic extractor: rejects Job 1 at classify, returns fixed tiers at judge."""
+
+    def prewarm(self) -> None:
+        pass
+
+    def classify_relevance(
+        self, language: str, title: str, raw_description: str
+    ) -> RelevanceVerdict:
+        return RelevanceVerdict(in_domain=(title != "Job 1"))
+
+    def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
+        # Extract job index from description ("description for job N")
+        for idx, url in enumerate(_STUB_URLS_LLM):
+            if f"job {idx}" in raw_description:
+                tier = _LLM_JUDGE_TIERS.get(url, MatchTier.green)
+                return MatchVerdict(tier=tier, matched=[], missing=[], summary="ok")
+        return MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok")
+
+
+def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
+    """Happy path: 6 stubs, 1 prefilter-dropped, 1 classifier-dropped, 4 written."""
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    summary = run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    assert summary.discovered == 6
+    assert summary.skipped == 0
+    assert summary.prefilter_dropped == 1
+    assert summary.classifier_dropped == 1
+    assert summary.written == 4
+    assert summary.green == 1
+    assert summary.amber == 2
+    assert summary.red == 1
+
+    # .seen.json: 2 off_domain, 4 kept
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    off_domain = [
+        url for url, rec in seen_data.items() if rec["status"] == "off_domain"
+    ]
+    kept = [url for url, rec in seen_data.items() if rec["status"] == "kept"]
+    assert len(off_domain) == 2
+    assert len(kept) == 4
+    assert _PF_REJECTED_LLM_URL in off_domain
+    assert _CLS_REJECTED_LLM_URL in off_domain
+
+    # current.md: 4 numbered entries
+    content = results_path.read_text(encoding="utf-8")
+    numbers = re.findall(r"^## (\d+)\.", content, re.MULTILINE)
+    assert len(numbers) == 4
+
+
+def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
+    """Second run on same tmp_path → all 6 skipped, current.md unchanged."""
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    def _make_run() -> RunSummary:
+        return run(
+            config_path,
+            extractor=_FakeExtractor(),
+            parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(seen_path),
+            results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        )
+
+    first = _make_run()
+    assert first.written == 4
+
+    content_after_first = results_path.read_text(encoding="utf-8")
+
+    second = _make_run()
+    assert second.discovered == 6
+    assert second.skipped == 6
+    assert second.prefilter_dropped == 0
+    assert second.classifier_dropped == 0
+    assert second.written == 0
+    assert second.green == 0
+    assert second.amber == 0
+    assert second.red == 0
+
+    assert results_path.read_text(encoding="utf-8") == content_after_first
+
+
+def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
+    """All classify_relevance calls complete before any judge_match call."""
+    call_log: list[str] = []
+
+    class _InstrumentedExtractor:
+        def prewarm(self) -> None:
+            pass
+
+        def classify_relevance(
+            self, language: str, title: str, raw_description: str
+        ) -> RelevanceVerdict:
+            call_log.append("classify")
+            return RelevanceVerdict(in_domain=True)
+
+        def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
+            call_log.append("judge")
+            return MatchVerdict(
+                tier=MatchTier.green, matched=[], missing=[], summary="ok"
+            )
+
+    class _MultiStubParser:
+        """Emits 5 stubs, all pass prefilter."""
+
+        def __enter__(self) -> "_MultiStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://batch.example/{i}",
+                    title=f"Job {i}",
+                    source="stub",
+                    language="en",
+                )
+                for i in range(5)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good job description")
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    run(
+        config_path,
+        extractor=_InstrumentedExtractor(),
+        parser_registry=lambda _: _MultiStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert call_log.count("classify") == 5
+    assert call_log.count("judge") == 5
+    # All classify calls before any judge call
+    last_classify = max(i for i, c in enumerate(call_log) if c == "classify")
+    first_judge = min(i for i, c in enumerate(call_log) if c == "judge")
+    assert last_classify < first_judge, (
+        f"classify and judge calls interleaved: {call_log}"
+    )

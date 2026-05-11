@@ -456,9 +456,7 @@ def test_mark_seen_external_redirect_persists_status(store_path: Path) -> None:
     assert on_disk["https://example.com/redir"]["status"] == "external_redirect"
 
 
-def test_external_redirect_is_seen_returns_url_hit_without_refetch(
-    store_path: Path,
-) -> None:
+def test_external_redirect_status_survives_reload(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/redir2")
     store.mark_seen(stub, "external_redirect")

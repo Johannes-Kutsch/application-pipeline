@@ -1019,8 +1019,16 @@ def test_external_redirect_marks_seen_and_increments_counter(
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records == [], f"unexpected WARNING(s): {warning_records}"
 
-    info_records = [r for r in caplog.records if "external_redirect" in r.getMessage()]
-    assert info_records, "expected at least one INFO log mentioning external_redirect"
+    dispatch_logs = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.INFO
+        and r.getMessage().startswith("external_redirect parser_id=")
+        and "https://external.example/job" in r.getMessage()
+    ]
+    assert dispatch_logs, (
+        "expected orchestrator to emit per-event external_redirect INFO log"
+    )
 
 
 def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> None:

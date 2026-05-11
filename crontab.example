@@ -1,0 +1,11 @@
+# crontab.example — application-pipeline Pi cron entry
+#
+# Install with: crontab -e
+# Replace <user> with the actual Pi user (e.g. pi, agent).
+# The runbook in docs/runbooks/ documents the full substitution procedure.
+#
+# flock -n ensures the single-writer invariant (ADR-0010): if a previous
+# invocation is still running, the new tick exits immediately without
+# launching a second pipeline instance.
+
+0 8,12,16,20 * * * /usr/bin/flock -n /var/lock/application-pipeline.lock /home/<user>/application-pipeline/scripts/pi-tick.sh >> /home/<user>/application-pipeline/logs/cron.log 2>&1

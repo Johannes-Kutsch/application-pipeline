@@ -14,6 +14,12 @@ from application_pipeline.parsers import (
     Position,
     PositionStub,
 )
+from application_pipeline.parsers.location import (
+    NotServed,
+    RemoteWire,
+    Resolved,
+    resolve,
+)
 from application_pipeline.parsers.registry import get
 from application_pipeline.parsers.types import City, Location, Remote
 
@@ -203,3 +209,59 @@ def test_location_match_is_exhaustive(loc: Location, expected: str) -> None:
         case _ as unreachable:
             assert_never(unreachable)
     assert result == expected
+
+
+# --- resolve() ---
+
+
+class _FakeParser:
+    def __init__(
+        self,
+        *,
+        served_cities: set[str],
+        serves_remote: bool,
+        wire_suffix: str = "_wire",
+    ) -> None:
+        self._served_cities = served_cities
+        self.serves_remote = serves_remote
+        self._wire_suffix = wire_suffix
+
+    def serves(self, name: str) -> bool:
+        return name in self._served_cities
+
+    def to_wire(self, name: str) -> str:
+        return name + self._wire_suffix
+
+    def remote_wire(self) -> str:
+        return "remote_payload"
+
+
+def test_resolve_city_served_returns_resolved() -> None:
+    parser = _FakeParser(served_cities={"hamburg"}, serves_remote=False)
+    result = resolve(City(name="Hamburg"), parser)
+    assert result == Resolved(wire="hamburg_wire")
+
+
+def test_resolve_city_not_served_returns_not_served() -> None:
+    parser = _FakeParser(served_cities=set(), serves_remote=False)
+    result = resolve(City(name="Hamburg"), parser)
+    assert result == NotServed()
+
+
+def test_resolve_remote_served_returns_remote_wire() -> None:
+    parser = _FakeParser(served_cities=set(), serves_remote=True)
+    result = resolve(Remote(), parser)
+    assert result == RemoteWire(payload="remote_payload")
+
+
+def test_resolve_remote_not_served_returns_not_served() -> None:
+    parser = _FakeParser(served_cities=set(), serves_remote=False)
+    result = resolve(Remote(), parser)
+    assert result == NotServed()
+
+
+def test_resolve_normalizes_city_name_before_lookup() -> None:
+    # serves() receives a casefolded name; "München" → "münchen"
+    parser = _FakeParser(served_cities={"münchen"}, serves_remote=False)
+    result = resolve(City(name="München"), parser)
+    assert result == Resolved(wire="münchen_wire")

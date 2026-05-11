@@ -31,6 +31,7 @@ def _write_config(
     keywords: str = '["python"]',
     locations: str = '["Hamburg"]',
     include_remote: bool = True,
+    negative_keywords: str = "[]",
 ) -> Path:
     """Write a minimal valid config.py and a prompts dir into tmp_path."""
     seen_line = (
@@ -45,6 +46,7 @@ def _write_config(
             SOURCES = {sources}
             LOCATIONS = {locations}
             INCLUDE_REMOTE = {include_remote!r}
+            NEGATIVE_KEYWORDS = {negative_keywords}
             {seen_line}
         """),
         encoding="utf-8",
@@ -276,7 +278,7 @@ def test_integration_discover_and_enrich(tmp_path: Path) -> None:
     assert summary.discovered == 6
     assert summary.skipped == 0
     assert len(summary.enriched) == 6
-    assert all(isinstance(p, Position) for p in summary.enriched)
+    assert all(isinstance(p, Position) for p, _lang in summary.enriched)
 
 
 def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
@@ -355,3 +357,66 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
     assert len(geo_calls) == 1
     assert len(remote_calls) == 1
     assert geo_calls[0].location == "Hamburg"
+
+
+# ---------------------------------------------------------------------------
+# Integration: language resolution + Pre-Filter pass (slice 4c)
+# ---------------------------------------------------------------------------
+
+_STUB_URLS_PF = [f"https://stub.example/pf/{i}" for i in range(6)]
+_REJECTED_URL = _STUB_URLS_PF[2]
+
+
+class _PreFilterStubParser:
+    """6 stubs; stub at index 2 gets 'excluded' in its description, others don't."""
+
+    def __enter__(self) -> "_PreFilterStubParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [
+            PositionStub(
+                url=_STUB_URLS_PF[i], title=f"Job {i}", source="stub", language="en"
+            )
+            for i in range(6)
+        ]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        desc = (
+            "excluded position" if stub.url == _REJECTED_URL else "regular job listing"
+        )
+        return Position(stub=stub, raw_description=desc)
+
+
+def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
+    """1 of 6 positions fails Pre-Filter → prefilter_dropped==1, URL in .seen.json as off_domain, 5 survivors."""
+    seen_path = tmp_path / ".seen.json"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    summary = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _PreFilterStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.discovered == 6
+    assert summary.skipped == 0
+    assert summary.prefilter_dropped == 1
+    assert len(summary.enriched) == 5
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_REJECTED_URL]["status"] == "off_domain"
+    surviving_urls = {p.stub.url for p, _lang in summary.enriched}
+    assert _REJECTED_URL not in surviving_urls

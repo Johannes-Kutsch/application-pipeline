@@ -12,6 +12,7 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline import layout as layout_module
 from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
+from application_pipeline.language import Language, resolve_language
 from application_pipeline.llm import (
     ExtractorUnreachableError,
     LLMExtractor,
@@ -31,10 +32,11 @@ class RunSummary:
     total_discovered: int = 0
     total_seen: int = 0
     total_kept: int = 0
+    prefilter_dropped: int = 0
     duration_seconds: float = 0.0
     discovered: int = 0
     skipped: int = 0
-    enriched: tuple[Position, ...] = ()
+    enriched: tuple[tuple[Position, Language], ...] = ()
 
 
 def run(
@@ -110,7 +112,8 @@ def run(
     # Step 9: Enter parsers via ExitStack, iterate sources × keywords × locations
     discovered = 0
     skipped = 0
-    enriched: list[Position] = []
+    prefilter_dropped = 0
+    survivors: list[tuple[Position, Language]] = []
 
     locations: list[str | None] = list(cfg.locations)
     if cfg.include_remote:
@@ -131,7 +134,14 @@ def run(
                     for stub in parser.discover(query):
                         discovered += 1
                         if dedup_store.is_seen(stub) == "miss":
-                            enriched.append(parser.enrich(stub))
+                            position = parser.enrich(stub)
+                            language = resolve_language(position)
+                            verdict = prefilter.classify(position, language)
+                            if verdict.passes:
+                                survivors.append((position, language))
+                            else:
+                                dedup_store.mark_seen(stub, "off_domain")
+                                prefilter_dropped += 1
                         else:
                             skipped += 1
 
@@ -139,5 +149,6 @@ def run(
         duration_seconds=time.monotonic() - _start,
         discovered=discovered,
         skipped=skipped,
-        enriched=tuple(enriched),
+        prefilter_dropped=prefilter_dropped,
+        enriched=tuple(survivors),
     )

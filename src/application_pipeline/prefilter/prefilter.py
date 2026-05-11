@@ -13,8 +13,11 @@ class PreFilterVerdict:
 
 
 class _Position(Protocol):
-    title: str
-    raw_description: str
+    @property
+    def title(self) -> str: ...
+
+    @property
+    def raw_description(self) -> str: ...
 
 
 class DomainPreFilter:

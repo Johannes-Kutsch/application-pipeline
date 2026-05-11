@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
+from application_pipeline import debug_log
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
 from application_pipeline.failure_report import write_failure
@@ -60,6 +61,7 @@ def main() -> None:
 
     config_path = Path(args[0])
     try:
+        debug_log.configure(config_path.parent / "logs")
         summary = run(config_path)
     except _FATAL as exc:
         try:

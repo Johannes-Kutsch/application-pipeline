@@ -443,3 +443,25 @@ def test_debug_log_on_tuple_match_with_alias_write(
     with caplog.at_level(logging.DEBUG, logger="application_pipeline.dedup.store"):
         store.is_seen(StubLike(url="https://b.example/1"))
     assert any("tuple" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_mark_seen_external_redirect_persists_status(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/redir")
+    store.mark_seen(stub, "external_redirect")
+
+    assert store.is_seen(stub) == "url_hit"
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk["https://example.com/redir"]["status"] == "external_redirect"
+
+
+def test_external_redirect_is_seen_returns_url_hit_without_refetch(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/redir2")
+    store.mark_seen(stub, "external_redirect")
+
+    reloaded = dedup_load(store_path)
+    assert reloaded.is_seen(stub) == "url_hit"

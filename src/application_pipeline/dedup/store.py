@@ -21,7 +21,7 @@ from .errors import DedupStoreError
 
 logger = logging.getLogger(__name__)
 
-SeenStatus = Literal["off_domain", "kept", "enrich_failed"]
+SeenStatus = Literal["off_domain", "kept", "enrich_failed", "external_redirect"]
 SeenResult = Literal["url_hit", "tuple_hit", "miss"]
 
 

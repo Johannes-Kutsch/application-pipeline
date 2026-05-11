@@ -2,7 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal
+from typing import Literal, Union
+
+
+@dataclass(frozen=True)
+class City:
+    name: str
+
+
+@dataclass(frozen=True)
+class Remote:
+    pass
+
+
+Location = Union[City, Remote]
 
 
 @dataclass

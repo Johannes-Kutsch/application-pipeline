@@ -13,6 +13,7 @@ from application_pipeline.parsers import (
     PositionStub,
 )
 from application_pipeline.parsers.registry import get
+from application_pipeline.parsers.types import City, Location, Remote
 
 
 class _ConcreteParser:
@@ -167,3 +168,52 @@ def test_registry_get_result_is_instantiable() -> None:
     cls = get("bundesagentur_api")
     assert cls is not None
     assert isinstance(cls(), Parser)
+
+
+# --- Location types ---
+
+
+def test_city_is_frozen():
+    city = City(name="Hamburg")
+    with pytest.raises(Exception):
+        city.name = "Berlin"  # type: ignore[misc]
+
+
+def test_remote_is_frozen():
+    remote = Remote()
+    with pytest.raises(Exception):
+        remote.x = 1  # type: ignore[attr-defined]
+
+
+def test_location_match_city_arm():
+    loc: Location = City(name="Hamburg")
+    match loc:
+        case City(name=n):
+            result = f"city:{n}"
+        case Remote():
+            result = "remote"
+    assert result == "city:Hamburg"
+
+
+def test_location_match_remote_arm():
+    loc: Location = Remote()
+    match loc:
+        case City(name=n):
+            result = f"city:{n}"
+        case Remote():
+            result = "remote"
+    assert result == "remote"
+
+
+def test_location_match_is_exhaustive_via_assert_never():
+    from typing import assert_never
+
+    loc: Location = City(name="Berlin")
+    match loc:
+        case City(name=n):
+            result = f"city:{n}"
+        case Remote():
+            result = "remote"
+        case _ as unreachable:
+            assert_never(unreachable)
+    assert result == "city:Berlin"

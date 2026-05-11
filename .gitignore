@@ -2,6 +2,9 @@
 *.claude
 pycastle/
 
+# Deduplication store — durability via Syncthing per ADR-0010
+.seen.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

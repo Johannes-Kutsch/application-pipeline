@@ -47,6 +47,8 @@ def main() -> None:
         f"  green={summary.green}"
         f"  amber={summary.amber}"
         f"  red={summary.red}"
+        f"  enrich_failed={summary.enrich_failed}"
+        f"  errored={summary.errored}"
         f"  duration={summary.duration_seconds:.1f}s"
     )
 

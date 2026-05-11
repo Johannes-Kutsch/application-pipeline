@@ -15,6 +15,7 @@ from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.language import Language, resolve_language
 from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
+    ExtractorError,
     ExtractorUnreachableError,
     LLMExtractor,
     MatchTier,
@@ -23,6 +24,7 @@ from application_pipeline.llm import (
 )
 from application_pipeline.parsers import Parser, ParserQuery, Position
 from application_pipeline.parsers import registry as _default_registry
+from application_pipeline.parsers.errors import ParserError
 from application_pipeline.prefilter import DomainPreFilter
 from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.renderer import render
@@ -41,6 +43,8 @@ class RunSummary:
     green: int = 0
     amber: int = 0
     red: int = 0
+    enrich_failed: int = 0
+    errored: int = 0
     duration_seconds: float = 0.0
 
 
@@ -123,6 +127,7 @@ def run(
     discovered = 0
     skipped = 0
     prefilter_dropped = 0
+    enrich_failed = 0
     survivors: list[tuple[Position, Language]] = []
 
     locations: list[str | None] = list(cfg.locations)
@@ -141,27 +146,53 @@ def run(
                         location=location,
                         max_results=source.max_results,
                     )
-                    for stub in parser.discover(query):
-                        discovered += 1
-                        if dedup_store.is_seen(stub) == "miss":
-                            position = parser.enrich(stub)
-                            language = resolve_language(position)
-                            verdict = prefilter.classify(position, language)
-                            if verdict.passes:
-                                survivors.append((position, language))
+                    try:
+                        for stub in parser.discover(query):
+                            discovered += 1
+                            if dedup_store.is_seen(stub) == "miss":
+                                try:
+                                    position = parser.enrich(stub)
+                                except ParserError as exc:
+                                    _log.warning(
+                                        "enrich failed: parser_type=%s stub_url=%s message=%s",
+                                        source.parser_type,
+                                        stub.url,
+                                        exc,
+                                    )
+                                    dedup_store.mark_seen(stub, "enrich_failed")
+                                    enrich_failed += 1
+                                    continue
+                                language = resolve_language(position)
+                                verdict = prefilter.classify(position, language)
+                                if verdict.passes:
+                                    survivors.append((position, language))
+                                else:
+                                    dedup_store.mark_seen(stub, "off_domain")
+                                    prefilter_dropped += 1
                             else:
-                                dedup_store.mark_seen(stub, "off_domain")
-                                prefilter_dropped += 1
-                        else:
-                            skipped += 1
+                                skipped += 1
+                    except ParserError as exc:
+                        _log.warning(
+                            "discover failed mid-run: parser_type=%s keyword=%s location=%s message=%s",
+                            source.parser_type,
+                            keyword,
+                            location,
+                            exc,
+                        )
 
     # Step 10: Classify batch — all classify_relevance calls before any judge_match call
     classifier_dropped = 0
+    errored = 0
     in_domain: list[tuple[Position, Language]] = []
     for position, language in survivors:
-        rel_verdict = extractor.classify_relevance(
-            language, position.title, position.raw_description
-        )
+        try:
+            rel_verdict = extractor.classify_relevance(
+                language, position.title, position.raw_description
+            )
+        except ExtractorError as exc:
+            _log.warning("classify_relevance failed: %s", exc)
+            errored += 1
+            continue
         if rel_verdict.in_domain:
             in_domain.append((position, language))
         else:
@@ -171,7 +202,12 @@ def run(
     # Step 11: Judge batch — all judge_match calls after classify batch
     judged: list[tuple[Position, MatchVerdict]] = []
     for position, language in in_domain:
-        match_verdict = extractor.judge_match(language, position.raw_description)
+        try:
+            match_verdict = extractor.judge_match(language, position.raw_description)
+        except ExtractorError as exc:
+            _log.warning("judge_match failed: %s", exc)
+            errored += 1
+            continue
         judged.append((position, match_verdict))
 
     # Step 12: Render → append+fsync → mark_seen("kept"), strictly in order
@@ -182,7 +218,14 @@ def run(
     for position, match_verdict in judged:
         number = results_manager.next_position_number()
         rendered = render(position, match_verdict, number, layout)
-        results_manager.append(rendered)
+        try:
+            results_manager.append(rendered)
+        except ResultsFileError as exc:
+            _log.error(
+                "append failed — results file corrupt, manual intervention required: %s",
+                exc,
+            )
+            raise
         dedup_store.mark_seen(position.stub, "kept")
         written += 1
         if match_verdict.tier == MatchTier.green:
@@ -194,7 +237,8 @@ def run(
 
     _log.info(
         "run complete: discovered=%d skipped=%d prefilter_dropped=%d "
-        "classifier_dropped=%d written=%d green=%d amber=%d red=%d",
+        "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
+        "enrich_failed=%d errored=%d",
         discovered,
         skipped,
         prefilter_dropped,
@@ -203,6 +247,8 @@ def run(
         green,
         amber,
         red,
+        enrich_failed,
+        errored,
     )
 
     return RunSummary(
@@ -215,4 +261,6 @@ def run(
         green=green,
         amber=amber,
         red=red,
+        enrich_failed=enrich_failed,
+        errored=errored,
     )

@@ -12,6 +12,7 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
 from application_pipeline.llm import (
+    ExtractorError,
     ExtractorUnreachableError,
     MatchTier,
     MatchVerdict,
@@ -19,6 +20,7 @@ from application_pipeline.llm import (
 )
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import ParserQuery, Position, PositionStub
+from application_pipeline.parsers.errors import ParserError
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import ResultsFileError, ResultsFileManager
 
@@ -652,3 +654,215 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
     assert last_classify < first_judge, (
         f"classify and judge calls interleaved: {call_log}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Error paths (issue #110)
+# ---------------------------------------------------------------------------
+
+_ERR_URLS = [f"https://stub.example/err/{i}" for i in range(4)]
+
+
+class _TwoStubParser:
+    """Yields 2 stubs with fixed URLs; enriches trivially."""
+
+    def __enter__(self) -> "_TwoStubParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [
+            PositionStub(
+                url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
+            )
+            for i in range(2)
+        ]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        return Position(stub=stub, raw_description="good description")
+
+
+def _two_stub_config(tmp_path: Path) -> Path:
+    return _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="stub")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+
+def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> None:
+    """ExtractorError on classify_relevance: position NOT marked seen, errored increments, run completes."""
+    seen_path = tmp_path / ".seen.json"
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    # First position raises, second succeeds
+    ext.classify_relevance.side_effect = [
+        ExtractorError("classify boom"),
+        RelevanceVerdict(in_domain=True),
+    ]
+    ext.judge_match.return_value = MatchVerdict(
+        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    )
+
+    summary = run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.errored == 1
+    assert summary.written == 1
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    # First position must NOT be in seen store (left un-seen for retry)
+    assert _ERR_URLS[0] not in seen_data
+
+
+def test_extractor_error_on_judge_leaves_position_unseen(tmp_path: Path) -> None:
+    """ExtractorError on judge_match: position NOT marked seen, rendered block NOT in current.md, errored increments."""
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance.return_value = RelevanceVerdict(in_domain=True)
+    # First judge raises, second succeeds
+    ext.judge_match.side_effect = [
+        ExtractorError("judge boom"),
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+    ]
+
+    summary = run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    assert summary.errored == 1
+    assert summary.written == 1
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert _ERR_URLS[0] not in seen_data
+
+    content = results_path.read_text(encoding="utf-8")
+    assert "Job 0" not in content
+
+
+def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
+    """ParserError from enrich: stub marked enrich_failed, enrich_failed increments, other stubs proceed."""
+    seen_path = tmp_path / ".seen.json"
+
+    class _EnrichFailParser:
+        def __enter__(self) -> "_EnrichFailParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
+                )
+                for i in range(3)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            if stub.url == _ERR_URLS[1]:
+                raise ParserError("enrich boom")
+            return Position(stub=stub, raw_description="good description")
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="stub")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.enrich_failed == 1
+    assert summary.written == 2
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_ERR_URLS[1]]["status"] == "enrich_failed"
+
+
+def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> None:
+    """ParserError mid-discover: already-yielded stubs processed, run advances to next combination."""
+    seen_path = tmp_path / ".seen.json"
+
+    class _MidDiscoverFailParser:
+        def __enter__(self) -> "_MidDiscoverFailParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            # Yield 3 stubs then raise ParserError
+            for i in range(3):
+                yield PositionStub(
+                    url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
+                )
+            raise ParserError("mid-discover boom")
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="stub")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _MidDiscoverFailParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.discovered == 3
+    assert summary.written == 3
+
+
+def test_append_failure_exits_nonzero_position_not_marked_seen(tmp_path: Path) -> None:
+    """ResultsFileError from append: run raises (non-zero exit), position NOT marked seen."""
+    seen_path = tmp_path / ".seen.json"
+
+    rm = MagicMock()
+    rm.ensure_initialized.return_value = None
+    rm.next_position_number.return_value = 1
+    rm.append.side_effect = ResultsFileError("disk full")
+
+    with pytest.raises(ResultsFileError):
+        run(
+            _two_stub_config(tmp_path),
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(seen_path),
+            results_manager=rm,
+        )
+
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    # No position must be marked kept
+    kept = [url for url, rec in seen_data.items() if rec.get("status") == "kept"]
+    assert kept == []

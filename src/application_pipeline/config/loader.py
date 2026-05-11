@@ -1,9 +1,8 @@
 import importlib
 import os
 import pathlib
-from typing import Any
 
-from application_pipeline.parsers.location import validate_coverage
+from application_pipeline.parsers.location import LocationCoverage, validate_coverage
 from application_pipeline.text.normalize import normalize
 from application_pipeline.user_settings import load_user_module
 
@@ -102,8 +101,8 @@ def _resolve_optional_file(
     return path
 
 
-def _resolve_parser_modules(sources: list[SourceEntry]) -> list[Any]:
-    modules = []
+def _resolve_parser_modules(sources: list[SourceEntry]) -> list[LocationCoverage]:
+    modules: list[LocationCoverage] = []
     for source in sources:
         try:
             modules.append(

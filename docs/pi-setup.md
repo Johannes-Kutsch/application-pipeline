@@ -289,16 +289,22 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
     ```
     Verify: the path `/home/pi/application-pipeline/...` (or your username) appears, no `<user>` placeholder remains.
 
-36. Install the crontab:
+36. Install the crontab. `crontab <file>` **replaces** the entire crontab — so if the Pi user already has unrelated cron entries (e.g. backup jobs, other tooling), a bare `crontab ~/crontab.tmp` would wipe them. Merge instead:
     ```bash
-    crontab ~/crontab.tmp
+    # Append the pi-tick entry to any existing crontab, then install the merged result
+    ( crontab -l 2>/dev/null; cat ~/crontab.tmp ) > ~/crontab.merged
+    cat ~/crontab.merged
+    ```
+    Verify: the file contains all pre-existing entries (if any) **plus** the new `pi-tick.sh` line, and no `<user>` placeholder remains.
+    ```bash
+    crontab ~/crontab.merged
     crontab -l
     ```
-    Expected: one line scheduling `pi-tick.sh` at 8, 12, 16, and 20 UTC daily.
+    Expected: the merged crontab is now installed; the `pi-tick.sh` line schedules it at 8, 12, 16, and 20 UTC daily.
 
-37. Remove the temporary file:
+37. Remove the temporary files:
     ```bash
-    rm ~/crontab.tmp
+    rm ~/crontab.tmp ~/crontab.merged
     ```
 
 ---

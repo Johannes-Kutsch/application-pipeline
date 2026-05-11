@@ -42,7 +42,7 @@ def write_failure(
 ) -> Path:
     now = datetime.now(UTC)
     timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    filename_ts = now.strftime("%Y-%m-%dT%H-%M-%SZ")
+    filename_ts = timestamp.replace(":", "-")
 
     failures_dir = results_dir / "failures"
     failures_dir.mkdir(parents=True, exist_ok=True)

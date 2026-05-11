@@ -288,7 +288,7 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
 
 The **Seen State** file (`.seen.json`) tracks which **Position** URLs have already been shown in the **Results File**. Losing it causes the next pipeline run to treat all previously-seen positions as new (a one-time flood of duplicates). Because `.seen.json` is continuously synced to the laptop via Syncthing (see [ADR-0002](adr/0002-seen-state-durable-via-syncthing.md) and [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md)), the recovery procedure is:
 
-39. After re-imaging the Pi and completing steps 1–32 above, copy `.seen.json` from the laptop's Syncthing folder back to the Pi **before** the first `pi-tick.sh` run:
+39. After re-imaging the Pi, complete steps 1–28 and **stop before installing the crontab** (step 31). Copy `.seen.json` from the laptop's Syncthing folder back to the Pi while no scheduled tick can fire:
     ```bash
     # Run on the Pi, substituting the laptop's IP and your Syncthing folder path:
     scp <laptop-user>@<laptop-ip>:<syncthing-folder>/.seen.json \
@@ -302,4 +302,4 @@ The **Seen State** file (`.seen.json`) tracks which **Position** URLs have alrea
     ```
     Expected: size > 0 bytes.
 
-41. Trigger a manual run (step 33) and confirm no duplicate flood in `current.md`.
+41. Resume the remaining bootstrap steps (29–32) to install the crontab, then trigger a manual run (step 33) and confirm no duplicate flood in `current.md`.

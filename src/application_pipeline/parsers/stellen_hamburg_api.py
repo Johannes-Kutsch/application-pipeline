@@ -35,7 +35,7 @@ from .http import (
     check_response_status,
     request_with_retry,
 )
-from .types import ParserQuery, Position, PositionStub
+from .types import City, ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
 
@@ -286,7 +286,7 @@ if __name__ == "__main__":
 
     query = ParserQuery(
         keyword=sys.argv[1] if len(sys.argv) > 1 else "*",
-        location="hamburg",
+        location=City("hamburg"),
         max_results=5,
     )
     with StellenHamburgParser() as p:

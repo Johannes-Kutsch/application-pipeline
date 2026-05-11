@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
+from application_pipeline.parsers.types import City, Remote
 from application_pipeline.parsers.bundesagentur_api import (
     BundesagenturParser,
     parser_class,
@@ -79,7 +80,11 @@ def _make_get(responses: list[bytes]) -> HttpGet:
 
 
 def _query(**kwargs: object) -> ParserQuery:
-    defaults: dict = {"keyword": "python", "location": "Hamburg", "max_results": 100}
+    defaults: dict = {
+        "keyword": "python",
+        "location": City("Hamburg"),
+        "max_results": 100,
+    }
     defaults.update(kwargs)
     return ParserQuery(**defaults)  # type: ignore[arg-type]
 
@@ -295,7 +300,7 @@ def test_discover_resolves_location_to_slug_in_url() -> None:
         return _search_body([])
 
     with BundesagenturParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location="Hamburg")))
+        list(p.discover(_query(location=City("Hamburg"))))
 
     assert any("wo=Hamburg" in u for u in urls)
 
@@ -308,7 +313,7 @@ def test_discover_normalizes_location_before_slug_lookup() -> None:
         return _search_body([])
 
     with BundesagenturParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location="  MÜNCHEN  ")))
+        list(p.discover(_query(location=City("  MÜNCHEN  "))))
 
     assert any("M%C3%BCnchen" in u or "München" in u for u in urls)
 
@@ -321,7 +326,7 @@ def test_discover_unknown_location_yields_nothing_and_logs_warning(
 
     with caplog.at_level(logging.WARNING):
         with BundesagenturParser(_http_get=capturing_get) as p:
-            stubs = list(p.discover(_query(location="unknown_city_xyz")))
+            stubs = list(p.discover(_query(location=City("unknown_city_xyz"))))
 
     assert stubs == []
     assert any("unmapped_location" in r.message for r in caplog.records)
@@ -340,7 +345,7 @@ def test_discover_location_none_uses_arbeitszeit_ho() -> None:
         return _search_body([])
 
     with BundesagenturParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location=None)))
+        list(p.discover(_query(location=Remote())))
 
     assert any("arbeitszeit=ho" in u for u in urls)
 
@@ -353,7 +358,7 @@ def test_discover_location_none_omits_wo_param() -> None:
         return _search_body([])
 
     with BundesagenturParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location=None)))
+        list(p.discover(_query(location=Remote())))
 
     assert all("wo=" not in u for u in urls)
 

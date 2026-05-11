@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
+from application_pipeline.parsers.types import City, Remote
 from application_pipeline.parsers.http import HttpGet
 from application_pipeline.parsers.jobs_beim_staat_html import (
     JobsBeimStaatParser,
@@ -37,7 +38,11 @@ def _make_get(responses: dict[str, bytes]) -> HttpGet:
 
 
 def _query(**kwargs: object) -> ParserQuery:
-    defaults: dict = {"keyword": "python", "location": "hamburg", "max_results": 100}
+    defaults: dict = {
+        "keyword": "python",
+        "location": City("hamburg"),
+        "max_results": 100,
+    }
     defaults.update(kwargs)
     return ParserQuery(**defaults)  # type: ignore[arg-type]
 
@@ -215,7 +220,7 @@ def test_discover_uses_homeoffice_slug_when_location_is_homeoffice(
         return list_html
 
     with JobsBeimStaatParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location="homeoffice")))
+        list(p.discover(_query(location=City("homeoffice"))))
 
     assert any("homeoffice" in u for u in fetched_urls)
 
@@ -230,7 +235,7 @@ def test_discover_unknown_location_logs_warning_and_yields_nothing(
 
     with caplog.at_level(logging.WARNING):
         with JobsBeimStaatParser(_http_get=never_called) as p:
-            stubs = list(p.discover(_query(location="UnknownCity99")))
+            stubs = list(p.discover(_query(location=City("UnknownCity99"))))
 
     assert stubs == []
     assert "unknown_location" in caplog.text
@@ -241,7 +246,7 @@ def test_discover_yields_nothing_when_location_is_none() -> None:
         raise AssertionError("should not fetch")
 
     with JobsBeimStaatParser(_http_get=never_called) as p:
-        stubs = list(p.discover(_query(location=None)))
+        stubs = list(p.discover(_query(location=Remote())))
 
     assert stubs == []
 
@@ -254,7 +259,7 @@ def test_discover_fetches_correct_slug_for_location(list_html: bytes) -> None:
         return list_html
 
     with JobsBeimStaatParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location="hamburg")))
+        list(p.discover(_query(location=City("hamburg"))))
 
     assert any("jobs/hamburg" in u for u in fetched_urls)
 
@@ -267,7 +272,7 @@ def test_discover_normalizes_location_case(list_html: bytes) -> None:
         return list_html
 
     with JobsBeimStaatParser(_http_get=capturing_get) as p:
-        list(p.discover(_query(location="Hamburg")))
+        list(p.discover(_query(location=City("Hamburg"))))
 
     assert any("jobs/hamburg" in u for u in fetched_urls)
 

@@ -20,6 +20,7 @@ from application_pipeline.llm import (
 )
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import Parser, ParserQuery, Position, PositionStub
+from application_pipeline.parsers.types import City, Remote
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import ResultsFileError, ResultsFileManager
@@ -364,11 +365,11 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
     )
 
     assert len(queries_received) == 2
-    geo_calls = [q for q in queries_received if q.location is not None]
-    remote_calls = [q for q in queries_received if q.location is None]
+    geo_calls = [q for q in queries_received if isinstance(q.location, City)]
+    remote_calls = [q for q in queries_received if isinstance(q.location, Remote)]
     assert len(geo_calls) == 1
     assert len(remote_calls) == 1
-    assert geo_calls[0].location == "Hamburg"
+    assert geo_calls[0].location == City("Hamburg")
 
 
 # ---------------------------------------------------------------------------

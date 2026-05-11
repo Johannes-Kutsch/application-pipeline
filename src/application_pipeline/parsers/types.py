@@ -21,7 +21,7 @@ Location = City | Remote
 @dataclass
 class ParserQuery:
     keyword: str
-    location: str | None
+    location: Location
     max_results: int
 
     def __post_init__(self) -> None:

@@ -42,11 +42,12 @@ def write_failure(
 ) -> Path:
     now = datetime.now(UTC)
     timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    filename_ts = now.strftime("%Y-%m-%dT%H-%M-%SZ")
 
     failures_dir = results_dir / "failures"
     failures_dir.mkdir(parents=True, exist_ok=True)
 
-    target = failures_dir / f"{timestamp}.md"
+    target = failures_dir / f"{filename_ts}.md"
     tmp = target.with_name(target.name + ".tmp")
 
     body = _render(timestamp, stage, error, log_tail, _discover_tag())

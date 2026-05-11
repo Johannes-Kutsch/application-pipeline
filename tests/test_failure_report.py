@@ -17,6 +17,7 @@ def results_dir(tmp_path: Path) -> Path:
 
 _FIXED_TIME = datetime(2026, 5, 11, 16, 4, 0, tzinfo=UTC)
 _FIXED_TIMESTAMP = "2026-05-11T16:04:00Z"
+_FIXED_FILENAME = "2026-05-11T16-04-00Z"
 
 
 def _write_at(timestamp: datetime, *args, **kwargs) -> Path:
@@ -32,7 +33,7 @@ class TestFileCreation:
         path = _write_at(
             _FIXED_TIME, "parser:test", ValueError("boom"), "log", results_dir
         )
-        assert path == results_dir / "failures" / f"{_FIXED_TIMESTAMP}.md"
+        assert path == results_dir / "failures" / f"{_FIXED_FILENAME}.md"
         assert path.exists()
 
     def test_creates_failures_subdirectory_when_missing(

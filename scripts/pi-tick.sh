@@ -34,11 +34,12 @@ current_tag() {
 
 write_failure() {
     local stage="$1" error_msg="$2" captured_output="$3"
-    local timestamp
+    local timestamp filename_ts
     timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    filename_ts="${timestamp//:/-}"
 
     mkdir -p "${FAILURES_DIR}"
-    local target="${FAILURES_DIR}/${timestamp}.md"
+    local target="${FAILURES_DIR}/${filename_ts}.md"
     local tmp="${target}.tmp"
 
     local tag

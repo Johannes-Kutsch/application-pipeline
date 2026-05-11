@@ -1,6 +1,6 @@
 # Failures surface as files in the synced `synched/` folder
 
-Run failures (deploy install errors, Ollama unreachable, parser crashes, classify/judge exceptions) are reported by writing a markdown file to `results/failures/<timestamp>.md` on the Pi. Syncthing propagates the file to the laptop. The pipeline never makes outbound calls (GitHub Issues, email, webhook) to notify of failure.
+Run failures (deploy install errors, Ollama unreachable, parser crashes, classify/judge exceptions) are reported by writing a markdown file to `synched/failures/<timestamp>.md` on the Pi. Syncthing propagates the file to the laptop. The pipeline never makes outbound calls (GitHub Issues, email, webhook) to notify of failure.
 
 ## Why
 

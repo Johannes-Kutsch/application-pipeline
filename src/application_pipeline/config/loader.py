@@ -104,8 +104,8 @@ def _validate(config: Config) -> None:
         raise ConfigError("KEYWORDS must be non-empty")
     if not config.sources:
         raise ConfigError("SOURCES must be non-empty")
-    if not config.locations:
-        raise ConfigError("LOCATIONS must be non-empty")
+    if not config.locations and not config.include_remote:
+        raise ConfigError("nothing to search")
 
     if not config.prompts_dir.is_dir():
         raise ConfigError(

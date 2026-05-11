@@ -487,7 +487,7 @@ def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> No
     assert second.keywords == ["second"]
 
 
-@pytest.mark.parametrize("empty_field", ["KEYWORDS", "SOURCES", "LOCATIONS"])
+@pytest.mark.parametrize("empty_field", ["KEYWORDS", "SOURCES"])
 def test_load_raises_when_required_list_is_empty(
     tmp_path: pathlib.Path, empty_field: str
 ) -> None:
@@ -505,6 +505,48 @@ def test_load_raises_when_required_list_is_empty(
 
     with pytest.raises(ConfigError, match=empty_field):
         load(path)
+
+
+def test_empty_locations_with_include_remote_false_raises(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(
+        tmp_path,
+        """
+        from application_pipeline import SourceEntry
+
+        KEYWORDS = ["python"]
+        SKILLS = []
+        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        LOCATIONS = []
+        INCLUDE_REMOTE = False
+        """,
+    )
+
+    with pytest.raises(ConfigError, match="nothing to search"):
+        load(path)
+
+
+def test_empty_locations_with_include_remote_true_is_valid(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(
+        tmp_path,
+        """
+        from application_pipeline import SourceEntry
+
+        KEYWORDS = ["python"]
+        SKILLS = []
+        SOURCES = [SourceEntry(parser_type="bundesagentur")]
+        LOCATIONS = []
+        INCLUDE_REMOTE = True
+        """,
+    )
+
+    config = load(path)
+
+    assert config.locations == []
+    assert config.include_remote is True
 
 
 def test_load_accepts_empty_skills(tmp_path: pathlib.Path) -> None:

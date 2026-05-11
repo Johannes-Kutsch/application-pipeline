@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import importlib.resources
-import pathlib
+from pathlib import Path
 
 import pytest
 
 from application_pipeline import Config, Layout, load, load_layout
 from application_pipeline.init_cmd import init
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _template_bytes(name: str) -> bytes:
@@ -20,8 +15,8 @@ def _template_bytes(name: str) -> bytes:
     ).read_bytes()
 
 
-def _make_prompts_dir(base: pathlib.Path) -> None:
-    """Create a minimal prompts directory accepted by the Config Loader."""
+def _make_prompts_dir(base: Path) -> None:
+    """Minimal prompts directory accepted by the Config Loader."""
     prompts = base / "prompts"
     prompts.mkdir(exist_ok=True)
     for fname in (
@@ -33,27 +28,15 @@ def _make_prompts_dir(base: pathlib.Path) -> None:
         (prompts / fname).write_text(f"{fname}\n")
 
 
-# ---------------------------------------------------------------------------
-# First-bootstrap: empty dir → both files written, bytes match templates
-# ---------------------------------------------------------------------------
-
-
-def test_first_bootstrap_writes_both_files(tmp_path: pathlib.Path) -> None:
+def test_first_bootstrap_writes_both_files(tmp_path: Path) -> None:
     init(tmp_path)
 
-    assert (tmp_path / "config.py").exists()
-    assert (tmp_path / "layout.py").exists()
     assert (tmp_path / "config.py").read_bytes() == _template_bytes("config.py")
     assert (tmp_path / "layout.py").read_bytes() == _template_bytes("layout.py")
 
 
-# ---------------------------------------------------------------------------
-# Status-line output
-# ---------------------------------------------------------------------------
-
-
 def test_first_bootstrap_prints_wrote_for_both(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
 
@@ -63,7 +46,7 @@ def test_first_bootstrap_prints_wrote_for_both(
 
 
 def test_skip_existing_config_prints_correctly(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "config.py").write_text("# operator-edited\n")
 
@@ -75,7 +58,7 @@ def test_skip_existing_config_prints_correctly(
 
 
 def test_both_exist_prints_skipped_for_both(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "config.py").write_text("# custom\n")
     (tmp_path / "layout.py").write_text("# custom\n")
@@ -87,12 +70,7 @@ def test_both_exist_prints_skipped_for_both(
     assert "skipped layout.py (already exists)" in out
 
 
-# ---------------------------------------------------------------------------
-# Skip-existing preserves content
-# ---------------------------------------------------------------------------
-
-
-def test_skip_existing_config_preserves_content(tmp_path: pathlib.Path) -> None:
+def test_skip_existing_config_preserves_content(tmp_path: Path) -> None:
     original = "# operator-edited content\nKEYWORDS = ['custom']\n"
     (tmp_path / "config.py").write_text(original)
 
@@ -101,7 +79,7 @@ def test_skip_existing_config_preserves_content(tmp_path: pathlib.Path) -> None:
     assert (tmp_path / "config.py").read_text() == original
 
 
-def test_both_exist_neither_modified(tmp_path: pathlib.Path) -> None:
+def test_both_exist_neither_modified(tmp_path: Path) -> None:
     config_content = "# my config\n"
     layout_content = "# my layout\n"
     (tmp_path / "config.py").write_text(config_content)
@@ -113,12 +91,7 @@ def test_both_exist_neither_modified(tmp_path: pathlib.Path) -> None:
     assert (tmp_path / "layout.py").read_text() == layout_content
 
 
-# ---------------------------------------------------------------------------
-# Template roundtrip through loaders
-# ---------------------------------------------------------------------------
-
-
-def test_config_template_loads_successfully(tmp_path: pathlib.Path) -> None:
+def test_config_template_loads_successfully(tmp_path: Path) -> None:
     init(tmp_path)
     _make_prompts_dir(tmp_path)
 
@@ -131,7 +104,7 @@ def test_config_template_loads_successfully(tmp_path: pathlib.Path) -> None:
     assert config.include_remote is True
 
 
-def test_layout_template_loads_successfully(tmp_path: pathlib.Path) -> None:
+def test_layout_template_loads_successfully(tmp_path: Path) -> None:
     init(tmp_path)
 
     layout = load_layout(tmp_path / "layout.py")

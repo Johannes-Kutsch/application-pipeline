@@ -75,10 +75,7 @@ class ClaudeExtractor:
         )
 
         try:
-            data = response.parsed_result
-            return RelevanceVerdict(in_domain=data["in_domain"])
-        except ExtractorSchemaError:
-            raise
+            return RelevanceVerdict(in_domain=response.parsed_result["in_domain"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ExtractorSchemaError(
                 f"classify_relevance: failed to validate Claude response: {exc}"
@@ -121,16 +118,14 @@ class ClaudeExtractor:
             duration_s=f"{response.duration_s:.3f}",
         )
 
+        data = response.parsed_result
         try:
-            data = response.parsed_result
             return MatchVerdict(
                 tier=MatchTier(data["tier"]),
                 matched=list(data["matched"]),
                 missing=list(data["missing"]),
                 summary=str(data["summary"]),
             )
-        except ExtractorSchemaError:
-            raise
         except (KeyError, TypeError, ValueError) as exc:
             raise ExtractorSchemaError(
                 f"judge_match: failed to validate Claude response: {exc}"

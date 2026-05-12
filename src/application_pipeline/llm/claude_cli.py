@@ -59,9 +59,6 @@ class ClaudeCliInvoker:
     #   claude -p - --output-format json
     # with the prompt written to the process's stdin.  This avoids ARG_MAX
     # limits for multi-KB prompts and keeps user content off the command line.
-    #
-    # TODO: read cli_path from Config.claude_cli_path once that field is added
-    # (ADR-0001); until then the caller supplies it as a constructor argument.
 
     def __init__(
         self,

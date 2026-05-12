@@ -70,6 +70,7 @@ def load(path: pathlib.Path) -> Config:
         ollama_json_retries=getattr(module, "OLLAMA_JSON_RETRIES", 1),
         ollama_http_retries=getattr(module, "OLLAMA_HTTP_RETRIES", 2),
         ollama_keep_alive=getattr(module, "OLLAMA_KEEP_ALIVE", "24h"),
+        claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
     )
     _validate(config)
     return config

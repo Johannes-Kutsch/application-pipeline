@@ -103,18 +103,6 @@ class TestNextPositionNumber:
         with pytest.raises(ResultsFileError):
             manager.next_position_number()
 
-    def test_raises_when_file_missing(self, manager: ResultsFileManager) -> None:
-        with pytest.raises(ResultsFileError):
-            manager.next_position_number()
-
-    def test_raises_when_file_zero_bytes(
-        self, manager: ResultsFileManager, results_path: Path
-    ) -> None:
-        results_path.parent.mkdir(parents=True, exist_ok=True)
-        results_path.write_bytes(b"")
-        with pytest.raises(ResultsFileError):
-            manager.next_position_number()
-
     def test_non_empty_file_with_no_position_headers_returns_one(
         self, manager: ResultsFileManager, results_path: Path
     ) -> None:

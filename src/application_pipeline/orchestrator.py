@@ -448,10 +448,7 @@ def run(
     for position, match_verdict in judged:
         number = results_manager.next_position_number()
         rendered = render(position, match_verdict, number, layout)
-        try:
-            results_manager.append(rendered)
-        except ResultsFileError:
-            raise
+        results_manager.append(rendered)
         dedup_store.mark_seen(position.stub, "kept")
         written += 1
         src = position.stub.source

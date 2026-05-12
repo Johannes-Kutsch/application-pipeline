@@ -193,7 +193,12 @@ def _format_run_divider(
 class RunSummary:
     discovered: int = 0
     skipped: int = 0
+    prefilter_considered: int = 0
+    prefilter_passed: int = 0
     prefilter_dropped: int = 0
+    prefilter_whitelist_hits: int = 0
+    prefilter_blacklist_hits: int = 0
+    prefilter_no_hit_either: int = 0
     classifier_dropped: int = 0
     written: int = 0
     green: int = 0
@@ -284,7 +289,12 @@ def run(
     # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
     discovered = 0
     skipped = 0
+    prefilter_considered = 0
+    prefilter_passed = 0
     prefilter_dropped = 0
+    prefilter_whitelist_hits = 0
+    prefilter_blacklist_hits = 0
+    prefilter_no_hit_either = 0
     enrich_failed = 0
     external_redirects = 0
     parsers_dead = 0
@@ -387,7 +397,15 @@ def run(
                     )
                     language_anomalies += 1
                 verdict = prefilter.classify(payload)
+                prefilter_considered += 1
+                if verdict.whitelist_hit:
+                    prefilter_whitelist_hits += 1
+                if verdict.blacklist_hit:
+                    prefilter_blacklist_hits += 1
+                if not verdict.whitelist_hit and not verdict.blacklist_hit:
+                    prefilter_no_hit_either += 1
                 if verdict.passes:
+                    prefilter_passed += 1
                     survivors.append((payload, resolution))
                 else:
                     dedup_store.mark_seen(payload.stub, "off_domain")
@@ -543,12 +561,19 @@ def run(
         raise
 
     _log.info(
-        "run complete: discovered=%d skipped=%d prefilter_dropped=%d "
+        "run complete: discovered=%d skipped=%d "
+        "prefilter_considered=%d prefilter_passed=%d prefilter_dropped=%d "
+        "prefilter_whitelist_hits=%d prefilter_blacklist_hits=%d prefilter_no_hit_either=%d "
         "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
         "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
         discovered,
         skipped,
+        prefilter_considered,
+        prefilter_passed,
         prefilter_dropped,
+        prefilter_whitelist_hits,
+        prefilter_blacklist_hits,
+        prefilter_no_hit_either,
         classifier_dropped,
         written,
         green,
@@ -564,7 +589,12 @@ def run(
         duration_seconds=elapsed_s,
         discovered=discovered,
         skipped=skipped,
+        prefilter_considered=prefilter_considered,
+        prefilter_passed=prefilter_passed,
         prefilter_dropped=prefilter_dropped,
+        prefilter_whitelist_hits=prefilter_whitelist_hits,
+        prefilter_blacklist_hits=prefilter_blacklist_hits,
+        prefilter_no_hit_either=prefilter_no_hit_either,
         classifier_dropped=classifier_dropped,
         written=written,
         green=green,

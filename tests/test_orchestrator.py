@@ -601,11 +601,79 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
 
     assert summary.discovered == 6
     assert summary.skipped == 0
+    assert summary.prefilter_considered == 6
+    assert summary.prefilter_passed == 5
     assert summary.prefilter_dropped == 1
+    assert summary.prefilter_blacklist_hits == 1
+    assert summary.prefilter_whitelist_hits == 0
+    assert summary.prefilter_no_hit_either == 5
     assert summary.written == 5
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data[_REJECTED_URL]["status"] == "off_domain"
+
+
+# ---------------------------------------------------------------------------
+# Integration: prefilter whitelist-rescue counter (issue #176)
+# ---------------------------------------------------------------------------
+
+_STUB_URLS_WL = [f"https://stub.example/wl/{i}" for i in range(3)]
+_WL_BLACKLIST_ONLY_URL = _STUB_URLS_WL[0]  # blacklist hit, no whitelist → drops
+_WL_RESCUE_URL = _STUB_URLS_WL[1]  # blacklist + whitelist hit → passes (rescue)
+_WL_NO_HIT_URL = _STUB_URLS_WL[2]  # no hit either → passes
+
+
+class _WhitelistRescueStubParser:
+    """3 stubs exercising all three prefilter verdict categories."""
+
+    def __enter__(self) -> "_WhitelistRescueStubParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [
+            PositionStub(url=url, title=f"Job {i}", source="stub", language="en")
+            for i, url in enumerate(_STUB_URLS_WL)
+        ]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        if stub.url == _WL_BLACKLIST_ONLY_URL:
+            desc = "Pflegekraft gesucht"
+        elif stub.url == _WL_RESCUE_URL:
+            desc = "Pflegekraft mit Django-Kenntnissen gesucht"
+        else:
+            desc = "Marketing Manager position"
+        return Position(stub=stub, raw_description=desc)
+
+
+def test_integration_prefilter_whitelist_rescue_counters(tmp_path: Path) -> None:
+    """Whitelist-rescue, blacklist-only-drop, and no-hit-either are counted correctly."""
+    seen_path = tmp_path / ".seen.json"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["pflegekraft"]',
+    )
+
+    summary = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _WhitelistRescueStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.prefilter_considered == 3
+    assert summary.prefilter_dropped == 1
+    assert summary.prefilter_passed == 2
+    assert summary.prefilter_blacklist_hits == 2  # blacklist-only + rescue
+    assert summary.prefilter_whitelist_hits == 1  # only rescue position
+    assert summary.prefilter_no_hit_either == 1  # marketing manager
 
 
 # ---------------------------------------------------------------------------

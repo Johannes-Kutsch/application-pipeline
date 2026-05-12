@@ -81,7 +81,46 @@ def test_strasse_and_straße_match_same_listing() -> None:
     assert verdict.passes is False
 
 
+def test_blacklist_only_drop_exposes_verdict_fields(
+    filter_with_skill: DomainPreFilter,
+) -> None:
+    pos = StubPosition(
+        title="Pflegekraft gesucht",
+        raw_description="Wir suchen eine Pflegekraft für unsere Einrichtung.",
+    )
+    verdict = filter_with_skill.classify(pos)
+    assert verdict.passes is False
+    assert verdict.blacklist_hit is True
+    assert verdict.whitelist_hit is False
+
+
+def test_whitelist_rescue_exposes_verdict_fields(
+    filter_with_skill: DomainPreFilter,
+) -> None:
+    pos = StubPosition(
+        title="Pflegekraft mit Python-Kenntnissen",
+        raw_description="Python-Entwicklung für Pflegesoftware.",
+    )
+    verdict = filter_with_skill.classify(pos)
+    assert verdict.passes is True
+    assert verdict.whitelist_hit is True
+    assert verdict.blacklist_hit is True
+
+
+def test_no_hit_either_exposes_verdict_fields(
+    filter_with_skill: DomainPreFilter,
+) -> None:
+    pos = StubPosition(
+        title="Marketing Manager",
+        raw_description="Wir suchen einen Marketing Manager.",
+    )
+    verdict = filter_with_skill.classify(pos)
+    assert verdict.passes is True
+    assert verdict.whitelist_hit is False
+    assert verdict.blacklist_hit is False
+
+
 def test_verdict_is_frozen() -> None:
-    verdict = PreFilterVerdict(passes=True)
+    verdict = PreFilterVerdict(passes=True, whitelist_hit=False, blacklist_hit=False)
     with pytest.raises(dataclasses.FrozenInstanceError):
         verdict.passes = False  # type: ignore[misc]

@@ -9,6 +9,8 @@ from application_pipeline.text import normalize
 @dataclass(frozen=True)
 class PreFilterVerdict:
     passes: bool
+    whitelist_hit: bool
+    blacklist_hit: bool
 
 
 class _Position(Protocol):
@@ -37,4 +39,6 @@ class DomainPreFilter:
         whitelist_hit = any(k in haystack for k in self._whitelist)
         blacklist_hit = any(k in haystack for k in self._blacklist)
         passes = whitelist_hit or not blacklist_hit
-        return PreFilterVerdict(passes=passes)
+        return PreFilterVerdict(
+            passes=passes, whitelist_hit=whitelist_hit, blacklist_hit=blacklist_hit
+        )

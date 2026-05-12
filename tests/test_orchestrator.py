@@ -1506,3 +1506,126 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
     assert "enrich_failed=1" in content
     assert "external_redirects=1" in content
     assert "parsers_dead=1" in content
+
+
+# ---------------------------------------------------------------------------
+# language.log integration
+# ---------------------------------------------------------------------------
+
+
+def test_language_log_anomaly_entries(tmp_path: Path) -> None:
+    """German position → no anomaly; French position → detected=other; short → detected=unknown.
+
+    Exactly one SUMMARY trailer must appear in language.log.
+    Downstream classify input uses effective language in {de, en} only.
+    """
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    _DE_DESCRIPTION = (
+        "Wir suchen einen erfahrenen Softwareentwickler für unser Team in Hamburg. "
+        "Das Unternehmen bietet interessante Projekte und eine gute Bezahlung. "
+        "Bewerben Sie sich jetzt mit Ihren vollständigen Unterlagen."
+    )
+    _FR_DESCRIPTION = (
+        "Nous recherchons un ingénieur logiciel expérimenté pour rejoindre notre équipe. "
+        "L'entreprise offre des projets intéressants et une bonne rémunération. "
+        "Postulez maintenant avec vos documents complets."
+    )
+    _SHORT_DESCRIPTION = "456 789 012"
+
+    _LANGUAGE_STUB_URLS = [
+        "https://lang.example/de",
+        "https://lang.example/fr",
+        "https://lang.example/short",
+    ]
+
+    class _LanguageTestParser:
+        def __enter__(self) -> "_LanguageTestParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=_LANGUAGE_STUB_URLS[0],
+                    title="Softwareentwickler",
+                    source="test",
+                ),
+                PositionStub(
+                    url=_LANGUAGE_STUB_URLS[1],
+                    title="Ingénieur logiciel",
+                    source="test",
+                ),
+                PositionStub(url=_LANGUAGE_STUB_URLS[2], title="123", source="test"),
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            if stub.url == _LANGUAGE_STUB_URLS[0]:
+                return Position(stub=stub, raw_description=_DE_DESCRIPTION)
+            elif stub.url == _LANGUAGE_STUB_URLS[1]:
+                return Position(stub=stub, raw_description=_FR_DESCRIPTION)
+            else:
+                return Position(stub=stub, raw_description=_SHORT_DESCRIPTION)
+
+    captured_languages: list[str] = []
+
+    class _CapturingExtractor:
+        def prewarm(self) -> None:
+            pass
+
+        def classify_relevance(
+            self, language: str, title: str, raw_description: str
+        ) -> "RelevanceVerdict":
+            captured_languages.append(language)
+            return RelevanceVerdict(in_domain=True)
+
+        def judge_match(self, language: str, raw_description: str) -> "MatchVerdict":
+            return MatchVerdict(
+                tier=MatchTier.green, matched=[], missing=[], summary="ok"
+            )
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    run(
+        config_path,
+        extractor=_CapturingExtractor(),  # type: ignore[arg-type]
+        parser_registry=lambda _: _LanguageTestParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    # Downstream classify only receives "de" or "en"
+    assert all(lang in ("de", "en") for lang in captured_languages), (
+        f"classify_relevance must only receive 'de' or 'en', got: {captured_languages}"
+    )
+
+    log_file = logs_dir / "language.log"
+    assert log_file.exists(), "language.log must be created"
+
+    content = log_file.read_text(encoding="utf-8")
+
+    # German position produces no anomaly entry
+    assert "lang.example/de" not in content
+
+    # French position: detected=other anomaly
+    assert "lang.example/fr" in content
+    assert "detected=other" in content
+
+    # Short position: detected=unknown anomaly
+    assert "lang.example/short" in content
+    assert "detected=unknown" in content
+
+    # Exactly one SUMMARY trailer
+    assert content.count("SUMMARY OF SESSION") == 1
+    assert "anomalies=2" in content

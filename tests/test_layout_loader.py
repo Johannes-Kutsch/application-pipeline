@@ -472,7 +472,7 @@ def test_layout_error_produces_failure_artifact_via_main(
     )
 
     with (
-        patch("application_pipeline.__main__.debug_log"),
+        patch("application_pipeline.__main__.parser_log"),
         patch("application_pipeline.__main__.run", side_effect=layout_err),
         patch("application_pipeline.__main__.current_stage") as mock_stage,
         pytest.raises(SystemExit) as exc_info,

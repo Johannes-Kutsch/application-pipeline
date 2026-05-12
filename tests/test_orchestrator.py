@@ -548,6 +548,77 @@ def test_discover_tuple_hit_resets_url_hit_counter(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Integration: dedup counter breakdown (issue #177)
+# ---------------------------------------------------------------------------
+
+
+def test_integration_dedup_counter_breakdown(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """2 url_hits + 1 tuple_hit + 4 misses → dedup_url_hits=2 dedup_tuple_hits=1 dedup_misses=4 in RunSummary and run complete: log."""
+    import logging
+
+    _DEDUP_URLS = [f"https://dedup.example/{i}" for i in range(7)]
+
+    class _SevenStubParser:
+        def __enter__(self) -> "_SevenStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=_DEDUP_URLS[i], title=f"Job {i}", source="stub", language="en"
+                )
+                for i in range(7)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    dedup = MagicMock()
+    # 4 misses, 2 url_hits, 1 tuple_hit
+    dedup.is_seen.side_effect = [
+        "miss",
+        "miss",
+        "url_hit",
+        "miss",
+        "tuple_hit",
+        "url_hit",
+        "miss",
+    ]
+
+    with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
+        summary = run(
+            _write_config(
+                tmp_path,
+                sources='[SourceEntry(parser_type="bundesagentur_api")]',
+                keywords='["python"]',
+                locations='["Hamburg"]',
+                include_remote=False,
+            ),
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _SevenStubParser,  # type: ignore[return-value]
+            dedup_store=dedup,
+            results_manager=_stub_results_manager(),
+        )
+
+    assert summary.dedup_url_hits == 2
+    assert summary.dedup_tuple_hits == 1
+    assert summary.dedup_misses == 4
+    assert summary.skipped == summary.dedup_url_hits + summary.dedup_tuple_hits
+
+    run_complete = next(
+        r.getMessage() for r in caplog.records if "run complete:" in r.getMessage()
+    )
+    assert "dedup_url_hits=2" in run_complete
+    assert "dedup_tuple_hits=1" in run_complete
+    assert "dedup_misses=4" in run_complete
+
+
+# ---------------------------------------------------------------------------
 # Integration: language resolution + Pre-Filter pass (slice 4c)
 # ---------------------------------------------------------------------------
 

@@ -199,6 +199,9 @@ class RunSummary:
     prefilter_whitelist_hits: int = 0
     prefilter_blacklist_hits: int = 0
     prefilter_no_hit_either: int = 0
+    dedup_url_hits: int = 0
+    dedup_tuple_hits: int = 0
+    dedup_misses: int = 0
     classifier_dropped: int = 0
     written: int = 0
     green: int = 0
@@ -289,6 +292,9 @@ def run(
     # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
     discovered = 0
     skipped = 0
+    dedup_url_hits = 0
+    dedup_tuple_hits = 0
+    dedup_misses = 0
     prefilter_considered = 0
     prefilter_passed = 0
     prefilter_dropped = 0
@@ -360,10 +366,12 @@ def run(
                 threshold = parser_thresholds[pid]
 
                 if seen_result == "miss":
+                    dedup_misses += 1
                     consecutive_url_hits[pid] = 0
                     _pending_enrich[pid] = payload
                     parser_inbound[pid].put(_ENRICH)
                 elif seen_result == "url_hit":
+                    dedup_url_hits += 1
                     consecutive_url_hits[pid] += 1
                     skipped += 1
                     if consecutive_url_hits[pid] >= threshold:
@@ -372,6 +380,7 @@ def run(
                     else:
                         parser_inbound[pid].put(_SKIP)
                 else:  # tuple_hit
+                    dedup_tuple_hits += 1
                     consecutive_url_hits[pid] = 0
                     skipped += 1
                     parser_inbound[pid].put(_SKIP)
@@ -564,6 +573,7 @@ def run(
         "run complete: discovered=%d skipped=%d "
         "prefilter_considered=%d prefilter_passed=%d prefilter_dropped=%d "
         "prefilter_whitelist_hits=%d prefilter_blacklist_hits=%d prefilter_no_hit_either=%d "
+        "dedup_url_hits=%d dedup_tuple_hits=%d dedup_misses=%d "
         "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
         "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
         discovered,
@@ -574,6 +584,9 @@ def run(
         prefilter_whitelist_hits,
         prefilter_blacklist_hits,
         prefilter_no_hit_either,
+        dedup_url_hits,
+        dedup_tuple_hits,
+        dedup_misses,
         classifier_dropped,
         written,
         green,
@@ -595,6 +608,9 @@ def run(
         prefilter_whitelist_hits=prefilter_whitelist_hits,
         prefilter_blacklist_hits=prefilter_blacklist_hits,
         prefilter_no_hit_either=prefilter_no_hit_either,
+        dedup_url_hits=dedup_url_hits,
+        dedup_tuple_hits=dedup_tuple_hits,
+        dedup_misses=dedup_misses,
         classifier_dropped=classifier_dropped,
         written=written,
         green=green,

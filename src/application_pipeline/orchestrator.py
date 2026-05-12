@@ -450,11 +450,7 @@ def run(
         rendered = render(position, match_verdict, number, layout)
         try:
             results_manager.append(rendered)
-        except ResultsFileError as exc:
-            _log.error(
-                "append failed — results file corrupt, manual intervention required: %s",
-                exc,
-            )
+        except ResultsFileError:
             raise
         dedup_store.mark_seen(position.stub, "kept")
         written += 1

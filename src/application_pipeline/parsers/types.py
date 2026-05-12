@@ -43,6 +43,15 @@ class PositionStub:
 
 
 @dataclass(frozen=True)
+class NotServedQuery:
+    """Sentinel emitted by parsers when a query location is not served.
+
+    Consumed by the orchestrator to count skipped queries; never forwarded
+    to classify or judge stages.
+    """
+
+
+@dataclass(frozen=True)
 class ExternalRedirect:
     stub: PositionStub
     outbound_url: str

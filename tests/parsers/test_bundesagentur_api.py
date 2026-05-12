@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.types import City, Remote
+from application_pipeline.parsers.types import City, NotServedQuery, Remote
 from application_pipeline.parsers.bundesagentur_api import (
     BundesagenturParser,
     parser_class,
@@ -144,6 +144,7 @@ def test_discover_stub_title_matches_api_stellenangebotsTitel() -> None:
     get = _make_get([_search_body([_item("x", "Data Scientist")]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.title == "Data Scientist"
 
 
@@ -151,6 +152,7 @@ def test_discover_stub_source_is_display_name() -> None:
     get = _make_get([_search_body([_item()]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.source == "Bundesagentur"
 
 
@@ -158,6 +160,7 @@ def test_discover_stub_language_is_de() -> None:
     get = _make_get([_search_body([_item()]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.language == "de"
 
 
@@ -165,6 +168,7 @@ def test_discover_stub_company_from_firma() -> None:
     get = _make_get([_search_body([_item(company="Muster GmbH")]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.company == "Muster GmbH"
 
 
@@ -172,6 +176,7 @@ def test_discover_stub_location_from_stellenlokationen_first_ort() -> None:
     get = _make_get([_search_body([_item(city="Berlin")]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.location == "Berlin"
 
 
@@ -181,6 +186,7 @@ def test_discover_stub_url_contains_base64_encoded_referenznummer() -> None:
     get = _make_get([_search_body([_item(ref)]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert ref_b64 in stub.url
 
 
@@ -188,6 +194,7 @@ def test_discover_stub_company_none_when_firma_absent() -> None:
     get = _make_get([_search_body([_item(company=None)]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.company is None
 
 
@@ -195,6 +202,7 @@ def test_discover_stub_location_none_when_stellenlokationen_absent() -> None:
     get = _make_get([_search_body([_item(city=None)]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.location is None
 
 
@@ -216,6 +224,7 @@ def test_discover_multi_location_uses_first_entry() -> None:
     get = _make_get([_search_body([item]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
 
 
@@ -234,6 +243,7 @@ def test_discover_skips_item_without_referenznummer() -> None:
     with BundesagenturParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 1
+    assert isinstance(stubs[0], PositionStub)
     assert base64.b64encode(b"good1").decode() in stubs[0].url
 
 
@@ -248,6 +258,8 @@ def test_discover_parses_search_fixture() -> None:
     with BundesagenturParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 2
+    assert isinstance(stubs[0], PositionStub)
+    assert isinstance(stubs[1], PositionStub)
     assert stubs[0].title == "Software Engineer"
     assert stubs[0].source == "Bundesagentur"
     assert stubs[1].title == "Data Scientist"
@@ -321,7 +333,7 @@ def test_discover_normalizes_location_before_slug_lookup() -> None:
     assert any("M%C3%BCnchen" in u or "München" in u for u in urls)
 
 
-def test_discover_unknown_location_yields_nothing_and_logs_info(
+def test_discover_unknown_location_yields_not_served_sentinel(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     def capturing_get(url: str, timeout: float) -> bytes:
@@ -333,17 +345,8 @@ def test_discover_unknown_location_yields_nothing_and_logs_info(
         with BundesagenturParser(_http_get=capturing_get) as p:
             stubs = list(p.discover(_query(location=City("unknown_city_xyz"))))
 
-    assert stubs == []
-    not_served = [
-        r
-        for r in caplog.records
-        if r.levelno == logging.INFO and "bundesagentur_api" in r.getMessage()
-    ]
-    assert not_served, "expected an INFO log line for NotServed"
-    msg = not_served[0].getMessage()
-    assert "parser_type" in msg
-    assert "location" in msg
-    assert "unknown_city_xyz" in msg
+    assert stubs == [NotServedQuery()]
+    assert not any("not_served" in r.getMessage() for r in caplog.records)
 
 
 def test_discover_unknown_location_does_not_log_warning(

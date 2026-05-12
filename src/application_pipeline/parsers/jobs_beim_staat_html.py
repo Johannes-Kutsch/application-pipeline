@@ -37,7 +37,14 @@ from .http import (
     request_with_retry,
 )
 from .location import NotServed, RemoteWire, Resolved, resolve
-from .types import City, ExternalRedirect, ParserQuery, Position, PositionStub
+from .types import (
+    City,
+    ExternalRedirect,
+    NotServedQuery,
+    ParserQuery,
+    Position,
+    PositionStub,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -204,7 +211,7 @@ class JobsBeimStaatParser:
         if self._client is not None:
             self._client.close()
 
-    def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
+    def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         place: str
         match resolve(query.location, sys.modules[__name__]):
             case Resolved(wire):
@@ -212,10 +219,7 @@ class JobsBeimStaatParser:
             case RemoteWire(payload):
                 place = str(payload)
             case NotServed():
-                _log.info(
-                    "location_not_served parser_type=jobs_beim_staat_html location=%r",
-                    query.location,
-                )
+                yield NotServedQuery()
                 return
             case _ as unreachable:
                 assert_never(unreachable)
@@ -329,7 +333,8 @@ if __name__ == "__main__":
         max_results=5,
     )
     with JobsBeimStaatParser() as p:
-        stubs = list(p.discover(query))
+        items = list(p.discover(query))
+    stubs = [s for s in items if isinstance(s, PositionStub)]
     print(f"discover: {len(stubs)} stubs")
     if stubs:
         with JobsBeimStaatParser() as p:

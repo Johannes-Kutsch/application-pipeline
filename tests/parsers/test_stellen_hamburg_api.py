@@ -9,7 +9,7 @@ import pytest
 
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.types import City, Remote
+from application_pipeline.parsers.types import City, NotServedQuery, Remote
 from application_pipeline.parsers.http import HttpGet
 from application_pipeline.parsers.stellen_hamburg_api import (
     HttpPost,
@@ -99,17 +99,17 @@ def test_parser_is_usable_as_context_manager() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_discover_yields_nothing_when_location_is_none() -> None:
+def test_discover_remote_location_yields_not_served_sentinel() -> None:
     def never_called(url: str, body: bytes, timeout: float) -> bytes:
         raise AssertionError("should not POST")
 
     with StellenHamburgParser(_http_post=never_called) as p:
         stubs = list(p.discover(_query(location=Remote())))
 
-    assert stubs == []
+    assert stubs == [NotServedQuery()]
 
 
-def test_discover_yields_nothing_when_location_unmapped(
+def test_discover_yields_not_served_sentinel_when_location_unmapped(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     def never_called(url: str, body: bytes, timeout: float) -> bytes:
@@ -121,32 +121,16 @@ def test_discover_yields_nothing_when_location_unmapped(
         with StellenHamburgParser(_http_post=never_called) as p:
             stubs = list(p.discover(_query(location=City("berlin"))))
 
-    assert stubs == []
-    info_records = [
-        r
-        for r in caplog.records
-        if r.levelno == logging.INFO and "not_served" in r.getMessage()
-    ]
-    assert info_records, "expected an INFO log line for NotServed"
-    msg = info_records[0].getMessage()
-    assert "parser_type" in msg
-    assert "location" in msg
-    assert "berlin" in msg
+    assert stubs == [NotServedQuery()]
+    assert not any("not_served" in r.getMessage() for r in caplog.records)
 
 
-def test_discover_unmapped_location_info_names_parser_type(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_discover_unmapped_location_does_not_make_http_request() -> None:
     def never_called(url: str, body: bytes, timeout: float) -> bytes:
         raise AssertionError("should not POST")
 
-    with caplog.at_level(
-        logging.INFO, logger="application_pipeline.parsers.stellen_hamburg_api"
-    ):
-        with StellenHamburgParser(_http_post=never_called) as p:
-            list(p.discover(_query(location=City("munich"))))
-
-    assert "stellen_hamburg_api" in caplog.text
+    with StellenHamburgParser(_http_post=never_called) as p:
+        list(p.discover(_query(location=City("munich"))))
 
 
 def test_discover_normalizes_location_case(search_json: bytes) -> None:
@@ -172,6 +156,7 @@ def test_discover_stub_source_is_display_name(search_json: bytes) -> None:
     post = _make_post(search_json)
     with StellenHamburgParser(_http_post=post) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.source == "stellen.hamburg"
 
 
@@ -179,6 +164,7 @@ def test_discover_stub_title_extracted(search_json: bytes) -> None:
     post = _make_post(search_json)
     with StellenHamburgParser(_http_post=post) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.title == "Softwareentwickler/in (m/w/d)"
 
 
@@ -186,6 +172,7 @@ def test_discover_stub_url_extracted(search_json: bytes) -> None:
     post = _make_post(search_json)
     with StellenHamburgParser(_http_post=post) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert "jobad/11111" in stub.url
 
 
@@ -193,6 +180,7 @@ def test_discover_stub_company_extracted(search_json: bytes) -> None:
     post = _make_post(search_json)
     with StellenHamburgParser(_http_post=post) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.company == "Stadtverwaltung Hamburg"
 
 
@@ -200,6 +188,7 @@ def test_discover_stub_location_extracted(search_json: bytes) -> None:
     post = _make_post(search_json)
     with StellenHamburgParser(_http_post=post) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
 
 
@@ -207,6 +196,7 @@ def test_discover_stub_language_is_de(search_json: bytes) -> None:
     post = _make_post(search_json)
     with StellenHamburgParser(_http_post=post) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.language == "de"
 
 

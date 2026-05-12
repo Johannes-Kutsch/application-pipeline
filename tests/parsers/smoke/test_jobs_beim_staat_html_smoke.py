@@ -8,6 +8,7 @@ from application_pipeline.parsers.types import (
     ExternalRedirect,
     ParserQuery,
     Position,
+    PositionStub,
 )
 
 
@@ -15,7 +16,7 @@ from application_pipeline.parsers.types import (
 def test_discover_hamburg_returns_stubs_and_enrich_populates_description() -> None:
     query = ParserQuery(keyword="*", location=City("hamburg"), max_results=5)
     with JobsBeimStaatParser() as p:
-        stubs = list(p.discover(query))
+        stubs = [s for s in p.discover(query) if isinstance(s, PositionStub)]
     assert len(stubs) >= 1
 
     with JobsBeimStaatParser() as p:

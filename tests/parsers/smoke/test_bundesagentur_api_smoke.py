@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 
 from application_pipeline.parsers.bundesagentur_api import BundesagenturParser
-from application_pipeline.parsers.types import City, ParserQuery
+from application_pipeline.parsers.types import City, ParserQuery, PositionStub
 
 
 @pytest.mark.smoke
 def test_discover_hamburg_returns_stubs_and_enrich_populates_description() -> None:
     query = ParserQuery(keyword="Python", location=City("Hamburg"), max_results=5)
     with BundesagenturParser() as p:
-        stubs = list(p.discover(query))
+        stubs = [s for s in p.discover(query) if isinstance(s, PositionStub)]
     assert len(stubs) >= 1
 
     with BundesagenturParser() as p:

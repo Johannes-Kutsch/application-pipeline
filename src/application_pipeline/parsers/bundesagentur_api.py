@@ -24,7 +24,7 @@ from .http import (
     request_with_retry,
 )
 from .location import NotServed, RemoteWire, Resolved, resolve
-from .types import City, ParserQuery, Position, PositionStub
+from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
 
 _log = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ class BundesagenturParser:
     def __exit__(self, *args: object) -> None:
         pass
 
-    def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
+    def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         extra_params: dict[str, object]
         match resolve(query.location, sys.modules[__name__]):
             case Resolved(wire):
@@ -141,10 +141,7 @@ class BundesagenturParser:
             case RemoteWire(payload):
                 extra_params = dict(payload)
             case NotServed():
-                _log.info(
-                    "not_served parser_type=bundesagentur_api location=%s",
-                    query.location,
-                )
+                yield NotServedQuery()
                 return
 
         seen: set[str] = set()

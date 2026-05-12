@@ -1433,3 +1433,65 @@ def test_parser_log_integration(
         "parser bundesagentur_api started" in record.message
         for record in caplog.records
     ), "INFO line 'parser <id> started' must appear in stderr"
+
+
+def test_not_served_queries_counted_in_parser_log_summary(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Three NotServedQuery sentinels → not_served_queries=3 in SUMMARY, nothing in body, no stderr."""
+    import logging
+
+    import application_pipeline.parser_log as parser_log
+    from application_pipeline.parsers import NotServedQuery
+
+    class _NotServedParser:
+        def __enter__(self) -> "_NotServedParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[NotServedQuery]:
+            return [NotServedQuery()]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            raise AssertionError("enrich must not be called")
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    # 3 keywords × 1 location × no remote = 3 discover() calls → 3 sentinels
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python", "java", "rust"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        run(
+            config_path,
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _NotServedParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            results_manager=_stub_results_manager(),
+        )
+
+    log_file = logs_dir / "bundesagentur_api.log"
+    assert log_file.exists()
+    content = log_file.read_text(encoding="utf-8")
+
+    # Body (before SUMMARY) must have no not_served text
+    body = content.split("SUMMARY OF SESSION")[0]
+    assert "not_served" not in body
+
+    # SUMMARY must contain not_served_queries=3
+    assert "SUMMARY OF SESSION" in content
+    assert "not_served_queries=3" in content
+
+    # No stderr log records mentioning not_served
+    assert not any("not_served" in record.message for record in caplog.records), (
+        "not_served must not appear in any stderr log record"
+    )

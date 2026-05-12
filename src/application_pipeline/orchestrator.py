@@ -30,6 +30,7 @@ from application_pipeline.llm import (
 )
 from application_pipeline.parsers import (
     ExternalRedirect,
+    NotServedQuery,
     Parser,
     ParserQuery,
     Position,
@@ -111,12 +112,14 @@ class _ParserThread(threading.Thread):
             for query in self._worklist:
                 gen = iter(self._parser.discover(query))
                 try:
-                    for stub in gen:
-                        self._outbound.put((self._parser_id, stub))
+                    for item in gen:
+                        self._outbound.put((self._parser_id, item))
+                        if isinstance(item, NotServedQuery):
+                            continue  # fire-and-forget; orchestrator counts, no reply
                         decision = self._inbound.get()
                         if decision is _ENRICH:
                             try:
-                                position = self._parser.enrich(stub)
+                                position = self._parser.enrich(item)
                                 self._outbound.put((self._parser_id, position))
                             except ParserError as exc:
                                 self._outbound.put((self._parser_id, exc))
@@ -327,6 +330,7 @@ def run(
         consecutive_url_hits: dict[str, int] = {pid: 0 for pid in parsers_remaining}
         _pending_enrich: dict[str, PositionStub] = {}
         discovered_per_parser: dict[str, int] = {}
+        not_served_per_parser: dict[str, int] = {}
 
         while parsers_remaining:
             pid, payload = outbound.get()
@@ -388,6 +392,9 @@ def run(
                     dedup_store.mark_seen(stub, "external_redirect")
                 external_redirects += 1
 
+            elif isinstance(payload, NotServedQuery):
+                not_served_per_parser[pid] = not_served_per_parser.get(pid, 0) + 1
+
             elif payload is _PARSER_DONE:
                 parsers_remaining.discard(pid)
 
@@ -409,6 +416,7 @@ def run(
                 pid,
                 {
                     "discovered": discovered_per_parser.get(pid, 0),
+                    "not_served_queries": not_served_per_parser.get(pid, 0),
                     "duration": round(parsers_done_monotonic - started_monotonic, 1),
                 },
                 started_at,

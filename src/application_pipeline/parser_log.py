@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,18 @@ def record(component_id: str, event_type: str, **fields: object) -> None:
     pairs = " ".join(f"{k}={v}" for k, v in fields.items())
     message = f"{event_type} {pairs}".rstrip()
     debug_log.append(component_id, message)
+
+
+def record_event(component_id: str, event_type: str, **fields: object) -> None:
+    record(component_id, event_type, **fields)
+
+
+def record_transcript(component_id: str, entry: dict) -> None:
+    if _logs_dir is None:
+        return
+    transcript_file = _logs_dir / f"{component_id}.transcripts.jsonl"
+    with transcript_file.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
 def record_traceback(component_id: str, traceback_str: str) -> None:

@@ -59,6 +59,17 @@ class TestEnsureInitialized:
         manager.ensure_initialized()
         assert results_path.read_bytes() == after_first
 
+    def test_wraps_oserror_as_results_file_error(
+        self, manager: ResultsFileManager, results_path: Path
+    ) -> None:
+        results_path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(results_path.parent, stat.S_IRUSR | stat.S_IXUSR)
+        try:
+            with pytest.raises(ResultsFileError):
+                manager.ensure_initialized()
+        finally:
+            os.chmod(results_path.parent, stat.S_IRWXU)
+
 
 class TestNextPositionNumber:
     def test_returns_one_on_fresh_initialized_file(
@@ -72,6 +83,7 @@ class TestNextPositionNumber:
     ) -> None:
         results_path.parent.mkdir(parents=True, exist_ok=True)
         results_path.write_text(HEADER + "## 47. Some Position\n", encoding="utf-8")
+        manager.ensure_initialized()
         assert manager.next_position_number() == 48
 
     def test_uses_max_not_last_when_multiple_headers(
@@ -82,17 +94,12 @@ class TestNextPositionNumber:
             HEADER + "## 3. Position\n## 1. Position\n## 5. Position\n## 2. Position\n"
         )
         results_path.write_text(content, encoding="utf-8")
+        manager.ensure_initialized()
         assert manager.next_position_number() == 6
 
-    def test_raises_when_file_missing(self, manager: ResultsFileManager) -> None:
-        with pytest.raises(ResultsFileError):
-            manager.next_position_number()
-
-    def test_raises_when_file_zero_bytes(
-        self, manager: ResultsFileManager, results_path: Path
+    def test_raises_before_ensure_initialized(
+        self, manager: ResultsFileManager
     ) -> None:
-        results_path.parent.mkdir(parents=True, exist_ok=True)
-        results_path.write_bytes(b"")
         with pytest.raises(ResultsFileError):
             manager.next_position_number()
 
@@ -101,7 +108,16 @@ class TestNextPositionNumber:
     ) -> None:
         results_path.parent.mkdir(parents=True, exist_ok=True)
         results_path.write_text(HEADER, encoding="utf-8")
+        manager.ensure_initialized()
         assert manager.next_position_number() == 1
+
+    def test_increments_in_memory_on_each_call(
+        self, manager: ResultsFileManager
+    ) -> None:
+        manager.ensure_initialized()
+        assert manager.next_position_number() == 1
+        assert manager.next_position_number() == 2
+        assert manager.next_position_number() == 3
 
 
 class TestAppend:
@@ -132,13 +148,13 @@ class TestAppend:
         content = results_path.read_text(encoding="utf-8")
         assert block in content
 
-    def test_propagates_oserror(
-        self, manager: ResultsFileManager, results_path: Path, tmp_path: Path
+    def test_wraps_oserror_as_results_file_error(
+        self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         manager.ensure_initialized()
         os.chmod(results_path, stat.S_IRUSR)
         try:
-            with pytest.raises(OSError):
+            with pytest.raises(ResultsFileError):
                 manager.append("## 2. Should fail\n")
         finally:
             os.chmod(results_path, stat.S_IRUSR | stat.S_IWUSR)

@@ -357,7 +357,7 @@ def run(
 
             elif isinstance(payload, Position):
                 language = resolve_language(payload)
-                verdict = prefilter.classify(payload, language)
+                verdict = prefilter.classify(payload)
                 if verdict.passes:
                     survivors.append((payload, language))
                 else:

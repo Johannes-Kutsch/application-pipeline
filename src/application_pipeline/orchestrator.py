@@ -19,7 +19,7 @@ from application_pipeline import layout as layout_module
 from application_pipeline import parser_log
 from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
-from application_pipeline.language import Language, resolve_language
+from application_pipeline.language import LanguageResolution, resolve_language
 from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
     ExtractorError,
@@ -285,7 +285,9 @@ def run(
     enrich_failed = 0
     external_redirects = 0
     parsers_dead = 0
-    survivors: list[tuple[Position, Language]] = []
+    survivors: list[tuple[Position, LanguageResolution]] = []
+    language_anomalies = 0
+    _run_started_at = datetime.now(timezone.utc)
 
     locations: list[Location] = [City(loc) for loc in cfg.locations]
     if cfg.include_remote:
@@ -331,6 +333,7 @@ def run(
         enrich_failed_per_parser: dict[str, int] = defaultdict(int)
         external_redirects_per_parser: dict[str, int] = defaultdict(int)
         parsers_dead_per_parser: dict[str, int] = defaultdict(int)
+        unparseable_dates_per_parser: dict[str, int] = defaultdict(int)
 
         while parsers_remaining:
             pid, payload = outbound.get()
@@ -360,10 +363,28 @@ def run(
                     parser_inbound[pid].put(_SKIP)
 
             elif isinstance(payload, Position):
-                language = resolve_language(payload)
+                for warning in payload._warnings:
+                    parser_log.record(pid, warning)
+                    if warning.startswith("unparseable_date"):
+                        unparseable_dates_per_parser[pid] += 1
+                resolution = resolve_language(payload)
+                if resolution.detected not in ("de", "en"):
+                    parser_log.record(
+                        "language",
+                        "anomaly",
+                        stub_url=payload.stub.url,
+                        title=payload.stub.title,
+                        source_parser=payload.stub.source,
+                        company=payload.stub.company,
+                        location=payload.stub.location,
+                        language=resolution.effective,
+                        detected=resolution.detected,
+                        detection_source=resolution.source,
+                    )
+                    language_anomalies += 1
                 verdict = prefilter.classify(payload)
                 if verdict.passes:
-                    survivors.append((payload, language))
+                    survivors.append((payload, resolution))
                 else:
                     dedup_store.mark_seen(payload.stub, "off_domain")
                     prefilter_dropped += 1
@@ -416,10 +437,16 @@ def run(
                     "enrich_failed": enrich_failed_per_parser[pid],
                     "external_redirects": external_redirects_per_parser[pid],
                     "parsers_dead": parsers_dead_per_parser[pid],
+                    "unparseable_dates": unparseable_dates_per_parser[pid],
                     "duration": round(parsers_done_monotonic - started_monotonic, 1),
                 },
                 started_at,
             )
+        parser_log.summarize(
+            "language",
+            {"anomalies": language_anomalies},
+            _run_started_at,
+        )
 
     # Step 10: Classify batch — all classify_relevance calls before any judge_match call
     current_stage.set("classify")
@@ -427,12 +454,12 @@ def run(
     errored = 0
     classify_calls = 0
     classify_total_s = 0.0
-    in_domain: list[tuple[Position, Language]] = []
-    for position, language in survivors:
+    in_domain: list[tuple[Position, LanguageResolution]] = []
+    for position, resolution in survivors:
         try:
             _t0 = time.monotonic()
             rel_verdict = extractor.classify_relevance(
-                language, position.title, position.raw_description
+                resolution.effective, position.title, position.raw_description
             )
             classify_total_s += time.monotonic() - _t0
             classify_calls += 1
@@ -441,7 +468,7 @@ def run(
             errored += 1
             continue
         if rel_verdict.in_domain:
-            in_domain.append((position, language))
+            in_domain.append((position, resolution))
         else:
             dedup_store.mark_seen(position.stub, "off_domain")
             classifier_dropped += 1
@@ -451,10 +478,12 @@ def run(
     judged: list[tuple[Position, MatchVerdict]] = []
     judge_calls = 0
     judge_total_s = 0.0
-    for position, language in in_domain:
+    for position, resolution in in_domain:
         try:
             _t0 = time.monotonic()
-            match_verdict = extractor.judge_match(language, position.raw_description)
+            match_verdict = extractor.judge_match(
+                resolution.effective, position.raw_description
+            )
             judge_total_s += time.monotonic() - _t0
             judge_calls += 1
         except ExtractorError as exc:

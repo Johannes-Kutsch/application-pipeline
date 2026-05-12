@@ -1,30 +1,27 @@
-from application_pipeline.language import resolve_language
+from application_pipeline.language import LanguageResolution, resolve_language
 from application_pipeline.parsers.types import Position, PositionStub
 
 
 def _pos(title: str, raw_description: str, language: str | None = None) -> Position:
     return Position(
         stub=PositionStub(
-            url="http://x", title=title, source="test", language=language
+            url="http://x",
+            title=title,
+            source="test",
+            language=language,  # type: ignore[arg-type]
         ),
         raw_description=raw_description,
     )
 
 
-def test_stub_language_returned_directly() -> None:
-    assert resolve_language(_pos("Job", "desc", language="de")) == "de"
+def test_stub_language_de_returns_resolution() -> None:
+    r = resolve_language(_pos("Job", "desc", language="de"))
+    assert r == LanguageResolution(effective="de", detected="de", source="parser")
 
 
-def test_stub_language_en_returned_directly() -> None:
-    assert resolve_language(_pos("Job", "desc", language="en")) == "en"
-
-
-def test_stub_language_other_returned_directly() -> None:
-    assert resolve_language(_pos("Job", "desc", language="other")) == "other"
-
-
-def test_stub_language_unknown_returned_directly() -> None:
-    assert resolve_language(_pos("Job", "desc", language="unknown")) == "unknown"
+def test_stub_language_en_returns_resolution() -> None:
+    r = resolve_language(_pos("Job", "desc", language="en"))
+    assert r == LanguageResolution(effective="en", detected="en", source="parser")
 
 
 def test_stub_language_none_detects_german() -> None:
@@ -36,7 +33,8 @@ def test_stub_language_none_detects_german() -> None:
             "Bewerben Sie sich jetzt mit Ihren vollständigen Unterlagen."
         ),
     )
-    assert resolve_language(pos) == "de"
+    r = resolve_language(pos)
+    assert r == LanguageResolution(effective="de", detected="de", source="langdetect")
 
 
 def test_stub_language_none_detects_english() -> None:
@@ -48,11 +46,15 @@ def test_stub_language_none_detects_english() -> None:
             "Apply now with your full application documents."
         ),
     )
-    assert resolve_language(pos) == "en"
+    r = resolve_language(pos)
+    assert r == LanguageResolution(effective="en", detected="en", source="langdetect")
 
 
 def test_stub_language_none_undetectable_gives_unknown() -> None:
-    assert resolve_language(_pos("123", "456 789 012")) == "unknown"
+    r = resolve_language(_pos("123", "456 789 012"))
+    assert r == LanguageResolution(
+        effective="en", detected="unknown", source="langdetect"
+    )
 
 
 def test_stub_language_none_non_de_en_gives_other() -> None:
@@ -64,4 +66,7 @@ def test_stub_language_none_non_de_en_gives_other() -> None:
             "Postulez maintenant avec vos documents complets."
         ),
     )
-    assert resolve_language(pos) == "other"
+    r = resolve_language(pos)
+    assert r == LanguageResolution(
+        effective="en", detected="other", source="langdetect"
+    )

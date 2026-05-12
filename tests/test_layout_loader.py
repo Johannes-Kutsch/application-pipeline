@@ -1,7 +1,9 @@
 import dataclasses
 import pathlib
 import re
+import sys
 import textwrap
+from unittest.mock import patch
 
 import pytest
 
@@ -370,3 +372,114 @@ def test_load_accepts_matched_bullets_in_placeholder_group(
     layout = load_layout(path)
 
     assert "skills" in layout.placeholder_groups
+
+
+# --- Smoke-test helpers ---
+
+
+def _safe_layout_body(
+    card_template: str = "{number}",
+    headline_template: str = "{number}",
+) -> str:
+    return (
+        'TIER_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}\n'
+        'TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}\n'
+        "PLACEHOLDER_GROUPS = {}\n"
+        'FILE_HEADER = ""\n'
+        f"CARD_TEMPLATE = {card_template!r}\n"
+        f"HEADLINE_TEMPLATE = {headline_template!r}\n"
+    )
+
+
+# --- Smoke-test failure shapes ---
+
+
+def test_smoke_test_raises_for_unknown_placeholder(tmp_path: pathlib.Path) -> None:
+    path = write_layout(
+        tmp_path, _safe_layout_body(card_template="{nonexistent_field}")
+    )
+
+    with pytest.raises(LayoutError, match="nonexistent_field"):
+        load_layout(path)
+
+
+def test_smoke_test_raises_for_excluded_field_raw_description(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_layout(tmp_path, _safe_layout_body(card_template="{raw_description}"))
+
+    with pytest.raises(LayoutError):
+        load_layout(path)
+
+
+def test_smoke_test_raises_for_excluded_field_stub(tmp_path: pathlib.Path) -> None:
+    path = write_layout(tmp_path, _safe_layout_body(card_template="{stub}"))
+
+    with pytest.raises(LayoutError):
+        load_layout(path)
+
+
+def test_smoke_test_raises_for_none_intolerant_format_spec(
+    tmp_path: pathlib.Path,
+) -> None:
+    # sparse fixture has posted_date=None; {posted_date:%Y-%m-%d} raises TypeError
+    path = write_layout(
+        tmp_path, _safe_layout_body(card_template="{posted_date:%Y-%m-%d}")
+    )
+
+    with pytest.raises(LayoutError):
+        load_layout(path)
+
+
+def test_smoke_test_error_names_density_and_carries_resolved_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_layout(tmp_path, _safe_layout_body(card_template="{typo_field}"))
+
+    with pytest.raises(LayoutError) as exc_info:
+        load_layout(path)
+
+    err = exc_info.value
+    assert "dense" in str(err)
+    assert err.resolved_path == path.resolve()
+
+
+def test_valid_layout_passes_smoke_test(tmp_path: pathlib.Path) -> None:
+    path = write_layout(tmp_path, _MINIMAL_BODY)
+
+    layout = load_layout(path)
+
+    assert isinstance(layout, Layout)
+
+
+# --- LayoutError in __main__._FATAL produces a failure artifact ---
+
+
+def test_layout_error_produces_failure_artifact_via_main(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from application_pipeline.__main__ import main
+
+    config_path = tmp_path / "config.yaml"
+    config_path.touch()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["prog", str(config_path)])
+
+    layout_err = LayoutError(
+        "smoke-test failed for dense × green",
+        resolved_path=config_path,
+    )
+
+    with (
+        patch("application_pipeline.__main__.debug_log"),
+        patch("application_pipeline.__main__.run", side_effect=layout_err),
+        patch("application_pipeline.__main__.current_stage") as mock_stage,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_stage.get.return_value = "load-layout"
+        main()
+
+    assert exc_info.value.code == 1
+    artifacts = list((tmp_path / "synched" / "failures").glob("*.md"))
+    assert len(artifacts) == 1

@@ -1,6 +1,7 @@
 *.idea
 *.claude
 pycastle/
+docs/applications/
 
 # Deduplication store — durability via Syncthing per ADR-0010
 .seen.json

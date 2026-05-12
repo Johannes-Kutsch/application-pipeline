@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html.parser
 import json
-import logging
 import sys
 import time
 from collections.abc import Iterator
@@ -37,9 +36,7 @@ from .http import (
     request_with_retry,
 )
 from .location import NotServed, RemoteWire, Resolved, resolve
-from .types import City, ParserQuery, Position, PositionStub
-
-_log = logging.getLogger(__name__)
+from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
 
 _PARSER_TYPE = "stellen_hamburg"
 _SEARCH_URL = "https://api-stellen.hamburg.de/search/"
@@ -179,14 +176,10 @@ class StellenHamburgParser:
     def __exit__(self, *args: object) -> None:
         pass
 
-    def discover(self, query: ParserQuery) -> Iterator[PositionStub]:
+    def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         match resolve(query.location, sys.modules[__name__]):
             case NotServed():
-                _log.info(
-                    "not_served parser_type=%s location=%r",
-                    _PARSER_TYPE,
-                    query.location,
-                )
+                yield NotServedQuery()
                 return
             case RemoteWire(_):
                 return
@@ -292,7 +285,8 @@ if __name__ == "__main__":
         max_results=5,
     )
     with StellenHamburgParser() as p:
-        stubs = list(p.discover(query))
+        items = list(p.discover(query))
+    stubs = [s for s in items if isinstance(s, PositionStub)]
     print(f"discover: {len(stubs)} stubs")
     if stubs:
         with StellenHamburgParser() as p:

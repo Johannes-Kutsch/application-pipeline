@@ -1,6 +1,6 @@
 from .errors import ParserError
 from .protocol import Parser
-from .types import ExternalRedirect, ParserQuery, Position, PositionStub
+from .types import ExternalRedirect, NotServedQuery, ParserQuery, Position, PositionStub
 
 __all__ = [
     "Parser",
@@ -9,4 +9,5 @@ __all__ = [
     "Position",
     "PositionStub",
     "ExternalRedirect",
+    "NotServedQuery",
 ]

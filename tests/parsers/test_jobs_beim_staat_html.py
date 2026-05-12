@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.types import City, ExternalRedirect, Position, Remote
+from application_pipeline.parsers.types import (
+    City,
+    ExternalRedirect,
+    NotServedQuery,
+    Position,
+    Remote,
+)
 from application_pipeline.parsers.http import HttpGet
 from application_pipeline.parsers import jobs_beim_staat_html as parser_module
 from application_pipeline.parsers.jobs_beim_staat_html import (
@@ -278,6 +284,7 @@ def test_discover_stub_source_is_jobs_beim_staat(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.source == "jobs-beim-staat"
 
 
@@ -285,6 +292,7 @@ def test_discover_stub_title_extracted(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.title == "Softwareentwickler/in (m/w/d)"
 
 
@@ -292,6 +300,7 @@ def test_discover_stub_url_points_to_stellenangebote(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert "stellenangebote/1001" in stub.url
 
 
@@ -301,6 +310,7 @@ def test_discover_stub_company_extracted_from_data_attribute(
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.company == "Hamburger IT-Serviceteam GmbH"
 
 
@@ -308,6 +318,7 @@ def test_discover_stub_location_extracted(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
 
 
@@ -315,6 +326,7 @@ def test_discover_stub_language_is_de(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         (stub, *_) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.language == "de"
 
 
@@ -360,14 +372,14 @@ def test_discover_max_results_stops_mid_page(list_html: bytes) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_discover_not_served_for_empty_city_yields_nothing() -> None:
+def test_discover_not_served_for_empty_city_yields_sentinel() -> None:
     def never_called(url: str, timeout: float) -> bytes:
         raise AssertionError("should not fetch")
 
     with JobsBeimStaatParser(_http_get=never_called) as p:
         stubs = list(p.discover(_query(location=City(""))))
 
-    assert stubs == []
+    assert stubs == [NotServedQuery()]
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +536,7 @@ def test_enrich_posted_date_set_from_vor_2_tagen(
     )
     with JobsBeimStaatParser(_http_get=get) as p:
         (first_stub, *_) = list(p.discover(_query()))
+        assert isinstance(first_stub, PositionStub)
         pos = p.enrich(first_stub)
     assert isinstance(pos, Position)
     assert pos.posted_date == date.today() - timedelta(days=2)

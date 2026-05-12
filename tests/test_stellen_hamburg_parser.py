@@ -164,6 +164,7 @@ def test_discover_stub_title_matches_descriptor_position_title() -> None:
     post = _make_post([_search_body([_item("1", "Data Scientist")])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.title == "Data Scientist"
 
 
@@ -171,6 +172,7 @@ def test_discover_stub_source_is_stellen_hamburg() -> None:
     post = _make_post([_search_body([_item()])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.source == "stellen.hamburg"
 
 
@@ -178,6 +180,7 @@ def test_discover_stub_language_is_de() -> None:
     post = _make_post([_search_body([_item()])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.language == "de"
 
 
@@ -185,6 +188,7 @@ def test_discover_stub_company_from_organization_name() -> None:
     post = _make_post([_search_body([_item(company="Finanzbehörde Hamburg")])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.company == "Finanzbehörde Hamburg"
 
 
@@ -192,6 +196,7 @@ def test_discover_stub_location_from_position_location() -> None:
     post = _make_post([_search_body([_item(location="Hamburg")])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
 
 
@@ -199,6 +204,7 @@ def test_discover_stub_url_contains_object_id() -> None:
     post = _make_post([_search_body([_item("99999")])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert "99999" in stub.url
 
 
@@ -206,6 +212,7 @@ def test_discover_stub_company_none_when_organization_absent() -> None:
     post = _make_post([_search_body([_item(company=None)])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.company is None
 
 
@@ -213,6 +220,7 @@ def test_discover_stub_location_none_when_position_location_absent() -> None:
     post = _make_post([_search_body([_item(location=None)])])
     with StellenHamburgParser(_http_post=post) as p:
         (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
     assert stub.location is None
 
 

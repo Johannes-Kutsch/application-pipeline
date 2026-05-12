@@ -120,10 +120,10 @@ def test_missing_file_initialises_empty(tmp_path: Path) -> None:
     assert store.is_seen(StubLike(url="https://example.com/none")) == "miss"
 
 
-def test_zero_byte_file_initialises_empty(store_path: Path) -> None:
+def test_zero_byte_file_raises_dedup_store_error(store_path: Path) -> None:
     store_path.write_bytes(b"")
-    store = dedup_load(store_path)
-    assert store.is_seen(StubLike(url="https://example.com/none")) == "miss"
+    with pytest.raises(DedupStoreError, match="empty"):
+        dedup_load(store_path)
 
 
 @pytest.mark.parametrize(
@@ -136,7 +136,7 @@ def test_malformed_file_raises(store_path: Path, content: str) -> None:
         dedup_load(store_path)
 
 
-def test_os_replace_failure_propagates_unwrapped(
+def test_persist_oserror_raises_dedup_store_error(
     store_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = dedup_load(store_path)
@@ -151,10 +151,52 @@ def test_os_replace_failure_propagates_unwrapped(
 
     monkeypatch.setattr(_os, "replace", boom)
 
-    with pytest.raises(OSError):
+    with pytest.raises(DedupStoreError) as exc_info:
         store.mark_seen(StubLike(url="https://example.com/new"), "kept")
 
+    assert isinstance(exc_info.value.__cause__, OSError)
     assert store_path.read_bytes() == before
+
+
+def test_persist_write_oserror_raises_dedup_store_error(
+    store_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = dedup_load(store_path)
+
+    import os as _os
+
+    def boom(fd: int, data: bytes) -> int:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(_os, "write", boom)
+
+    with pytest.raises(DedupStoreError) as exc_info:
+        store.mark_seen(StubLike(url="https://example.com/x"), "kept")
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+
+
+def test_alias_write_corrupt_record_raises_dedup_store_error(
+    store_path: Path,
+) -> None:
+    # Seed a store with a record missing required fields (corrupt on-disk data)
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/corrupt": {
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    # status and first_seen intentionally missing
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path)
+    # A new URL with the same tuple will trigger alias write on the corrupt record
+    with pytest.raises(DedupStoreError):
+        store.is_seen(StubLike(url="https://other.example/new"))
 
 
 @pytest.mark.parametrize(

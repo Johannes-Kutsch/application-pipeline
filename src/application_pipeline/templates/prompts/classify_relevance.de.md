@@ -20,3 +20,5 @@ Stellentitel: {title}
 
 Stellenbeschreibung:
 {raw_description}
+
+/no_think

@@ -17,3 +17,5 @@ strukturierte Bewertung:
 
 Stellenbeschreibung:
 {raw_description}
+
+/no_think

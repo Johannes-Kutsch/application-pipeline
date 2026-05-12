@@ -17,3 +17,5 @@ Job title: {title}
 
 Job description:
 {raw_description}
+
+/no_think

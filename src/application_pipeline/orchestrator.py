@@ -327,6 +327,7 @@ def run(
         consecutive_url_hits: dict[str, int] = {pid: 0 for pid in parsers_remaining}
         _pending_enrich: dict[str, PositionStub] = {}
         discovered_per_parser: dict[str, int] = {}
+        unparseable_dates_per_parser: dict[str, int] = {}
 
         while parsers_remaining:
             pid, payload = outbound.get()
@@ -356,6 +357,12 @@ def run(
                     parser_inbound[pid].put(_SKIP)
 
             elif isinstance(payload, Position):
+                for warning in payload._warnings:
+                    parser_log.record(pid, warning)
+                    if warning.startswith("unparseable_date"):
+                        unparseable_dates_per_parser[pid] = (
+                            unparseable_dates_per_parser.get(pid, 0) + 1
+                        )
                 language = resolve_language(payload)
                 verdict = prefilter.classify(payload)
                 if verdict.passes:
@@ -409,6 +416,7 @@ def run(
                 pid,
                 {
                     "discovered": discovered_per_parser.get(pid, 0),
+                    "unparseable_dates": unparseable_dates_per_parser.get(pid, 0),
                     "duration": round(parsers_done_monotonic - started_monotonic, 1),
                 },
                 started_at,

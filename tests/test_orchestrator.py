@@ -1433,3 +1433,119 @@ def test_parser_log_integration(
         "parser bundesagentur_api started" in record.message
         for record in caplog.records
     ), "INFO line 'parser <id> started' must appear in stderr"
+
+
+# ---------------------------------------------------------------------------
+# Position._warnings — field existence and round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_position_warnings_defaults_to_empty_tuple() -> None:
+    stub = PositionStub(url="https://x.com/1", title="T", source="s")
+    pos = Position(stub=stub, raw_description="desc")
+    assert pos._warnings == ()
+
+
+def test_position_warnings_round_trips_through_construction() -> None:
+    stub = PositionStub(url="https://x.com/1", title="T", source="s")
+    pos = Position(
+        stub=stub,
+        raw_description="desc",
+        _warnings=("unparseable_date raw=INVALID",),
+    )
+    assert pos._warnings == ("unparseable_date raw=INVALID",)
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator: Position._warnings drained to parser_log + SUMMARY
+# ---------------------------------------------------------------------------
+
+
+class _WarnParser:
+    """Returns one stub; enrich returns a Position with an unparseable_date warning."""
+
+    def __enter__(self) -> "_WarnParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [
+            PositionStub(
+                url="https://stub.example/warn/1", title="Warn Job", source="stub"
+            )
+        ]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        return Position(
+            stub=stub,
+            raw_description="some description",
+            posted_date=None,
+            _warnings=("unparseable_date raw=INVALID_DATE",),
+        )
+
+
+def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
+    """Position._warnings are drained into parser_log before classify;
+    the resulting Position still reaches downstream with posted_date=None."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="jobs_beim_staat_html")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    summary = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    log_file = logs_dir / "jobs_beim_staat_html.log"
+    assert log_file.exists()
+    content = log_file.read_text(encoding="utf-8")
+    assert "unparseable_date raw=INVALID_DATE" in content
+    assert "unparseable_dates=1" in content
+    assert summary.written == 1
+
+
+def test_unparseable_date_warning_not_emitted_to_stderr(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The unparseable_date warning must NOT appear in stderr (the old _log.info path)."""
+    import logging
+
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="jobs_beim_staat_html")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    with caplog.at_level(logging.INFO):
+        run(
+            config_path,
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            results_manager=_stub_results_manager(),
+        )
+
+    assert not any("unparseable_date" in record.message for record in caplog.records), (
+        "unparseable_date must not appear in logging output"
+    )

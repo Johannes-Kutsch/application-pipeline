@@ -58,6 +58,7 @@ class Position:
     work_model: Literal["remote", "hybrid", "on-site"] | None = None
     posted_date: date | None = None
     deadline: date | None = None
+    _warnings: tuple[str, ...] = ()
 
     @property
     def title(self) -> str:

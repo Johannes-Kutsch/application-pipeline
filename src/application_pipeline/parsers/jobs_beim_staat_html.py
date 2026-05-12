@@ -68,26 +68,25 @@ _WOCHEN_RE = re.compile(r"^vor\s+(\d+)\s+Woche(?:n)?$", re.IGNORECASE)
 _DMY_RE = re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$")
 
 
-def _parse_posted_date(raw: str, today: date) -> date | None:
+def _parse_posted_date(raw: str, today: date) -> tuple[date | None, str | None]:
     s = raw.strip()
     if _HEUTE_RE.match(s):
-        return today
+        return today, None
     if _GESTERN_RE.match(s):
-        return today - timedelta(days=1)
+        return today - timedelta(days=1), None
     m = _TAGEN_RE.match(s)
     if m:
-        return today - timedelta(days=int(m.group(1)))
+        return today - timedelta(days=int(m.group(1))), None
     m = _WOCHEN_RE.match(s)
     if m:
-        return today - timedelta(weeks=int(m.group(1)))
+        return today - timedelta(weeks=int(m.group(1))), None
     m = _DMY_RE.match(s)
     if m:
         try:
-            return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            return date(int(m.group(3)), int(m.group(2)), int(m.group(1))), None
         except ValueError:
             pass
-    _log.info("unparseable_date parser_type=jobs_beim_staat_html raw=%s", raw)
-    return None
+    return None, f"unparseable_date raw={raw}"
 
 
 def _id_from_query(url: str) -> str | None:
@@ -134,7 +133,7 @@ def _text_after_icon(card: Tag, icon_suffix: str) -> str | None:
     return None
 
 
-def _parse_card(card: Tag, today: date) -> PositionStub | None:
+def _parse_card(card: Tag, today: date) -> tuple[PositionStub, tuple[str, ...]] | None:
     link = card.select_one("h3 > a")
     if not isinstance(link, Tag):
         return None
@@ -156,7 +155,12 @@ def _parse_card(card: Tag, today: date) -> PositionStub | None:
 
     location = _text_after_icon(card, "location-pin.png")
     raw_date = _text_after_icon(card, "history.png")
-    posted_date = _parse_posted_date(raw_date, today) if raw_date else None
+    posted_date: date | None = None
+    warnings: tuple[str, ...] = ()
+    if raw_date:
+        posted_date, warning = _parse_posted_date(raw_date, today)
+        if warning is not None:
+            warnings = (warning,)
 
     return PositionStub(
         url=full_url,
@@ -166,7 +170,7 @@ def _parse_card(card: Tag, today: date) -> PositionStub | None:
         location=location,
         language="de",
         posted_date=posted_date,
-    )
+    ), warnings
 
 
 class JobsBeimStaatParser:
@@ -180,6 +184,7 @@ class JobsBeimStaatParser:
         self._timeout = _timeout
         self._retries = _retries
         self._throttle = Throttle()
+        self._stub_warnings: dict[str, tuple[str, ...]] = {}
         if _http_get is None:
             self._client: httpx.Client | None = httpx.Client(
                 timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
@@ -264,9 +269,12 @@ class JobsBeimStaatParser:
             for card in cards:
                 if count >= query.max_results:
                     return
-                stub = _parse_card(card, today)
-                if stub is None:
+                result = _parse_card(card, today)
+                if result is None:
                     continue
+                stub, warnings = result
+                if warnings:
+                    self._stub_warnings[stub.url] = warnings
                 yield stub
                 count += 1
 
@@ -311,10 +319,12 @@ class JobsBeimStaatParser:
         iframe_soup = BeautifulSoup(iframe_raw, "html.parser")
         raw_description = _normalize_description(iframe_soup.get_text(separator="\n"))
 
+        warnings = self._stub_warnings.pop(stub.url, ())
         return Position(
             stub=stub,
             raw_description=raw_description,
             posted_date=stub.posted_date,
+            _warnings=warnings,
         )
 
 

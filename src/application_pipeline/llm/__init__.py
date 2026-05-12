@@ -1,3 +1,11 @@
+from .claude_cli import (
+    ClaudeCliError,
+    ClaudeCliInvoker,
+    ClaudeMalformedEnvelopeError,
+    ClaudeResponse,
+    ClaudeUsage,
+    ClaudeUsageLimitError,
+)
 from .ollama import OllamaExtractor
 from .types import (
     ExtractorError,
@@ -11,6 +19,12 @@ from .types import (
 )
 
 __all__ = [
+    "ClaudeCliError",
+    "ClaudeCliInvoker",
+    "ClaudeMalformedEnvelopeError",
+    "ClaudeResponse",
+    "ClaudeUsage",
+    "ClaudeUsageLimitError",
     "ExtractorError",
     "ExtractorMalformedJSONError",
     "ExtractorSchemaError",

@@ -7,8 +7,6 @@ from langdetect import LangDetectException, detect_langs
 
 from application_pipeline.parsers.types import Position
 
-Language = Literal["de", "en"]
-
 _CONFIDENCE_FLOOR = 0.5
 
 
@@ -27,7 +25,7 @@ def resolve_language(position: Position) -> LanguageResolution:
     detected = _detect(text)
     effective: Literal["de", "en"] = detected if detected in ("de", "en") else "en"
     return LanguageResolution(
-        effective=cast(Literal["de", "en"], effective),
+        effective=effective,
         detected=detected,
         source="langdetect",
     )

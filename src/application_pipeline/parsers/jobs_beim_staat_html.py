@@ -23,7 +23,6 @@ from typing import Any, assert_never
 import httpx
 from bs4 import BeautifulSoup, Tag
 
-from application_pipeline import debug_log
 from application_pipeline.http import HttpRetryError
 
 from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
@@ -288,10 +287,6 @@ class JobsBeimStaatParser:
         if job_id is None:
             outbound = _find_outbound_href(wrapper_soup)
             if outbound is not None:
-                debug_log.append(
-                    "jobs_beim_staat_html",
-                    f"external_redirect stub_url={stub.url} outbound={outbound}",
-                )
                 return ExternalRedirect(stub, outbound)
             raise ParserError(
                 f"jobs-beim-staat enrich: no iframe target found in wrapper {stub.url}"

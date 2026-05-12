@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-import application_pipeline.debug_log as debug_log_module
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.types import City, ExternalRedirect, Position, Remote
 from application_pipeline.parsers.http import HttpGet
@@ -577,18 +576,11 @@ def test_enrich_iframe_wins_over_stray_outbound_link(
     assert isinstance(result, Position)
 
 
-def test_enrich_external_redirect_appends_outbound_url_to_debug_log(
-    stub: PositionStub, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_enrich_external_redirect_returns_external_redirect(
+    stub: PositionStub,
 ) -> None:
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir()
-    monkeypatch.setattr(debug_log_module, "_logs_dir", logs_dir)
-
     get = _make_get([_OUTBOUND_WRAPPER])
     with JobsBeimStaatParser(_http_get=get) as p:
-        p.enrich(stub)
-
-    log_file = logs_dir / "jobs_beim_staat_html.log"
-    assert log_file.exists()
-    content = log_file.read_text(encoding="utf-8")
-    assert "go.opportuno.de/job/123" in content
+        result = p.enrich(stub)
+    assert isinstance(result, ExternalRedirect)
+    assert "go.opportuno.de/job/123" in result.outbound_url

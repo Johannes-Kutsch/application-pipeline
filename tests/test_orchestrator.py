@@ -985,8 +985,13 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
 def test_external_redirect_marks_seen_and_increments_counter(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """ExternalRedirect: stub marked external_redirect, external_redirects increments, enrich_failed unchanged, INFO logged, no WARNING."""
+    """ExternalRedirect: stub marked external_redirect, external_redirects increments, enrich_failed unchanged, event in parser log, no WARNING."""
     import logging
+
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
 
     seen_path = tmp_path / ".seen.json"
 
@@ -1012,7 +1017,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
                 )
             return Position(stub=stub, raw_description="good description")
 
-    with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
+    with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
         summary = run(
             _write_config(
                 tmp_path,
@@ -1037,16 +1042,9 @@ def test_external_redirect_marks_seen_and_increments_counter(
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records == [], f"unexpected WARNING(s): {warning_records}"
 
-    dispatch_logs = [
-        r
-        for r in caplog.records
-        if r.levelno == logging.INFO
-        and r.getMessage().startswith("external_redirect parser_id=")
-        and "https://external.example/job" in r.getMessage()
-    ]
-    assert dispatch_logs, (
-        "expected orchestrator to emit per-event external_redirect INFO log"
-    )
+    log_content = (logs_dir / "bundesagentur_api.log").read_text(encoding="utf-8")
+    assert "external_redirect" in log_content
+    assert "https://external.example/job" in log_content
 
 
 def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> None:
@@ -1433,3 +1431,78 @@ def test_parser_log_integration(
         "parser bundesagentur_api started" in record.message
         for record in caplog.records
     ), "INFO line 'parser <id> started' must appear in stderr"
+
+
+def test_parser_log_records_enrich_failed_redirect_and_dead(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ParserError, ExternalRedirect, and _ParserDead each produce an entry in the parser log; no WARNING/ERROR on stderr; SUMMARY includes all three counters."""
+    import logging
+
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    _STUB_URLS = [
+        "https://stub.example/0",
+        "https://stub.example/1",
+    ]
+
+    class _ThreeEventParser:
+        def __enter__(self) -> "_ThreeEventParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            yield PositionStub(
+                url=_STUB_URLS[0], title="Job 0", source="stub", language="en"
+            )
+            yield PositionStub(
+                url=_STUB_URLS[1], title="Job 1", source="stub", language="en"
+            )
+            raise RuntimeError("thread crashed")
+
+        def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
+            if stub.url == _STUB_URLS[0]:
+                raise ParserError("enrich boom")
+            return ExternalRedirect(
+                stub=stub, outbound_url="https://external.example/job"
+            )
+
+    with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
+        summary = run(
+            _write_config(
+                tmp_path,
+                sources='[SourceEntry(parser_type="bundesagentur_api")]',
+                keywords='["python"]',
+                locations='["Hamburg"]',
+                include_remote=False,
+            ),
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _ThreeEventParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            results_manager=_stub_results_manager(),
+        )
+
+    assert summary.enrich_failed == 1
+    assert summary.external_redirects == 1
+    assert summary.parsers_dead == 1
+
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warning_records == [], f"unexpected WARNING/ERROR(s): {warning_records}"
+
+    log_file = logs_dir / "bundesagentur_api.log"
+    assert log_file.exists(), "parser log file must be created"
+    content = log_file.read_text(encoding="utf-8")
+
+    assert "enrich_failed" in content
+    assert "external_redirect" in content
+    assert "traceback" in content
+
+    assert "enrich_failed=1" in content
+    assert "external_redirects=1" in content
+    assert "parsers_dead=1" in content

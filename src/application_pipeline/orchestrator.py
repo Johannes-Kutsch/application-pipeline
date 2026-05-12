@@ -327,6 +327,9 @@ def run(
         consecutive_url_hits: dict[str, int] = {pid: 0 for pid in parsers_remaining}
         _pending_enrich: dict[str, PositionStub] = {}
         discovered_per_parser: dict[str, int] = {}
+        enrich_failed_per_parser: dict[str, int] = {}
+        external_redirects_per_parser: dict[str, int] = {}
+        parsers_dead_per_parser: dict[str, int] = {}
 
         while parsers_remaining:
             pid, payload = outbound.get()
@@ -367,37 +370,39 @@ def run(
             elif isinstance(payload, ParserError):
                 stub = _pending_enrich.pop(pid, None)
                 if stub is not None:
-                    _log.warning(
-                        "enrich failed: parser_id=%s stub_url=%s message=%s",
+                    parser_log.record(
                         pid,
-                        stub.url,
-                        payload,
+                        "enrich_failed",
+                        stub_url=stub.url,
+                        title=stub.title,
+                        reason=str(payload),
                     )
                     dedup_store.mark_seen(stub, "enrich_failed")
                 enrich_failed += 1
+                enrich_failed_per_parser[pid] = enrich_failed_per_parser.get(pid, 0) + 1
 
             elif isinstance(payload, ExternalRedirect):
                 stub = _pending_enrich.pop(pid, None)
                 if stub is not None:
-                    _log.info(
-                        "external_redirect parser_id=%s stub_url=%s outbound=%s",
+                    parser_log.record(
                         pid,
-                        stub.url,
-                        payload.outbound_url,
+                        "external_redirect",
+                        stub_url=stub.url,
+                        outbound=payload.outbound_url,
                     )
                     dedup_store.mark_seen(stub, "external_redirect")
                 external_redirects += 1
+                external_redirects_per_parser[pid] = (
+                    external_redirects_per_parser.get(pid, 0) + 1
+                )
 
             elif payload is _PARSER_DONE:
                 parsers_remaining.discard(pid)
 
             elif isinstance(payload, _ParserDead):
-                _log.error(
-                    "parser thread died: parser_id=%s\n%s",
-                    pid,
-                    payload.traceback_str,
-                )
+                parser_log.record_traceback(pid, payload.traceback_str)
                 parsers_dead += 1
+                parsers_dead_per_parser[pid] = parsers_dead_per_parser.get(pid, 0) + 1
                 parsers_remaining.discard(pid)
 
         for _, t in threads:
@@ -409,6 +414,9 @@ def run(
                 pid,
                 {
                     "discovered": discovered_per_parser.get(pid, 0),
+                    "enrich_failed": enrich_failed_per_parser.get(pid, 0),
+                    "external_redirects": external_redirects_per_parser.get(pid, 0),
+                    "parsers_dead": parsers_dead_per_parser.get(pid, 0),
                     "duration": round(parsers_done_monotonic - started_monotonic, 1),
                 },
                 started_at,

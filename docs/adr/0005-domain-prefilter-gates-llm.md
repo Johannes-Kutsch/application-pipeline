@@ -6,7 +6,7 @@ The Pre-Filter also fills `Position.language` via `langdetect` when the Parser l
 
 ## Why
 
-- **An LLM call on a Pi is not a "cheap discard."** A `classify_relevance` call against Qwen 3 8B on Pi 5 takes ~30–90 seconds wall time including KV-cache warmth. PRD #20 originally framed `classify_relevance` as the cheap discard; on Pi hardware that framing is wrong. The actual cheap discard is regex.
+- **An LLM call on a Pi is not a "cheap discard."** A `classify_relevance` call on Pi 5 takes several seconds to tens of seconds wall time even with the lighter models (`qwen3:0.6b` / `qwen3:4b`). PRD #20 originally framed `classify_relevance` as the cheap discard; on Pi hardware that framing is wrong. The actual cheap discard is regex.
 - **Volume reduction is the bottleneck.** Bundesagentur + stellen.hamburg can produce hundreds of new listings per day across the configured **Keywords**. Running an LLM call on every one would blow past any reasonable cron window. A deterministic pre-filter cuts the LLM-classify volume to listings the cheap rules genuinely cannot decide.
 - **Whitelist-wins precedence preserves cross-field opportunities.** A listing matching a blacklist term in the company name (e.g. `"Pflegeheim AG"`) but mentioning `"Python"` in the description should reach the LLM, not be dropped. Anchoring the whitelist to the applicant's `Config.skills` plus a broader `Config.inclusion_keywords` (role names, tech families) keeps the rescue net wide.
 - **The LLM stays the authority on in-domain.** Pre-Filter is a volume reducer, never a decision-maker. Anything that passes goes to the LLM. False positives on the whitelist cost an LLM call (recoverable); false drops on the blacklist are the only loss-of-information path, and they're bounded to listings that match a blacklist term *and* mention nothing in the applicant's skill stack.
@@ -14,7 +14,7 @@ The Pre-Filter also fills `Position.language` via `langdetect` when the Parser l
 
 ## Considered alternatives
 
-- **No pre-filter; let the LLM judge every listing.** Rejected: throughput exceeds reasonable cron windows on Pi 5 (~30–90 s × hundreds of listings).
+- **No pre-filter; let the LLM judge every listing.** Rejected: throughput exceeds reasonable cron windows on Pi 5 (several seconds to tens of seconds per call × hundreds of listings).
 - **Two-tier: confident-in (skip to `judge_match`) + confident-out (drop) + ambiguous (LLM classify).** Rejected: skip-to-judge based on keyword alone risks losing cross-field opportunities. Pre-Filter only drops; never bypasses the LLM gate.
 - **Embedding-based gate (BGE-M3 or `paraphrase-multilingual-MiniLM-L12-v2`).** Deferred to v1.1: cleaner relevance signal, but adds a runtime dependency and a threshold-tuning loop. Substring keyword matching handles obvious-slop cases at zero dependency cost; the embedding upgrade is a clean future swap behind the same module surface.
 - **Fuzzy matching (Levenshtein-1).** Rejected: short keywords (`Go`, `R`, `C`, `Java`) explode false positives in German prose; German inflection (Pflege/Pflegekraft/Pflegerin) is better handled by stem-style keyword authoring (`Pfleg` instead of `Pflege`) which the substring matcher handles deterministically.

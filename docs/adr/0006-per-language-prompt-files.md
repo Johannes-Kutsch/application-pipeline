@@ -4,7 +4,7 @@ LLM prompts are authored as full per-language translations rather than a single 
 
 ## Why
 
-- **Qwen 3 8B's German output quality is materially better when the entire prompt frame is in German.** A single English prompt that injects "this listing is in German; emit summary in German" produces summaries that drift back to English mid-sentence and use stilted German idiom when they don't drift. Authoring the prompt natively in the target language fixes both.
+- **Qwen 3 4B's German output quality is materially better when the entire prompt frame is in German.** A single English prompt that injects "this listing is in German; emit summary in German" produces summaries that drift back to English mid-sentence and use stilted German idiom when they don't drift. Authoring the prompt natively in the target language fixes both.
 - **The `{language}` slot was tautological.** With per-language files, the file IS the language; injecting the language as a slot value duplicates information the loader already knows.
 - **Translation cost is bounded.** Two languages × two call sites = 4 files. The applicant's pipeline targets German job markets (Bundesagentur, stellen.hamburg) plus English-language listings; neither language set grows organically. A third language in v1.1+ is one new file per call site — additive.
 - **Simpler validation contract.** PRD #24's Prompt Loader validates each file against its slot inventory independently; per-language doubling fits the existing shape with the slot inventory shrinking by one (the dropped `language` slot).

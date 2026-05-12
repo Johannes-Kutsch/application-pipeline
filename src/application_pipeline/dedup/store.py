@@ -49,6 +49,15 @@ class DeduplicationStore:
         )
 
     @staticmethod
+    def _validate_record(url: str, record: dict[str, Any]) -> None:
+        """Raise DedupStoreError if record is missing any required alias field."""
+        for field in ("company_lc", "title_lc", "location_lc", "status", "first_seen"):
+            if record.get(field) is None:
+                raise DedupStoreError(
+                    f"record for {url!r} has missing or null required field {field!r}"
+                )
+
+    @staticmethod
     def _build_tuple_index(
         records: dict[str, dict[str, Any]],
     ) -> dict[tuple[str, str, str], str]:
@@ -134,6 +143,7 @@ class DeduplicationStore:
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]
+        self._validate_record(canonical_url, original)
         record = {
             "company_lc": original["company_lc"],
             "title_lc": original["title_lc"],
@@ -149,13 +159,18 @@ class DeduplicationStore:
     def _persist(self, records: dict[str, dict[str, Any]]) -> None:
         tmp = self._path.with_name(self._path.name + ".tmp")
         payload = json.dumps(records, indent=2, sort_keys=True, ensure_ascii=False)
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
         try:
-            os.write(fd, payload.encode("utf-8"))
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(tmp, self._path)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+            try:
+                os.write(fd, payload.encode("utf-8"))
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(tmp, self._path)
+        except OSError as exc:
+            raise DedupStoreError(
+                f"could not persist dedup store to {self._path}: {exc}"
+            ) from exc
 
 
 def load(path: Path) -> DeduplicationStore:
@@ -168,7 +183,9 @@ def load(path: Path) -> DeduplicationStore:
         raise DedupStoreError(f"could not read dedup store at {path}: {exc}") from exc
 
     if not raw:
-        return DeduplicationStore(path, {})
+        raise DedupStoreError(
+            f"dedup store at {path} is empty; delete the file to start fresh"
+        )
 
     try:
         data = json.loads(raw)

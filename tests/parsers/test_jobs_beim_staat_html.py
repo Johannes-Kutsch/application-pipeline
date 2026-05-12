@@ -86,52 +86,65 @@ def stub() -> PositionStub:
 
 
 def test_parse_posted_date_heute_returns_today() -> None:
-    assert _parse_posted_date("heute", _TODAY) == _TODAY
+    result, warning = _parse_posted_date("heute", _TODAY)
+    assert result == _TODAY
+    assert warning is None
 
 
 def test_parse_posted_date_gestern_returns_yesterday() -> None:
-    assert _parse_posted_date("gestern", _TODAY) == date(2026, 5, 7)
+    result, warning = _parse_posted_date("gestern", _TODAY)
+    assert result == date(2026, 5, 7)
+    assert warning is None
 
 
 def test_parse_posted_date_vor_n_tagen_subtracts_days() -> None:
-    assert _parse_posted_date("vor 3 Tagen", _TODAY) == date(2026, 5, 5)
+    result, warning = _parse_posted_date("vor 3 Tagen", _TODAY)
+    assert result == date(2026, 5, 5)
+    assert warning is None
 
 
 def test_parse_posted_date_vor_1_tag_singular() -> None:
-    assert _parse_posted_date("vor 1 Tag", _TODAY) == date(2026, 5, 7)
+    result, warning = _parse_posted_date("vor 1 Tag", _TODAY)
+    assert result == date(2026, 5, 7)
+    assert warning is None
 
 
 def test_parse_posted_date_vor_n_wochen_subtracts_weeks() -> None:
-    assert _parse_posted_date("vor 2 Wochen", _TODAY) == date(2026, 4, 24)
+    result, warning = _parse_posted_date("vor 2 Wochen", _TODAY)
+    assert result == date(2026, 4, 24)
+    assert warning is None
 
 
 def test_parse_posted_date_vor_1_woche_singular() -> None:
-    assert _parse_posted_date("vor 1 Woche", _TODAY) == date(2026, 5, 1)
+    result, warning = _parse_posted_date("vor 1 Woche", _TODAY)
+    assert result == date(2026, 5, 1)
+    assert warning is None
 
 
 def test_parse_posted_date_dmy_format() -> None:
-    assert _parse_posted_date("15.04.2026", _TODAY) == date(2026, 4, 15)
+    result, warning = _parse_posted_date("15.04.2026", _TODAY)
+    assert result == date(2026, 4, 15)
+    assert warning is None
 
 
-def test_parse_posted_date_unparseable_returns_none(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    import logging
-
-    with caplog.at_level(logging.INFO):
-        result = _parse_posted_date("irgendwann mal", _TODAY)
+def test_parse_posted_date_unparseable_returns_none_and_warning() -> None:
+    result, warning = _parse_posted_date("irgendwann mal", _TODAY)
     assert result is None
-    assert "unparseable_date" in caplog.text
-    assert "jobs_beim_staat_html" in caplog.text
-    assert "irgendwann mal" in caplog.text
+    assert warning is not None
+    assert "unparseable_date" in warning
+    assert "irgendwann mal" in warning
 
 
 def test_parse_posted_date_case_insensitive_heute() -> None:
-    assert _parse_posted_date("Heute", _TODAY) == _TODAY
+    result, warning = _parse_posted_date("Heute", _TODAY)
+    assert result == _TODAY
+    assert warning is None
 
 
 def test_parse_posted_date_case_insensitive_gestern() -> None:
-    assert _parse_posted_date("Gestern", _TODAY) == date(2026, 5, 7)
+    result, warning = _parse_posted_date("Gestern", _TODAY)
+    assert result == date(2026, 5, 7)
+    assert warning is None
 
 
 # ---------------------------------------------------------------------------

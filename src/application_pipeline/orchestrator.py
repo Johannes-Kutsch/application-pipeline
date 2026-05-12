@@ -333,6 +333,7 @@ def run(
         enrich_failed_per_parser: dict[str, int] = defaultdict(int)
         external_redirects_per_parser: dict[str, int] = defaultdict(int)
         parsers_dead_per_parser: dict[str, int] = defaultdict(int)
+        unparseable_dates_per_parser: dict[str, int] = defaultdict(int)
 
         while parsers_remaining:
             pid, payload = outbound.get()
@@ -362,6 +363,10 @@ def run(
                     parser_inbound[pid].put(_SKIP)
 
             elif isinstance(payload, Position):
+                for warning in payload._warnings:
+                    parser_log.record(pid, warning)
+                    if warning.startswith("unparseable_date"):
+                        unparseable_dates_per_parser[pid] += 1
                 resolution = resolve_language(payload)
                 if resolution.detected not in ("de", "en"):
                     parser_log.record(
@@ -432,6 +437,7 @@ def run(
                     "enrich_failed": enrich_failed_per_parser[pid],
                     "external_redirects": external_redirects_per_parser[pid],
                     "parsers_dead": parsers_dead_per_parser[pid],
+                    "unparseable_dates": unparseable_dates_per_parser[pid],
                     "duration": round(parsers_done_monotonic - started_monotonic, 1),
                 },
                 started_at,

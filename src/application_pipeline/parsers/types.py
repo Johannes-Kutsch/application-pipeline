@@ -40,6 +40,7 @@ class PositionStub:
     location: str | None = None
     language: Literal["de", "en"] | None = None
     posted_date: date | None = None
+    _warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class Position:
     work_model: Literal["remote", "hybrid", "on-site"] | None = None
     posted_date: date | None = None
     deadline: date | None = None
+    _warnings: tuple[str, ...] = ()
 
     @property
     def title(self) -> str:

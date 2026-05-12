@@ -9,7 +9,6 @@ cheap URL lookup. See ADR-0004; do not "fix" this back to a pure read.
 from __future__ import annotations
 
 import json
-import logging
 import os
 from datetime import date
 from pathlib import Path
@@ -18,8 +17,6 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from application_pipeline.text import normalize
 
 from .errors import DedupStoreError
-
-logger = logging.getLogger(__name__)
 
 SeenStatus = Literal["off_domain", "kept", "enrich_failed", "external_redirect"]
 SeenResult = Literal["url_hit", "tuple_hit", "miss"]

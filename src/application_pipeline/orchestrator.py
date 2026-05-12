@@ -15,6 +15,7 @@ from pathlib import Path
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline import layout as layout_module
+from application_pipeline import parser_log
 from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.language import Language, resolve_language
@@ -299,6 +300,7 @@ def run(
         parser_inbound: dict[str, queue.Queue[object]] = {}
         parser_thresholds: dict[str, int] = {}
         threads: list[_ParserThread] = []
+        parser_ids_ordered: list[str] = []
 
         for parser, source in parsers_list:
             parser_id = source.parser_type
@@ -314,13 +316,21 @@ def run(
             ]
             t = _ParserThread(parser_id, parser, worklist, outbound, inbound)
             threads.append(t)
+            parser_ids_ordered.append(parser_id)
 
-        for t in threads:
+        parser_start_datetimes: dict[str, datetime] = {}
+        parser_start_monotonic: dict[str, float] = {}
+        for t, pid in zip(threads, parser_ids_ordered):
             t.start()
+            parser_start_monotonic[pid] = time.monotonic()
+            parser_start_datetimes[pid] = datetime.now(timezone.utc)
+            _log.info("parser %s started", pid)
+            parser_log.record(pid, "parser started")
 
         parsers_remaining: set[str] = set(parser_inbound.keys())
         consecutive_url_hits: dict[str, int] = {pid: 0 for pid in parsers_remaining}
         _pending_enrich: dict[str, PositionStub] = {}
+        discovered_per_parser: dict[str, int] = {}
 
         while parsers_remaining:
             pid, payload = outbound.get()
@@ -328,6 +338,7 @@ def run(
 
             if isinstance(payload, PositionStub):
                 discovered += 1
+                discovered_per_parser[pid] = discovered_per_parser.get(pid, 0) + 1
                 seen_result = dedup_store.is_seen(payload)
                 threshold = parser_thresholds[pid]
 
@@ -395,6 +406,17 @@ def run(
 
         for t in threads:
             t.join()
+
+        _parsers_done = time.monotonic()
+        for pid, started_at in parser_start_datetimes.items():
+            parser_log.summarize(
+                pid,
+                {
+                    "discovered": discovered_per_parser.get(pid, 0),
+                    "duration": round(_parsers_done - parser_start_monotonic[pid], 1),
+                },
+                started_at,
+            )
 
     # Step 10: Classify batch — all classify_relevance calls before any judge_match call
     current_stage.set("classify")

@@ -47,3 +47,4 @@ class Config:
     ollama_json_retries: int = 1
     ollama_http_retries: int = 2
     ollama_keep_alive: str = "24h"
+    claude_cli_path: str | None = None

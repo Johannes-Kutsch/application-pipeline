@@ -5,6 +5,7 @@ from .dedup import DedupStoreError, DeduplicationStore, SeenResult, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
 from .llm import (
+    ClaudeExtractor,
     ExtractorError,
     ExtractorMalformedJSONError,
     ExtractorSchemaError,
@@ -22,6 +23,7 @@ from .results import load as load_results
 from .user_settings import UserSettingsError, load_user_module
 
 __all__ = [
+    "ClaudeExtractor",
     "Config",
     "ConfigError",
     "DomainPreFilter",

@@ -22,6 +22,7 @@ from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.language import LanguageResolution, resolve_language
 from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
+    ClaudeExtractor,
     ExtractorError,
     ExtractorUnreachableError,
     LLMExtractor,
@@ -240,7 +241,10 @@ def run(
         except PromptError as exc:
             _log.error("startup failed — prompts: %s", exc)
             raise
-        extractor = OllamaExtractor(cfg, prompts)
+        if cfg.claude_cli_path is not None:
+            extractor = ClaudeExtractor(cfg, prompts)
+        else:
+            extractor = OllamaExtractor(cfg, prompts)
 
     try:
         extractor.prewarm()

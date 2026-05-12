@@ -1,3 +1,4 @@
+from .claude import ClaudeExtractor
 from .claude_cli import (
     ClaudeCliError,
     ClaudeCliInvoker,
@@ -19,6 +20,7 @@ from .types import (
 )
 
 __all__ = [
+    "ClaudeExtractor",
     "ClaudeCliError",
     "ClaudeCliInvoker",
     "ClaudeMalformedEnvelopeError",

@@ -133,7 +133,7 @@ def _text_after_icon(card: Tag, icon_suffix: str) -> str | None:
     return None
 
 
-def _parse_card(card: Tag, today: date) -> tuple[PositionStub, tuple[str, ...]] | None:
+def _parse_card(card: Tag, today: date) -> PositionStub | None:
     link = card.select_one("h3 > a")
     if not isinstance(link, Tag):
         return None
@@ -170,7 +170,8 @@ def _parse_card(card: Tag, today: date) -> tuple[PositionStub, tuple[str, ...]] 
         location=location,
         language="de",
         posted_date=posted_date,
-    ), warnings
+        _warnings=warnings,
+    )
 
 
 class JobsBeimStaatParser:
@@ -184,7 +185,6 @@ class JobsBeimStaatParser:
         self._timeout = _timeout
         self._retries = _retries
         self._throttle = Throttle()
-        self._stub_warnings: dict[str, tuple[str, ...]] = {}
         if _http_get is None:
             self._client: httpx.Client | None = httpx.Client(
                 timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
@@ -269,12 +269,9 @@ class JobsBeimStaatParser:
             for card in cards:
                 if count >= query.max_results:
                     return
-                result = _parse_card(card, today)
-                if result is None:
+                stub = _parse_card(card, today)
+                if stub is None:
                     continue
-                stub, warnings = result
-                if warnings:
-                    self._stub_warnings[stub.url] = warnings
                 yield stub
                 count += 1
 
@@ -319,12 +316,11 @@ class JobsBeimStaatParser:
         iframe_soup = BeautifulSoup(iframe_raw, "html.parser")
         raw_description = _normalize_description(iframe_soup.get_text(separator="\n"))
 
-        warnings = self._stub_warnings.pop(stub.url, ())
         return Position(
             stub=stub,
             raw_description=raw_description,
             posted_date=stub.posted_date,
-            _warnings=warnings,
+            _warnings=stub._warnings,
         )
 
 

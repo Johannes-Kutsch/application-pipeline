@@ -40,6 +40,7 @@ class PositionStub:
     location: str | None = None
     language: str | None = None
     posted_date: date | None = None
+    _warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

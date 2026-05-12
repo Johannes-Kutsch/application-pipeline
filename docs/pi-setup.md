@@ -9,7 +9,7 @@ Read `CONTEXT.md` for domain glossary and `docs/adr/` for architectural decision
 
 ## 1. Hardware + OS prerequisites
 
-1. Confirm hardware: **Raspberry Pi 5, 8 GB RAM**. Smaller models lack RAM for `qwen3:8b` (see [ADR-0001](adr/0001-local-ollama-as-llm-backend.md)).
+1. Confirm hardware: **Raspberry Pi 5, 8 GB RAM** (see [ADR-0001](adr/0001-local-ollama-as-llm-backend.md)).
 
 2. Flash **Raspberry Pi OS Lite, 64-bit, Bookworm (Debian 12)**. Use Raspberry Pi Imager ≥ 1.8.
    - Enable SSH in Imager's advanced options and set a username (e.g. `pi`).
@@ -66,22 +66,24 @@ Ollama is the local LLM runtime required by the **Relevance Classifier** and **M
    ```
    Expected: `active`, `enabled`, version printed. The install script registers Ollama as a systemd service and enables it automatically; no extra action required.
 
-9. Pull the model (`qwen3:8b` — do not substitute Qwen 2.5 or another identifier):
+9. Pull both models the pipeline uses:
    ```bash
-   ollama pull qwen3:8b
+   ollama pull qwen3:0.6b
+   ollama pull qwen3:4b
    ```
-   Expected: download progress, then `success`. This downloads ~5 GB; allow 10–20 minutes on a typical home connection.
+   Expected: download progress for each, then `success`. Combined download is roughly 3 GB; allow 5–15 minutes on a typical home connection.
 
-10. Sanity-check model and RAM headroom:
+10. Sanity-check models and RAM headroom:
     ```bash
-    ollama run qwen3:8b "reply with the single word ok"
+    ollama run qwen3:0.6b "reply with the single word ok"
+    ollama run qwen3:4b "reply with the single word ok"
     ```
-    Expected: model outputs `ok` (or similar short acknowledgement).
+    Expected: each model outputs `ok` (or similar short acknowledgement).
 
     ```bash
     ollama ps
     ```
-    Expected: `qwen3:8b` listed with VRAM/RAM usage under ~6 GB, leaving headroom on the 8 GB Pi 5.
+    Expected: both `qwen3:0.6b` and `qwen3:4b` listed, combined resident RAM ~3 GB.
 
 ---
 

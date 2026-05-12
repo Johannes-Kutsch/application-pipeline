@@ -299,8 +299,7 @@ def run(
 
         parser_inbound: dict[str, queue.Queue[object]] = {}
         parser_thresholds: dict[str, int] = {}
-        threads: list[_ParserThread] = []
-        parser_ids_ordered: list[str] = []
+        threads: list[tuple[str, _ParserThread]] = []
 
         for parser, source in parsers_list:
             parser_id = source.parser_type
@@ -315,15 +314,12 @@ def run(
                 for loc in locations
             ]
             t = _ParserThread(parser_id, parser, worklist, outbound, inbound)
-            threads.append(t)
-            parser_ids_ordered.append(parser_id)
+            threads.append((parser_id, t))
 
-        parser_start_datetimes: dict[str, datetime] = {}
-        parser_start_monotonic: dict[str, float] = {}
-        for t, pid in zip(threads, parser_ids_ordered):
+        parser_starts: dict[str, tuple[datetime, float]] = {}
+        for pid, t in threads:
             t.start()
-            parser_start_monotonic[pid] = time.monotonic()
-            parser_start_datetimes[pid] = datetime.now(timezone.utc)
+            parser_starts[pid] = (datetime.now(timezone.utc), time.monotonic())
             _log.info("parser %s started", pid)
             parser_log.record(pid, "parser started")
 
@@ -404,16 +400,16 @@ def run(
                 parsers_dead += 1
                 parsers_remaining.discard(pid)
 
-        for t in threads:
+        for _, t in threads:
             t.join()
 
-        _parsers_done = time.monotonic()
-        for pid, started_at in parser_start_datetimes.items():
+        parsers_done_monotonic = time.monotonic()
+        for pid, (started_at, started_monotonic) in parser_starts.items():
             parser_log.summarize(
                 pid,
                 {
                     "discovered": discovered_per_parser.get(pid, 0),
-                    "duration": round(_parsers_done - parser_start_monotonic[pid], 1),
+                    "duration": round(parsers_done_monotonic - started_monotonic, 1),
                 },
                 started_at,
             )

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html.parser
 import json
-import logging
 import sys
 import time
 from collections.abc import Iterator
@@ -38,8 +37,6 @@ from .http import (
 )
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
-
-_log = logging.getLogger(__name__)
 
 _PARSER_TYPE = "stellen_hamburg"
 _SEARCH_URL = "https://api-stellen.hamburg.de/search/"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-import logging
 import sys
 import urllib.parse
 from collections.abc import Iterator
@@ -25,8 +24,6 @@ from .http import (
 )
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
-
-_log = logging.getLogger(__name__)
 
 _BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6"
 _DETAIL_BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"

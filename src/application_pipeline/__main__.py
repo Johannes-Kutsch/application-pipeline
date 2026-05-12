@@ -40,6 +40,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s %(name)s: %(message)s",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 _tail = _TailHandler()
 _tail.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
 logging.getLogger().addHandler(_tail)

@@ -9,7 +9,6 @@ cheap URL lookup. See ADR-0004; do not "fix" this back to a pure read.
 from __future__ import annotations
 
 import json
-import logging
 import os
 from datetime import date
 from pathlib import Path
@@ -18,8 +17,6 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from application_pipeline.text import normalize
 
 from .errors import DedupStoreError
-
-logger = logging.getLogger(__name__)
 
 SeenStatus = Literal["off_domain", "kept", "enrich_failed", "external_redirect"]
 SeenResult = Literal["url_hit", "tuple_hit", "miss"]
@@ -93,24 +90,17 @@ class DeduplicationStore:
         alias write.
         """
         if key.url in self._records:
-            logger.debug("is_seen: url match for %s", key.url)
             return "url_hit"
 
         canonical_url = self._tuple_lookup(key)
         if canonical_url is not None:
             self._write_alias(key.url, canonical_url)
-            logger.debug(
-                "is_seen: tuple match for %s; alias written under %s",
-                canonical_url,
-                key.url,
-            )
             return "tuple_hit"
 
         return "miss"
 
     def mark_seen(self, key: _SeenKey, status: SeenStatus) -> None:
         if key.url in self._records:
-            logger.debug("mark_seen: no-op, url already recorded: %s", key.url)
             return
 
         company_lc = normalize(key.company)
@@ -130,7 +120,6 @@ class DeduplicationStore:
         self._records = new_records
         if company_lc and title_lc and location_lc:
             self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
-        logger.debug("mark_seen: recorded %s with status=%s", key.url, status)
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]

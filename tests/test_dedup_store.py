@@ -170,30 +170,22 @@ def test_mark_seen_accepts_stub_and_position(store_path: Path, obj: object) -> N
     assert store.is_seen(obj) == "url_hit"  # type: ignore[arg-type]
 
 
-def test_debug_log_on_url_match(
+def test_no_debug_records_during_is_seen_and_mark_seen(
     store_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     store = dedup_load(store_path)
-    stub = StubLike(url="https://example.com/log")
-    store.mark_seen(stub, "kept")
+    stub_a = StubLike(url="https://example.com/a")
+    stub_b = StubLike(url="https://example.com/b")
 
     with caplog.at_level(logging.DEBUG, logger="application_pipeline.dedup.store"):
-        assert store.is_seen(stub) == "url_hit"
+        store.is_seen(stub_a)
+        store.mark_seen(stub_a, "kept")
+        store.is_seen(stub_a)
+        store.mark_seen(stub_a, "off_domain")
+        store.is_seen(stub_b)
 
-    assert any("url" in r.getMessage().lower() for r in caplog.records)
-
-
-def test_debug_log_on_mark_no_op(
-    store_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    store = dedup_load(store_path)
-    stub = StubLike(url="https://example.com/noop")
-    store.mark_seen(stub, "kept")
-
-    with caplog.at_level(logging.DEBUG, logger="application_pipeline.dedup.store"):
-        store.mark_seen(stub, "off_domain")
-
-    assert any("no-op" in r.getMessage().lower() for r in caplog.records)
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert debug_records == []
 
 
 def test_handles_none_company_title_location(store_path: Path) -> None:
@@ -433,16 +425,6 @@ def test_round_trip_mix_of_originals_and_aliases(store_path: Path) -> None:
     assert reloaded.is_seen(c) == "url_hit"
     after = json.loads(store_path.read_text(encoding="utf-8"))
     assert before == after
-
-
-def test_debug_log_on_tuple_match_with_alias_write(
-    store_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    store = dedup_load(store_path)
-    store.mark_seen(StubLike(url="https://a.example/1"), "kept")
-    with caplog.at_level(logging.DEBUG, logger="application_pipeline.dedup.store"):
-        store.is_seen(StubLike(url="https://b.example/1"))
-    assert any("tuple" in r.getMessage().lower() for r in caplog.records)
 
 
 def test_mark_seen_external_redirect_persists_status(store_path: Path) -> None:

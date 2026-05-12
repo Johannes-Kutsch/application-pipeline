@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import application_pipeline.debug_log as debug_log
+import application_pipeline.parser_log as parser_log
 
 _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
@@ -14,8 +15,10 @@ _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 def reset_debug_log():
     """Reset module state before each test."""
     debug_log._logs_dir = None
+    parser_log._logs_dir = None
     yield
     debug_log._logs_dir = None
+    parser_log._logs_dir = None
 
 
 def test_append_after_configure_creates_log_with_timestamp(tmp_path: Path) -> None:
@@ -60,6 +63,7 @@ def test_main_materialises_logs_directory(
 
     config_path = tmp_path / "config.toml"
     config_path.write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["app", str(config_path)])
     monkeypatch.setattr(
         "application_pipeline.__main__.run",
@@ -70,4 +74,4 @@ def test_main_materialises_logs_directory(
 
     main()
 
-    assert (tmp_path / "logs").is_dir()
+    assert (tmp_path / "synched" / "logs").is_dir()

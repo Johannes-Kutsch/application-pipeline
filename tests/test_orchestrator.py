@@ -8,6 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import application_pipeline.debug_log as _debug_log
+import application_pipeline.parser_log as _parser_log
+
 from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
@@ -35,6 +38,21 @@ from application_pipeline.results import ResultsFileError, ResultsFileManager
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_log_state():
+    """Reset parser_log / debug_log module state between tests.
+
+    Some tests call main() which configures both modules. Without this reset
+    the relative 'synched/logs' path leaks across tests after monkeypatch
+    restores the working directory.
+    """
+    _debug_log._logs_dir = None
+    _parser_log._logs_dir = None
+    yield
+    _debug_log._logs_dir = None
+    _parser_log._logs_dir = None
 
 
 def _write_config(
@@ -1366,3 +1384,52 @@ def test_results_write_stage_label_on_append_failure(tmp_path: Path) -> None:
         assert current_stage.get() == "results_write"
     finally:
         current_stage.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# parser_log integration
+# ---------------------------------------------------------------------------
+
+
+def test_parser_log_integration(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """parser started line + SUMMARY with discovered= and duration= appear in the log file."""
+    import logging
+
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
+        run(
+            config_path,
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            results_manager=_stub_results_manager(),
+        )
+
+    log_file = logs_dir / "bundesagentur_api.log"
+    assert log_file.exists(), "parser log file must be created"
+
+    content = log_file.read_text(encoding="utf-8")
+    assert "parser started" in content
+    assert "SUMMARY OF SESSION" in content
+    assert "discovered=" in content
+    assert "duration=" in content
+
+    assert any(
+        "parser bundesagentur_api started" in record.message
+        for record in caplog.records
+    ), "INFO line 'parser <id> started' must appear in stderr"

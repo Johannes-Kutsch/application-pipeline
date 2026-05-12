@@ -26,7 +26,7 @@ def record_event(component_id: str, event_type: str, **fields: object) -> None:
     record(component_id, event_type, **fields)
 
 
-def record_transcript(component_id: str, entry: dict) -> None:
+def record_transcript(component_id: str, entry: Mapping[str, object]) -> None:
     if _logs_dir is None:
         return
     transcript_file = _logs_dir / f"{component_id}.transcripts.jsonl"

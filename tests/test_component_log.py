@@ -108,7 +108,7 @@ def test_record_transcript_appends_valid_json_object(tmp_path: Path) -> None:
 
 def test_record_transcript_multiple_calls_one_json_per_line(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    entries = [
+    entries: list[dict[str, object]] = [
         {"ts": "2026-05-12T10:00:00Z", "status": "ok", "item_ids": [1, 2]},
         {"ts": "2026-05-12T10:01:00Z", "status": "error", "item_ids": []},
         {"ts": "2026-05-12T10:02:00Z", "status": "ok", "item_ids": [3]},

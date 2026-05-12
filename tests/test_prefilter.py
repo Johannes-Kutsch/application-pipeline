@@ -26,7 +26,7 @@ def test_blacklist_only_does_not_pass(filter_with_skill: DomainPreFilter) -> Non
         title="Pflegekraft gesucht",
         raw_description="Wir suchen eine Pflegekraft für unsere Einrichtung.",
     )
-    verdict = filter_with_skill.classify(pos, language="de")
+    verdict = filter_with_skill.classify(pos)
     assert verdict.passes is False
 
 
@@ -35,7 +35,7 @@ def test_blacklist_and_skill_passes(filter_with_skill: DomainPreFilter) -> None:
         title="Pflegekraft mit Python-Kenntnissen",
         raw_description="Python-Entwicklung für Pflegesoftware.",
     )
-    verdict = filter_with_skill.classify(pos, language="de")
+    verdict = filter_with_skill.classify(pos)
     assert verdict.passes is True
 
 
@@ -49,7 +49,7 @@ def test_neither_whitelist_nor_blacklist_passes() -> None:
         title="Marketing Manager",
         raw_description="Wir suchen einen Marketing Manager.",
     )
-    verdict = f.classify(pos, language="de")
+    verdict = f.classify(pos)
     assert verdict.passes is True
 
 
@@ -63,7 +63,7 @@ def test_whitelist_only_passes() -> None:
         title="Senior Data Engineer",
         raw_description="We are looking for a data engineer.",
     )
-    verdict = f.classify(pos, language="en")
+    verdict = f.classify(pos)
     assert verdict.passes is True
 
 
@@ -77,7 +77,7 @@ def test_strasse_and_straße_match_same_listing() -> None:
         title="Job in der Hauptstrasse",
         raw_description="Wir befinden uns in der Hauptstrasse.",
     )
-    verdict = f.classify(pos, language="de")
+    verdict = f.classify(pos)
     assert verdict.passes is False
 
 

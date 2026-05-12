@@ -2,15 +2,13 @@
 
 A deterministic **Domain Pre-Filter** module runs before any LLM call. It examines each **Position**'s `title + raw_description` against two configured keyword lists — `Config.inclusion_keywords` (whitelist) and `Config.negative_keywords` (blacklist) — using case-insensitive substring match after a shared `normalize()` pass (whitespace collapse + `casefold`). **Whitelist hits override blacklist hits.** Any **Position** that survives (no blacklist hit, *or* any whitelist hit regardless of blacklist) is forwarded to `LLMExtractor.classify_relevance` for the holistic in-domain decision. The Pre-Filter never decides in-domain alone; it only drops obvious slop.
 
-The Pre-Filter also fills `Position.language` via `langdetect` when the Parser left it `None`, falling back to `"unknown"` when language detection is unconfident or the description is too short.
-
 ## Why
 
 - **An LLM call on a Pi is not a "cheap discard."** A `classify_relevance` call on Pi 5 takes several seconds to tens of seconds wall time even with the lighter models (`qwen3:0.6b` / `qwen3:4b`). PRD #20 originally framed `classify_relevance` as the cheap discard; on Pi hardware that framing is wrong. The actual cheap discard is regex.
 - **Volume reduction is the bottleneck.** Bundesagentur + stellen.hamburg can produce hundreds of new listings per day across the configured **Keywords**. Running an LLM call on every one would blow past any reasonable cron window. A deterministic pre-filter cuts the LLM-classify volume to listings the cheap rules genuinely cannot decide.
 - **Whitelist-wins precedence preserves cross-field opportunities.** A listing matching a blacklist term in the company name (e.g. `"Pflegeheim AG"`) but mentioning `"Python"` in the description should reach the LLM, not be dropped. Anchoring the whitelist to the applicant's `Config.skills` plus a broader `Config.inclusion_keywords` (role names, tech families) keeps the rescue net wide.
 - **The LLM stays the authority on in-domain.** Pre-Filter is a volume reducer, never a decision-maker. Anything that passes goes to the LLM. False positives on the whitelist cost an LLM call (recoverable); false drops on the blacklist are the only loss-of-information path, and they're bounded to listings that match a blacklist term *and* mention nothing in the applicant's skill stack.
-- **Language detection lives here naturally.** The Pre-Filter already inspects the full description; running `langdetect` adds ~5 ms and removes language detection from `classify_relevance`'s responsibilities. `RelevanceVerdict` shrinks to `{in_domain: bool}`.
+- **Language detection is a separate concern handled by the orchestrator.** `application_pipeline/language.py` runs `langdetect` on each enriched `Position` before pre-filtering; the orchestrator calls it and passes the result downstream. The Pre-Filter receives only the position text and has no language awareness.
 
 ## Considered alternatives
 
@@ -25,7 +23,7 @@ The Pre-Filter also fills `Position.language` via `langdetect` when the Parser l
 - The pipeline gains a new module: `application_pipeline/prefilter/`. PRD #20 declares it a precondition for `LLMExtractor.classify_relevance`.
 - `Config` gains `inclusion_keywords: list[str]` and `negative_keywords: list[str]`; both validated at load time (each entry a non-empty string of length ≥ 3).
 - `Config.skills` is reused as part of the whitelist (concatenated with `inclusion_keywords` for matching); the user's hard-skill inventory IS the broadest natural whitelist.
-- `RelevanceVerdict.language` is removed. `Position.language` is filled by Parser if available, else by Pre-Filter via `langdetect`. `"unknown"` sentinel when confidence is too low; downstream `OllamaExtractor` falls back to the English prompt file in that case.
+- `RelevanceVerdict.language` is removed. `Position.language` is resolved by `application_pipeline/language.py`, invoked by the orchestrator immediately after enrichment and before pre-filtering. `"unknown"` sentinel when confidence is too low; downstream `OllamaExtractor` falls back to the English prompt file in that case.
 - `LLMExtractor.classify_relevance` is now the **survivor classifier**, not the every-listing gate. Its absolute call volume drops materially; its per-call importance rises (every call is a genuine ambiguity).
 - A shared text helper at `application_pipeline/text/normalize.py` is used by Pre-Filter and (after migration) Dedup Store. The helper uses `casefold` (not `lower`), so `Straße` and `Strasse` collide as the same key — desired for German city/company names.
 - The Pre-Filter is single-pass, stateless, deterministic — trivially testable without a model.

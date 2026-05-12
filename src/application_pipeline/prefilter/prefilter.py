@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from application_pipeline.language import Language
 from application_pipeline.text import normalize
 
 
@@ -28,13 +27,11 @@ class DomainPreFilter:
         skills: list[str],
     ) -> None:
         self._whitelist = [
-            n for k in (*inclusion_keywords, *skills) if (n := normalize(k)) is not None
+            n for k in (*inclusion_keywords, *skills) if (n := normalize(k))
         ]
-        self._blacklist = [
-            n for k in negative_keywords if (n := normalize(k)) is not None
-        ]
+        self._blacklist = [n for k in negative_keywords if (n := normalize(k))]
 
-    def classify(self, position: _Position, language: Language) -> PreFilterVerdict:
+    def classify(self, position: _Position) -> PreFilterVerdict:
         text = position.title + " " + position.raw_description
         haystack = normalize(text) or ""
         whitelist_hit = any(k in haystack for k in self._whitelist)

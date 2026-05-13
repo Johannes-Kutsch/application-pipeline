@@ -9,7 +9,7 @@ import traceback
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -220,6 +220,21 @@ class RunSummary:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _BatchStats:
+    classify_calls: int = 0
+    classify_total_s: float = 0.0
+    judge_calls: int = 0
+    judge_total_s: float = 0.0
+    classifier_dropped: int = 0
+    errored: int = 0
+    written: int = 0
+    green: int = 0
+    amber: int = 0
+    red: int = 0
+    written_per_source: dict[str, int] = field(default_factory=dict)
+
+
 def _make_classify_items(
     batch: list[tuple[Position, LanguageResolution]],
 ) -> list[ClassifyItem]:
@@ -240,28 +255,17 @@ def _process_batch(
     dedup_store: DeduplicationStore,
     results_manager: ResultsFileManager,
     layout: Layout,
-    *,
-    classify_calls_ref: list[int],
-    classify_total_s_ref: list[float],
-    judge_calls_ref: list[int],
-    judge_total_s_ref: list[float],
-    classifier_dropped_ref: list[int],
-    errored_ref: list[int],
-    written_ref: list[int],
-    green_ref: list[int],
-    amber_ref: list[int],
-    red_ref: list[int],
-    written_per_source_ref: dict[str, int],
+    stats: _BatchStats,
 ) -> None:
     """Classify a batch, then pipeline judge → write for each in-domain survivor."""
     items = _make_classify_items(batch)
     try:
         _t0 = time.monotonic()
         verdicts = extractor.classify_relevance_batch(language, items)
-        classify_total_s_ref[0] += time.monotonic() - _t0
-        classify_calls_ref[0] += 1
+        stats.classify_total_s += time.monotonic() - _t0
+        stats.classify_calls += 1
     except ClaudeUsageLimitError:
-        raise  # abort — propagate to caller
+        raise
     except ExtractorError as exc:
         _log.warning("classify_relevance_batch failed: %s", exc)
         parser_log.record(
@@ -271,26 +275,24 @@ def _process_batch(
             batch_size=len(batch),
             error=str(exc),
         )
-        errored_ref[0] += len(batch)
-        # Do not mark any item seen — they will be retried next run
+        stats.errored += len(batch)
         return
 
     for verdict, (position, resolution) in zip(verdicts, batch):
         if not verdict.in_domain:
             dedup_store.mark_seen(position.stub, "off_domain")
-            classifier_dropped_ref[0] += 1
+            stats.classifier_dropped += 1
             continue
 
-        # In-domain: judge → render → append → mark-seen
         try:
             _t0 = time.monotonic()
             match_verdict = extractor.judge_match(
                 resolution.effective, position.raw_description
             )
-            judge_total_s_ref[0] += time.monotonic() - _t0
-            judge_calls_ref[0] += 1
+            stats.judge_total_s += time.monotonic() - _t0
+            stats.judge_calls += 1
         except ClaudeUsageLimitError:
-            raise  # abort — propagate to caller
+            raise
         except ExtractorError as exc:
             _log.warning("judge_match failed: %s", exc)
             parser_log.record(
@@ -299,8 +301,7 @@ def _process_batch(
                 stub_url=position.stub.url,
                 error=str(exc),
             )
-            errored_ref[0] += 1
-            # Do not mark seen — retry next run
+            stats.errored += 1
             continue
 
         current_stage.set("results_write")
@@ -308,15 +309,15 @@ def _process_batch(
         rendered = render(position, match_verdict, number, layout)
         results_manager.append(rendered)
         dedup_store.mark_seen(position.stub, "kept")
-        written_ref[0] += 1
+        stats.written += 1
         src = position.stub.source
-        written_per_source_ref[src] = written_per_source_ref.get(src, 0) + 1
+        stats.written_per_source[src] = stats.written_per_source.get(src, 0) + 1
         if match_verdict.tier == MatchTier.green:
-            green_ref[0] += 1
+            stats.green += 1
         elif match_verdict.tier == MatchTier.amber:
-            amber_ref[0] += 1
+            stats.amber += 1
         else:
-            red_ref[0] += 1
+            stats.red += 1
 
 
 def run(
@@ -600,55 +601,32 @@ def run(
             en_buffer.append((position, resolution))
 
     batch_size = cfg.claude_classify_batch_size
-    classify_calls_ref = [0]
-    classify_total_s_ref = [0.0]
-    judge_calls_ref = [0]
-    judge_total_s_ref = [0.0]
-    classifier_dropped_ref = [0]
-    errored_ref = [0]
-    written_ref = [0]
-    green_ref = [0]
-    amber_ref = [0]
-    red_ref = [0]
-    written_per_source_ref: dict[str, int] = {}
-
-    _batch_kwargs = dict(
-        extractor=extractor,
-        dedup_store=dedup_store,
-        results_manager=results_manager,
-        layout=layout,
-        classify_calls_ref=classify_calls_ref,
-        classify_total_s_ref=classify_total_s_ref,
-        judge_calls_ref=judge_calls_ref,
-        judge_total_s_ref=judge_total_s_ref,
-        classifier_dropped_ref=classifier_dropped_ref,
-        errored_ref=errored_ref,
-        written_ref=written_ref,
-        green_ref=green_ref,
-        amber_ref=amber_ref,
-        red_ref=red_ref,
-        written_per_source_ref=written_per_source_ref,
-    )
+    stats = _BatchStats()
 
     for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
-        for i in range(0, max(len(lang_buffer), 1), batch_size):
-            batch = lang_buffer[i : i + batch_size]
-            if not batch:
-                break
-            _process_batch(batch, lang_str, **_batch_kwargs)  # type: ignore[arg-type]
+        for i in range(0, len(lang_buffer), batch_size):
+            _process_batch(
+                lang_buffer[i : i + batch_size],
+                lang_str,
+                extractor,
+                dedup_store,
+                results_manager,
+                layout,
+                stats,
+            )
 
     # Step 13: Append Run Divider — only on successful completion
     elapsed_s = time.monotonic() - _start
     divider = _format_run_divider(
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         tag=_discover_release_tag(),
-        sources=written_per_source_ref,
-        kept=written_ref[0],
-        errors=errored_ref[0],
-        classify_calls=classify_calls_ref[0],
-        classify_total_s=classify_total_s_ref[0],
-        judge_calls=judge_calls_ref[0],
-        judge_total_s=judge_total_s_ref[0],
+        sources=stats.written_per_source,
+        kept=stats.written,
+        errors=stats.errored,
+        classify_calls=stats.classify_calls,
+        classify_total_s=stats.classify_total_s,
+        judge_calls=stats.judge_calls,
+        judge_total_s=stats.judge_total_s,
         elapsed_s=elapsed_s,
     )
     try:
@@ -675,14 +653,14 @@ def run(
         dedup_url_hits,
         dedup_tuple_hits,
         dedup_misses,
-        classifier_dropped_ref[0],
-        written_ref[0],
-        green_ref[0],
-        amber_ref[0],
-        red_ref[0],
+        stats.classifier_dropped,
+        stats.written,
+        stats.green,
+        stats.amber,
+        stats.red,
         enrich_failed,
         external_redirects,
-        errored_ref[0],
+        stats.errored,
         parsers_dead,
     )
 
@@ -699,13 +677,13 @@ def run(
         dedup_url_hits=dedup_url_hits,
         dedup_tuple_hits=dedup_tuple_hits,
         dedup_misses=dedup_misses,
-        classifier_dropped=classifier_dropped_ref[0],
-        written=written_ref[0],
-        green=green_ref[0],
-        amber=amber_ref[0],
-        red=red_ref[0],
+        classifier_dropped=stats.classifier_dropped,
+        written=stats.written,
+        green=stats.green,
+        amber=stats.amber,
+        red=stats.red,
         enrich_failed=enrich_failed,
         external_redirects=external_redirects,
-        errored=errored_ref[0],
+        errored=stats.errored,
         parsers_dead=parsers_dead,
     )

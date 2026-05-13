@@ -183,17 +183,4 @@ class ClaudeExtractor:
                 )
             response_by_id[entry_id] = in_domain
 
-        extra_ids = set(response_by_id) - set(input_ids)
-        if extra_ids:
-            raise ExtractorBatchMalformedError(
-                f"classify_relevance_batch: extra ids in response: {extra_ids!r}"
-            )
-
-        try:
-            return [
-                RelevanceVerdict(in_domain=response_by_id[item.id]) for item in items
-            ]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ExtractorBatchMalformedError(
-                f"classify_relevance_batch: failed to build verdicts: {exc}"
-            ) from exc
+        return [RelevanceVerdict(in_domain=response_by_id[item.id]) for item in items]

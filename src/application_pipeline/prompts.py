@@ -10,7 +10,7 @@ class PromptError(Exception):
     pass
 
 
-CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"title", "raw_description"})
+CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"ITEMS"})
 JUDGE_MATCH_SLOTS: frozenset[str] = frozenset({"skills", "raw_description"})
 
 _LANGS: tuple[Literal["de", "en"], ...] = ("de", "en")

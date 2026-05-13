@@ -19,10 +19,21 @@ class ExtractorSchemaError(ExtractorError):
     pass
 
 
+class ExtractorBatchMalformedError(ExtractorError):
+    pass
+
+
 class MatchTier(str, Enum):
     green = "green"
     amber = "amber"
     red = "red"
+
+
+@dataclass(frozen=True)
+class ClassifyItem:
+    id: str
+    title: str
+    raw_description: str
 
 
 @dataclass(frozen=True)
@@ -61,9 +72,9 @@ class MatchVerdict:
 
 @runtime_checkable
 class LLMExtractor(Protocol):
-    def classify_relevance(
-        self, language: str, title: str, raw_description: str
-    ) -> RelevanceVerdict: ...
+    def classify_relevance_batch(
+        self, language: str, items: list[ClassifyItem]
+    ) -> list[RelevanceVerdict]: ...
 
     def judge_match(self, language: str, raw_description: str) -> MatchVerdict: ...
 

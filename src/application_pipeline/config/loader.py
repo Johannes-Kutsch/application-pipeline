@@ -66,6 +66,10 @@ def load(path: pathlib.Path) -> Config:
         must_be_nonempty=True,
     )
 
+    claude_classify_batch_size = int(getattr(module, "CLAUDE_CLASSIFY_BATCH_SIZE", 100))
+    if claude_classify_batch_size < 1:
+        raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be >= 1")
+
     config = Config(
         keywords=module.KEYWORDS,
         skills=module.SKILLS,
@@ -80,6 +84,7 @@ def load(path: pathlib.Path) -> Config:
         classify_relevance_prompt=classify_relevance_prompt,
         judge_match_prompt=judge_match_prompt,
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
+        claude_classify_batch_size=claude_classify_batch_size,
     )
     _validate(config)
     return config

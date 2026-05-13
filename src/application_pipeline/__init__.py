@@ -5,7 +5,9 @@ from .dedup import DedupStoreError, DeduplicationStore, SeenResult, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
 from .llm import (
+    ClassifyItem,
     ClaudeExtractor,
+    ExtractorBatchMalformedError,
     ExtractorError,
     ExtractorMalformedJSONError,
     ExtractorSchemaError,
@@ -22,6 +24,7 @@ from .results import load as load_results
 from .user_settings import UserSettingsError, load_user_module
 
 __all__ = [
+    "ClassifyItem",
     "ClaudeExtractor",
     "Config",
     "ConfigError",
@@ -29,6 +32,7 @@ __all__ = [
     "PreFilterVerdict",
     "DedupStoreError",
     "DeduplicationStore",
+    "ExtractorBatchMalformedError",
     "ExtractorError",
     "ExtractorMalformedJSONError",
     "ExtractorSchemaError",

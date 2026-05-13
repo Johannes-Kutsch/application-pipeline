@@ -15,12 +15,15 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
 from application_pipeline.llm import (
+    ClassifyItem,
+    ExtractorBatchMalformedError,
     ExtractorError,
     ExtractorUnreachableError,
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
 )
+from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import (
     ExternalRedirect,
@@ -88,9 +91,7 @@ def _write_config(
     prompts_dir.mkdir(exist_ok=True)
     if with_prompt_files:
         for name in ("classify_relevance.de.md", "classify_relevance.en.md"):
-            (prompts_dir / name).write_text(
-                "{title} {raw_description}", encoding="utf-8"
-            )
+            (prompts_dir / name).write_text("{ITEMS}", encoding="utf-8")
         for name in ("judge_match.de.md", "judge_match.en.md"):
             (prompts_dir / name).write_text(
                 "{skills} {raw_description}", encoding="utf-8"
@@ -101,7 +102,9 @@ def _write_config(
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance.return_value = RelevanceVerdict(in_domain=True)
+    ext.classify_relevance_batch.side_effect = lambda lang, items: [
+        RelevanceVerdict(in_domain=True) for _ in items
+    ]
     ext.judge_match.return_value = MatchVerdict(
         tier=MatchTier.green, matched=[], missing=[], summary="ok"
     )
@@ -799,10 +802,10 @@ class _FakeExtractor:
     def prewarm(self) -> None:
         pass
 
-    def classify_relevance(
-        self, language: str, title: str, raw_description: str
-    ) -> RelevanceVerdict:
-        return RelevanceVerdict(in_domain=(title != "Job 1"))
+    def classify_relevance_batch(
+        self, language: str, items: list[ClassifyItem]
+    ) -> list[RelevanceVerdict]:
+        return [RelevanceVerdict(in_domain=(item.title != "Job 1")) for item in items]
 
     def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
         # Extract job index from description ("description for job N")
@@ -907,18 +910,18 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
 
 
 def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
-    """All classify_relevance calls complete before any judge_match call."""
+    """All classify_relevance_batch calls complete before any judge_match call."""
     call_log: list[str] = []
 
     class _InstrumentedExtractor:
         def prewarm(self) -> None:
             pass
 
-        def classify_relevance(
-            self, language: str, title: str, raw_description: str
-        ) -> RelevanceVerdict:
-            call_log.append("classify")
-            return RelevanceVerdict(in_domain=True)
+        def classify_relevance_batch(
+            self, language: str, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict]:
+            call_log.extend(["classify"] * len(items))
+            return [RelevanceVerdict(in_domain=True) for _ in items]
 
         def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
             call_log.append("judge")
@@ -1013,29 +1016,50 @@ def _two_stub_config(tmp_path: Path) -> Path:
     )
 
 
-def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> None:
-    """ExtractorError on classify_relevance: position NOT marked seen, errored increments, run completes."""
+def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> None:
+    """ExtractorError on classify_relevance_batch: NO position in batch marked seen, run continues with next batch."""
     seen_path = tmp_path / ".seen.json"
+
+    call_count = [0]
+
+    def _batch_side_effect(
+        lang: str, items: list[ClassifyItem]
+    ) -> list[RelevanceVerdict]:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise ExtractorError("classify batch boom")
+        return [RelevanceVerdict(in_domain=True) for _ in items]
 
     ext = MagicMock()
     ext.prewarm.return_value = None
-    # First position raises, second succeeds
-    ext.classify_relevance.side_effect = [
-        ExtractorError("classify boom"),
-        RelevanceVerdict(in_domain=True),
-    ]
+    ext.classify_relevance_batch.side_effect = _batch_side_effect
     ext.judge_match.return_value = MatchVerdict(
         tier=MatchTier.green, matched=[], missing=[], summary="ok"
     )
 
+    # Use batch_size=1 so each position is its own batch
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    # Write CLAUDE_CLASSIFY_BATCH_SIZE=1 into config
+    config_text = config_path.read_text(encoding="utf-8")
+    config_path.write_text(
+        config_text + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 1\n", encoding="utf-8"
+    )
+
     summary = run(
-        _two_stub_config(tmp_path),
+        config_path,
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
         results_manager=_stub_results_manager(),
     )
 
+    # First batch errored (1 position), second batch succeeded (1 position written)
     assert summary.errored == 1
     assert summary.written == 1
 
@@ -1051,7 +1075,9 @@ def test_extractor_error_on_judge_leaves_position_unseen(tmp_path: Path) -> None
 
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance.return_value = RelevanceVerdict(in_domain=True)
+    ext.classify_relevance_batch.side_effect = lambda lang, items: [
+        RelevanceVerdict(in_domain=True) for _ in items
+    ]
     # First judge raises, second succeeds
     ext.judge_match.side_effect = [
         ExtractorError("judge boom"),
@@ -1427,9 +1453,9 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
         def prewarm(self) -> None:
             pass
 
-        def classify_relevance(
-            self, language: str, title: str, raw_description: str
-        ) -> RelevanceVerdict:
+        def classify_relevance_batch(
+            self, language: str, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict]:
             raise RuntimeError("unexpected crash escaping main path")
 
         def judge_match(
@@ -1779,11 +1805,11 @@ def test_language_log_anomaly_entries(tmp_path: Path) -> None:
         def prewarm(self) -> None:
             pass
 
-        def classify_relevance(
-            self, language: str, title: str, raw_description: str
-        ) -> "RelevanceVerdict":
+        def classify_relevance_batch(
+            self, language: str, items: list[ClassifyItem]
+        ) -> "list[RelevanceVerdict]":
             captured_languages.append(language)
-            return RelevanceVerdict(in_domain=True)
+            return [RelevanceVerdict(in_domain=True) for _ in items]
 
         def judge_match(self, language: str, raw_description: str) -> "MatchVerdict":
             return MatchVerdict(
@@ -1946,3 +1972,431 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
     assert not any("unparseable_date" in record.message for record in caplog.records), (
         "unparseable_date must not appear in logging output"
     )
+
+
+# ---------------------------------------------------------------------------
+# Batched classify pipeline — new tests for issue #187
+# ---------------------------------------------------------------------------
+
+
+def _batch_size_config(tmp_path: Path, batch_size: int) -> Path:
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    config_text = config_path.read_text(encoding="utf-8")
+    config_path.write_text(
+        config_text + f"\nCLAUDE_CLASSIFY_BATCH_SIZE = {batch_size}\n",
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def test_batch_flush_at_size(tmp_path: Path) -> None:
+    """batch_size=2 with 4 positions → classify_relevance_batch called twice with 2 items each."""
+    batch_sizes_seen: list[int] = []
+
+    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+        batch_sizes_seen.append(len(items))
+        return [RelevanceVerdict(in_domain=True) for _ in items]
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = _batch
+    ext.judge_match.return_value = MatchVerdict(
+        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    )
+
+    class _FourStubParser:
+        def __enter__(self) -> "_FourStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://batch.example/{i}",
+                    title=f"Job {i}",
+                    source="stub",
+                    language="en",
+                )
+                for i in range(4)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    summary = run(
+        _batch_size_config(tmp_path, 2),
+        extractor=ext,
+        parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.written == 4
+    # With batch_size=2 and 4 items: 2 batches
+    assert batch_sizes_seen == [2, 2]
+
+
+def test_language_routing_de_and_en_buffers(tmp_path: Path) -> None:
+    """German positions go to de classify call, English positions go to en classify call."""
+    lang_batches: dict[str, list[int]] = {}
+
+    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+        lang_batches[lang] = lang_batches.get(lang, []) + [len(items)]
+        return [RelevanceVerdict(in_domain=True) for _ in items]
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = _batch
+    ext.judge_match.return_value = MatchVerdict(
+        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    )
+
+    _DE_DESCRIPTION = (
+        "Wir suchen einen erfahrenen Softwareentwickler für unser Team. "
+        "Das Unternehmen bietet interessante Projekte und eine gute Bezahlung."
+    )
+
+    class _MixedLangParser:
+        def __enter__(self) -> "_MixedLangParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://ml.example/de1", title="Entwickler", source="s"
+                ),
+                PositionStub(
+                    url="https://ml.example/de2", title="Ingenieur", source="s"
+                ),
+                PositionStub(
+                    url="https://ml.example/en1",
+                    title="Engineer",
+                    source="s",
+                    language="en",
+                ),
+                PositionStub(
+                    url="https://ml.example/en2",
+                    title="Developer",
+                    source="s",
+                    language="en",
+                ),
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            if "de" in stub.url:
+                return Position(stub=stub, raw_description=_DE_DESCRIPTION)
+            return Position(
+                stub=stub, raw_description="Software engineering role in English."
+            )
+
+    summary = run(
+        _batch_size_config(tmp_path, 100),
+        extractor=ext,
+        parser_registry=lambda _: _MixedLangParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.written == 4
+    assert "de" in lang_batches
+    assert "en" in lang_batches
+    assert lang_batches["de"] == [2]
+    assert lang_batches["en"] == [2]
+
+
+def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
+    """Positions classified as off-domain are marked seen immediately; judge_match is NOT called."""
+    seen_path = tmp_path / ".seen.json"
+    _OFF_URL = "https://offdomain.example/0"
+    _ON_URL = "https://offdomain.example/1"
+
+    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+        # First item off-domain, second in-domain
+        return [
+            RelevanceVerdict(in_domain=(item.raw_description != "off domain content"))
+            for item in items
+        ]
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = _batch
+    ext.judge_match.return_value = MatchVerdict(
+        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    )
+
+    class _TwoLangParser:
+        def __enter__(self) -> "_TwoLangParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=_OFF_URL, title="Off-domain Job", source="s", language="en"
+                ),
+                PositionStub(
+                    url=_ON_URL, title="On-domain Job", source="s", language="en"
+                ),
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            if stub.url == _OFF_URL:
+                return Position(stub=stub, raw_description="off domain content")
+            return Position(stub=stub, raw_description="software engineering role")
+
+    summary = run(
+        _batch_size_config(tmp_path, 100),
+        extractor=ext,
+        parser_registry=lambda _: _TwoLangParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.classifier_dropped == 1
+    assert summary.written == 1
+    # judge_match called only once (for the in-domain position)
+    assert ext.judge_match.call_count == 1
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_OFF_URL]["status"] == "off_domain"
+
+
+def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
+    """ExtractorBatchMalformedError: none of the batch items are marked seen; run continues."""
+    seen_path = tmp_path / ".seen.json"
+
+    call_count = [0]
+
+    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise ExtractorBatchMalformedError("length mismatch")
+        return [RelevanceVerdict(in_domain=True) for _ in items]
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = _batch
+    ext.judge_match.return_value = MatchVerdict(
+        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    )
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    config_text = config_path.read_text(encoding="utf-8")
+    config_path.write_text(
+        config_text + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 1\n", encoding="utf-8"
+    )
+
+    summary = run(
+        config_path,
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    # First batch failed (1 item), second succeeded (1 item written)
+    assert summary.errored == 1
+    assert summary.written == 1
+
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    # First item must NOT be in seen store
+    assert _ERR_URLS[0] not in seen_data
+
+
+def test_batch_malformed_logs_to_classify_relevance_log(tmp_path: Path) -> None:
+    """ExtractorBatchMalformedError is logged to classify_relevance.log via parser_log."""
+    import application_pipeline.parser_log as pl
+
+    logs_dir = tmp_path / "synched" / "logs"
+    pl.configure(logs_dir)
+
+    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+        raise ExtractorBatchMalformedError("id mismatch")
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = _batch
+
+    run(
+        _batch_size_config(tmp_path, 100),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    log_file = logs_dir / "classify_relevance.log"
+    assert log_file.exists(), "classify_relevance.log must be created on batch error"
+    content = log_file.read_text(encoding="utf-8")
+    assert "batch_error" in content
+
+
+def test_claude_usage_limit_error_propagates_from_run(tmp_path: Path) -> None:
+    """ClaudeUsageLimitError during classify propagates from run(); in-flight items remain unmarked."""
+    seen_path = tmp_path / ".seen.json"
+
+    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+        raise ClaudeUsageLimitError("subscription cap")
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = _batch
+
+    with pytest.raises(ClaudeUsageLimitError):
+        run(
+            _two_stub_config(tmp_path),
+            extractor=ext,
+            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(seen_path),
+            results_manager=_stub_results_manager(),
+        )
+
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    # No items must be marked seen (they were in-flight when abort happened)
+    assert all(url not in seen_data for url in _ERR_URLS[:2])
+
+
+def test_claude_usage_limit_error_writes_failure_report_and_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ClaudeUsageLimitError during classify → failure report written, exit 1."""
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+
+    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+        raise ClaudeUsageLimitError("subscription cap")
+
+    class _UsageLimitExtractor:
+        def prewarm(self) -> None:
+            pass
+
+        def classify_relevance_batch(
+            self, language: str, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict]:
+            raise ClaudeUsageLimitError("subscription cap")
+
+        def judge_match(
+            self, language: str, raw_description: str
+        ) -> MatchVerdict:  # pragma: no cover
+            raise NotImplementedError
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.ClaudeExtractor",
+        lambda *a, **kw: _UsageLimitExtractor(),
+    )
+
+    from application_pipeline.__main__ import main
+
+    # Need a parser that produces at least one position so classify_relevance_batch is called
+    class _OneStubParser:
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://limit.example/0",
+                    title="Job",
+                    source="s",
+                    language="en",
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="software engineering role")
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator._default_registry",
+        type("_Reg", (), {"get": staticmethod(lambda _: _OneStubParser)})(),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+
+    failures_dir = tmp_path / "synched" / "failures"
+    reports = list(failures_dir.glob("*.md"))
+    assert len(reports) == 1, f"expected one failure report, got {reports}"
+
+
+# ---------------------------------------------------------------------------
+# Prompt loader: only de + en; init materialises only de + en
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_loader_only_de_and_en_for_classify(tmp_path: Path) -> None:
+    """load_prompts only loads classify_relevance.de.md and classify_relevance.en.md."""
+    from application_pipeline.prompts import load_prompts
+    from application_pipeline import Config, SourceEntry
+
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "classify_relevance.de.md").write_text("{ITEMS}", encoding="utf-8")
+    (prompts_dir / "classify_relevance.en.md").write_text("{ITEMS}", encoding="utf-8")
+    (prompts_dir / "judge_match.de.md").write_text(
+        "{skills} {raw_description}", encoding="utf-8"
+    )
+    (prompts_dir / "judge_match.en.md").write_text(
+        "{skills} {raw_description}", encoding="utf-8"
+    )
+
+    cfg = Config(
+        keywords=["python"],
+        skills=["python"],
+        sources=[SourceEntry(parser_type="bundesagentur_api")],
+        locations=["Hamburg"],
+        prompts_dir=prompts_dir,
+    )
+    prompts = load_prompts(cfg)
+
+    assert set(prompts.classify_relevance.keys()) == {"de", "en"}
+    assert set(prompts.judge_match.keys()) == {"de", "en"}
+
+
+def test_init_does_not_materialise_other_or_unknown_prompt_files(
+    tmp_path: Path,
+) -> None:
+    """init command copies only de + en prompt files; no 'other' or 'unknown' files."""
+    from application_pipeline.init_cmd import init
+
+    init(tmp_path)
+
+    prompt_files = list((tmp_path / "prompts").glob("*.md"))
+    names = {f.name for f in prompt_files}
+
+    assert "classify_relevance.other.md" not in names
+    assert "classify_relevance.unknown.md" not in names
+    assert "judge_match.other.md" not in names
+    assert "judge_match.unknown.md" not in names
+    assert "classify_relevance.de.md" in names
+    assert "classify_relevance.en.md" in names
+    assert "judge_match.de.md" in names
+    assert "judge_match.en.md" in names

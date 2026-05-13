@@ -3,6 +3,7 @@ import dataclasses
 import pytest
 
 from application_pipeline.llm import (
+    ClassifyItem,
     LLMExtractor,
     ExtractorError,
     MatchTier,
@@ -56,6 +57,24 @@ def test_relevance_verdict_is_frozen():
         v.in_domain = False  # type: ignore[misc]
 
 
+# --- ClassifyItem ---
+
+
+def test_classify_item_fields():
+    item = ClassifyItem(
+        id="abc", title="Software Engineer", raw_description="Python role"
+    )
+    assert item.id == "abc"
+    assert item.title == "Software Engineer"
+    assert item.raw_description == "Python role"
+
+
+def test_classify_item_is_frozen():
+    item = ClassifyItem(id="x", title="T", raw_description="D")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        item.id = "y"  # type: ignore[misc]
+
+
 # --- MatchVerdict ---
 
 
@@ -96,10 +115,10 @@ def test_match_verdict_is_frozen():
 
 
 class _StubExtractor:
-    def classify_relevance(
-        self, language: str, title: str, raw_description: str
-    ) -> RelevanceVerdict:
-        return RelevanceVerdict(in_domain=True)
+    def classify_relevance_batch(
+        self, language: str, items: list[ClassifyItem]
+    ) -> list[RelevanceVerdict]:
+        return [RelevanceVerdict(in_domain=True) for _ in items]
 
     def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
         return MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok")
@@ -114,15 +133,15 @@ def test_conforming_class_is_llm_extractor():
 
 def test_class_missing_judge_match_is_not_llm_extractor():
     class _Bad:
-        def classify_relevance(
-            self, language: str, title: str, raw_description: str
-        ) -> RelevanceVerdict:
-            return RelevanceVerdict(in_domain=False)
+        def classify_relevance_batch(
+            self, language: str, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict]:
+            return []
 
     assert not isinstance(_Bad(), LLMExtractor)
 
 
-def test_class_missing_classify_relevance_is_not_llm_extractor():
+def test_class_missing_classify_relevance_batch_is_not_llm_extractor():
     class _Bad:
         def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
             return MatchVerdict(tier=MatchTier.red, matched=[], missing=[], summary="x")
@@ -130,11 +149,15 @@ def test_class_missing_classify_relevance_is_not_llm_extractor():
     assert not isinstance(_Bad(), LLMExtractor)
 
 
-def test_stub_classify_relevance_returns_relevance_verdict():
+def test_stub_classify_relevance_batch_returns_relevance_verdicts():
     extractor: LLMExtractor = _StubExtractor()
-    result = extractor.classify_relevance("de", "Data Scientist", "some description")
-    assert isinstance(result, RelevanceVerdict)
-    assert result.in_domain is True
+    items = [
+        ClassifyItem(id="0", title="Data Scientist", raw_description="some description")
+    ]
+    results = extractor.classify_relevance_batch("de", items)
+    assert len(results) == 1
+    assert isinstance(results[0], RelevanceVerdict)
+    assert results[0].in_domain is True
 
 
 def test_stub_judge_match_returns_match_verdict():

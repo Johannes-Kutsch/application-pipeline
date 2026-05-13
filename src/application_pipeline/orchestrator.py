@@ -22,13 +22,14 @@ from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.language import LanguageResolution, resolve_language
 from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
+    ClassifyItem,
     ClaudeExtractor,
     ExtractorError,
     ExtractorUnreachableError,
     LLMExtractor,
     MatchTier,
-    MatchVerdict,
 )
+from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.parsers import (
     ExternalRedirect,
     NotServedQuery,
@@ -212,6 +213,110 @@ class RunSummary:
     errored: int = 0
     parsers_dead: int = 0
     duration_seconds: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Batch classify + pipeline helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_classify_items(
+    batch: list[tuple[Position, LanguageResolution]],
+) -> list[ClassifyItem]:
+    return [
+        ClassifyItem(
+            id=str(idx),
+            title=pos.stub.title,
+            raw_description=pos.raw_description,
+        )
+        for idx, (pos, _) in enumerate(batch)
+    ]
+
+
+def _process_batch(
+    batch: list[tuple[Position, LanguageResolution]],
+    language: str,
+    extractor: LLMExtractor,
+    dedup_store: DeduplicationStore,
+    results_manager: ResultsFileManager,
+    layout: Layout,
+    *,
+    classify_calls_ref: list[int],
+    classify_total_s_ref: list[float],
+    judge_calls_ref: list[int],
+    judge_total_s_ref: list[float],
+    classifier_dropped_ref: list[int],
+    errored_ref: list[int],
+    written_ref: list[int],
+    green_ref: list[int],
+    amber_ref: list[int],
+    red_ref: list[int],
+    written_per_source_ref: dict[str, int],
+) -> None:
+    """Classify a batch, then pipeline judge → write for each in-domain survivor."""
+    items = _make_classify_items(batch)
+    try:
+        _t0 = time.monotonic()
+        verdicts = extractor.classify_relevance_batch(language, items)
+        classify_total_s_ref[0] += time.monotonic() - _t0
+        classify_calls_ref[0] += 1
+    except ClaudeUsageLimitError:
+        raise  # abort — propagate to caller
+    except ExtractorError as exc:
+        _log.warning("classify_relevance_batch failed: %s", exc)
+        parser_log.record(
+            "classify_relevance",
+            "batch_error",
+            language=language,
+            batch_size=len(batch),
+            error=str(exc),
+        )
+        errored_ref[0] += len(batch)
+        # Do not mark any item seen — they will be retried next run
+        return
+
+    for verdict, (position, resolution) in zip(verdicts, batch):
+        if not verdict.in_domain:
+            dedup_store.mark_seen(position.stub, "off_domain")
+            classifier_dropped_ref[0] += 1
+            continue
+
+        # In-domain: judge → render → append → mark-seen
+        try:
+            _t0 = time.monotonic()
+            match_verdict = extractor.judge_match(
+                resolution.effective, position.raw_description
+            )
+            judge_total_s_ref[0] += time.monotonic() - _t0
+            judge_calls_ref[0] += 1
+        except ClaudeUsageLimitError:
+            raise  # abort — propagate to caller
+        except ExtractorError as exc:
+            _log.warning("judge_match failed: %s", exc)
+            parser_log.record(
+                "judge_match",
+                "error",
+                stub_url=position.stub.url,
+                error=str(exc),
+            )
+            errored_ref[0] += 1
+            # Do not mark seen — retry next run
+            continue
+
+        current_stage.set("results_write")
+        number = results_manager.next_position_number()
+        rendered = render(position, match_verdict, number, layout)
+        results_manager.append(rendered)
+        dedup_store.mark_seen(position.stub, "kept")
+        written_ref[0] += 1
+        src = position.stub.source
+        written_per_source_ref[src] = written_per_source_ref.get(src, 0) + 1
+        if match_verdict.tier == MatchTier.green:
+            green_ref[0] += 1
+        elif match_verdict.tier == MatchTier.amber:
+            amber_ref[0] += 1
+        else:
+            red_ref[0] += 1
 
 
 def run(
@@ -483,84 +588,67 @@ def run(
             _run_started_at,
         )
 
-    # Step 10: Classify batch — all classify_relevance calls before any judge_match call
+    # Steps 10-12: Batched classify → judge survivors → append+fsync+mark-seen
+    # Per-language buffers: de → de; en/other/unknown → en
     current_stage.set("classify")
-    classifier_dropped = 0
-    errored = 0
-    classify_calls = 0
-    classify_total_s = 0.0
-    in_domain: list[tuple[Position, LanguageResolution]] = []
+    de_buffer: list[tuple[Position, LanguageResolution]] = []
+    en_buffer: list[tuple[Position, LanguageResolution]] = []
     for position, resolution in survivors:
-        try:
-            _t0 = time.monotonic()
-            rel_verdict = extractor.classify_relevance(
-                resolution.effective, position.title, position.raw_description
-            )
-            classify_total_s += time.monotonic() - _t0
-            classify_calls += 1
-        except ExtractorError as exc:
-            _log.warning("classify_relevance failed: %s", exc)
-            errored += 1
-            continue
-        if rel_verdict.in_domain:
-            in_domain.append((position, resolution))
+        if resolution.effective == "de":
+            de_buffer.append((position, resolution))
         else:
-            dedup_store.mark_seen(position.stub, "off_domain")
-            classifier_dropped += 1
+            en_buffer.append((position, resolution))
 
-    # Step 11: Judge batch — all judge_match calls after classify batch
-    current_stage.set("judge")
-    judged: list[tuple[Position, MatchVerdict]] = []
-    judge_calls = 0
-    judge_total_s = 0.0
-    for position, resolution in in_domain:
-        try:
-            _t0 = time.monotonic()
-            match_verdict = extractor.judge_match(
-                resolution.effective, position.raw_description
-            )
-            judge_total_s += time.monotonic() - _t0
-            judge_calls += 1
-        except ExtractorError as exc:
-            _log.warning("judge_match failed: %s", exc)
-            errored += 1
-            continue
-        judged.append((position, match_verdict))
+    batch_size = cfg.claude_classify_batch_size
+    classify_calls_ref = [0]
+    classify_total_s_ref = [0.0]
+    judge_calls_ref = [0]
+    judge_total_s_ref = [0.0]
+    classifier_dropped_ref = [0]
+    errored_ref = [0]
+    written_ref = [0]
+    green_ref = [0]
+    amber_ref = [0]
+    red_ref = [0]
+    written_per_source_ref: dict[str, int] = {}
 
-    # Step 12: Render → append+fsync → mark_seen("kept"), strictly in order
-    current_stage.set("results_write")
-    written = 0
-    green = 0
-    amber = 0
-    red = 0
-    written_per_source: dict[str, int] = {}
-    for position, match_verdict in judged:
-        number = results_manager.next_position_number()
-        rendered = render(position, match_verdict, number, layout)
-        results_manager.append(rendered)
-        dedup_store.mark_seen(position.stub, "kept")
-        written += 1
-        src = position.stub.source
-        written_per_source[src] = written_per_source.get(src, 0) + 1
-        if match_verdict.tier == MatchTier.green:
-            green += 1
-        elif match_verdict.tier == MatchTier.amber:
-            amber += 1
-        else:
-            red += 1
+    _batch_kwargs = dict(
+        extractor=extractor,
+        dedup_store=dedup_store,
+        results_manager=results_manager,
+        layout=layout,
+        classify_calls_ref=classify_calls_ref,
+        classify_total_s_ref=classify_total_s_ref,
+        judge_calls_ref=judge_calls_ref,
+        judge_total_s_ref=judge_total_s_ref,
+        classifier_dropped_ref=classifier_dropped_ref,
+        errored_ref=errored_ref,
+        written_ref=written_ref,
+        green_ref=green_ref,
+        amber_ref=amber_ref,
+        red_ref=red_ref,
+        written_per_source_ref=written_per_source_ref,
+    )
+
+    for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
+        for i in range(0, max(len(lang_buffer), 1), batch_size):
+            batch = lang_buffer[i : i + batch_size]
+            if not batch:
+                break
+            _process_batch(batch, lang_str, **_batch_kwargs)  # type: ignore[arg-type]
 
     # Step 13: Append Run Divider — only on successful completion
     elapsed_s = time.monotonic() - _start
     divider = _format_run_divider(
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         tag=_discover_release_tag(),
-        sources=written_per_source,
-        kept=written,
-        errors=errored,
-        classify_calls=classify_calls,
-        classify_total_s=classify_total_s,
-        judge_calls=judge_calls,
-        judge_total_s=judge_total_s,
+        sources=written_per_source_ref,
+        kept=written_ref[0],
+        errors=errored_ref[0],
+        classify_calls=classify_calls_ref[0],
+        classify_total_s=classify_total_s_ref[0],
+        judge_calls=judge_calls_ref[0],
+        judge_total_s=judge_total_s_ref[0],
         elapsed_s=elapsed_s,
     )
     try:
@@ -587,14 +675,14 @@ def run(
         dedup_url_hits,
         dedup_tuple_hits,
         dedup_misses,
-        classifier_dropped,
-        written,
-        green,
-        amber,
-        red,
+        classifier_dropped_ref[0],
+        written_ref[0],
+        green_ref[0],
+        amber_ref[0],
+        red_ref[0],
         enrich_failed,
         external_redirects,
-        errored,
+        errored_ref[0],
         parsers_dead,
     )
 
@@ -611,13 +699,13 @@ def run(
         dedup_url_hits=dedup_url_hits,
         dedup_tuple_hits=dedup_tuple_hits,
         dedup_misses=dedup_misses,
-        classifier_dropped=classifier_dropped,
-        written=written,
-        green=green,
-        amber=amber,
-        red=red,
+        classifier_dropped=classifier_dropped_ref[0],
+        written=written_ref[0],
+        green=green_ref[0],
+        amber=amber_ref[0],
+        red=red_ref[0],
         enrich_failed=enrich_failed,
         external_redirects=external_redirects,
-        errored=errored,
+        errored=errored_ref[0],
         parsers_dead=parsers_dead,
     )

@@ -41,3 +41,4 @@ class Config:
     classify_relevance_prompt: pathlib.Path | None = None
     judge_match_prompt: pathlib.Path | None = None
     claude_cli_path: str | None = None
+    claude_classify_batch_size: int = 100

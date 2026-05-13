@@ -10,13 +10,14 @@ from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
 from application_pipeline.failure_report import write_failure
 from application_pipeline.layout import LayoutError
-from application_pipeline.llm import ExtractorUnreachableError
+from application_pipeline.llm import ClaudeUsageLimitError, ExtractorUnreachableError
 from application_pipeline.orchestrator import current_stage, run
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import ResultsFileError
 
 _FATAL = (
     ConfigError,
+    ClaudeUsageLimitError,
     LayoutError,
     PromptError,
     ExtractorUnreachableError,

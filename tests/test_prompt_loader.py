@@ -24,8 +24,8 @@ SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
 LOCATIONS = ["Hamburg"]
 """
 
-_CLASSIFY_DE = "Klassifiziere: Titel={title} Beschreibung={raw_description}\n"
-_CLASSIFY_EN = "Classify: title={title} description={raw_description}\n"
+_CLASSIFY_DE = "Klassifiziere: {ITEMS}\n"
+_CLASSIFY_EN = "Classify: {ITEMS}\n"
 _JUDGE_DE = "Beurteile: Fähigkeiten={skills} Beschreibung={raw_description}\n"
 _JUDGE_EN = "Judge: skills={skills} description={raw_description}\n"
 
@@ -85,8 +85,8 @@ def test_prompt_template_render_raises_on_unknown_slot() -> None:
 
 
 def test_prompt_template_preserves_template_verbatim() -> None:
-    raw = "  {title}\n{raw_description}  "
-    tpl = PromptTemplate(raw, frozenset({"title", "raw_description"}))
+    raw = "  {ITEMS}\n"
+    tpl = PromptTemplate(raw, frozenset({"ITEMS"}))
 
     assert tpl.template == raw
     assert tpl.template is raw
@@ -123,8 +123,8 @@ def test_load_prompts_preserves_template_string(tmp_path: pathlib.Path) -> None:
 
 
 def test_load_prompts_preserves_utf8(tmp_path: pathlib.Path) -> None:
-    classify_de = "Klassifiziere — Schlüssel: ✓ {title} {raw_description}\n"
-    classify_en = "Classify — key: ✓ {title} {raw_description}\n"
+    classify_de = "Klassifiziere — Schlüssel: ✓ {ITEMS}\n"
+    classify_en = "Classify — key: ✓ {ITEMS}\n"
     judge_de = "Beurteile — Fähigkeiten: π {skills} {raw_description}\n"
     judge_en = "Judge — skills: π {skills} {raw_description}\n"
     write_prompts(
@@ -149,7 +149,7 @@ def test_load_prompts_strips_utf8_bom(tmp_path: pathlib.Path) -> None:
     prompts_dir.mkdir()
     # Write with utf-8-sig so the file starts with BOM bytes (\xef\xbb\xbf).
     (prompts_dir / "classify_relevance.de.md").write_text(
-        "{title} {raw_description}\n", encoding="utf-8-sig"
+        "{ITEMS}\n", encoding="utf-8-sig"
     )
     (prompts_dir / "classify_relevance.en.md").write_text(
         _CLASSIFY_EN, encoding="utf-8"
@@ -161,11 +161,11 @@ def test_load_prompts_strips_utf8_bom(tmp_path: pathlib.Path) -> None:
     prompts = load_prompts(config)
 
     assert not prompts.classify_relevance["de"].template.startswith("﻿")
-    assert prompts.classify_relevance["de"].template.startswith("{title}")
+    assert prompts.classify_relevance["de"].template.startswith("{ITEMS}")
 
 
 def test_prompts_is_frozen() -> None:
-    tpl = PromptTemplate("{title} {raw_description}", CLASSIFY_RELEVANCE_SLOTS)
+    tpl = PromptTemplate("{ITEMS}", CLASSIFY_RELEVANCE_SLOTS)
     prompts = Prompts(
         classify_relevance={"de": tpl, "en": tpl},
         judge_match={
@@ -259,7 +259,7 @@ def test_load_prompts_raises_on_unknown_classify_slot(
     prompts_dir = tmp_path / "prompts"
     write_prompts(prompts_dir)
     (prompts_dir / f"classify_relevance.{lang}.md").write_text(
-        "{title} {raw_description} {extra}\n", encoding="utf-8"
+        "{ITEMS} {extra}\n", encoding="utf-8"
     )
     config = make_config(tmp_path)
 
@@ -305,7 +305,7 @@ def test_load_prompts_raises_on_format_spec(tmp_path: pathlib.Path, lang: str) -
     prompts_dir = tmp_path / "prompts"
     write_prompts(prompts_dir)
     (prompts_dir / f"classify_relevance.{lang}.md").write_text(
-        "{title:>10} {raw_description}\n", encoding="utf-8"
+        "{ITEMS:>10}\n", encoding="utf-8"
     )
     config = make_config(tmp_path)
 
@@ -320,7 +320,7 @@ def test_load_prompts_raises_on_conversion_flag(
     prompts_dir = tmp_path / "prompts"
     write_prompts(prompts_dir)
     (prompts_dir / f"classify_relevance.{lang}.md").write_text(
-        "{title!r} {raw_description}\n", encoding="utf-8"
+        "{ITEMS!r}\n", encoding="utf-8"
     )
     config = make_config(tmp_path)
 
@@ -338,7 +338,7 @@ def test_load_prompts_raises_on_malformed_format_string(
     prompts_dir = tmp_path / "prompts"
     write_prompts(prompts_dir)
     (prompts_dir / f"classify_relevance.{lang}.md").write_text(
-        "{title} {raw_description} {unclosed\n", encoding="utf-8"
+        "{ITEMS} {unclosed\n", encoding="utf-8"
     )
     config = make_config(tmp_path)
 

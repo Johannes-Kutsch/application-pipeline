@@ -9,7 +9,7 @@ Read `CONTEXT.md` for domain glossary and `docs/adr/` for architectural decision
 
 ## 1. Hardware + OS prerequisites
 
-1. Confirm hardware: **Raspberry Pi 5, 8 GB RAM** (see [ADR-0001](adr/0001-local-ollama-as-llm-backend.md)).
+1. Confirm hardware: **Raspberry Pi 5, 8 GB RAM**.
 
 2. Flash **Raspberry Pi OS Lite, 64-bit, Bookworm (Debian 12)**. Use Raspberry Pi Imager ≥ 1.8.
    - Enable SSH in Imager's advanced options and set a username (e.g. `pi`).
@@ -49,41 +49,45 @@ Read `CONTEXT.md` for domain glossary and `docs/adr/` for architectural decision
 
 ---
 
-## 3. Ollama installation
+## 3. Claude Code installation
 
-Ollama is the local LLM runtime required by the **Relevance Classifier** and **Match Judge** (see [ADR-0001](adr/0001-local-ollama-as-llm-backend.md)). The Pi never calls an external LLM API.
+Claude Code is the CLI used by the **Relevance Classifier** and **Match Judge** to call Claude models via the Anthropic API.
 
-7. Install Ollama:
+7. Install Node.js (required by Claude Code) and then install Claude Code globally:
    ```bash
-   curl -fsSL https://ollama.com/install.sh | sh
+   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+   sudo apt-get install -y nodejs
+   sudo npm install -g @anthropic-ai/claude-code
    ```
-
-8. Confirm the Ollama service is running and enabled at boot:
+   Verify:
    ```bash
-   systemctl is-active ollama
-   systemctl is-enabled ollama
-   ollama --version
+   node --version
+   claude --version
    ```
-   Expected: `active`, `enabled`, version printed. The install script registers Ollama as a systemd service and enables it automatically; no extra action required.
+   Expected: Node.js ≥ 18, Claude Code version printed.
 
-9. Pull both models the pipeline uses:
+8. Authenticate Claude Code. Run this in your SSH session on the Pi:
    ```bash
-   ollama pull qwen3:0.6b
-   ollama pull qwen3:4b
+   claude login
    ```
-   Expected: download progress for each, then `success`. Combined download is roughly 3 GB; allow 5–15 minutes on a typical home connection.
+   Claude Code prints a URL. Because the Pi has no desktop browser, use the **laptop-browser code-paste workaround**:
+   - Open the printed URL in a browser on your **laptop**.
+   - Complete the login flow on the laptop; the page will display a short **authorisation code**.
+   - Paste the authorisation code back into the SSH session on the Pi when prompted.
 
-10. Sanity-check models and RAM headroom:
+   Expected: `Logged in as <your Anthropic account email>` printed on the Pi.
+
+9. Smoke-test the CLI and confirm the response envelope:
+   ```bash
+   claude -p --output-format json "reply with the single word ok"
+   ```
+   Expected: a JSON object with a `result` field containing `ok` (or similar single-word reply) and no error fields.
+
+10. Confirm the credential file exists at the default location:
     ```bash
-    ollama run qwen3:0.6b "reply with the single word ok"
-    ollama run qwen3:4b "reply with the single word ok"
+    ls -lh ~/.claude/.credentials.json
     ```
-    Expected: each model outputs `ok` (or similar short acknowledgement).
-
-    ```bash
-    ollama ps
-    ```
-    Expected: both `qwen3:0.6b` and `qwen3:4b` listed, combined resident RAM ~3 GB.
+    Expected: file is present and non-empty.
 
 ---
 
@@ -259,7 +263,7 @@ This manually performs the first deploy that the cron wrapper (`scripts/pi-tick.
 
 ## 7. Initialise settings
 
-This step seeds `data/synched/` with the default `config.py`, `layout.py`, and the four per-language prompt templates required by ADR-0006. Run it once after the venv exists but before the crontab is installed.
+This step seeds `data/synched/` with the default `config.py`, `layout.py`, and the prompt templates required by ADR-0006. Each call site (`classify_relevance`, `judge_match`) materialises exactly **two** prompt files — `de` and `en`; there is no `other` or `unknown` variant. Run it once after the venv exists but before the crontab is installed.
 
 33. Run `init` against the synched data directory:
     ```bash
@@ -359,6 +363,8 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
 The **Seen State** file (`.seen.json`) tracks which **Position** URLs have already been shown in the **Results File**. Losing it causes the next pipeline run to treat all previously-seen positions as new (a one-time flood of duplicates). Because `.seen.json` is continuously synced to the laptop via Syncthing (see [ADR-0002](adr/0002-seen-state-durable-via-syncthing.md) and [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md)), the recovery procedure is:
 
 `config.py` and `layout.py` ride the same Syncthing channel as `.seen.json` and will be restored automatically once the Pi's Syncthing folder is re-paired. Running `init` again during recovery is safe — it skips files that already exist, so it will not overwrite the restored copies.
+
+**Important:** the Claude credential (`~/.claude/.credentials.json`) is **not** backed up by Syncthing. On a fresh Pi after an SD card failure you will need to re-run `claude login` (step 8) to re-authenticate before the pipeline can call the Anthropic API.
 
 44. After re-imaging the Pi, complete steps 1–33 and **stop before installing the crontab** (step 36). Copy `.seen.json` from the laptop's Syncthing folder back to the Pi while no scheduled tick can fire:
     ```bash

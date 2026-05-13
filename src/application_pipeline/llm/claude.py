@@ -8,6 +8,7 @@ from .claude_cli import (
     ClaudeCliError,
     ClaudeCliInvoker,
     ClaudeMalformedEnvelopeError,
+    ClaudeResponse,
 )
 from .types import (
     CallUsage,
@@ -78,13 +79,7 @@ class ClaudeExtractor:
             duration_s=f"{response.duration_s:.3f}",
         )
 
-        usage = CallUsage(
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            cache_read_tokens=response.usage.cache_read_tokens,
-            cost_usd=response.cost_usd,
-            duration_s=response.duration_s,
-        )
+        usage = self._usage_from(response)
         return self._parse_batch_response(response.parsed_result, items), usage
 
     def judge_match(
@@ -127,13 +122,7 @@ class ClaudeExtractor:
             duration_s=f"{response.duration_s:.3f}",
         )
 
-        usage = CallUsage(
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            cache_read_tokens=response.usage.cache_read_tokens,
-            cost_usd=response.cost_usd,
-            duration_s=response.duration_s,
-        )
+        usage = self._usage_from(response)
         data = response.parsed_result
         try:
             return (
@@ -152,6 +141,16 @@ class ClaudeExtractor:
 
     def prewarm(self) -> None:
         pass  # Claude CLI is a stateless executable; no warm-up needed
+
+    @staticmethod
+    def _usage_from(response: ClaudeResponse) -> CallUsage:
+        return CallUsage(
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            cache_read_tokens=response.usage.cache_read_tokens,
+            cost_usd=response.cost_usd,
+            duration_s=response.duration_s,
+        )
 
     @staticmethod
     def _lang_or_en(language: str) -> Literal["de", "en"]:

@@ -160,9 +160,14 @@ def _format_run_divider(
     kept: int,
     errors: int,
     classify_calls: int,
+    classify_items: int,
     classify_total_s: float,
     judge_calls: int,
     judge_total_s: float,
+    claude_input_tokens: int,
+    claude_output_tokens: int,
+    claude_cache_read_tokens: int,
+    claude_cost_usd: float,
     elapsed_s: float,
 ) -> str:
     parts = [f"run {timestamp}"]
@@ -176,9 +181,14 @@ def _format_run_divider(
             f"kept={kept}",
             f"errors={errors}",
             f"classify_calls={classify_calls}",
+            f"classify_items={classify_items}",
             f"classify_total_s={classify_total_s:.1f}",
             f"judge_calls={judge_calls}",
             f"judge_total_s={judge_total_s:.1f}",
+            f"claude_input_tokens={claude_input_tokens}",
+            f"claude_output_tokens={claude_output_tokens}",
+            f"claude_cache_read_tokens={claude_cache_read_tokens}",
+            f"claude_cost_usd={claude_cost_usd:.6f}",
             f"elapsed_s={elapsed_s:.1f}",
         ]
     )
@@ -212,6 +222,11 @@ class RunSummary:
     external_redirects: int = 0
     errored: int = 0
     parsers_dead: int = 0
+    classify_items: int = 0
+    claude_input_tokens: int = 0
+    claude_output_tokens: int = 0
+    claude_cache_read_tokens: int = 0
+    claude_cost_usd: float = 0.0
     duration_seconds: float = 0.0
 
 
@@ -223,9 +238,20 @@ class RunSummary:
 @dataclass
 class _BatchStats:
     classify_calls: int = 0
+    classify_items: int = 0
+    classify_failed: int = 0
     classify_total_s: float = 0.0
+    classify_input_tokens: int = 0
+    classify_output_tokens: int = 0
+    classify_cache_read_tokens: int = 0
+    classify_cost_usd: float = 0.0
     judge_calls: int = 0
+    judge_failed: int = 0
     judge_total_s: float = 0.0
+    judge_input_tokens: int = 0
+    judge_output_tokens: int = 0
+    judge_cache_read_tokens: int = 0
+    judge_cost_usd: float = 0.0
     classifier_dropped: int = 0
     errored: int = 0
     written: int = 0
@@ -261,9 +287,14 @@ def _process_batch(
     items = _make_classify_items(batch)
     try:
         _t0 = time.monotonic()
-        verdicts = extractor.classify_relevance_batch(language, items)
+        verdicts, classify_usage = extractor.classify_relevance_batch(language, items)
         stats.classify_total_s += time.monotonic() - _t0
         stats.classify_calls += 1
+        stats.classify_items += len(items)
+        stats.classify_input_tokens += classify_usage.input_tokens
+        stats.classify_output_tokens += classify_usage.output_tokens
+        stats.classify_cache_read_tokens += classify_usage.cache_read_tokens
+        stats.classify_cost_usd += classify_usage.cost_usd
     except ClaudeUsageLimitError:
         raise
     except ExtractorError as exc:
@@ -275,6 +306,7 @@ def _process_batch(
             batch_size=len(batch),
             error=str(exc),
         )
+        stats.classify_failed += 1
         stats.errored += len(batch)
         return
 
@@ -286,11 +318,15 @@ def _process_batch(
 
         try:
             _t0 = time.monotonic()
-            match_verdict = extractor.judge_match(
+            match_verdict, judge_usage = extractor.judge_match(
                 resolution.effective, position.raw_description
             )
             stats.judge_total_s += time.monotonic() - _t0
             stats.judge_calls += 1
+            stats.judge_input_tokens += judge_usage.input_tokens
+            stats.judge_output_tokens += judge_usage.output_tokens
+            stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
+            stats.judge_cost_usd += judge_usage.cost_usd
         except ClaudeUsageLimitError:
             raise
         except ExtractorError as exc:
@@ -301,6 +337,7 @@ def _process_batch(
                 stub_url=position.stub.url,
                 error=str(exc),
             )
+            stats.judge_failed += 1
             stats.errored += 1
             continue
 
@@ -615,8 +652,48 @@ def run(
                 stats,
             )
 
+    # Emit per-call-site SUMMARY OF SESSION trailers
+    parser_log.summarize(
+        "classify_relevance",
+        {
+            "batches_sent": stats.classify_calls,
+            "items_classified": stats.classify_items,
+            "in_domain": stats.classify_items - stats.classifier_dropped,
+            "off_domain": stats.classifier_dropped,
+            "batches_failed": stats.classify_failed,
+            "input_tokens": stats.classify_input_tokens,
+            "output_tokens": stats.classify_output_tokens,
+            "cache_read_tokens": stats.classify_cache_read_tokens,
+            "cost_usd": round(stats.classify_cost_usd, 6),
+            "duration_s": round(stats.classify_total_s, 1),
+        },
+        _run_started_at,
+    )
+    parser_log.summarize(
+        "judge_match",
+        {
+            "judges_sent": stats.judge_calls,
+            "judges_failed": stats.judge_failed,
+            "green": stats.green,
+            "amber": stats.amber,
+            "red": stats.red,
+            "input_tokens": stats.judge_input_tokens,
+            "output_tokens": stats.judge_output_tokens,
+            "cache_read_tokens": stats.judge_cache_read_tokens,
+            "cost_usd": round(stats.judge_cost_usd, 6),
+            "duration_s": round(stats.judge_total_s, 1),
+        },
+        _run_started_at,
+    )
+
     # Step 13: Append Run Divider — only on successful completion
     elapsed_s = time.monotonic() - _start
+    claude_input_tokens = stats.classify_input_tokens + stats.judge_input_tokens
+    claude_output_tokens = stats.classify_output_tokens + stats.judge_output_tokens
+    claude_cache_read_tokens = (
+        stats.classify_cache_read_tokens + stats.judge_cache_read_tokens
+    )
+    claude_cost_usd = stats.classify_cost_usd + stats.judge_cost_usd
     divider = _format_run_divider(
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         tag=_discover_release_tag(),
@@ -624,9 +701,14 @@ def run(
         kept=stats.written,
         errors=stats.errored,
         classify_calls=stats.classify_calls,
+        classify_items=stats.classify_items,
         classify_total_s=stats.classify_total_s,
         judge_calls=stats.judge_calls,
         judge_total_s=stats.judge_total_s,
+        claude_input_tokens=claude_input_tokens,
+        claude_output_tokens=claude_output_tokens,
+        claude_cache_read_tokens=claude_cache_read_tokens,
+        claude_cost_usd=claude_cost_usd,
         elapsed_s=elapsed_s,
     )
     try:
@@ -686,4 +768,9 @@ def run(
         external_redirects=external_redirects,
         errored=stats.errored,
         parsers_dead=parsers_dead,
+        classify_items=stats.classify_items,
+        claude_input_tokens=claude_input_tokens,
+        claude_output_tokens=claude_output_tokens,
+        claude_cache_read_tokens=claude_cache_read_tokens,
+        claude_cost_usd=claude_cost_usd,
     )

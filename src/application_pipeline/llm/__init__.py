@@ -8,6 +8,7 @@ from .claude_cli import (
     ClaudeUsageLimitError,
 )
 from .types import (
+    CallUsage,
     ClassifyItem,
     ExtractorBatchMalformedError,
     ExtractorError,
@@ -21,6 +22,7 @@ from .types import (
 )
 
 __all__ = [
+    "CallUsage",
     "ClassifyItem",
     "ClaudeExtractor",
     "ClaudeCliError",

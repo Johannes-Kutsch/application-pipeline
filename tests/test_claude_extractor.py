@@ -158,10 +158,12 @@ def test_classify_relevance_batch_returns_in_domain_true() -> None:
         _prompts(),
         _invoker=_fake_invoker(_batch_response(items, {"0": True})),
     )
-    results = extractor.classify_relevance_batch("en", items)
+    results, usage = extractor.classify_relevance_batch("en", items)
     assert len(results) == 1
     assert isinstance(results[0], RelevanceVerdict)
     assert results[0].in_domain is True
+    assert usage.input_tokens == 100
+    assert usage.cost_usd == pytest.approx(0.001)
 
 
 def test_classify_relevance_batch_returns_in_domain_false() -> None:
@@ -171,7 +173,7 @@ def test_classify_relevance_batch_returns_in_domain_false() -> None:
         _prompts(),
         _invoker=_fake_invoker(_batch_response(items, {"0": False})),
     )
-    results = extractor.classify_relevance_batch("en", items)
+    results, _ = extractor.classify_relevance_batch("en", items)
     assert results[0].in_domain is False
 
 
@@ -213,7 +215,7 @@ def test_classify_relevance_batch_returns_verdicts_in_input_order() -> None:
         session_id="s",
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    results = extractor.classify_relevance_batch("en", items)
+    results, _ = extractor.classify_relevance_batch("en", items)
     assert len(results) == 3
     assert results[0].in_domain is True  # id=a
     assert results[1].in_domain is True  # id=b
@@ -395,12 +397,14 @@ def test_judge_match_returns_match_verdict() -> None:
     extractor = ClaudeExtractor(
         _config(), _prompts(), _invoker=_fake_invoker(_judge_response())
     )
-    result = extractor.judge_match("en", "Looking for Python dev")
+    result, usage = extractor.judge_match("en", "Looking for Python dev")
     assert isinstance(result, MatchVerdict)
     assert result.tier == MatchTier.green
     assert result.matched == ["python"]
     assert result.missing == []
     assert result.summary == "Good match"
+    assert usage.input_tokens == 100
+    assert usage.cost_usd == pytest.approx(0.002)
 
 
 # ---------------------------------------------------------------------------

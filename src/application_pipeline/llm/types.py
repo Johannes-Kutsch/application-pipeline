@@ -70,12 +70,23 @@ class MatchVerdict:
             )
 
 
+@dataclass(frozen=True)
+class CallUsage:
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    duration_s: float
+
+
 @runtime_checkable
 class LLMExtractor(Protocol):
     def classify_relevance_batch(
         self, language: str, items: list[ClassifyItem]
-    ) -> list[RelevanceVerdict]: ...
+    ) -> tuple[list[RelevanceVerdict], CallUsage]: ...
 
-    def judge_match(self, language: str, raw_description: str) -> MatchVerdict: ...
+    def judge_match(
+        self, language: str, raw_description: str
+    ) -> tuple[MatchVerdict, CallUsage]: ...
 
     def prewarm(self) -> None: ...

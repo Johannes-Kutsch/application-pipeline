@@ -10,6 +10,7 @@ from .claude_cli import (
     ClaudeMalformedEnvelopeError,
 )
 from .types import (
+    CallUsage,
     ClassifyItem,
     ExtractorBatchMalformedError,
     ExtractorMalformedJSONError,
@@ -38,7 +39,7 @@ class ClaudeExtractor:
 
     def classify_relevance_batch(
         self, language: str, items: list[ClassifyItem]
-    ) -> list[RelevanceVerdict]:
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
         lang = self._lang_or_en(language)
         items_block = self._format_classify_items(items)
         prompt = self._prompts.classify_relevance[lang].render(ITEMS=items_block)
@@ -77,9 +78,18 @@ class ClaudeExtractor:
             duration_s=f"{response.duration_s:.3f}",
         )
 
-        return self._parse_batch_response(response.parsed_result, items)
+        usage = CallUsage(
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            cache_read_tokens=response.usage.cache_read_tokens,
+            cost_usd=response.cost_usd,
+            duration_s=response.duration_s,
+        )
+        return self._parse_batch_response(response.parsed_result, items), usage
 
-    def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
+    def judge_match(
+        self, language: str, raw_description: str
+    ) -> tuple[MatchVerdict, CallUsage]:
         lang = self._lang_or_en(language)
         prompt = self._prompts.judge_match[lang].render(
             skills=self._skills_block, raw_description=raw_description
@@ -117,13 +127,23 @@ class ClaudeExtractor:
             duration_s=f"{response.duration_s:.3f}",
         )
 
+        usage = CallUsage(
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            cache_read_tokens=response.usage.cache_read_tokens,
+            cost_usd=response.cost_usd,
+            duration_s=response.duration_s,
+        )
         data = response.parsed_result
         try:
-            return MatchVerdict(
-                tier=MatchTier(data["tier"]),
-                matched=list(data["matched"]),
-                missing=list(data["missing"]),
-                summary=str(data["summary"]),
+            return (
+                MatchVerdict(
+                    tier=MatchTier(data["tier"]),
+                    matched=list(data["matched"]),
+                    missing=list(data["missing"]),
+                    summary=str(data["summary"]),
+                ),
+                usage,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ExtractorSchemaError(

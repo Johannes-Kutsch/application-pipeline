@@ -15,6 +15,7 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
 from application_pipeline.llm import (
+    CallUsage,
     ClassifyItem,
     ExtractorBatchMalformedError,
     ExtractorError,
@@ -99,14 +100,21 @@ def _write_config(
     return config_path
 
 
+_ZERO_USAGE = CallUsage(
+    input_tokens=0, output_tokens=0, cache_read_tokens=0, cost_usd=0.0, duration_s=0.0
+)
+
+
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: [
-        RelevanceVerdict(in_domain=True) for _ in items
-    ]
-    ext.judge_match.return_value = MatchVerdict(
-        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
     )
     return ext
 
@@ -796,6 +804,22 @@ class _LLMStubParser:
         return Position(stub=stub, raw_description=desc)
 
 
+_FAKE_CLASSIFY_USAGE = CallUsage(
+    input_tokens=10,
+    output_tokens=5,
+    cache_read_tokens=2,
+    cost_usd=0.001,
+    duration_s=0.5,
+)
+_FAKE_JUDGE_USAGE = CallUsage(
+    input_tokens=8,
+    output_tokens=4,
+    cache_read_tokens=1,
+    cost_usd=0.0008,
+    duration_s=0.4,
+)
+
+
 class _FakeExtractor:
     """Deterministic extractor: rejects Job 1 at classify, returns fixed tiers at judge."""
 
@@ -804,16 +828,25 @@ class _FakeExtractor:
 
     def classify_relevance_batch(
         self, language: str, items: list[ClassifyItem]
-    ) -> list[RelevanceVerdict]:
-        return [RelevanceVerdict(in_domain=(item.title != "Job 1")) for item in items]
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
+        verdicts = [
+            RelevanceVerdict(in_domain=(item.title != "Job 1")) for item in items
+        ]
+        return verdicts, _FAKE_CLASSIFY_USAGE
 
-    def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
+    def judge_match(
+        self, language: str, raw_description: str
+    ) -> tuple[MatchVerdict, CallUsage]:
         # Extract job index from description ("description for job N")
         for idx, url in enumerate(_STUB_URLS_LLM):
             if f"job {idx}" in raw_description:
                 tier = _LLM_JUDGE_TIERS.get(url, MatchTier.green)
-                return MatchVerdict(tier=tier, matched=[], missing=[], summary="ok")
-        return MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok")
+                return MatchVerdict(
+                    tier=tier, matched=[], missing=[], summary="ok"
+                ), _FAKE_JUDGE_USAGE
+        return MatchVerdict(
+            tier=MatchTier.green, matched=[], missing=[], summary="ok"
+        ), _FAKE_JUDGE_USAGE
 
 
 def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
@@ -919,14 +952,19 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
 
         def classify_relevance_batch(
             self, language: str, items: list[ClassifyItem]
-        ) -> list[RelevanceVerdict]:
+        ) -> tuple[list[RelevanceVerdict], CallUsage]:
             call_log.extend(["classify"] * len(items))
-            return [RelevanceVerdict(in_domain=True) for _ in items]
+            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
-        def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
+        def judge_match(
+            self, language: str, raw_description: str
+        ) -> tuple[MatchVerdict, CallUsage]:
             call_log.append("judge")
-            return MatchVerdict(
-                tier=MatchTier.green, matched=[], missing=[], summary="ok"
+            return (
+                MatchVerdict(
+                    tier=MatchTier.green, matched=[], missing=[], summary="ok"
+                ),
+                _ZERO_USAGE,
             )
 
     class _MultiStubParser:
@@ -1024,17 +1062,18 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
 
     def _batch_side_effect(
         lang: str, items: list[ClassifyItem]
-    ) -> list[RelevanceVerdict]:
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
         call_count[0] += 1
         if call_count[0] == 1:
             raise ExtractorError("classify batch boom")
-        return [RelevanceVerdict(in_domain=True) for _ in items]
+        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
     ext.prewarm.return_value = None
     ext.classify_relevance_batch.side_effect = _batch_side_effect
-    ext.judge_match.return_value = MatchVerdict(
-        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
     )
 
     # Use batch_size=1 so each position is its own batch
@@ -1075,13 +1114,17 @@ def test_extractor_error_on_judge_leaves_position_unseen(tmp_path: Path) -> None
 
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: [
-        RelevanceVerdict(in_domain=True) for _ in items
-    ]
+    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
     # First judge raises, second succeeds
     ext.judge_match.side_effect = [
         ExtractorError("judge boom"),
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        (
+            MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+            _ZERO_USAGE,
+        ),
     ]
 
     summary = run(
@@ -1422,9 +1465,14 @@ def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
         "kept=",
         "errors=",
         "classify_calls=",
+        "classify_items=",
         "classify_total_s=",
         "judge_calls=",
         "judge_total_s=",
+        "claude_input_tokens=",
+        "claude_output_tokens=",
+        "claude_cache_read_tokens=",
+        "claude_cost_usd=",
         "elapsed_s=",
     ):
         assert key in last_block, (
@@ -1455,12 +1503,12 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
 
         def classify_relevance_batch(
             self, language: str, items: list[ClassifyItem]
-        ) -> list[RelevanceVerdict]:
+        ) -> tuple[list[RelevanceVerdict], CallUsage]:
             raise RuntimeError("unexpected crash escaping main path")
 
         def judge_match(
             self, language: str, raw_description: str
-        ) -> MatchVerdict:  # pragma: no cover
+        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
     with pytest.raises(RuntimeError):
@@ -1807,13 +1855,18 @@ def test_language_log_anomaly_entries(tmp_path: Path) -> None:
 
         def classify_relevance_batch(
             self, language: str, items: list[ClassifyItem]
-        ) -> "list[RelevanceVerdict]":
+        ) -> "tuple[list[RelevanceVerdict], CallUsage]":
             captured_languages.append(language)
-            return [RelevanceVerdict(in_domain=True) for _ in items]
+            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
-        def judge_match(self, language: str, raw_description: str) -> "MatchVerdict":
-            return MatchVerdict(
-                tier=MatchTier.green, matched=[], missing=[], summary="ok"
+        def judge_match(
+            self, language: str, raw_description: str
+        ) -> "tuple[MatchVerdict, CallUsage]":
+            return (
+                MatchVerdict(
+                    tier=MatchTier.green, matched=[], missing=[], summary="ok"
+                ),
+                _ZERO_USAGE,
             )
 
     config_path = _write_config(
@@ -1999,15 +2052,18 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
     """batch_size=2 with 4 positions → classify_relevance_batch called twice with 2 items each."""
     batch_sizes_seen: list[int] = []
 
-    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+    def _batch(
+        lang: str, items: list[ClassifyItem]
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
         batch_sizes_seen.append(len(items))
-        return [RelevanceVerdict(in_domain=True) for _ in items]
+        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
     ext.prewarm.return_value = None
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = MatchVerdict(
-        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
     )
 
     class _FourStubParser:
@@ -2048,15 +2104,18 @@ def test_language_routing_de_and_en_buffers(tmp_path: Path) -> None:
     """German positions go to de classify call, English positions go to en classify call."""
     lang_batches: dict[str, list[int]] = {}
 
-    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+    def _batch(
+        lang: str, items: list[ClassifyItem]
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
         lang_batches[lang] = lang_batches.get(lang, []) + [len(items)]
-        return [RelevanceVerdict(in_domain=True) for _ in items]
+        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
     ext.prewarm.return_value = None
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = MatchVerdict(
-        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
     )
 
     _DE_DESCRIPTION = (
@@ -2121,18 +2180,21 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     _OFF_URL = "https://offdomain.example/0"
     _ON_URL = "https://offdomain.example/1"
 
-    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+    def _batch(
+        lang: str, items: list[ClassifyItem]
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
         # First item off-domain, second in-domain
         return [
             RelevanceVerdict(in_domain=(item.raw_description != "off domain content"))
             for item in items
-        ]
+        ], _ZERO_USAGE
 
     ext = MagicMock()
     ext.prewarm.return_value = None
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = MatchVerdict(
-        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
     )
 
     class _TwoLangParser:
@@ -2180,17 +2242,20 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
 
     call_count = [0]
 
-    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+    def _batch(
+        lang: str, items: list[ClassifyItem]
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
         call_count[0] += 1
         if call_count[0] == 1:
             raise ExtractorBatchMalformedError("length mismatch")
-        return [RelevanceVerdict(in_domain=True) for _ in items]
+        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
     ext.prewarm.return_value = None
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = MatchVerdict(
-        tier=MatchTier.green, matched=[], missing=[], summary="ok"
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
     )
 
     config_path = _write_config(
@@ -2296,12 +2361,12 @@ def test_claude_usage_limit_error_writes_failure_report_and_exits_one(
 
         def classify_relevance_batch(
             self, language: str, items: list[ClassifyItem]
-        ) -> list[RelevanceVerdict]:
+        ) -> tuple[list[RelevanceVerdict], CallUsage]:
             raise ClaudeUsageLimitError("subscription cap")
 
         def judge_match(
             self, language: str, raw_description: str
-        ) -> MatchVerdict:  # pragma: no cover
+        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
     monkeypatch.setattr(
@@ -2400,3 +2465,168 @@ def test_init_does_not_materialise_other_or_unknown_prompt_files(
     assert "classify_relevance.en.md" in names
     assert "judge_match.de.md" in names
     assert "judge_match.en.md" in names
+
+
+# ---------------------------------------------------------------------------
+# RunSummary telemetry (issue #188)
+# ---------------------------------------------------------------------------
+
+
+def test_run_summary_carries_token_and_cost_totals(tmp_path: Path) -> None:
+    """RunSummary accumulates classify + judge token/cost totals from _FakeExtractor."""
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    summary = run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    # 5 items pass prefilter → 1 classify batch
+    assert summary.classify_items == 5
+    # 1 classify batch × 10 input tokens + 4 judge calls × 8 input tokens
+    assert summary.claude_input_tokens == 10 + 4 * 8
+    assert summary.claude_output_tokens == 5 + 4 * 4
+    assert summary.claude_cache_read_tokens == 2 + 4 * 1
+    assert abs(summary.claude_cost_usd - (0.001 + 4 * 0.0008)) < 1e-9
+
+
+def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
+    """classify_relevance.log gets a SUMMARY OF SESSION with the full expected schema."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    log_file = logs_dir / "classify_relevance.log"
+    assert log_file.exists(), "classify_relevance.log must be created"
+    content = log_file.read_text(encoding="utf-8")
+
+    assert "SUMMARY OF SESSION" in content
+    for key in (
+        "batches_sent=",
+        "items_classified=",
+        "in_domain=",
+        "off_domain=",
+        "batches_failed=",
+        "input_tokens=",
+        "output_tokens=",
+        "cache_read_tokens=",
+        "cost_usd=",
+        "duration_s=",
+    ):
+        assert key in content, f"key {key!r} missing from classify_relevance.log"
+
+
+def test_judge_match_trailer_schema(tmp_path: Path) -> None:
+    """judge_match.log gets a SUMMARY OF SESSION with the full expected schema."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    log_file = logs_dir / "judge_match.log"
+    assert log_file.exists(), "judge_match.log must be created"
+    content = log_file.read_text(encoding="utf-8")
+
+    assert "SUMMARY OF SESSION" in content
+    for key in (
+        "judges_sent=",
+        "judges_failed=",
+        "green=",
+        "amber=",
+        "red=",
+        "input_tokens=",
+        "output_tokens=",
+        "cache_read_tokens=",
+        "cost_usd=",
+        "duration_s=",
+    ):
+        assert key in content, f"key {key!r} missing from judge_match.log"
+
+
+def test_main_run_complete_line_includes_new_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """__main__ 'run complete:' line includes classify_items, claude_* token and cost fields."""
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+
+    fake_summary = RunSummary(
+        discovered=3,
+        written=2,
+        classify_items=3,
+        claude_input_tokens=42,
+        claude_output_tokens=21,
+        claude_cache_read_tokens=6,
+        claude_cost_usd=0.0042,
+        duration_seconds=1.5,
+    )
+    monkeypatch.setattr("application_pipeline.__main__.run", lambda _path: fake_summary)
+
+    from application_pipeline.__main__ import main
+
+    main()
+
+    out = capsys.readouterr().out
+    assert out.startswith("run complete:"), (
+        f"expected 'run complete:' prefix, got: {out!r}"
+    )
+    for field in (
+        "classify_items=",
+        "claude_input_tokens=",
+        "claude_output_tokens=",
+        "claude_cache_read_tokens=",
+        "claude_cost_usd=",
+    ):
+        assert field in out, f"field {field!r} missing from run complete line: {out!r}"

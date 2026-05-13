@@ -76,7 +76,7 @@ def main() -> None:
         sys.exit(1)
 
     print(
-        f"done"
+        f"run complete:"
         f"  discovered={summary.discovered}"
         f"  skipped={summary.skipped}"
         f"  prefilter_dropped={summary.prefilter_dropped}"
@@ -88,6 +88,11 @@ def main() -> None:
         f"  enrich_failed={summary.enrich_failed}"
         f"  external_redirects={summary.external_redirects}"
         f"  errored={summary.errored}"
+        f"  classify_items={summary.classify_items}"
+        f"  claude_input_tokens={summary.claude_input_tokens}"
+        f"  claude_output_tokens={summary.claude_output_tokens}"
+        f"  claude_cache_read_tokens={summary.claude_cache_read_tokens}"
+        f"  claude_cost_usd={summary.claude_cost_usd:.6f}"
         f"  duration={summary.duration_seconds:.1f}s"
     )
 

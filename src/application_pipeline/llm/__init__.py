@@ -7,7 +7,6 @@ from .claude_cli import (
     ClaudeUsage,
     ClaudeUsageLimitError,
 )
-from .ollama import OllamaExtractor
 from .types import (
     ExtractorError,
     ExtractorMalformedJSONError,
@@ -34,6 +33,5 @@ __all__ = [
     "LLMExtractor",
     "MatchTier",
     "MatchVerdict",
-    "OllamaExtractor",
     "RelevanceVerdict",
 ]

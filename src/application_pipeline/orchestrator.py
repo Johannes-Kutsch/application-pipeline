@@ -28,7 +28,6 @@ from application_pipeline.llm import (
     LLMExtractor,
     MatchTier,
     MatchVerdict,
-    OllamaExtractor,
 )
 from application_pipeline.parsers import (
     ExternalRedirect,
@@ -241,10 +240,7 @@ def run(
         except PromptError as exc:
             _log.error("startup failed — prompts: %s", exc)
             raise
-        if cfg.claude_cli_path is not None:
-            extractor = ClaudeExtractor(cfg, prompts)
-        else:
-            extractor = OllamaExtractor(cfg, prompts)
+        extractor = ClaudeExtractor(cfg, prompts)
 
     try:
         extractor.prewarm()

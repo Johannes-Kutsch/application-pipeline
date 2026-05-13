@@ -10,6 +10,16 @@ from .types import Config, ConfigError, SourceEntry
 
 _REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
 
+_OLLAMA_FIELDS = (
+    "OLLAMA_BASE_URL",
+    "OLLAMA_CLASSIFY_MODEL",
+    "OLLAMA_JUDGE_MODEL",
+    "OLLAMA_READ_TIMEOUT_SECONDS",
+    "OLLAMA_JSON_RETRIES",
+    "OLLAMA_HTTP_RETRIES",
+    "OLLAMA_KEEP_ALIVE",
+)
+
 
 def load(path: pathlib.Path) -> Config:
     module = load_user_module(path, ConfigError)
@@ -17,6 +27,12 @@ def load(path: pathlib.Path) -> Config:
     for name in _REQUIRED_FIELDS:
         if not hasattr(module, name):
             raise ConfigError(f"Missing required field: {name}")
+
+    for name in _OLLAMA_FIELDS:
+        if hasattr(module, name):
+            raise ConfigError(
+                f"{name} is no longer supported; remove it from your config"
+            )
 
     config_dir = path.resolve().parent
 
@@ -63,13 +79,6 @@ def load(path: pathlib.Path) -> Config:
         prompts_dir=prompts_dir,
         classify_relevance_prompt=classify_relevance_prompt,
         judge_match_prompt=judge_match_prompt,
-        ollama_base_url=getattr(module, "OLLAMA_BASE_URL", "http://localhost:11434"),
-        ollama_classify_model=getattr(module, "OLLAMA_CLASSIFY_MODEL", "qwen3:0.6b"),
-        ollama_judge_model=getattr(module, "OLLAMA_JUDGE_MODEL", "qwen3:4b"),
-        ollama_read_timeout_seconds=getattr(module, "OLLAMA_READ_TIMEOUT_SECONDS", 300),
-        ollama_json_retries=getattr(module, "OLLAMA_JSON_RETRIES", 1),
-        ollama_http_retries=getattr(module, "OLLAMA_HTTP_RETRIES", 2),
-        ollama_keep_alive=getattr(module, "OLLAMA_KEEP_ALIVE", "24h"),
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
     )
     _validate(config)
@@ -128,21 +137,6 @@ def _validate(config: Config) -> None:
         raise ConfigError(
             f"PROMPTS_DIR: {config.prompts_dir} does not exist or is not a directory"
         )
-
-    if not config.ollama_base_url.startswith(("http://", "https://")):
-        raise ConfigError(
-            f"ollama_base_url must start with http:// or https://;"
-            f" got {config.ollama_base_url!r}"
-        )
-    for field_name, value in [
-        ("ollama_json_retries", config.ollama_json_retries),
-        ("ollama_http_retries", config.ollama_http_retries),
-        ("ollama_read_timeout_seconds", config.ollama_read_timeout_seconds),
-    ]:
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise ConfigError(
-                f"{field_name} must be a non-negative integer; got {value!r}"
-            )
 
     _check_unique("KEYWORDS", config.keywords, item_label="value")
     _check_unique("SKILLS", config.skills, item_label="value")

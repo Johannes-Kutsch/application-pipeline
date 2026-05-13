@@ -16,5 +16,3 @@ Evaluate the job description against the candidate's skill set and produce a str
 
 Job description:
 {raw_description}
-
-/no_think

@@ -13,7 +13,6 @@ from .llm import (
     LLMExtractor,
     MatchTier,
     MatchVerdict,
-    OllamaExtractor,
     RelevanceVerdict,
 )
 from .prompts import PromptError, PromptTemplate, Prompts, load_prompts
@@ -39,7 +38,6 @@ __all__ = [
     "LayoutError",
     "MatchTier",
     "MatchVerdict",
-    "OllamaExtractor",
     "Position",
     "PositionStub",
     "PromptError",

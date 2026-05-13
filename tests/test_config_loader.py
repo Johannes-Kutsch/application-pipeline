@@ -350,70 +350,28 @@ def test_judge_match_prompt_raises_when_missing(tmp_path: pathlib.Path) -> None:
         load(path)
 
 
-# --- LLM defaults ---
-
-
-def test_ollama_defaults(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY)
-
-    config = load(path)
-
-    assert config.ollama_json_retries == 1
-    assert config.ollama_http_retries == 2
-    assert config.ollama_keep_alive == "24h"
-    assert config.ollama_read_timeout_seconds == 300
-
-
-# --- ollama validation ---
-
-
-def test_ollama_base_url_must_start_with_http(tmp_path: pathlib.Path) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + '\nOLLAMA_BASE_URL = "ftp://localhost:11434"\n',
-    )
-
-    with pytest.raises(ConfigError, match="ollama_base_url"):
-        load(path)
-
-
-def test_ollama_base_url_accepts_https(tmp_path: pathlib.Path) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + '\nOLLAMA_BASE_URL = "https://remote:11434"\n',
-    )
-
-    config = load(path)
-
-    assert config.ollama_base_url == "https://remote:11434"
+# --- OLLAMA_* fields rejected ---
 
 
 @pytest.mark.parametrize(
     "field",
-    ["OLLAMA_JSON_RETRIES", "OLLAMA_HTTP_RETRIES", "OLLAMA_READ_TIMEOUT_SECONDS"],
+    [
+        "OLLAMA_BASE_URL",
+        "OLLAMA_CLASSIFY_MODEL",
+        "OLLAMA_JUDGE_MODEL",
+        "OLLAMA_READ_TIMEOUT_SECONDS",
+        "OLLAMA_JSON_RETRIES",
+        "OLLAMA_HTTP_RETRIES",
+        "OLLAMA_KEEP_ALIVE",
+    ],
 )
-def test_ollama_retry_timeout_rejects_negative(
+def test_load_raises_when_ollama_field_present(
     tmp_path: pathlib.Path, field: str
 ) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + f"\n{field} = -1\n",
-    )
+    path = write_config(tmp_path, REQUIRED_BODY + f'\n{field} = "anything"\n')
 
-    with pytest.raises(ConfigError, match=field.lower()):
+    with pytest.raises(ConfigError, match=field):
         load(path)
-
-
-def test_ollama_retry_fields_accept_zero(tmp_path: pathlib.Path) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + "\nOLLAMA_JSON_RETRIES = 0\nOLLAMA_HTTP_RETRIES = 0\n",
-    )
-
-    config = load(path)
-
-    assert config.ollama_json_retries == 0
-    assert config.ollama_http_retries == 0
 
 
 # --- keyword normalize length check ---

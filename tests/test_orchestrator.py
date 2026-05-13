@@ -1470,7 +1470,7 @@ def test_fatal_error_writes_failure_report_and_exits_one(
             raise ExtractorUnreachableError("test: ollama unreachable")
 
     monkeypatch.setattr(
-        "application_pipeline.orchestrator.OllamaExtractor",
+        "application_pipeline.orchestrator.ClaudeExtractor",
         lambda *a, **kw: _FailingExtractor(),
     )
 

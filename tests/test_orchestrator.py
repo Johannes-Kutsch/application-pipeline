@@ -48,8 +48,7 @@ def _reset_log_state():
     """Reset parser_log module state between tests.
 
     Some tests call main() which configures parser_log. Without this reset
-    the relative 'synched/logs' path leaks across tests after monkeypatch
-    restores the working directory.
+    the configured logs path leaks across tests.
     """
     _parser_log._logs_dir = None
     yield
@@ -1552,7 +1551,7 @@ def test_fatal_error_writes_failure_report_and_exits_one(
 
     assert exc_info.value.code == 1
 
-    failures_dir = tmp_path / "synched" / "failures"
+    failures_dir = tmp_path / "failures"
     reports = list(failures_dir.glob("*.md"))
     assert len(reports) == 1, f"expected one failure report, got {reports}"
 
@@ -2404,7 +2403,7 @@ def test_claude_usage_limit_error_writes_failure_report_and_exits_one(
 
     assert exc_info.value.code == 1
 
-    failures_dir = tmp_path / "synched" / "failures"
+    failures_dir = tmp_path / "failures"
     reports = list(failures_dir.glob("*.md"))
     assert len(reports) == 1, f"expected one failure report, got {reports}"
 

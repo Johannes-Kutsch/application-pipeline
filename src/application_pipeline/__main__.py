@@ -66,11 +66,11 @@ def main() -> None:
 
     config_path = Path(args[0])
     try:
-        parser_log.configure(Path("synched") / "logs")
+        parser_log.configure(config_path.parent / "logs")
         summary = run(config_path)
     except _FATAL as exc:
         try:
-            write_failure(current_stage.get(), exc, _tail.tail(), Path("synched"))
+            write_failure(current_stage.get(), exc, _tail.tail(), config_path.parent)
         except Exception:
             pass
         sys.exit(1)

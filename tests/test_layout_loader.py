@@ -481,5 +481,5 @@ def test_layout_error_produces_failure_artifact_via_main(
         main()
 
     assert exc_info.value.code == 1
-    artifacts = list((tmp_path / "synched" / "failures").glob("*.md"))
+    artifacts = list((tmp_path / "failures").glob("*.md"))
     assert len(artifacts) == 1

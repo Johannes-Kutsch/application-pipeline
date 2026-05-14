@@ -150,14 +150,15 @@ def test_two_sessions_produce_two_summary_blocks(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_main_materialises_logs_directory(
+def test_main_materialises_logs_next_to_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from application_pipeline.orchestrator import RunSummary
 
-    config_path = tmp_path / "config.toml"
+    config_dir = tmp_path / "mydata"
+    config_dir.mkdir()
+    config_path = config_dir / "config.toml"
     config_path.write_text("", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["app", str(config_path)])
     monkeypatch.setattr(
         "application_pipeline.__main__.run",
@@ -168,4 +169,34 @@ def test_main_materialises_logs_directory(
 
     main()
 
-    assert (tmp_path / "synched" / "logs").is_dir()
+    assert (config_dir / "logs").is_dir()
+
+
+def test_main_logs_land_next_to_config_regardless_of_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from application_pipeline.orchestrator import RunSummary
+
+    config_dir = tmp_path / "synched"
+    config_dir.mkdir()
+    config_path = config_dir / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+
+    other_cwd = tmp_path / "workdir"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+
+    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+    monkeypatch.setattr(
+        "application_pipeline.__main__.run",
+        lambda *_a, **_kw: RunSummary(),
+    )
+
+    from application_pipeline.__main__ import main
+
+    main()
+
+    assert (config_dir / "logs").is_dir()
+    assert not (other_cwd / "synched").exists(), (
+        "logs must not be created relative to cwd"
+    )

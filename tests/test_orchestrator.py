@@ -3025,3 +3025,169 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
     assert order_a >= 2
     assert order_b >= 2
     assert order_a != order_b
+
+
+# ---------------------------------------------------------------------------
+# Status Display: dedup and prefilter rows
+# ---------------------------------------------------------------------------
+
+
+def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
+    """dedup and prefilter rows are registered after all parser rows."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    registered = display.registered_names()
+    assert "dedup" in registered
+    assert "prefilter" in registered
+
+    dedup_order = next(
+        c.kwargs["order"]
+        for c in display.calls
+        if c.method == "register" and c.name == "dedup"
+    )
+    prefilter_order = next(
+        c.kwargs["order"]
+        for c in display.calls
+        if c.method == "register" and c.name == "prefilter"
+    )
+    parser_order = next(
+        c.kwargs["order"]
+        for c in display.calls
+        if c.method == "register" and c.name == "bundesagentur_api"
+    )
+    assert dedup_order > parser_order
+    assert prefilter_order == dedup_order + 1
+
+
+def test_dedup_row_registered_after_parser_rows(tmp_path: Path) -> None:
+    """dedup row appears after all parser rows in call sequence."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    indexed = [(i, c.method, c.name) for i, c in enumerate(display.calls)]
+    parser_reg_idx = next(
+        i for i, m, n in indexed if m == "register" and n == "bundesagentur_api"
+    )
+    dedup_reg_idx = next(i for i, m, n in indexed if m == "register" and n == "dedup")
+    assert dedup_reg_idx > parser_reg_idx
+
+
+def test_dedup_row_body_updates_on_dedup_events(tmp_path: Path) -> None:
+    """dedup row body tracks url_hits, tuple_hits, and misses."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("dedup")
+    assert bodies, "expected at least one body update for dedup row"
+    final = bodies[-1]
+    assert "url_hits=" in final
+    assert "tuple_hits=" in final
+    assert "misses=" in final
+    # _StubParser emits 3 fresh stubs → 3 misses, 0 hits on first run
+    assert "misses=3" in final
+    assert "url_hits=0" in final
+    assert "tuple_hits=0" in final
+
+
+def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:
+    """prefilter row body tracks considered, passed, and dropped counts."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("prefilter")
+    assert bodies, "expected at least one body update for prefilter row"
+    final = bodies[-1]
+    assert "considered=" in final
+    assert "passed=" in final
+    assert "dropped=" in final
+    assert "wl=" in final
+    assert "bl=" in final
+
+
+def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:
+    """dedup and prefilter rows persist for the entire run (no mid-run removal)."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    assert not any(c.method == "remove" and c.name == "dedup" for c in display.calls), (
+        "dedup row must not be removed during run"
+    )
+    assert not any(
+        c.method == "remove" and c.name == "prefilter" for c in display.calls
+    ), "prefilter row must not be removed during run"

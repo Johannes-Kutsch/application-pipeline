@@ -526,6 +526,12 @@ def run(
 
             status_display.remove("startup")
 
+            _n_parsers = len(threads)
+            status_display.register("dedup", order=2 + _n_parsers, phase="running")
+            status_display.register(
+                "prefilter", order=2 + _n_parsers + 1, phase="running"
+            )
+
             parsers_remaining: set[str] = set(parser_inbound.keys())
             consecutive_url_hits: dict[str, int] = {pid: 0 for pid in parsers_remaining}
             _pending_enrich: dict[str, PositionStub] = {}
@@ -583,6 +589,10 @@ def run(
                         "pipeline",
                         body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
                     )
+                    status_display.update_body(
+                        "dedup",
+                        body=f"url_hits={dedup_url_hits} tuple_hits={dedup_tuple_hits} misses={dedup_misses}",
+                    )
                     _update_parser_row(pid)
 
                 elif isinstance(payload, Position):
@@ -620,6 +630,10 @@ def run(
                     else:
                         dedup_store.mark_seen(payload.stub, "off_domain")
                         prefilter_dropped += 1
+                    status_display.update_body(
+                        "prefilter",
+                        body=f"considered={prefilter_considered} passed={prefilter_passed} dropped={prefilter_dropped} (wl={prefilter_whitelist_hits} bl={prefilter_blacklist_hits})",
+                    )
                     _update_parser_row(pid)
 
                 elif isinstance(payload, ParserError):

@@ -151,6 +151,25 @@ _NO_MORE_BATCHES = _NoMoreBatches()
 
 
 # ---------------------------------------------------------------------------
+# Judge queue protocol
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _JudgeJob:
+    position: "Position"
+    resolution: "LanguageResolution"
+    item_id: str
+
+
+class _NoMoreJudges:
+    __slots__ = ()
+
+
+_NO_MORE_JUDGES = _NoMoreJudges()
+
+
+# ---------------------------------------------------------------------------
 # Queue worker base class
 # ---------------------------------------------------------------------------
 
@@ -178,10 +197,16 @@ class _QueueWorker(threading.Thread):
                 item = self._input_queue.get()
                 if item is self._sentinel:
                     break
-                self._process(item)
+                if not self._run_state.is_degraded:
+                    self._process(item)
         except BaseException as exc:
             self.exc = exc
             self._run_state.set_aborted(exc)
+        finally:
+            self._on_shutdown()
+
+    def _on_shutdown(self) -> None:
+        pass
 
     def _process(self, item: object) -> None:
         raise NotImplementedError
@@ -269,7 +294,7 @@ class _ClassifyThread(_QueueWorker):
         self,
         *,
         classify_queue: queue.Queue[object],
-        survivors_queue: "queue.Queue[tuple[Position, LanguageResolution]]",
+        judge_queue: "queue.Queue[object]",
         extractor: LLMExtractor,
         dedup_store: DeduplicationStore,
         status_display: "StatusDisplay",
@@ -284,12 +309,15 @@ class _ClassifyThread(_QueueWorker):
             run_state=run_state,
         )
         self.name = "classify-worker"
-        self._survivors_queue = survivors_queue
+        self._judge_queue = judge_queue
         self._extractor = extractor
         self._dedup_store = dedup_store
         self._status_display = status_display
         self._total_batches = total_batches
         self.classify_stats = classify_stats
+
+    def _on_shutdown(self) -> None:
+        self._judge_queue.put(_NO_MORE_JUDGES)
 
     def _process(self, item: object) -> None:
         assert isinstance(item, _ClassifyBatch)
@@ -310,7 +338,8 @@ class _ClassifyThread(_QueueWorker):
             )
             self.classify_stats.classify_cost_usd += classify_usage.cost_usd
         except ClaudeUsageLimitError:
-            raise
+            self._run_state.set_degraded("usage_limit", self.name)
+            return
         except ExtractorError as exc:
             _log.warning("classify_relevance_batch failed: %s", exc)
             parser_log.record(
@@ -336,7 +365,96 @@ class _ClassifyThread(_QueueWorker):
                 self._dedup_store.mark_off_domain(position.stub)
                 self.classify_stats.classifier_dropped += 1
             else:
-                self._survivors_queue.put((position, resolution))
+                self._judge_queue.put(
+                    _JudgeJob(
+                        position=position,
+                        resolution=resolution,
+                        item_id=batch.item_id,
+                    )
+                )
+
+
+# ---------------------------------------------------------------------------
+# Judge thread
+# ---------------------------------------------------------------------------
+
+
+class _JudgeThread(_QueueWorker):
+    def __init__(
+        self,
+        *,
+        judge_queue: queue.Queue[object],
+        extractor: LLMExtractor,
+        results_manager: "ResultsFileManager",
+        dedup_store: DeduplicationStore,
+        status_display: "StatusDisplay",
+        layout: "Layout",
+        judge_stats: "_JudgeStats",
+        run_state: _RunState,
+    ) -> None:
+        super().__init__(
+            input_queue=judge_queue,
+            sentinel=_NO_MORE_JUDGES,
+            stage_name="judge",
+            run_state=run_state,
+        )
+        self.name = "judge-worker"
+        self._extractor = extractor
+        self._results_manager = results_manager
+        self._dedup_store = dedup_store
+        self._status_display = status_display
+        self._layout = layout
+        self.judge_stats = judge_stats
+
+    def _process(self, item: object) -> None:
+        assert isinstance(item, _JudgeJob)
+        job = item
+        try:
+            _t0 = time.monotonic()
+            match_verdict, judge_usage = self._extractor.judge_match(
+                job.resolution.effective, job.position.raw_description
+            )
+            self.judge_stats.judge_total_s += time.monotonic() - _t0
+            self.judge_stats.judge_calls += 1
+            self.judge_stats.judge_input_tokens += judge_usage.input_tokens
+            self.judge_stats.judge_output_tokens += judge_usage.output_tokens
+            self.judge_stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
+            self.judge_stats.judge_cost_usd += judge_usage.cost_usd
+        except ClaudeUsageLimitError:
+            self._run_state.set_degraded("usage_limit", self.name)
+            return
+        except ExtractorError as exc:
+            _log.warning("judge_match failed: %s", exc)
+            parser_log.record(
+                "judge_match",
+                "error",
+                stub_url=job.position.stub.url,
+                error=str(exc),
+            )
+            self.judge_stats.judge_failed += 1
+            self.judge_stats.errored += 1
+            return
+
+        number = self._results_manager.next_position_number()
+        rendered = render(job.position, match_verdict, number, self._layout)
+        self._results_manager.append(rendered)
+        self._dedup_store.mark_kept(job.position.stub)
+        self.judge_stats.written += 1
+        src = job.position.stub.source
+        self.judge_stats.written_per_source[src] = (
+            self.judge_stats.written_per_source.get(src, 0) + 1
+        )
+        if match_verdict.tier == MatchTier.green:
+            self.judge_stats.green += 1
+        elif match_verdict.tier == MatchTier.amber:
+            self.judge_stats.amber += 1
+        else:
+            self.judge_stats.red += 1
+
+        self._status_display.update_body(
+            "judge_match",
+            body=self.judge_stats.body(),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +486,7 @@ def _format_run_divider(
     claude_cache_read_tokens: int,
     claude_cost_usd: float,
     elapsed_s: float,
+    degraded_reason: str | None = None,
 ) -> str:
     parts = [f"run {timestamp}"]
     if tag is not None:
@@ -391,6 +510,8 @@ def _format_run_divider(
             f"elapsed_s={elapsed_s:.1f}",
         ]
     )
+    if degraded_reason is not None:
+        parts.append(f"degraded_reason={degraded_reason}")
     return f"<!-- {' '.join(parts)} -->\n"
 
 
@@ -892,7 +1013,7 @@ def run(
                 _run_started_at,
             )
 
-        # Steps 10-12: Classify on dedicated thread; judge survivors on main thread
+        # Steps 10-12: Classify on dedicated thread; judge on dedicated thread (pipelined)
         # Per-language buffers: de → de; en/other/unknown → en
         de_buffer: list[tuple[Position, LanguageResolution]] = []
         en_buffer: list[tuple[Position, LanguageResolution]] = []
@@ -910,12 +1031,11 @@ def run(
         )
 
         classify_queue: queue.Queue[object] = queue.Queue()
-        survivors_queue: queue.Queue[tuple[Position, LanguageResolution]] = (
-            queue.Queue()
-        )
+        judge_queue: queue.Queue[object] = queue.Queue()
+
         classify_thread = _ClassifyThread(
             classify_queue=classify_queue,
-            survivors_queue=survivors_queue,
+            judge_queue=judge_queue,
             extractor=extractor,
             dedup_store=dedup_store,
             status_display=status_display,
@@ -923,7 +1043,18 @@ def run(
             classify_stats=classify_stats,
             run_state=run_state,
         )
+        judge_thread = _JudgeThread(
+            judge_queue=judge_queue,
+            extractor=extractor,
+            results_manager=results_manager,
+            dedup_store=dedup_store,
+            status_display=status_display,
+            layout=layout,
+            judge_stats=judge_stats,
+            run_state=run_state,
+        )
         classify_thread.start()
+        judge_thread.start()
 
         batch_id = 0
         for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
@@ -947,74 +1078,22 @@ def run(
                 )
                 batch_id += 1
         classify_queue.put(_NO_MORE_BATCHES)
+
+        # Sentinel cascade: classify drains → forwards _NO_MORE_JUDGES → judge drains → exits
         classify_thread.join()
+        judge_thread.join()
 
         if classify_thread.exc is not None:
             raise classify_thread.exc
+        if judge_thread.exc is not None:
+            raise judge_thread.exc
 
         judge_stats.errored += classify_stats.items_errored
 
-        # Drain survivors and judge each synchronously on main thread
-        try:
-            while True:
-                try:
-                    position, resolution = survivors_queue.get_nowait()
-                except queue.Empty:
-                    break
-
-                try:
-                    _t0 = time.monotonic()
-                    match_verdict, judge_usage = extractor.judge_match(
-                        resolution.effective, position.raw_description
-                    )
-                    judge_stats.judge_total_s += time.monotonic() - _t0
-                    judge_stats.judge_calls += 1
-                    judge_stats.judge_input_tokens += judge_usage.input_tokens
-                    judge_stats.judge_output_tokens += judge_usage.output_tokens
-                    judge_stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
-                    judge_stats.judge_cost_usd += judge_usage.cost_usd
-                except ClaudeUsageLimitError:
-                    raise
-                except ExtractorError as exc:
-                    _log.warning("judge_match failed: %s", exc)
-                    parser_log.record(
-                        "judge_match",
-                        "error",
-                        stub_url=position.stub.url,
-                        error=str(exc),
-                    )
-                    judge_stats.judge_failed += 1
-                    judge_stats.errored += 1
-                    continue
-
-                current_stage.set("results_write")
-                number = results_manager.next_position_number()
-                rendered = render(position, match_verdict, number, layout)
-                results_manager.append(rendered)
-                dedup_store.mark_kept(position.stub)
-                judge_stats.written += 1
-                src = position.stub.source
-                judge_stats.written_per_source[src] = (
-                    judge_stats.written_per_source.get(src, 0) + 1
-                )
-                if match_verdict.tier == MatchTier.green:
-                    judge_stats.green += 1
-                elif match_verdict.tier == MatchTier.amber:
-                    judge_stats.amber += 1
-                else:
-                    judge_stats.red += 1
-
-                status_display.update_body(
-                    "judge_match",
-                    body=judge_stats.body(),
-                )
-                status_display.update_body(
-                    "pipeline",
-                    body=f"discovered={discovered} written={judge_stats.written} errors={enrich_failed + parsers_dead + judge_stats.errored}",
-                )
-        except ClaudeUsageLimitError as exc:
-            run_state.set_aborted(exc)
-            raise
+        status_display.update_body(
+            "pipeline",
+            body=f"discovered={discovered} written={judge_stats.written} errors={enrich_failed + parsers_dead + judge_stats.errored}",
+        )
 
         # Emit per-call-site SUMMARY OF SESSION trailers
         parser_log.summarize(
@@ -1080,6 +1159,7 @@ def run(
             claude_cache_read_tokens=claude_cache_read_tokens,
             claude_cost_usd=claude_cost_usd,
             elapsed_s=elapsed_s,
+            degraded_reason=run_state.degraded_reason,
         )
         try:
             results_manager.append(divider)

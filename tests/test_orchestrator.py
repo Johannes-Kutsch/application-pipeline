@@ -1562,10 +1562,8 @@ def test_fatal_error_writes_failure_report_and_exits_one(
     assert "startup failed" in body  # log tail captured before exception propagated
 
 
-def test_results_write_stage_label_on_append_failure(tmp_path: Path) -> None:
-    """ResultsFileError in step 12 → current_stage set to 'results_write'."""
-    from application_pipeline.orchestrator import current_stage
-
+def test_results_write_error_propagates_from_run(tmp_path: Path) -> None:
+    """ResultsFileError from append in judge worker propagates from run()."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -1579,20 +1577,14 @@ def test_results_write_stage_label_on_append_failure(tmp_path: Path) -> None:
     crashing_rm.next_position_number.return_value = 1
     crashing_rm.append.side_effect = ResultsFileError("disk full")
 
-    token = current_stage.set("orchestrator")
-    try:
-        with pytest.raises(ResultsFileError):
-            run(
-                config_path,
-                extractor=_FakeExtractor(),
-                parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
-                dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-                results_manager=crashing_rm,
-            )
-
-        assert current_stage.get() == "results_write"
-    finally:
-        current_stage.reset(token)
+    with pytest.raises(ResultsFileError):
+        run(
+            config_path,
+            extractor=_FakeExtractor(),
+            parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            results_manager=crashing_rm,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2382,43 +2374,52 @@ def test_batch_malformed_logs_to_classify_relevance_log(tmp_path: Path) -> None:
     assert "batch_error" in content
 
 
-def test_claude_usage_limit_error_propagates_from_run(tmp_path: Path) -> None:
-    """ClaudeUsageLimitError during classify propagates from run(); in-flight items remain unmarked."""
+def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
+    """ClaudeUsageLimitError during classify → run completes, degraded_reason in divider, items unmarked."""
     seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
 
-    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+    def _batch(
+        lang: str, items: list[ClassifyItem]
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
         raise ClaudeUsageLimitError("subscription cap")
 
     ext = MagicMock()
     ext.prewarm.return_value = None
     ext.classify_relevance_batch.side_effect = _batch
 
-    with pytest.raises(ClaudeUsageLimitError):
-        run(
-            _two_stub_config(tmp_path),
-            extractor=ext,
-            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
-            dedup_store=dedup_module.load(seen_path),
-            results_manager=_stub_results_manager(),
-        )
+    summary = run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
 
+    # Run completes successfully with zero written
+    assert summary.written == 0
+
+    # In-flight items (the batch that hit the limit) remain unmarked
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    # No items must be marked seen (they were in-flight when abort happened)
     assert all(url not in seen_data for url in _ERR_URLS[:2])
 
+    # Run Divider records degraded_reason=usage_limit
+    content = results_path.read_text(encoding="utf-8")
+    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "degraded_reason=usage_limit" in last_line, (
+        f"expected degraded_reason in divider: {last_line!r}"
+    )
 
-def test_claude_usage_limit_error_writes_failure_report_and_exits_one(
+
+def test_claude_usage_limit_error_exits_zero_no_failure_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ClaudeUsageLimitError during classify → failure report written, exit 1."""
+    """ClaudeUsageLimitError during classify → run degrades, exits 0, NO failure report written."""
     monkeypatch.chdir(tmp_path)
     config_path = _write_config(tmp_path)
     monkeypatch.setattr("sys.argv", ["app", str(config_path)])
-
-    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
-        raise ClaudeUsageLimitError("subscription cap")
 
     class _UsageLimitExtractor:
         def prewarm(self) -> None:
@@ -2441,7 +2442,6 @@ def test_claude_usage_limit_error_writes_failure_report_and_exits_one(
 
     from application_pipeline.__main__ import main
 
-    # Need a parser that produces at least one position so classify_relevance_batch is called
     class _OneStubParser:
         def __enter__(self) -> "_OneStubParser":
             return self
@@ -2467,14 +2467,15 @@ def test_claude_usage_limit_error_writes_failure_report_and_exits_one(
         type("_Reg", (), {"get": staticmethod(lambda _: _OneStubParser)})(),
     )
 
-    with pytest.raises(SystemExit) as exc_info:
-        main()
+    # Degraded run exits 0 (not 1)
+    main()
 
-    assert exc_info.value.code == 1
-
+    # No failure report written
     failures_dir = tmp_path / "failures"
-    reports = list(failures_dir.glob("*.md"))
-    assert len(reports) == 1, f"expected one failure report, got {reports}"
+    reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
+    assert len(reports) == 0, (
+        f"expected no failure report on usage limit, got {reports}"
+    )
 
 
 # ---------------------------------------------------------------------------

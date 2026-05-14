@@ -2098,6 +2098,73 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
     assert batch_sizes_seen == [2, 2]
 
 
+def test_classify_thread_two_language_three_batch_happy_path(tmp_path: Path) -> None:
+    """_ClassifyThread happy path: 2 de + 4 en survivors, batch_size=2 → 3 batches total.
+
+    All positions are in-domain and judged green.  Asserts set-equality on the
+    URLs that appear in current.md and on the 'kept' members of .seen.json.
+    """
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+
+    _DE_DESCRIPTION = (
+        "Wir suchen einen erfahrenen Softwareentwickler für unser Team. "
+        "Das Unternehmen bietet interessante Projekte und eine gute Bezahlung."
+    )
+    _DE_URLS = [f"https://ct3b.example/de/{i}" for i in range(2)]
+    _EN_URLS = [f"https://ct3b.example/en/{i}" for i in range(4)]
+    _ALL_URLS = set(_DE_URLS + _EN_URLS)
+
+    class _TwoLangSixStubParser:
+        def __enter__(self) -> "_TwoLangSixStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            stubs = []
+            for url in _DE_URLS:
+                stubs.append(
+                    PositionStub(url=url, title=f"Entwickler {url}", source="s")
+                )
+            for url in _EN_URLS:
+                stubs.append(
+                    PositionStub(
+                        url=url, title=f"Engineer {url}", source="s", language="en"
+                    )
+                )
+            return stubs
+
+        def enrich(self, stub: PositionStub) -> Position:
+            if "de" in stub.url:
+                return Position(stub=stub, raw_description=_DE_DESCRIPTION)
+            return Position(stub=stub, raw_description="Software engineering role.")
+
+    summary = run(
+        _batch_size_config(tmp_path, 2),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TwoLangSixStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    # 2 de + 4 en → 3 batches (1 de + 2 en)
+    assert summary.written == 6
+    assert summary.classify_items == 6
+    assert summary.classifier_dropped == 0
+
+    # .seen.json: all 6 URLs kept
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    kept_urls = {url for url, rec in seen_data.items() if rec["status"] == "kept"}
+    assert kept_urls == _ALL_URLS
+
+    # current.md: all 6 URLs appear in rendered content
+    content = results_path.read_text(encoding="utf-8")
+    urls_in_content = {url for url in _ALL_URLS if url in content}
+    assert urls_in_content == _ALL_URLS
+
+
 def test_language_routing_de_and_en_buffers(tmp_path: Path) -> None:
     """German positions go to de classify call, English positions go to en classify call."""
     lang_batches: dict[str, list[int]] = {}

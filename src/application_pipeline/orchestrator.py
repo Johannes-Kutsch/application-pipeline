@@ -130,6 +130,64 @@ _QUERY_DONE = _QueryDone()
 
 
 # ---------------------------------------------------------------------------
+# Classify queue protocol
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _ClassifyBatch:
+    language: str
+    positions: list[tuple["Position", "LanguageResolution"]]
+    item_id: str
+    remaining_en: int
+    remaining_de: int
+
+
+class _NoMoreBatches:
+    __slots__ = ()
+
+
+_NO_MORE_BATCHES = _NoMoreBatches()
+
+
+# ---------------------------------------------------------------------------
+# Queue worker base class
+# ---------------------------------------------------------------------------
+
+
+class _QueueWorker(threading.Thread):
+    def __init__(
+        self,
+        *,
+        input_queue: queue.Queue[object],
+        sentinel: object,
+        stage_name: str,
+        run_state: "_RunState",
+    ) -> None:
+        super().__init__(daemon=True)
+        self._input_queue = input_queue
+        self._sentinel = sentinel
+        self._stage_name = stage_name
+        self._run_state = run_state
+        self.exc: BaseException | None = None
+
+    def run(self) -> None:
+        current_stage.set(self._stage_name)
+        try:
+            while True:
+                item = self._input_queue.get()
+                if item is self._sentinel:
+                    break
+                self._process(item)
+        except BaseException as exc:
+            self.exc = exc
+            self._run_state.set_aborted(exc)
+
+    def _process(self, item: object) -> None:
+        raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
 # Parser thread — pure producer
 # ---------------------------------------------------------------------------
 
@@ -199,6 +257,86 @@ class _ParserThread(threading.Thread):
             )
         else:
             self._outbound.put((self._parser_id, _PARSER_DONE))
+
+
+# ---------------------------------------------------------------------------
+# Classify thread
+# ---------------------------------------------------------------------------
+
+
+class _ClassifyThread(_QueueWorker):
+    def __init__(
+        self,
+        *,
+        classify_queue: queue.Queue[object],
+        survivors_queue: "queue.Queue[tuple[Position, LanguageResolution]]",
+        extractor: LLMExtractor,
+        dedup_store: DeduplicationStore,
+        status_display: "StatusDisplay",
+        total_batches: int,
+        classify_stats: "_ClassifyStats",
+        run_state: _RunState,
+    ) -> None:
+        super().__init__(
+            input_queue=classify_queue,
+            sentinel=_NO_MORE_BATCHES,
+            stage_name="classify",
+            run_state=run_state,
+        )
+        self.name = "classify-worker"
+        self._survivors_queue = survivors_queue
+        self._extractor = extractor
+        self._dedup_store = dedup_store
+        self._status_display = status_display
+        self._total_batches = total_batches
+        self.classify_stats = classify_stats
+
+    def _process(self, item: object) -> None:
+        assert isinstance(item, _ClassifyBatch)
+        batch = item
+        items = _make_classify_items(batch.positions)
+        try:
+            _t0 = time.monotonic()
+            verdicts, classify_usage = self._extractor.classify_relevance_batch(
+                batch.language, items
+            )
+            self.classify_stats.classify_total_s += time.monotonic() - _t0
+            self.classify_stats.classify_calls += 1
+            self.classify_stats.classify_items += len(items)
+            self.classify_stats.classify_input_tokens += classify_usage.input_tokens
+            self.classify_stats.classify_output_tokens += classify_usage.output_tokens
+            self.classify_stats.classify_cache_read_tokens += (
+                classify_usage.cache_read_tokens
+            )
+            self.classify_stats.classify_cost_usd += classify_usage.cost_usd
+        except ClaudeUsageLimitError:
+            raise
+        except ExtractorError as exc:
+            _log.warning("classify_relevance_batch failed: %s", exc)
+            parser_log.record(
+                "classify_relevance",
+                "batch_error",
+                language=batch.language,
+                batch_size=len(batch.positions),
+                error=str(exc),
+            )
+            self.classify_stats.classify_failed += 1
+            self.classify_stats.items_errored += len(batch.positions)
+            return
+
+        self._status_display.update_body(
+            "classify_relevance",
+            body=self.classify_stats.body(
+                self._total_batches, batch.remaining_en, batch.remaining_de
+            ),
+        )
+
+        for verdict, (position, resolution) in zip(verdicts, batch.positions):
+            if not verdict.in_domain:
+                self._dedup_store.mark_off_domain(position.stub)
+                self.classify_stats.classifier_dropped += 1
+            else:
+                self._survivors_queue.put((position, resolution))
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +445,7 @@ class _ClassifyStats:
     classify_cache_read_tokens: int = 0
     classify_cost_usd: float = 0.0
     classifier_dropped: int = 0
+    items_errored: int = 0
 
     def body(self, total_batches: int, remaining_en: int, remaining_de: int) -> str:
         queue_total = remaining_en + remaining_de
@@ -381,107 +520,6 @@ def _make_classify_items(
         )
         for idx, (pos, _) in enumerate(batch)
     ]
-
-
-def _process_batch(
-    batch: list[tuple[Position, LanguageResolution]],
-    language: str,
-    extractor: LLMExtractor,
-    dedup_store: DeduplicationStore,
-    results_manager: ResultsFileManager,
-    layout: Layout,
-    classify_stats: _ClassifyStats,
-    judge_stats: _JudgeStats,
-    *,
-    status_display: StatusDisplay,
-    total_batches: int,
-    remaining_en: int,
-    remaining_de: int,
-) -> None:
-    """Classify a batch, then pipeline judge → write for each in-domain survivor."""
-    items = _make_classify_items(batch)
-    try:
-        _t0 = time.monotonic()
-        verdicts, classify_usage = extractor.classify_relevance_batch(language, items)
-        classify_stats.classify_total_s += time.monotonic() - _t0
-        classify_stats.classify_calls += 1
-        classify_stats.classify_items += len(items)
-        classify_stats.classify_input_tokens += classify_usage.input_tokens
-        classify_stats.classify_output_tokens += classify_usage.output_tokens
-        classify_stats.classify_cache_read_tokens += classify_usage.cache_read_tokens
-        classify_stats.classify_cost_usd += classify_usage.cost_usd
-    except ClaudeUsageLimitError:
-        raise
-    except ExtractorError as exc:
-        _log.warning("classify_relevance_batch failed: %s", exc)
-        parser_log.record(
-            "classify_relevance",
-            "batch_error",
-            language=language,
-            batch_size=len(batch),
-            error=str(exc),
-        )
-        classify_stats.classify_failed += 1
-        judge_stats.errored += len(batch)
-        return
-
-    status_display.update_body(
-        "classify_relevance",
-        body=classify_stats.body(total_batches, remaining_en, remaining_de),
-    )
-
-    for verdict, (position, resolution) in zip(verdicts, batch):
-        if not verdict.in_domain:
-            dedup_store.mark_off_domain(position.stub)
-            classify_stats.classifier_dropped += 1
-            continue
-
-        try:
-            _t0 = time.monotonic()
-            match_verdict, judge_usage = extractor.judge_match(
-                resolution.effective, position.raw_description
-            )
-            judge_stats.judge_total_s += time.monotonic() - _t0
-            judge_stats.judge_calls += 1
-            judge_stats.judge_input_tokens += judge_usage.input_tokens
-            judge_stats.judge_output_tokens += judge_usage.output_tokens
-            judge_stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
-            judge_stats.judge_cost_usd += judge_usage.cost_usd
-        except ClaudeUsageLimitError:
-            raise
-        except ExtractorError as exc:
-            _log.warning("judge_match failed: %s", exc)
-            parser_log.record(
-                "judge_match",
-                "error",
-                stub_url=position.stub.url,
-                error=str(exc),
-            )
-            judge_stats.judge_failed += 1
-            judge_stats.errored += 1
-            continue
-
-        current_stage.set("results_write")
-        number = results_manager.next_position_number()
-        rendered = render(position, match_verdict, number, layout)
-        results_manager.append(rendered)
-        dedup_store.mark_kept(position.stub)
-        judge_stats.written += 1
-        src = position.stub.source
-        judge_stats.written_per_source[src] = (
-            judge_stats.written_per_source.get(src, 0) + 1
-        )
-        if match_verdict.tier == MatchTier.green:
-            judge_stats.green += 1
-        elif match_verdict.tier == MatchTier.amber:
-            judge_stats.amber += 1
-        else:
-            judge_stats.red += 1
-
-        status_display.update_body(
-            "judge_match",
-            body=judge_stats.body(),
-        )
 
 
 def _make_parser_body(
@@ -854,9 +892,8 @@ def run(
                 _run_started_at,
             )
 
-        # Steps 10-12: Batched classify → judge survivors → append+fsync+mark-seen
+        # Steps 10-12: Classify on dedicated thread; judge survivors on main thread
         # Per-language buffers: de → de; en/other/unknown → en
-        current_stage.set("classify")
         de_buffer: list[tuple[Position, LanguageResolution]] = []
         en_buffer: list[tuple[Position, LanguageResolution]] = []
         for position, resolution in survivors:
@@ -872,35 +909,109 @@ def run(
             (len(buf) + batch_size - 1) // batch_size for buf in (de_buffer, en_buffer)
         )
 
-        try:
-            for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
-                for i in range(0, len(lang_buffer), batch_size):
-                    batch = lang_buffer[i : i + batch_size]
-                    sent_in_lang = i + len(batch)
-                    rem_de = len(de_buffer) - sent_in_lang if lang_str == "de" else 0
-                    rem_en = (
-                        len(en_buffer) - sent_in_lang
-                        if lang_str == "en"
-                        else len(en_buffer)
-                    )
-                    _process_batch(
-                        batch,
-                        lang_str,
-                        extractor,
-                        dedup_store,
-                        results_manager,
-                        layout,
-                        classify_stats,
-                        judge_stats,
-                        status_display=status_display,
-                        total_batches=total_batches,
+        classify_queue: queue.Queue[object] = queue.Queue()
+        survivors_queue: queue.Queue[tuple[Position, LanguageResolution]] = (
+            queue.Queue()
+        )
+        classify_thread = _ClassifyThread(
+            classify_queue=classify_queue,
+            survivors_queue=survivors_queue,
+            extractor=extractor,
+            dedup_store=dedup_store,
+            status_display=status_display,
+            total_batches=total_batches,
+            classify_stats=classify_stats,
+            run_state=run_state,
+        )
+        classify_thread.start()
+
+        batch_id = 0
+        for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
+            for i in range(0, len(lang_buffer), batch_size):
+                batch = lang_buffer[i : i + batch_size]
+                sent_in_lang = i + len(batch)
+                rem_de = len(de_buffer) - sent_in_lang if lang_str == "de" else 0
+                rem_en = (
+                    len(en_buffer) - sent_in_lang
+                    if lang_str == "en"
+                    else len(en_buffer)
+                )
+                classify_queue.put(
+                    _ClassifyBatch(
+                        language=lang_str,
+                        positions=batch,
+                        item_id=str(batch_id),
                         remaining_en=rem_en,
                         remaining_de=rem_de,
                     )
-                    status_display.update_body(
-                        "pipeline",
-                        body=f"discovered={discovered} written={judge_stats.written} errors={enrich_failed + parsers_dead + judge_stats.errored}",
+                )
+                batch_id += 1
+        classify_queue.put(_NO_MORE_BATCHES)
+        classify_thread.join()
+
+        if classify_thread.exc is not None:
+            raise classify_thread.exc
+
+        judge_stats.errored += classify_stats.items_errored
+
+        # Drain survivors and judge each synchronously on main thread
+        try:
+            while True:
+                try:
+                    position, resolution = survivors_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                try:
+                    _t0 = time.monotonic()
+                    match_verdict, judge_usage = extractor.judge_match(
+                        resolution.effective, position.raw_description
                     )
+                    judge_stats.judge_total_s += time.monotonic() - _t0
+                    judge_stats.judge_calls += 1
+                    judge_stats.judge_input_tokens += judge_usage.input_tokens
+                    judge_stats.judge_output_tokens += judge_usage.output_tokens
+                    judge_stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
+                    judge_stats.judge_cost_usd += judge_usage.cost_usd
+                except ClaudeUsageLimitError:
+                    raise
+                except ExtractorError as exc:
+                    _log.warning("judge_match failed: %s", exc)
+                    parser_log.record(
+                        "judge_match",
+                        "error",
+                        stub_url=position.stub.url,
+                        error=str(exc),
+                    )
+                    judge_stats.judge_failed += 1
+                    judge_stats.errored += 1
+                    continue
+
+                current_stage.set("results_write")
+                number = results_manager.next_position_number()
+                rendered = render(position, match_verdict, number, layout)
+                results_manager.append(rendered)
+                dedup_store.mark_kept(position.stub)
+                judge_stats.written += 1
+                src = position.stub.source
+                judge_stats.written_per_source[src] = (
+                    judge_stats.written_per_source.get(src, 0) + 1
+                )
+                if match_verdict.tier == MatchTier.green:
+                    judge_stats.green += 1
+                elif match_verdict.tier == MatchTier.amber:
+                    judge_stats.amber += 1
+                else:
+                    judge_stats.red += 1
+
+                status_display.update_body(
+                    "judge_match",
+                    body=judge_stats.body(),
+                )
+                status_display.update_body(
+                    "pipeline",
+                    body=f"discovered={discovered} written={judge_stats.written} errors={enrich_failed + parsers_dead + judge_stats.errored}",
+                )
         except ClaudeUsageLimitError as exc:
             run_state.set_aborted(exc)
             raise

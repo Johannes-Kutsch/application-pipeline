@@ -3306,3 +3306,108 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
     assert not any(
         c.method == "remove" and c.name == "judge_match" for c in display.calls
     ), "judge_match row must not be removed during run"
+
+
+# ---------------------------------------------------------------------------
+# Stuck-thread watchdog
+# ---------------------------------------------------------------------------
+
+
+def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
+    """Parser that sleeps past the stall threshold emits 'stalled' + stack trace in its log."""
+    import time
+
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    _THRESHOLD = 0.05  # 50 ms — fast enough for tests
+
+    class _SleepyParser:
+        def __enter__(self) -> "_SleepyParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            time.sleep(_THRESHOLD * 4)  # sleep well past threshold
+            return []
+
+        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
+            raise NotImplementedError
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _SleepyParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        stall_threshold_s=_THRESHOLD,
+    )
+
+    log_file = logs_dir / "bundesagentur_api.log"
+    assert log_file.exists(), "parser log file must be created"
+    content = log_file.read_text(encoding="utf-8")
+
+    assert "stalled" in content, "stalled event must appear in parser log"
+    assert "traceback" in content, "stack trace header must appear in parser log"
+    assert "File " in content, "stack frame lines must appear in parser log"
+
+
+def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
+    """Stall is logged at most once per silence period — not on every poll tick."""
+    import time
+
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    _THRESHOLD = 0.05
+
+    class _LongSleepParser:
+        def __enter__(self) -> "_LongSleepParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            time.sleep(_THRESHOLD * 8)  # sleep for multiple poll ticks
+            return []
+
+        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
+            raise NotImplementedError
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _LongSleepParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        stall_threshold_s=_THRESHOLD,
+    )
+
+    log_file = logs_dir / "bundesagentur_api.log"
+    content = log_file.read_text(encoding="utf-8")
+
+    stalled_count = content.count(" stalled ")
+    assert stalled_count == 1, f"expected exactly 1 stalled entry, got {stalled_count}"

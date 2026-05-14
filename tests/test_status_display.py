@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import logging
+import threading
+import unittest.mock
 from pathlib import Path
 
 import pytest
 
 import application_pipeline.parser_log as _parser_log
-from application_pipeline.status_display import PlainStatusDisplay, _LiveLoggingHandler
+from application_pipeline.status_display import (
+    PlainStatusDisplay,
+    RichStatusDisplay,
+    _LiveLoggingHandler,
+)
 from fake_status_display import FakeStatusDisplay
 
 
@@ -180,3 +186,81 @@ def test_log_warning_forwarded_to_display_print_during_active_session() -> None:
         assert print_calls[0].name == "application_pipeline.orchestrator"
     finally:
         root.removeHandler(handler)
+
+
+# ---------------------------------------------------------------------------
+# Thread safety
+# ---------------------------------------------------------------------------
+
+
+def test_plain_concurrent_phase_updates_produce_complete_lines(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    display = PlainStatusDisplay()
+    n = 20
+    for i in range(n):
+        display.register(f"parser-{i}", order=i, phase="starting")
+    capsys.readouterr()
+
+    barrier = threading.Barrier(n)
+
+    def flip(name: str) -> None:
+        barrier.wait()
+        display.update_phase(name, phase="done")
+
+    threads = [threading.Thread(target=flip, args=(f"parser-{i}",)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert len(lines) == n
+    for line in lines:
+        assert line.endswith("phase=done")
+
+
+@pytest.fixture
+def rich_display():
+    with unittest.mock.patch("rich.live.Live") as mock_live_cls:
+        mock_live_cls.return_value.console = unittest.mock.MagicMock()
+        display = RichStatusDisplay()
+        yield display
+        display.stop()
+
+
+def test_rich_survives_concurrent_access(rich_display: RichStatusDisplay) -> None:
+    n = 20
+    for i in range(n):
+        rich_display.register(f"parser-{i}", order=i, phase="starting")
+
+    barrier = threading.Barrier(n)
+    errors: list[Exception] = []
+
+    def worker(name: str) -> None:
+        try:
+            barrier.wait()
+            rich_display.update_phase(name, phase="running")
+            rich_display.update_body(name, body="discovered=1")
+            rich_display.update_phase(name, phase="done")
+            rich_display.remove(name)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(f"parser-{i}",)) for i in range(n)]
+    # also run register calls from extra threads to stress concurrent mutation
+    threads += [
+        threading.Thread(
+            target=rich_display.update_body,
+            args=(f"parser-{i % n}",),
+            kwargs={"body": "stress"},
+        )
+        for i in range(n * 2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []

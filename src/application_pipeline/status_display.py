@@ -34,29 +34,33 @@ class _RowState:
 
 class PlainStatusDisplay:
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._phases: dict[str, str] = {}
 
     def register(
         self, name: str, *, order: int, phase: str = "starting", body: str = ""
     ) -> None:
-        self._phases[name] = phase
-        parser_log.record(name, "registered", order=order, phase=phase)
-        print(f"{name}: registered order={order} phase={phase}")
+        with self._lock:
+            self._phases[name] = phase
+            parser_log.record(name, "registered", order=order, phase=phase)
+            print(f"{name}: registered order={order} phase={phase}")
 
     def update_phase(self, name: str, *, phase: str) -> None:
-        if self._phases.get(name) == phase:
-            return
-        self._phases[name] = phase
-        parser_log.record(name, "phase_changed", phase=phase)
-        print(f"{name}: phase={phase}")
+        with self._lock:
+            if self._phases.get(name) == phase:
+                return
+            self._phases[name] = phase
+            parser_log.record(name, "phase_changed", phase=phase)
+            print(f"{name}: phase={phase}")
 
     def update_body(self, name: str, *, body: str) -> None:
         pass
 
     def remove(self, name: str) -> None:
-        self._phases.pop(name, None)
-        parser_log.record(name, "removed")
-        print(f"{name}: removed")
+        with self._lock:
+            self._phases.pop(name, None)
+            parser_log.record(name, "removed")
+            print(f"{name}: removed")
 
     def print(self, *, caller: str, message: str) -> None:
         pass

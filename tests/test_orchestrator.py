@@ -2802,3 +2802,226 @@ def test_startup_row_visible_on_prewarm_failure(tmp_path: Path) -> None:
     assert not any(c.method == "remove" and c.name == "startup" for c in display.calls)
     startup_bodies = display.body_updates_for("startup")
     assert startup_bodies and "prewarm" in startup_bodies[-1]
+
+
+# ---------------------------------------------------------------------------
+# StatusDisplay — per-parser rows (issue #197)
+# ---------------------------------------------------------------------------
+
+
+def test_parser_row_registered_per_parser(tmp_path: Path) -> None:
+    """One status display row is registered per parser, with order >= 2."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    assert "bundesagentur_api" in display.registered_names()
+    reg = next(
+        c
+        for c in display.calls
+        if c.method == "register" and c.name == "bundesagentur_api"
+    )
+    assert reg.kwargs["order"] >= 2
+
+
+def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
+    """Parser row is registered after pipeline and startup rows."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    indexed = [(i, c.method, c.name) for i, c in enumerate(display.calls)]
+    startup_reg_idx = next(
+        i for i, m, n in indexed if m == "register" and n == "startup"
+    )
+    parser_reg_idx = next(
+        i for i, m, n in indexed if m == "register" and n == "bundesagentur_api"
+    )
+    assert parser_reg_idx > startup_reg_idx
+
+
+def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
+    """Parser row body gains '· done' suffix when parser completes; row is not removed."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("bundesagentur_api")
+    assert bodies, "expected at least one body update for parser row"
+    assert bodies[-1].endswith("· done"), (
+        f"last body {bodies[-1]!r} must end with '· done'"
+    )
+    assert not any(
+        c.method == "remove" and c.name == "bundesagentur_api" for c in display.calls
+    ), "parser row must not be removed during run"
+
+
+def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
+    """Parser row body contains queries/total, stubs, and enriched counts."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("bundesagentur_api")
+    # Last body before "done" should have format: "X/Y queries · N stubs · M enriched · done"
+    final = bodies[-1]
+    assert "queries" in final
+    assert "stubs" in final
+    assert "enriched" in final
+    # _StubParser returns 3 stubs per call; 1 keyword × 1 location = 1 query → 3 stubs, 3 enriched
+    assert final.startswith("1/1 queries · 3 stubs · 3 enriched")
+
+
+def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
+    """Parser row body gains '· dead' suffix when parser thread crashes."""
+
+    class _DeadParserForRow:
+        def __enter__(self) -> "_DeadParserForRow":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            raise RuntimeError("intentional crash")
+            yield  # pragma: no cover
+
+        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
+            raise NotImplementedError
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _DeadParserForRow,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("bundesagentur_api")
+    assert bodies, "expected at least one body update for dead parser row"
+    assert bodies[-1].endswith("· dead"), (
+        f"last body {bodies[-1]!r} must end with '· dead'"
+    )
+    assert not any(
+        c.method == "remove" and c.name == "bundesagentur_api" for c in display.calls
+    ), "dead parser row must not be removed"
+
+
+def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
+    """Multiple parsers each get their own row with distinct order values."""
+
+    class _EmptyParser:
+        def __enter__(self) -> "_EmptyParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return []
+
+        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
+            raise NotImplementedError
+
+    # Use two real parser_type names so location coverage validation passes
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api"), SourceEntry(parser_type="stellen_hamburg_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _EmptyParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    registered = display.registered_names()
+    assert "bundesagentur_api" in registered
+    assert "stellen_hamburg_api" in registered
+
+    order_a = next(
+        c.kwargs["order"]
+        for c in display.calls
+        if c.method == "register" and c.name == "bundesagentur_api"
+    )
+    order_b = next(
+        c.kwargs["order"]
+        for c in display.calls
+        if c.method == "register" and c.name == "stellen_hamburg_api"
+    )
+    assert order_a >= 2
+    assert order_b >= 2
+    assert order_a != order_b

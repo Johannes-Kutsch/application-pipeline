@@ -89,6 +89,13 @@ _SKIP = _Skip()
 _SKIP_AND_END_QUERY = _SkipAndEndQuery()
 
 
+class _QueryDone:
+    __slots__ = ()
+
+
+_QUERY_DONE = _QueryDone()
+
+
 # ---------------------------------------------------------------------------
 # Parser thread — pure producer
 # ---------------------------------------------------------------------------
@@ -133,6 +140,7 @@ class _ParserThread(threading.Thread):
                     close = getattr(gen, "close", None)
                     if close is not None:
                         close()
+                self._outbound.put((self._parser_id, _QUERY_DONE))
         except BaseException as exc:
             self._outbound.put(
                 (self._parser_id, _ParserDead(exc, traceback.format_exc()))
@@ -358,6 +366,14 @@ def _process_batch(
             stats.red += 1
 
 
+def _make_parser_body(
+    queries_done: int, total_queries: int, stubs: int, enriched: int
+) -> str:
+    return (
+        f"{queries_done}/{total_queries} queries · {stubs} stubs · {enriched} enriched"
+    )
+
+
 def run(
     config_path: Path,
     *,
@@ -474,6 +490,7 @@ def run(
 
             parser_inbound: dict[str, queue.Queue[object]] = {}
             parser_thresholds: dict[str, int] = {}
+            total_queries_per_parser: dict[str, int] = {}
             threads: list[tuple[str, _ParserThread]] = []
 
             for parser, source in parsers_list:
@@ -490,15 +507,22 @@ def run(
                     for kw in cfg.keywords
                     for loc in locations
                 ]
+                total_queries_per_parser[parser_id] = len(worklist)
                 t = _ParserThread(parser_id, parser, worklist, outbound, inbound)
                 threads.append((parser_id, t))
 
             parser_starts: dict[str, tuple[datetime, float]] = {}
-            for pid, t in threads:
+            for i, (pid, t) in enumerate(threads):
                 t.start()
                 parser_starts[pid] = (datetime.now(timezone.utc), time.monotonic())
                 _log.info("parser %s started", pid)
                 parser_log.record(pid, "parser started")
+                status_display.register(
+                    pid,
+                    order=2 + i,
+                    phase="running",
+                    body=_make_parser_body(0, total_queries_per_parser[pid], 0, 0),
+                )
 
             status_display.remove("startup")
 
@@ -511,6 +535,8 @@ def run(
             not_served_per_parser: dict[str, int] = defaultdict(int)
             parsers_dead_per_parser: dict[str, int] = defaultdict(int)
             unparseable_dates_per_parser: dict[str, int] = defaultdict(int)
+            enriched_per_parser: dict[str, int] = defaultdict(int)
+            queries_done_per_parser: dict[str, int] = defaultdict(int)
 
             while parsers_remaining:
                 pid, payload = outbound.get()
@@ -545,12 +571,22 @@ def run(
                         "pipeline",
                         body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
                     )
+                    status_display.update_body(
+                        pid,
+                        body=_make_parser_body(
+                            queries_done_per_parser[pid],
+                            total_queries_per_parser[pid],
+                            discovered_per_parser[pid],
+                            enriched_per_parser[pid],
+                        ),
+                    )
 
                 elif isinstance(payload, Position):
                     for warning in payload._warnings:
                         parser_log.record(pid, warning)
                         if warning.startswith("unparseable_date"):
                             unparseable_dates_per_parser[pid] += 1
+                    enriched_per_parser[pid] += 1
                     resolution = resolve_language(payload)
                     if resolution.detected not in ("de", "en"):
                         parser_log.record(
@@ -580,6 +616,15 @@ def run(
                     else:
                         dedup_store.mark_seen(payload.stub, "off_domain")
                         prefilter_dropped += 1
+                    status_display.update_body(
+                        pid,
+                        body=_make_parser_body(
+                            queries_done_per_parser[pid],
+                            total_queries_per_parser[pid],
+                            discovered_per_parser[pid],
+                            enriched_per_parser[pid],
+                        ),
+                    )
 
                 elif isinstance(payload, ParserError):
                     stub = _pending_enrich.pop(pid, None)
@@ -615,14 +660,46 @@ def run(
                 elif isinstance(payload, NotServedQuery):
                     not_served_per_parser[pid] += 1
 
+                elif payload is _QUERY_DONE:
+                    queries_done_per_parser[pid] += 1
+                    status_display.update_body(
+                        pid,
+                        body=_make_parser_body(
+                            queries_done_per_parser[pid],
+                            total_queries_per_parser[pid],
+                            discovered_per_parser[pid],
+                            enriched_per_parser[pid],
+                        ),
+                    )
+
                 elif payload is _PARSER_DONE:
                     parsers_remaining.discard(pid)
+                    status_display.update_body(
+                        pid,
+                        body=_make_parser_body(
+                            queries_done_per_parser[pid],
+                            total_queries_per_parser[pid],
+                            discovered_per_parser[pid],
+                            enriched_per_parser[pid],
+                        )
+                        + " · done",
+                    )
 
                 elif isinstance(payload, _ParserDead):
                     parser_log.record_traceback(pid, payload.traceback_str)
                     parsers_dead += 1
                     parsers_dead_per_parser[pid] += 1
                     parsers_remaining.discard(pid)
+                    status_display.update_body(
+                        pid,
+                        body=_make_parser_body(
+                            queries_done_per_parser[pid],
+                            total_queries_per_parser[pid],
+                            discovered_per_parser[pid],
+                            enriched_per_parser[pid],
+                        )
+                        + " · dead",
+                    )
                     status_display.update_body(
                         "pipeline",
                         body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",

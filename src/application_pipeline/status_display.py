@@ -65,7 +65,7 @@ class RichStatusDisplay:
 
         self._lock = threading.Lock()
         self._rows: dict[str, _RowState] = {}
-        self._live = Live(self, refresh_per_second=4)
+        self._live = Live(self, refresh_per_second=4)  # type: ignore[arg-type]
         self._live.start()
 
     def __rich_console__(self, console: object, options: object) -> object:

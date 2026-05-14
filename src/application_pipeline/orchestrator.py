@@ -6,7 +6,6 @@ import queue
 import threading
 import time
 import traceback
-from collections import defaultdict
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -270,6 +269,37 @@ class _BatchStats:
     written_per_source: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass
+class _ParserState:
+    parser_id: str
+    inbound: queue.Queue[object]
+    threshold: int
+    total_queries: int
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_monotonic: float = field(default_factory=time.monotonic)
+    pending_enrich: PositionStub | None = None
+    consecutive_url_hits: int = 0
+    discovered: int = 0
+    enrich_failed: int = 0
+    external_redirects: int = 0
+    not_served: int = 0
+    parsers_dead: int = 0
+    unparseable_dates: int = 0
+    enriched: int = 0
+    queries_done: int = 0
+
+    def summary_dict(self, end_monotonic: float) -> dict[str, int | float]:
+        return {
+            "discovered": self.discovered,
+            "enrich_failed": self.enrich_failed,
+            "external_redirects": self.external_redirects,
+            "not_served_queries": self.not_served,
+            "parsers_dead": self.parsers_dead,
+            "unparseable_dates": self.unparseable_dates,
+            "duration": round(end_monotonic - self.started_monotonic, 1),
+        }
+
+
 def _make_classify_items(
     batch: list[tuple[Position, LanguageResolution]],
 ) -> list[ClassifyItem]:
@@ -505,18 +535,12 @@ def run(
                 (stack.enter_context(cls()), source) for cls, source in resolved
             ]
 
-            parser_inbound: dict[str, queue.Queue[object]] = {}
-            parser_thresholds: dict[str, int] = {}
-            total_queries_per_parser: dict[str, int] = {}
+            parser_states: dict[str, _ParserState] = {}
             threads: list[tuple[str, _ParserThread]] = []
 
             for parser, source in parsers_list:
                 parser_id = source.parser_type
                 inbound: queue.Queue[object] = queue.Queue()
-                parser_inbound[parser_id] = inbound
-                parser_thresholds[parser_id] = getattr(
-                    parser, "page_size", _DISCOVER_SHORT_CIRCUIT_FALLBACK
-                )
                 worklist = [
                     ParserQuery(
                         keyword=kw, location=loc, max_results=source.max_results
@@ -524,21 +548,29 @@ def run(
                     for kw in cfg.keywords
                     for loc in locations
                 ]
-                total_queries_per_parser[parser_id] = len(worklist)
+                parser_states[parser_id] = _ParserState(
+                    parser_id=parser_id,
+                    inbound=inbound,
+                    threshold=getattr(
+                        parser, "page_size", _DISCOVER_SHORT_CIRCUIT_FALLBACK
+                    ),
+                    total_queries=len(worklist),
+                )
                 t = _ParserThread(parser_id, parser, worklist, outbound, inbound)
                 threads.append((parser_id, t))
 
-            parser_starts: dict[str, tuple[datetime, float]] = {}
             for i, (pid, t) in enumerate(threads):
                 t.start()
-                parser_starts[pid] = (datetime.now(timezone.utc), time.monotonic())
+                state = parser_states[pid]
+                state.started_at = datetime.now(timezone.utc)
+                state.started_monotonic = time.monotonic()
                 _log.info("parser %s started", pid)
                 parser_log.record(pid, "parser started")
                 status_display.register(
                     pid,
                     order=2 + i,
                     phase="running",
-                    body=_make_parser_body(0, total_queries_per_parser[pid], 0, 0),
+                    body=_make_parser_body(0, state.total_queries, 0, 0),
                 )
 
             status_display.remove("startup")
@@ -554,26 +586,17 @@ def run(
                 "judge_match", order=5 + len(threads), phase="running"
             )
 
-            parsers_remaining: set[str] = set(parser_inbound.keys())
-            consecutive_url_hits: dict[str, int] = {pid: 0 for pid in parsers_remaining}
-            _pending_enrich: dict[str, PositionStub] = {}
-            discovered_per_parser: dict[str, int] = defaultdict(int)
-            enrich_failed_per_parser: dict[str, int] = defaultdict(int)
-            external_redirects_per_parser: dict[str, int] = defaultdict(int)
-            not_served_per_parser: dict[str, int] = defaultdict(int)
-            parsers_dead_per_parser: dict[str, int] = defaultdict(int)
-            unparseable_dates_per_parser: dict[str, int] = defaultdict(int)
-            enriched_per_parser: dict[str, int] = defaultdict(int)
-            queries_done_per_parser: dict[str, int] = defaultdict(int)
+            parsers_remaining: set[str] = set(parser_states.keys())
 
             def _update_parser_row(pid: str, suffix: str = "") -> None:
+                s = parser_states[pid]
                 status_display.update_body(
                     pid,
                     body=_make_parser_body(
-                        queries_done_per_parser[pid],
-                        total_queries_per_parser[pid],
-                        discovered_per_parser[pid],
-                        enriched_per_parser[pid],
+                        s.queries_done,
+                        s.total_queries,
+                        s.discovered,
+                        s.enriched,
                     )
                     + suffix,
                 )
@@ -581,32 +604,32 @@ def run(
             while parsers_remaining:
                 pid, payload = outbound.get()
                 current_stage.set(f"parser:{pid}")
+                state = parser_states[pid]
 
                 if isinstance(payload, PositionStub):
                     discovered += 1
-                    discovered_per_parser[pid] += 1
+                    state.discovered += 1
                     seen_result = dedup_store.is_seen(payload)
-                    threshold = parser_thresholds[pid]
 
                     if seen_result == "miss":
                         dedup_misses += 1
-                        consecutive_url_hits[pid] = 0
-                        _pending_enrich[pid] = payload
-                        parser_inbound[pid].put(_ENRICH)
+                        state.consecutive_url_hits = 0
+                        state.pending_enrich = payload
+                        state.inbound.put(_ENRICH)
                     elif seen_result == "url_hit":
                         dedup_url_hits += 1
-                        consecutive_url_hits[pid] += 1
+                        state.consecutive_url_hits += 1
                         skipped += 1
-                        if consecutive_url_hits[pid] >= threshold:
-                            consecutive_url_hits[pid] = 0
-                            parser_inbound[pid].put(_SKIP_AND_END_QUERY)
+                        if state.consecutive_url_hits >= state.threshold:
+                            state.consecutive_url_hits = 0
+                            state.inbound.put(_SKIP_AND_END_QUERY)
                         else:
-                            parser_inbound[pid].put(_SKIP)
+                            state.inbound.put(_SKIP)
                     else:  # tuple_hit
                         dedup_tuple_hits += 1
-                        consecutive_url_hits[pid] = 0
+                        state.consecutive_url_hits = 0
                         skipped += 1
-                        parser_inbound[pid].put(_SKIP)
+                        state.inbound.put(_SKIP)
                     status_display.update_body(
                         "pipeline",
                         body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
@@ -621,8 +644,8 @@ def run(
                     for warning in payload._warnings:
                         parser_log.record(pid, warning)
                         if warning.startswith("unparseable_date"):
-                            unparseable_dates_per_parser[pid] += 1
-                    enriched_per_parser[pid] += 1
+                            state.unparseable_dates += 1
+                    state.enriched += 1
                     resolution = resolve_language(payload)
                     if resolution.detected not in ("de", "en"):
                         parser_log.record(
@@ -659,7 +682,8 @@ def run(
                     _update_parser_row(pid)
 
                 elif isinstance(payload, ParserError):
-                    stub = _pending_enrich.pop(pid, None)
+                    stub = state.pending_enrich
+                    state.pending_enrich = None
                     if stub is not None:
                         parser_log.record(
                             pid,
@@ -670,14 +694,15 @@ def run(
                         )
                         dedup_store.mark_seen(stub, "enrich_failed")
                     enrich_failed += 1
-                    enrich_failed_per_parser[pid] += 1
+                    state.enrich_failed += 1
                     status_display.update_body(
                         "pipeline",
                         body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
                     )
 
                 elif isinstance(payload, ExternalRedirect):
-                    stub = _pending_enrich.pop(pid, None)
+                    stub = state.pending_enrich
+                    state.pending_enrich = None
                     if stub is not None:
                         parser_log.record(
                             pid,
@@ -687,13 +712,13 @@ def run(
                         )
                         dedup_store.mark_seen(stub, "external_redirect")
                     external_redirects += 1
-                    external_redirects_per_parser[pid] += 1
+                    state.external_redirects += 1
 
                 elif isinstance(payload, NotServedQuery):
-                    not_served_per_parser[pid] += 1
+                    state.not_served += 1
 
                 elif payload is _QUERY_DONE:
-                    queries_done_per_parser[pid] += 1
+                    state.queries_done += 1
                     _update_parser_row(pid)
 
                 elif payload is _PARSER_DONE:
@@ -703,7 +728,7 @@ def run(
                 elif isinstance(payload, _ParserDead):
                     parser_log.record_traceback(pid, payload.traceback_str)
                     parsers_dead += 1
-                    parsers_dead_per_parser[pid] += 1
+                    state.parsers_dead += 1
                     parsers_remaining.discard(pid)
                     _update_parser_row(pid, " · dead")
                     status_display.update_body(
@@ -715,21 +740,11 @@ def run(
                 t.join()
 
             parsers_done_monotonic = time.monotonic()
-            for pid, (started_at, started_monotonic) in parser_starts.items():
+            for pid, pstate in parser_states.items():
                 parser_log.summarize(
                     pid,
-                    {
-                        "discovered": discovered_per_parser[pid],
-                        "enrich_failed": enrich_failed_per_parser[pid],
-                        "external_redirects": external_redirects_per_parser[pid],
-                        "not_served_queries": not_served_per_parser[pid],
-                        "parsers_dead": parsers_dead_per_parser[pid],
-                        "unparseable_dates": unparseable_dates_per_parser[pid],
-                        "duration": round(
-                            parsers_done_monotonic - started_monotonic, 1
-                        ),
-                    },
-                    started_at,
+                    pstate.summary_dict(parsers_done_monotonic),
+                    pstate.started_at,
                 )
             parser_log.summarize(
                 "language",

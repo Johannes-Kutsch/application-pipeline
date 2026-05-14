@@ -261,7 +261,7 @@ class RunSummary:
 
 
 @dataclass
-class _BatchStats:
+class _ClassifyStats:
     classify_calls: int = 0
     classify_items: int = 0
     classify_failed: int = 0
@@ -270,6 +270,18 @@ class _BatchStats:
     classify_output_tokens: int = 0
     classify_cache_read_tokens: int = 0
     classify_cost_usd: float = 0.0
+    classifier_dropped: int = 0
+
+    def body(self, total_batches: int, remaining_en: int, remaining_de: int) -> str:
+        queue_total = remaining_en + remaining_de
+        return (
+            f"{self.classify_calls}/{total_batches} batches done"
+            f" · {queue_total} items in queue ({remaining_en} en / {remaining_de} de)"
+        )
+
+
+@dataclass
+class _JudgeStats:
     judge_calls: int = 0
     judge_failed: int = 0
     judge_total_s: float = 0.0
@@ -277,13 +289,16 @@ class _BatchStats:
     judge_output_tokens: int = 0
     judge_cache_read_tokens: int = 0
     judge_cost_usd: float = 0.0
-    classifier_dropped: int = 0
-    errored: int = 0
     written: int = 0
     green: int = 0
     amber: int = 0
     red: int = 0
     written_per_source: dict[str, int] = field(default_factory=dict)
+    errored: int = 0
+
+    def body(self) -> str:
+        total_judged = self.judge_calls + self.judge_failed
+        return f"{self.judge_calls}/{total_judged} judgments · green={self.green} amber={self.amber} red={self.red}"
 
 
 @dataclass
@@ -339,7 +354,8 @@ def _process_batch(
     dedup_store: DeduplicationStore,
     results_manager: ResultsFileManager,
     layout: Layout,
-    stats: _BatchStats,
+    classify_stats: _ClassifyStats,
+    judge_stats: _JudgeStats,
     *,
     status_display: StatusDisplay,
     total_batches: int,
@@ -351,13 +367,13 @@ def _process_batch(
     try:
         _t0 = time.monotonic()
         verdicts, classify_usage = extractor.classify_relevance_batch(language, items)
-        stats.classify_total_s += time.monotonic() - _t0
-        stats.classify_calls += 1
-        stats.classify_items += len(items)
-        stats.classify_input_tokens += classify_usage.input_tokens
-        stats.classify_output_tokens += classify_usage.output_tokens
-        stats.classify_cache_read_tokens += classify_usage.cache_read_tokens
-        stats.classify_cost_usd += classify_usage.cost_usd
+        classify_stats.classify_total_s += time.monotonic() - _t0
+        classify_stats.classify_calls += 1
+        classify_stats.classify_items += len(items)
+        classify_stats.classify_input_tokens += classify_usage.input_tokens
+        classify_stats.classify_output_tokens += classify_usage.output_tokens
+        classify_stats.classify_cache_read_tokens += classify_usage.cache_read_tokens
+        classify_stats.classify_cost_usd += classify_usage.cost_usd
     except ClaudeUsageLimitError:
         raise
     except ExtractorError as exc:
@@ -369,20 +385,19 @@ def _process_batch(
             batch_size=len(batch),
             error=str(exc),
         )
-        stats.classify_failed += 1
-        stats.errored += len(batch)
+        classify_stats.classify_failed += 1
+        judge_stats.errored += len(batch)
         return
 
-    queue_total = remaining_en + remaining_de
     status_display.update_body(
         "classify_relevance",
-        body=f"{stats.classify_calls}/{total_batches} batches done · {queue_total} items in queue ({remaining_en} en / {remaining_de} de)",
+        body=classify_stats.body(total_batches, remaining_en, remaining_de),
     )
 
     for verdict, (position, resolution) in zip(verdicts, batch):
         if not verdict.in_domain:
             dedup_store.mark_seen(position.stub, "off_domain")
-            stats.classifier_dropped += 1
+            classify_stats.classifier_dropped += 1
             continue
 
         try:
@@ -390,12 +405,12 @@ def _process_batch(
             match_verdict, judge_usage = extractor.judge_match(
                 resolution.effective, position.raw_description
             )
-            stats.judge_total_s += time.monotonic() - _t0
-            stats.judge_calls += 1
-            stats.judge_input_tokens += judge_usage.input_tokens
-            stats.judge_output_tokens += judge_usage.output_tokens
-            stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
-            stats.judge_cost_usd += judge_usage.cost_usd
+            judge_stats.judge_total_s += time.monotonic() - _t0
+            judge_stats.judge_calls += 1
+            judge_stats.judge_input_tokens += judge_usage.input_tokens
+            judge_stats.judge_output_tokens += judge_usage.output_tokens
+            judge_stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
+            judge_stats.judge_cost_usd += judge_usage.cost_usd
         except ClaudeUsageLimitError:
             raise
         except ExtractorError as exc:
@@ -406,8 +421,8 @@ def _process_batch(
                 stub_url=position.stub.url,
                 error=str(exc),
             )
-            stats.judge_failed += 1
-            stats.errored += 1
+            judge_stats.judge_failed += 1
+            judge_stats.errored += 1
             continue
 
         current_stage.set("results_write")
@@ -415,20 +430,21 @@ def _process_batch(
         rendered = render(position, match_verdict, number, layout)
         results_manager.append(rendered)
         dedup_store.mark_seen(position.stub, "kept")
-        stats.written += 1
+        judge_stats.written += 1
         src = position.stub.source
-        stats.written_per_source[src] = stats.written_per_source.get(src, 0) + 1
+        judge_stats.written_per_source[src] = (
+            judge_stats.written_per_source.get(src, 0) + 1
+        )
         if match_verdict.tier == MatchTier.green:
-            stats.green += 1
+            judge_stats.green += 1
         elif match_verdict.tier == MatchTier.amber:
-            stats.amber += 1
+            judge_stats.amber += 1
         else:
-            stats.red += 1
+            judge_stats.red += 1
 
-        total_judged = stats.judge_calls + stats.judge_failed
         status_display.update_body(
             "judge_match",
-            body=f"{stats.judge_calls}/{total_judged} judgments · green={stats.green} amber={stats.amber} red={stats.red}",
+            body=judge_stats.body(),
         )
 
 
@@ -813,7 +829,8 @@ def run(
                 en_buffer.append((position, resolution))
 
         batch_size = cfg.claude_classify_batch_size
-        stats = _BatchStats()
+        classify_stats = _ClassifyStats()
+        judge_stats = _JudgeStats()
         total_batches = sum(
             (len(buf) + batch_size - 1) // batch_size for buf in (de_buffer, en_buffer)
         )
@@ -835,7 +852,8 @@ def run(
                     dedup_store,
                     results_manager,
                     layout,
-                    stats,
+                    classify_stats,
+                    judge_stats,
                     status_display=status_display,
                     total_batches=total_batches,
                     remaining_en=rem_en,
@@ -843,62 +861,68 @@ def run(
                 )
                 status_display.update_body(
                     "pipeline",
-                    body=f"discovered={discovered} written={stats.written} errors={enrich_failed + parsers_dead + stats.errored}",
+                    body=f"discovered={discovered} written={judge_stats.written} errors={enrich_failed + parsers_dead + judge_stats.errored}",
                 )
 
         # Emit per-call-site SUMMARY OF SESSION trailers
         parser_log.summarize(
             "classify_relevance",
             {
-                "batches_sent": stats.classify_calls,
-                "items_classified": stats.classify_items,
-                "in_domain": stats.classify_items - stats.classifier_dropped,
-                "off_domain": stats.classifier_dropped,
-                "batches_failed": stats.classify_failed,
-                "input_tokens": stats.classify_input_tokens,
-                "output_tokens": stats.classify_output_tokens,
-                "cache_read_tokens": stats.classify_cache_read_tokens,
-                "cost_usd": round(stats.classify_cost_usd, 6),
-                "duration_s": round(stats.classify_total_s, 1),
+                "batches_sent": classify_stats.classify_calls,
+                "items_classified": classify_stats.classify_items,
+                "in_domain": classify_stats.classify_items
+                - classify_stats.classifier_dropped,
+                "off_domain": classify_stats.classifier_dropped,
+                "batches_failed": classify_stats.classify_failed,
+                "input_tokens": classify_stats.classify_input_tokens,
+                "output_tokens": classify_stats.classify_output_tokens,
+                "cache_read_tokens": classify_stats.classify_cache_read_tokens,
+                "cost_usd": round(classify_stats.classify_cost_usd, 6),
+                "duration_s": round(classify_stats.classify_total_s, 1),
             },
             _run_started_at,
         )
         parser_log.summarize(
             "judge_match",
             {
-                "judges_sent": stats.judge_calls,
-                "judges_failed": stats.judge_failed,
-                "green": stats.green,
-                "amber": stats.amber,
-                "red": stats.red,
-                "input_tokens": stats.judge_input_tokens,
-                "output_tokens": stats.judge_output_tokens,
-                "cache_read_tokens": stats.judge_cache_read_tokens,
-                "cost_usd": round(stats.judge_cost_usd, 6),
-                "duration_s": round(stats.judge_total_s, 1),
+                "judges_sent": judge_stats.judge_calls,
+                "judges_failed": judge_stats.judge_failed,
+                "green": judge_stats.green,
+                "amber": judge_stats.amber,
+                "red": judge_stats.red,
+                "input_tokens": judge_stats.judge_input_tokens,
+                "output_tokens": judge_stats.judge_output_tokens,
+                "cache_read_tokens": judge_stats.judge_cache_read_tokens,
+                "cost_usd": round(judge_stats.judge_cost_usd, 6),
+                "duration_s": round(judge_stats.judge_total_s, 1),
             },
             _run_started_at,
         )
 
         # Step 13: Append Run Divider — only on successful completion
         elapsed_s = time.monotonic() - _start
-        claude_input_tokens = stats.classify_input_tokens + stats.judge_input_tokens
-        claude_output_tokens = stats.classify_output_tokens + stats.judge_output_tokens
-        claude_cache_read_tokens = (
-            stats.classify_cache_read_tokens + stats.judge_cache_read_tokens
+        claude_input_tokens = (
+            classify_stats.classify_input_tokens + judge_stats.judge_input_tokens
         )
-        claude_cost_usd = stats.classify_cost_usd + stats.judge_cost_usd
+        claude_output_tokens = (
+            classify_stats.classify_output_tokens + judge_stats.judge_output_tokens
+        )
+        claude_cache_read_tokens = (
+            classify_stats.classify_cache_read_tokens
+            + judge_stats.judge_cache_read_tokens
+        )
+        claude_cost_usd = classify_stats.classify_cost_usd + judge_stats.judge_cost_usd
         divider = _format_run_divider(
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             tag=_discover_release_tag(),
-            sources=stats.written_per_source,
-            kept=stats.written,
-            errors=stats.errored,
-            classify_calls=stats.classify_calls,
-            classify_items=stats.classify_items,
-            classify_total_s=stats.classify_total_s,
-            judge_calls=stats.judge_calls,
-            judge_total_s=stats.judge_total_s,
+            sources=judge_stats.written_per_source,
+            kept=judge_stats.written,
+            errors=judge_stats.errored,
+            classify_calls=classify_stats.classify_calls,
+            classify_items=classify_stats.classify_items,
+            classify_total_s=classify_stats.classify_total_s,
+            judge_calls=judge_stats.judge_calls,
+            judge_total_s=judge_stats.judge_total_s,
             claude_input_tokens=claude_input_tokens,
             claude_output_tokens=claude_output_tokens,
             claude_cache_read_tokens=claude_cache_read_tokens,
@@ -929,14 +953,14 @@ def run(
             dedup_url_hits,
             dedup_tuple_hits,
             dedup_misses,
-            stats.classifier_dropped,
-            stats.written,
-            stats.green,
-            stats.amber,
-            stats.red,
+            classify_stats.classifier_dropped,
+            judge_stats.written,
+            judge_stats.green,
+            judge_stats.amber,
+            judge_stats.red,
             enrich_failed,
             external_redirects,
-            stats.errored,
+            judge_stats.errored,
             parsers_dead,
         )
 
@@ -953,16 +977,16 @@ def run(
             dedup_url_hits=dedup_url_hits,
             dedup_tuple_hits=dedup_tuple_hits,
             dedup_misses=dedup_misses,
-            classifier_dropped=stats.classifier_dropped,
-            written=stats.written,
-            green=stats.green,
-            amber=stats.amber,
-            red=stats.red,
+            classifier_dropped=classify_stats.classifier_dropped,
+            written=judge_stats.written,
+            green=judge_stats.green,
+            amber=judge_stats.amber,
+            red=judge_stats.red,
             enrich_failed=enrich_failed,
             external_redirects=external_redirects,
-            errored=stats.errored,
+            errored=judge_stats.errored,
             parsers_dead=parsers_dead,
-            classify_items=stats.classify_items,
+            classify_items=classify_stats.classify_items,
             claude_input_tokens=claude_input_tokens,
             claude_output_tokens=claude_output_tokens,
             claude_cache_read_tokens=claude_cache_read_tokens,

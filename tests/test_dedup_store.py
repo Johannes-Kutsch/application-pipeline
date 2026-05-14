@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -56,16 +57,16 @@ def test_is_seen_miss_on_fresh_store(store: DeduplicationStore) -> None:
     assert store.is_seen(StubLike(url="https://example.com/1")) == "miss"
 
 
-def test_mark_then_is_seen_returns_url_hit(store: DeduplicationStore) -> None:
+def test_mark_kept_then_is_seen_returns_url_hit(store: DeduplicationStore) -> None:
     stub = StubLike(url="https://example.com/1")
-    store.mark_seen(stub, "kept")
+    store.mark_kept(stub)
     assert store.is_seen(stub) == "url_hit"
 
 
-def test_mark_seen_off_domain_persists_status(store_path: Path) -> None:
+def test_mark_off_domain_persists_status(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/x")
-    store.mark_seen(stub, "off_domain")
+    store.mark_off_domain(stub)
 
     assert store.is_seen(stub) == "url_hit"
 
@@ -78,10 +79,19 @@ def test_mark_seen_off_domain_persists_status(store_path: Path) -> None:
     assert record["first_seen"] == date.today().isoformat()
 
 
-def test_mark_seen_enrich_failed_persists_status(store_path: Path) -> None:
+def test_mark_kept_persists_status(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/k")
+    store.mark_kept(stub)
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk["https://example.com/k"]["status"] == "kept"
+
+
+def test_mark_enrich_failed_persists_status(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/ef")
-    store.mark_seen(stub, "enrich_failed")
+    store.mark_enrich_failed(stub)
 
     assert store.is_seen(stub) == "url_hit"
 
@@ -89,13 +99,24 @@ def test_mark_seen_enrich_failed_persists_status(store_path: Path) -> None:
     assert on_disk["https://example.com/ef"]["status"] == "enrich_failed"
 
 
+def test_mark_external_redirect_persists_status(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/redir")
+    store.mark_external_redirect(stub)
+
+    assert store.is_seen(stub) == "url_hit"
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk["https://example.com/redir"]["status"] == "external_redirect"
+
+
 def test_second_mark_same_url_is_silent_no_op(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/y")
-    store.mark_seen(stub, "kept")
+    store.mark_kept(stub)
     first = json.loads(store_path.read_text(encoding="utf-8"))
 
-    store.mark_seen(stub, "off_domain")
+    store.mark_off_domain(stub)
     second = json.loads(store_path.read_text(encoding="utf-8"))
 
     assert first == second
@@ -105,7 +126,7 @@ def test_second_mark_same_url_is_silent_no_op(store_path: Path) -> None:
 def test_first_seen_preserved_across_reload(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/keep")
-    store.mark_seen(stub, "kept")
+    store.mark_kept(stub)
 
     reloaded = dedup_load(store_path)
     assert reloaded.is_seen(stub) == "url_hit"
@@ -141,7 +162,7 @@ def test_persist_oserror_raises_dedup_store_error(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/initial")
-    store.mark_seen(stub, "kept")
+    store.mark_kept(stub)
     before = store_path.read_bytes()
 
     import os as _os
@@ -152,7 +173,7 @@ def test_persist_oserror_raises_dedup_store_error(
     monkeypatch.setattr(_os, "replace", boom)
 
     with pytest.raises(DedupStoreError) as exc_info:
-        store.mark_seen(StubLike(url="https://example.com/new"), "kept")
+        store.mark_kept(StubLike(url="https://example.com/new"))
 
     assert isinstance(exc_info.value.__cause__, OSError)
     assert store_path.read_bytes() == before
@@ -171,7 +192,7 @@ def test_persist_write_oserror_raises_dedup_store_error(
     monkeypatch.setattr(_os, "write", boom)
 
     with pytest.raises(DedupStoreError) as exc_info:
-        store.mark_seen(StubLike(url="https://example.com/x"), "kept")
+        store.mark_kept(StubLike(url="https://example.com/x"))
 
     assert isinstance(exc_info.value.__cause__, OSError)
 
@@ -206,13 +227,13 @@ def test_alias_write_corrupt_record_raises_dedup_store_error(
         PositionLike(url="https://example.com/a"),
     ],
 )
-def test_mark_seen_accepts_stub_and_position(store_path: Path, obj: object) -> None:
+def test_mark_kept_accepts_stub_and_position(store_path: Path, obj: object) -> None:
     store = dedup_load(store_path)
-    store.mark_seen(obj, "kept")  # type: ignore[arg-type]
+    store.mark_kept(obj)  # type: ignore[arg-type]
     assert store.is_seen(obj) == "url_hit"  # type: ignore[arg-type]
 
 
-def test_no_debug_records_during_is_seen_and_mark_seen(
+def test_no_debug_records_during_is_seen_and_mark_methods(
     store_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     store = dedup_load(store_path)
@@ -221,9 +242,9 @@ def test_no_debug_records_during_is_seen_and_mark_seen(
 
     with caplog.at_level(logging.DEBUG, logger="application_pipeline.dedup.store"):
         store.is_seen(stub_a)
-        store.mark_seen(stub_a, "kept")
+        store.mark_kept(stub_a)
         store.is_seen(stub_a)
-        store.mark_seen(stub_a, "off_domain")
+        store.mark_off_domain(stub_a)
         store.is_seen(stub_b)
 
     debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
@@ -235,7 +256,7 @@ def test_handles_none_company_title_location(store_path: Path) -> None:
     stub = StubLike(
         url="https://example.com/n", company=None, title=None, location=None
     )
-    store.mark_seen(stub, "kept")
+    store.mark_kept(stub)
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     record = on_disk["https://example.com/n"]
@@ -248,7 +269,7 @@ def test_tuple_match_under_new_url_returns_tuple_hit(store_path: Path) -> None:
     store = dedup_load(store_path)
     a = StubLike(url="https://bundesagentur.de/job/1")
     b = StubLike(url="https://stellen.hamburg/job/42")
-    store.mark_seen(a, "kept")
+    store.mark_kept(a)
     assert store.is_seen(b) == "tuple_hit"
 
 
@@ -258,7 +279,7 @@ def test_tuple_match_writes_alias_with_original_status_and_first_seen(
     store = dedup_load(store_path)
     a = StubLike(url="https://bundesagentur.de/job/1")
     b = StubLike(url="https://stellen.hamburg/job/42")
-    store.mark_seen(a, "kept")
+    store.mark_kept(a)
     original = json.loads(store_path.read_text(encoding="utf-8"))[a.url]
 
     store.is_seen(b)
@@ -299,7 +320,7 @@ def test_after_alias_reload_resolves_via_url_tier(store_path: Path) -> None:
     store = dedup_load(store_path)
     a = StubLike(url="https://bundesagentur.de/x")
     b = StubLike(url="https://stellen.hamburg/y")
-    store.mark_seen(a, "kept")
+    store.mark_kept(a)
     store.is_seen(b)
 
     reloaded = dedup_load(store_path)
@@ -312,14 +333,13 @@ def test_after_alias_reload_resolves_via_url_tier(store_path: Path) -> None:
 
 def test_tuple_match_case_insensitive(store_path: Path) -> None:
     store = dedup_load(store_path)
-    store.mark_seen(
+    store.mark_kept(
         StubLike(
             url="https://example.com/1",
             company="acme gmbh",
             title="engineer",
             location="hamburg",
         ),
-        "kept",
     )
     assert (
         store.is_seen(
@@ -336,14 +356,13 @@ def test_tuple_match_case_insensitive(store_path: Path) -> None:
 
 def test_tuple_match_collapses_internal_whitespace(store_path: Path) -> None:
     store = dedup_load(store_path)
-    store.mark_seen(
+    store.mark_kept(
         StubLike(
             url="https://example.com/1",
             company="ACME GmbH",
             title="Software Engineer",
             location="Hamburg",
         ),
-        "kept",
     )
     assert (
         store.is_seen(
@@ -360,14 +379,13 @@ def test_tuple_match_collapses_internal_whitespace(store_path: Path) -> None:
 
 def test_tuple_lookup_skipped_when_field_none(store_path: Path) -> None:
     store = dedup_load(store_path)
-    store.mark_seen(
+    store.mark_kept(
         StubLike(
             url="https://example.com/1",
             company=None,
             title="Engineer",
             location="Hamburg",
         ),
-        "kept",
     )
     # Different URL with same (None, title, location) must NOT match via tuple.
     assert (
@@ -387,14 +405,13 @@ def test_tuple_lookup_skipped_when_field_empty_after_normalize(
     store_path: Path,
 ) -> None:
     store = dedup_load(store_path)
-    store.mark_seen(
+    store.mark_kept(
         StubLike(
             url="https://example.com/1",
             company="   ",
             title="Engineer",
             location="Hamburg",
         ),
-        "kept",
     )
     assert (
         store.is_seen(
@@ -416,7 +433,7 @@ def test_none_company_url_match_still_works_on_second_is_seen(
     stub = StubLike(
         url="https://example.com/n", company=None, title="Engineer", location="Hamburg"
     )
-    store.mark_seen(stub, "kept")
+    store.mark_kept(stub)
     assert store.is_seen(stub) == "url_hit"
 
 
@@ -456,9 +473,9 @@ def test_round_trip_mix_of_originals_and_aliases(store_path: Path) -> None:
     c = StubLike(
         url="https://a.example/2", company="Beta", title="PM", location="Berlin"
     )
-    store.mark_seen(a, "kept")
+    store.mark_kept(a)
     store.is_seen(b)  # writes alias under b.url
-    store.mark_seen(c, "off_domain")
+    store.mark_off_domain(c)
 
     before = json.loads(store_path.read_text(encoding="utf-8"))
     reloaded = dedup_load(store_path)
@@ -469,21 +486,42 @@ def test_round_trip_mix_of_originals_and_aliases(store_path: Path) -> None:
     assert before == after
 
 
-def test_mark_seen_external_redirect_persists_status(store_path: Path) -> None:
-    store = dedup_load(store_path)
-    stub = StubLike(url="https://example.com/redir")
-    store.mark_seen(stub, "external_redirect")
-
-    assert store.is_seen(stub) == "url_hit"
-
-    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk["https://example.com/redir"]["status"] == "external_redirect"
-
-
 def test_external_redirect_status_survives_reload(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/redir2")
-    store.mark_seen(stub, "external_redirect")
+    store.mark_external_redirect(stub)
 
     reloaded = dedup_load(store_path)
     assert reloaded.is_seen(stub) == "url_hit"
+
+
+def test_concurrent_marks_produce_valid_store(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    n_threads = 10
+    marks_per_thread = 100
+    errors: list[Exception] = []
+
+    def worker(thread_id: int) -> None:
+        try:
+            for i in range(marks_per_thread):
+                stub = StubLike(
+                    url=f"https://example.com/t{thread_id}/i{i}",
+                    company=f"Company{thread_id}",
+                    title=f"Role{i}",
+                    location="Hamburg",
+                )
+                store.mark_kept(stub)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"threads raised: {errors}"
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert isinstance(on_disk, dict)
+    assert len(on_disk) == n_threads * marks_per_thread

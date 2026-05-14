@@ -432,7 +432,7 @@ def _process_batch(
 
     for verdict, (position, resolution) in zip(verdicts, batch):
         if not verdict.in_domain:
-            dedup_store.mark_seen(position.stub, "off_domain")
+            dedup_store.mark_off_domain(position.stub)
             classify_stats.classifier_dropped += 1
             continue
 
@@ -465,7 +465,7 @@ def _process_batch(
         number = results_manager.next_position_number()
         rendered = render(position, match_verdict, number, layout)
         results_manager.append(rendered)
-        dedup_store.mark_seen(position.stub, "kept")
+        dedup_store.mark_kept(position.stub)
         judge_stats.written += 1
         src = position.stub.source
         judge_stats.written_per_source[src] = (
@@ -775,7 +775,7 @@ def run(
                         prefilter_passed += 1
                         survivors.append((payload, resolution))
                     else:
-                        dedup_store.mark_seen(payload.stub, "off_domain")
+                        dedup_store.mark_off_domain(payload.stub)
                         prefilter_dropped += 1
                     status_display.update_body(
                         "prefilter",
@@ -794,7 +794,7 @@ def run(
                             title=stub.title,
                             reason=str(payload),
                         )
-                        dedup_store.mark_seen(stub, "enrich_failed")
+                        dedup_store.mark_enrich_failed(stub)
                     enrich_failed += 1
                     state.enrich_failed += 1
                     status_display.update_body(
@@ -812,7 +812,7 @@ def run(
                             stub_url=stub.url,
                             outbound=payload.outbound_url,
                         )
-                        dedup_store.mark_seen(stub, "external_redirect")
+                        dedup_store.mark_external_redirect(stub)
                     external_redirects += 1
                     state.external_redirects += 1
 

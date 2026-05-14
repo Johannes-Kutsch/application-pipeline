@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -44,6 +45,7 @@ class DeduplicationStore:
         self._tuple_index: dict[tuple[str, str, str], str] = self._build_tuple_index(
             records
         )
+        self._lock = threading.Lock()
 
     @staticmethod
     def _validate_record(url: str, record: dict[str, Any]) -> None:
@@ -98,17 +100,19 @@ class DeduplicationStore:
         on the cheap URL lookup. The return value is unaffected by the
         alias write.
         """
-        if key.url in self._records:
-            return "url_hit"
+        with self._lock:
+            if key.url in self._records:
+                return "url_hit"
 
-        canonical_url = self._tuple_lookup(key)
-        if canonical_url is not None:
-            self._write_alias(key.url, canonical_url)
-            return "tuple_hit"
+            canonical_url = self._tuple_lookup(key)
+            if canonical_url is not None:
+                self._write_alias(key.url, canonical_url)
+                return "tuple_hit"
 
-        return "miss"
+            return "miss"
 
-    def mark_seen(self, key: _SeenKey, status: SeenStatus) -> None:
+    def _mark(self, key: _SeenKey, status: SeenStatus) -> None:
+        """Write a new record for key. Caller must hold ``self._lock``."""
         if key.url in self._records:
             return
 
@@ -129,6 +133,22 @@ class DeduplicationStore:
         self._records = new_records
         if company_lc and title_lc and location_lc:
             self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
+
+    def mark_off_domain(self, key: _SeenKey) -> None:
+        with self._lock:
+            self._mark(key, "off_domain")
+
+    def mark_kept(self, key: _SeenKey) -> None:
+        with self._lock:
+            self._mark(key, "kept")
+
+    def mark_enrich_failed(self, key: _SeenKey) -> None:
+        with self._lock:
+            self._mark(key, "enrich_failed")
+
+    def mark_external_redirect(self, key: _SeenKey) -> None:
+        with self._lock:
+            self._mark(key, "external_redirect")
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]

@@ -54,6 +54,42 @@ _STALL_THRESHOLD_S: float = 60.0
 
 
 # ---------------------------------------------------------------------------
+# Run state
+# ---------------------------------------------------------------------------
+
+
+class _RunState:
+    """Consolidated run-state object replacing ad-hoc abort/degraded flags."""
+
+    def __init__(self) -> None:
+        self.degraded_reason: str | None = None
+        self.fatal_exc: BaseException | None = None
+        self.degraded_at: datetime | None = None
+        self.degraded_by: str | None = None
+        self._lock = threading.Lock()
+
+    @property
+    def is_degraded(self) -> bool:
+        return self.degraded_reason is not None
+
+    @property
+    def is_aborted(self) -> bool:
+        return self.fatal_exc is not None
+
+    def set_degraded(self, reason: str, by: str) -> None:
+        with self._lock:
+            if self.degraded_reason is None:
+                self.degraded_reason = reason
+                self.degraded_at = datetime.now(timezone.utc)
+                self.degraded_by = by
+
+    def set_aborted(self, exc: BaseException) -> None:
+        with self._lock:
+            if self.fatal_exc is None:
+                self.fatal_exc = exc
+
+
+# ---------------------------------------------------------------------------
 # Queue protocol sentinels
 # ---------------------------------------------------------------------------
 
@@ -455,6 +491,7 @@ def run(
     if status_display is None:
         status_display = PlainStatusDisplay()
 
+    run_state = _RunState()
     _start = time.monotonic()
     status_display.register("pipeline", order=0, phase="running")
     status_display.register("startup", order=1, phase="running")
@@ -818,33 +855,37 @@ def run(
             (len(buf) + batch_size - 1) // batch_size for buf in (de_buffer, en_buffer)
         )
 
-        for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
-            for i in range(0, len(lang_buffer), batch_size):
-                batch = lang_buffer[i : i + batch_size]
-                sent_in_lang = i + len(batch)
-                rem_de = len(de_buffer) - sent_in_lang if lang_str == "de" else 0
-                rem_en = (
-                    len(en_buffer) - sent_in_lang
-                    if lang_str == "en"
-                    else len(en_buffer)
-                )
-                _process_batch(
-                    batch,
-                    lang_str,
-                    extractor,
-                    dedup_store,
-                    results_manager,
-                    layout,
-                    stats,
-                    status_display=status_display,
-                    total_batches=total_batches,
-                    remaining_en=rem_en,
-                    remaining_de=rem_de,
-                )
-                status_display.update_body(
-                    "pipeline",
-                    body=f"discovered={discovered} written={stats.written} errors={enrich_failed + parsers_dead + stats.errored}",
-                )
+        try:
+            for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
+                for i in range(0, len(lang_buffer), batch_size):
+                    batch = lang_buffer[i : i + batch_size]
+                    sent_in_lang = i + len(batch)
+                    rem_de = len(de_buffer) - sent_in_lang if lang_str == "de" else 0
+                    rem_en = (
+                        len(en_buffer) - sent_in_lang
+                        if lang_str == "en"
+                        else len(en_buffer)
+                    )
+                    _process_batch(
+                        batch,
+                        lang_str,
+                        extractor,
+                        dedup_store,
+                        results_manager,
+                        layout,
+                        stats,
+                        status_display=status_display,
+                        total_batches=total_batches,
+                        remaining_en=rem_en,
+                        remaining_de=rem_de,
+                    )
+                    status_display.update_body(
+                        "pipeline",
+                        body=f"discovered={discovered} written={stats.written} errors={enrich_failed + parsers_dead + stats.errored}",
+                    )
+        except ClaudeUsageLimitError as exc:
+            run_state.set_aborted(exc)
+            raise
 
         # Emit per-call-site SUMMARY OF SESSION trailers
         parser_log.summarize(

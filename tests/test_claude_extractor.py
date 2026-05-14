@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import application_pipeline.debug_log as debug_log
 import application_pipeline.parser_log as parser_log
 from application_pipeline import (
     ClassifyItem,
@@ -50,10 +49,8 @@ from application_pipeline.prompts import (
 
 @pytest.fixture(autouse=True)
 def reset_logs() -> Generator[None, None, None]:
-    debug_log._logs_dir = None
     parser_log._logs_dir = None
     yield
-    debug_log._logs_dir = None
     parser_log._logs_dir = None
 
 

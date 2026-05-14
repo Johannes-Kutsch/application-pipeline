@@ -5,21 +5,24 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
-from application_pipeline import debug_log
-
 _logs_dir: Path | None = None
 
 
 def configure(logs_dir: Path) -> None:
     global _logs_dir
-    debug_log.configure(logs_dir)
+    logs_dir.mkdir(parents=True, exist_ok=True)
     _logs_dir = logs_dir
 
 
 def record(component_id: str, event_type: str, **fields: object) -> None:
+    if _logs_dir is None:
+        return
     pairs = " ".join(f"{k}={v}" for k, v in fields.items())
     message = f"{event_type} {pairs}".rstrip()
-    debug_log.append(component_id, message)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    log_file = _logs_dir / f"{component_id}.log"
+    with log_file.open("a", encoding="utf-8") as f:
+        f.write(f"{ts} {message}\n")
 
 
 def record_transcript(component_id: str, entry: Mapping[str, object]) -> None:

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-import application_pipeline.debug_log as debug_log
 import application_pipeline.parser_log as parser_log
 
 _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
@@ -14,10 +13,8 @@ _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 @pytest.fixture(autouse=True)
 def reset_logs():
-    debug_log._logs_dir = None
     parser_log._logs_dir = None
     yield
-    debug_log._logs_dir = None
     parser_log._logs_dir = None
 
 
@@ -146,3 +143,29 @@ def test_two_sessions_produce_two_summary_blocks(tmp_path: Path) -> None:
     assert "\n\n" in between, (
         "SUMMARY blocks must be separated by at least one blank line"
     )
+
+
+# ---------------------------------------------------------------------------
+# __main__ startup
+# ---------------------------------------------------------------------------
+
+
+def test_main_materialises_logs_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from application_pipeline.orchestrator import RunSummary
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+    monkeypatch.setattr(
+        "application_pipeline.__main__.run",
+        lambda *_a, **_kw: RunSummary(),
+    )
+
+    from application_pipeline.__main__ import main
+
+    main()
+
+    assert (tmp_path / "synched" / "logs").is_dir()

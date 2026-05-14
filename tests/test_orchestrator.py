@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import application_pipeline.debug_log as _debug_log
 import application_pipeline.parser_log as _parser_log
 
 from application_pipeline import dedup as dedup_module
@@ -46,16 +45,14 @@ from application_pipeline.results import ResultsFileError, ResultsFileManager
 
 @pytest.fixture(autouse=True)
 def _reset_log_state():
-    """Reset parser_log / debug_log module state between tests.
+    """Reset parser_log module state between tests.
 
-    Some tests call main() which configures both modules. Without this reset
+    Some tests call main() which configures parser_log. Without this reset
     the relative 'synched/logs' path leaks across tests after monkeypatch
     restores the working directory.
     """
-    _debug_log._logs_dir = None
     _parser_log._logs_dir = None
     yield
-    _debug_log._logs_dir = None
     _parser_log._logs_dir = None
 
 

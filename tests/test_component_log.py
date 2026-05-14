@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-import application_pipeline.debug_log as debug_log
 import application_pipeline.parser_log as parser_log
 
 _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
@@ -21,10 +20,8 @@ _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 @pytest.fixture(autouse=True)
 def reset_logs():
-    debug_log._logs_dir = None
     parser_log._logs_dir = None
     yield
-    debug_log._logs_dir = None
     parser_log._logs_dir = None
 
 

@@ -3163,3 +3163,146 @@ def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:
     assert not any(
         c.method == "remove" and c.name == "prefilter" for c in display.calls
     ), "prefilter row must not be removed during run"
+
+
+# ---------------------------------------------------------------------------
+# Status Display: classify_relevance and judge_match rows (issue #199)
+# ---------------------------------------------------------------------------
+
+_DE_DESCRIPTION_199 = (
+    "Wir suchen einen erfahrenen Softwareentwickler für unser Team. "
+    "Das Unternehmen bietet interessante Projekte und eine gute Bezahlung."
+)
+
+
+class _MixedLangParser199:
+    """1 de stub + 1 en stub per discover call for classify/judge row tests."""
+
+    def __enter__(self) -> "_MixedLangParser199":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [
+            PositionStub(
+                url="https://cl199.example/de1", title="Entwickler", source="s"
+            ),
+            PositionStub(
+                url="https://cl199.example/en1",
+                title="Engineer",
+                source="s",
+                language="en",
+            ),
+        ]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        if "de1" in stub.url:
+            return Position(stub=stub, raw_description=_DE_DESCRIPTION_199)
+        return Position(stub=stub, raw_description="Software engineering role.")
+
+
+def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
+    """classify_relevance and judge_match rows are registered below prefilter and adjacent."""
+    display = FakeStatusDisplay()
+
+    run(
+        _write_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    assert "classify_relevance" in display.registered_names()
+    assert "judge_match" in display.registered_names()
+
+    prefilter_order = next(
+        c.kwargs["order"]
+        for c in display.calls
+        if c.method == "register" and c.name == "prefilter"
+    )
+    classify_order = next(
+        c.kwargs["order"]
+        for c in display.calls
+        if c.method == "register" and c.name == "classify_relevance"
+    )
+    judge_order = next(
+        c.kwargs["order"]
+        for c in display.calls
+        if c.method == "register" and c.name == "judge_match"
+    )
+
+    assert classify_order > prefilter_order
+    assert judge_order == classify_order + 1
+
+
+def test_classify_and_judge_rows_body_progression(tmp_path: Path) -> None:
+    """Synthetic (de, en) batch mix: classify_relevance and judge_match bodies progress correctly."""
+    display = FakeStatusDisplay()
+
+    run(
+        _batch_size_config(tmp_path, 1),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    classify_bodies = display.body_updates_for("classify_relevance")
+    judge_bodies = display.body_updates_for("judge_match")
+
+    # 1 de + 1 en survivor, batch_size=1 → 2 classify batches
+    assert len(classify_bodies) == 2
+
+    # After de batch (1/2 done, 1 en item still in queue)
+    assert "1/2 batches done" in classify_bodies[0]
+    assert "1 items in queue" in classify_bodies[0]
+    assert "1 en" in classify_bodies[0]
+    assert "0 de" in classify_bodies[0]
+
+    # After en batch (2/2 done, queue empty)
+    assert "2/2 batches done" in classify_bodies[1]
+    assert "0 items in queue" in classify_bodies[1]
+    assert "0 en" in classify_bodies[1]
+    assert "0 de" in classify_bodies[1]
+
+    # Both items in-domain → 2 judge calls (stub extractor returns green)
+    assert len(judge_bodies) == 2
+    assert "1/1 judgments" in judge_bodies[0]
+    assert "green=1" in judge_bodies[0]
+    assert "2/2 judgments" in judge_bodies[1]
+    assert "green=2" in judge_bodies[1]
+    assert "amber=0" in judge_bodies[1]
+    assert "red=0" in judge_bodies[1]
+
+
+def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
+    """classify_relevance and judge_match rows persist for the entire run."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    assert not any(
+        c.method == "remove" and c.name == "classify_relevance" for c in display.calls
+    ), "classify_relevance row must not be removed during run"
+    assert not any(
+        c.method == "remove" and c.name == "judge_match" for c in display.calls
+    ), "judge_match row must not be removed during run"

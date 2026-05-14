@@ -291,6 +291,11 @@ def _process_batch(
     results_manager: ResultsFileManager,
     layout: Layout,
     stats: _BatchStats,
+    *,
+    status_display: StatusDisplay,
+    total_batches: int,
+    remaining_en: int,
+    remaining_de: int,
 ) -> None:
     """Classify a batch, then pipeline judge → write for each in-domain survivor."""
     items = _make_classify_items(batch)
@@ -318,6 +323,12 @@ def _process_batch(
         stats.classify_failed += 1
         stats.errored += len(batch)
         return
+
+    queue_total = remaining_en + remaining_de
+    status_display.update_body(
+        "classify_relevance",
+        body=f"{stats.classify_calls}/{total_batches} batches done · {queue_total} items in queue ({remaining_en} en / {remaining_de} de)",
+    )
 
     for verdict, (position, resolution) in zip(verdicts, batch):
         if not verdict.in_domain:
@@ -364,6 +375,12 @@ def _process_batch(
             stats.amber += 1
         else:
             stats.red += 1
+
+        total_judged = stats.judge_calls + stats.judge_failed
+        status_display.update_body(
+            "judge_match",
+            body=f"{stats.judge_calls}/{total_judged} judgments · green={stats.green} amber={stats.amber} red={stats.red}",
+        )
 
 
 def _make_parser_body(
@@ -529,6 +546,12 @@ def run(
             status_display.register("dedup", order=2 + len(threads), phase="running")
             status_display.register(
                 "prefilter", order=3 + len(threads), phase="running"
+            )
+            status_display.register(
+                "classify_relevance", order=4 + len(threads), phase="running"
+            )
+            status_display.register(
+                "judge_match", order=5 + len(threads), phase="running"
             )
 
             parsers_remaining: set[str] = set(parser_inbound.keys())
@@ -727,17 +750,31 @@ def run(
 
         batch_size = cfg.claude_classify_batch_size
         stats = _BatchStats()
+        total_batches = (
+            (len(de_buffer) + batch_size - 1) // batch_size if de_buffer else 0
+        ) + ((len(en_buffer) + batch_size - 1) // batch_size if en_buffer else 0)
 
         for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
             for i in range(0, len(lang_buffer), batch_size):
+                batch = lang_buffer[i : i + batch_size]
+                if lang_str == "de":
+                    rem_de = max(0, len(de_buffer) - (i + len(batch)))
+                    rem_en = len(en_buffer)
+                else:
+                    rem_de = 0
+                    rem_en = max(0, len(en_buffer) - (i + len(batch)))
                 _process_batch(
-                    lang_buffer[i : i + batch_size],
+                    batch,
                     lang_str,
                     extractor,
                     dedup_store,
                     results_manager,
                     layout,
                     stats,
+                    status_display=status_display,
+                    total_batches=total_batches,
+                    remaining_en=rem_en,
+                    remaining_de=rem_de,
                 )
                 status_display.update_body(
                     "pipeline",

@@ -5,15 +5,19 @@ import logging
 import sys
 from pathlib import Path
 
-from application_pipeline import parser_log
-from application_pipeline.config import ConfigError
-from application_pipeline.dedup import DedupStoreError
-from application_pipeline.failure_report import write_failure
-from application_pipeline.layout import LayoutError
-from application_pipeline.llm import ClaudeUsageLimitError, ExtractorUnreachableError
-from application_pipeline.orchestrator import current_stage, run
-from application_pipeline.prompts import PromptError
-from application_pipeline.results import ResultsFileError
+from dotenv import load_dotenv
+
+load_dotenv(Path.home() / ".env")
+
+from application_pipeline import parser_log  # noqa: E402
+from application_pipeline.config import ConfigError  # noqa: E402
+from application_pipeline.dedup import DedupStoreError  # noqa: E402
+from application_pipeline.failure_report import write_failure  # noqa: E402
+from application_pipeline.layout import LayoutError  # noqa: E402
+from application_pipeline.llm import ClaudeUsageLimitError, ExtractorUnreachableError  # noqa: E402
+from application_pipeline.orchestrator import current_stage, run  # noqa: E402
+from application_pipeline.prompts import PromptError  # noqa: E402
+from application_pipeline.results import ResultsFileError  # noqa: E402
 
 _FATAL = (
     ConfigError,

@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 import httpx
 
+import application_pipeline.parser_log as parser_log
 from application_pipeline.http import HttpRetryError
 
 from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
@@ -175,13 +176,21 @@ class BundesagenturParser:
                 if not ref or ref in seen:
                     continue
                 seen.add(ref)
+                title: str = item.get("stellenangebotsTitel") or ""
+                if not title:
+                    parser_log.record(
+                        "bundesagentur_api",
+                        "missing_title",
+                        item=item,
+                    )
+                    continue
                 lokationen: list[dict[str, Any]] = item.get("stellenlokationen") or []
                 first_address = lokationen[0].get("adresse") or {} if lokationen else {}
                 city: str | None = first_address.get("ort") or None
                 ref_b64 = base64.b64encode(ref.encode()).decode()
                 yield PositionStub(
                     url=f"{_DETAIL_BASE_URL}/jobdetails/{ref_b64}",
-                    title=item["stellenangebotsTitel"],
+                    title=title,
                     source=_DISPLAY_NAME,
                     company=item.get("firma") or None,
                     location=city,

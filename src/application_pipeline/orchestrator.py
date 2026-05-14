@@ -538,6 +538,18 @@ def run(
             enriched_per_parser: dict[str, int] = defaultdict(int)
             queries_done_per_parser: dict[str, int] = defaultdict(int)
 
+            def _update_parser_row(pid: str, suffix: str = "") -> None:
+                status_display.update_body(
+                    pid,
+                    body=_make_parser_body(
+                        queries_done_per_parser[pid],
+                        total_queries_per_parser[pid],
+                        discovered_per_parser[pid],
+                        enriched_per_parser[pid],
+                    )
+                    + suffix,
+                )
+
             while parsers_remaining:
                 pid, payload = outbound.get()
                 current_stage.set(f"parser:{pid}")
@@ -571,15 +583,7 @@ def run(
                         "pipeline",
                         body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
                     )
-                    status_display.update_body(
-                        pid,
-                        body=_make_parser_body(
-                            queries_done_per_parser[pid],
-                            total_queries_per_parser[pid],
-                            discovered_per_parser[pid],
-                            enriched_per_parser[pid],
-                        ),
-                    )
+                    _update_parser_row(pid)
 
                 elif isinstance(payload, Position):
                     for warning in payload._warnings:
@@ -616,15 +620,7 @@ def run(
                     else:
                         dedup_store.mark_seen(payload.stub, "off_domain")
                         prefilter_dropped += 1
-                    status_display.update_body(
-                        pid,
-                        body=_make_parser_body(
-                            queries_done_per_parser[pid],
-                            total_queries_per_parser[pid],
-                            discovered_per_parser[pid],
-                            enriched_per_parser[pid],
-                        ),
-                    )
+                    _update_parser_row(pid)
 
                 elif isinstance(payload, ParserError):
                     stub = _pending_enrich.pop(pid, None)
@@ -662,44 +658,18 @@ def run(
 
                 elif payload is _QUERY_DONE:
                     queries_done_per_parser[pid] += 1
-                    status_display.update_body(
-                        pid,
-                        body=_make_parser_body(
-                            queries_done_per_parser[pid],
-                            total_queries_per_parser[pid],
-                            discovered_per_parser[pid],
-                            enriched_per_parser[pid],
-                        ),
-                    )
+                    _update_parser_row(pid)
 
                 elif payload is _PARSER_DONE:
                     parsers_remaining.discard(pid)
-                    status_display.update_body(
-                        pid,
-                        body=_make_parser_body(
-                            queries_done_per_parser[pid],
-                            total_queries_per_parser[pid],
-                            discovered_per_parser[pid],
-                            enriched_per_parser[pid],
-                        )
-                        + " · done",
-                    )
+                    _update_parser_row(pid, " · done")
 
                 elif isinstance(payload, _ParserDead):
                     parser_log.record_traceback(pid, payload.traceback_str)
                     parsers_dead += 1
                     parsers_dead_per_parser[pid] += 1
                     parsers_remaining.discard(pid)
-                    status_display.update_body(
-                        pid,
-                        body=_make_parser_body(
-                            queries_done_per_parser[pid],
-                            total_queries_per_parser[pid],
-                            discovered_per_parser[pid],
-                            enriched_per_parser[pid],
-                        )
-                        + " · dead",
-                    )
+                    _update_parser_row(pid, " · dead")
                     status_display.update_body(
                         "pipeline",
                         body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",

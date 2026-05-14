@@ -2090,6 +2090,66 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
     assert batch_sizes_seen == [2, 2]
 
 
+def test_parser_classify_overlap(tmp_path: Path) -> None:
+    """First classify batch completes before parser finishes when parser is slow.
+
+    Uses a slow parser (0.2s per enrich) and batch_size=1 so the first
+    enriched position triggers an eager flush.  Asserts that the first
+    classify_relevance update_body event in the FakeStatusDisplay call log
+    precedes the parser-done update_body event, proving parser/LLM overlap.
+    """
+    import time as _time
+
+    class _SlowTwoStubParser:
+        def __enter__(self) -> "_SlowTwoStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://slow.example/{i}",
+                    title=f"Job {i}",
+                    source="s",
+                    language="en",
+                )
+                for i in range(2)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            _time.sleep(0.2)
+            return Position(stub=stub, raw_description="Software engineering role.")
+
+    display = FakeStatusDisplay()
+
+    run(
+        _batch_size_config(tmp_path, 1),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _SlowTwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    first_classify_idx = next(
+        i
+        for i, c in enumerate(display.calls)
+        if c.method == "update_body" and c.name == "classify_relevance"
+    )
+    parser_done_idx = next(
+        i
+        for i, c in enumerate(display.calls)
+        if c.method == "update_body"
+        and str(c.kwargs.get("body", "")).endswith(" · done")
+    )
+
+    assert first_classify_idx < parser_done_idx, (
+        "classify_relevance update_body must precede parser-done update_body"
+    )
+
+
 def test_classify_thread_two_language_three_batch_happy_path(tmp_path: Path) -> None:
     """_ClassifyThread happy path: 2 de + 4 en survivors, batch_size=2 → 3 batches total.
 
@@ -3326,11 +3386,8 @@ def test_classify_and_judge_rows_body_progression(tmp_path: Path) -> None:
     # 1 de + 1 en survivor, batch_size=1 → 2 classify batches
     assert len(classify_bodies) == 2
 
-    # After de batch (1/2 done, 1 en item still in queue)
-    assert "1/2 batches done" in classify_bodies[0]
-    assert "1 items in queue" in classify_bodies[0]
-    assert "1 en" in classify_bodies[0]
-    assert "0 de" in classify_bodies[0]
+    # First batch done: incremental counter shows "1/"
+    assert "1/" in classify_bodies[0]
 
     # After en batch (2/2 done, queue empty)
     assert "2/2 batches done" in classify_bodies[1]

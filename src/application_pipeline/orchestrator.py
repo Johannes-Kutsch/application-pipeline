@@ -298,7 +298,7 @@ class _ClassifyThread(_QueueWorker):
         extractor: LLMExtractor,
         dedup_store: DeduplicationStore,
         status_display: "StatusDisplay",
-        total_batches: int,
+        total_batches_ref: "list[int]",
         classify_stats: "_ClassifyStats",
         run_state: _RunState,
     ) -> None:
@@ -313,7 +313,7 @@ class _ClassifyThread(_QueueWorker):
         self._extractor = extractor
         self._dedup_store = dedup_store
         self._status_display = status_display
-        self._total_batches = total_batches
+        self._total_batches_ref = total_batches_ref
         self.classify_stats = classify_stats
 
     def _on_shutdown(self) -> None:
@@ -356,7 +356,7 @@ class _ClassifyThread(_QueueWorker):
         self._status_display.update_body(
             "classify_relevance",
             body=self.classify_stats.body(
-                self._total_batches, batch.remaining_en, batch.remaining_de
+                self._total_batches_ref[0], batch.remaining_en, batch.remaining_de
             ),
         )
 
@@ -752,7 +752,15 @@ def run(
         enrich_failed = 0
         external_redirects = 0
         parsers_dead = 0
-        survivors: list[tuple[Position, LanguageResolution]] = []
+        de_buffer: list[tuple[Position, LanguageResolution]] = []
+        en_buffer: list[tuple[Position, LanguageResolution]] = []
+        batch_size = cfg.claude_classify_batch_size
+        total_batches_ref: list[int] = [0]
+        batch_id = 0
+        classify_stats = _ClassifyStats()
+        judge_stats = _JudgeStats()
+        classify_queue: queue.Queue[object] = queue.Queue()
+        judge_queue: queue.Queue[object] = queue.Queue()
         language_anomalies = 0
         _run_started_at = datetime.now(timezone.utc)
 
@@ -818,6 +826,29 @@ def run(
             status_display.register(
                 "judge_match", order=5 + len(threads), phase="running"
             )
+
+            classify_thread = _ClassifyThread(
+                classify_queue=classify_queue,
+                judge_queue=judge_queue,
+                extractor=extractor,
+                dedup_store=dedup_store,
+                status_display=status_display,
+                total_batches_ref=total_batches_ref,
+                classify_stats=classify_stats,
+                run_state=run_state,
+            )
+            judge_thread = _JudgeThread(
+                judge_queue=judge_queue,
+                extractor=extractor,
+                results_manager=results_manager,
+                dedup_store=dedup_store,
+                status_display=status_display,
+                layout=layout,
+                judge_stats=judge_stats,
+                run_state=run_state,
+            )
+            classify_thread.start()
+            judge_thread.start()
 
             parsers_remaining: set[str] = set(parser_states.keys())
 
@@ -932,7 +963,36 @@ def run(
                         prefilter_no_hit_either += 1
                     if verdict.passes:
                         prefilter_passed += 1
-                        survivors.append((payload, resolution))
+                        if resolution.effective == "de":
+                            de_buffer.append((payload, resolution))
+                            if len(de_buffer) >= batch_size:
+                                classify_queue.put(
+                                    _ClassifyBatch(
+                                        language="de",
+                                        positions=de_buffer[:batch_size],
+                                        item_id=str(batch_id),
+                                        remaining_en=len(en_buffer),
+                                        remaining_de=0,
+                                    )
+                                )
+                                total_batches_ref[0] += 1
+                                batch_id += 1
+                                del de_buffer[:batch_size]
+                        else:
+                            en_buffer.append((payload, resolution))
+                            if len(en_buffer) >= batch_size:
+                                classify_queue.put(
+                                    _ClassifyBatch(
+                                        language="en",
+                                        positions=en_buffer[:batch_size],
+                                        item_id=str(batch_id),
+                                        remaining_de=len(de_buffer),
+                                        remaining_en=0,
+                                    )
+                                )
+                                total_batches_ref[0] += 1
+                                batch_id += 1
+                                del en_buffer[:batch_size]
                     else:
                         dedup_store.mark_off_domain(payload.stub)
                         prefilter_dropped += 1
@@ -1013,71 +1073,34 @@ def run(
                 _run_started_at,
             )
 
-        # Steps 10-12: Classify on dedicated thread; judge on dedicated thread (pipelined)
-        # Per-language buffers: de → de; en/other/unknown → en
-        de_buffer: list[tuple[Position, LanguageResolution]] = []
-        en_buffer: list[tuple[Position, LanguageResolution]] = []
-        for position, resolution in survivors:
-            if resolution.effective == "de":
-                de_buffer.append((position, resolution))
-            else:
-                en_buffer.append((position, resolution))
-
-        batch_size = cfg.claude_classify_batch_size
-        classify_stats = _ClassifyStats()
-        judge_stats = _JudgeStats()
-        total_batches = sum(
-            (len(buf) + batch_size - 1) // batch_size for buf in (de_buffer, en_buffer)
-        )
-
-        classify_queue: queue.Queue[object] = queue.Queue()
-        judge_queue: queue.Queue[object] = queue.Queue()
-
-        classify_thread = _ClassifyThread(
-            classify_queue=classify_queue,
-            judge_queue=judge_queue,
-            extractor=extractor,
-            dedup_store=dedup_store,
-            status_display=status_display,
-            total_batches=total_batches,
-            classify_stats=classify_stats,
-            run_state=run_state,
-        )
-        judge_thread = _JudgeThread(
-            judge_queue=judge_queue,
-            extractor=extractor,
-            results_manager=results_manager,
-            dedup_store=dedup_store,
-            status_display=status_display,
-            layout=layout,
-            judge_stats=judge_stats,
-            run_state=run_state,
-        )
-        classify_thread.start()
-        judge_thread.start()
-
-        batch_id = 0
-        for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
-            for i in range(0, len(lang_buffer), batch_size):
-                batch = lang_buffer[i : i + batch_size]
-                sent_in_lang = i + len(batch)
-                rem_de = len(de_buffer) - sent_in_lang if lang_str == "de" else 0
-                rem_en = (
-                    len(en_buffer) - sent_in_lang
-                    if lang_str == "en"
-                    else len(en_buffer)
-                )
+            # Flush residual buffers (end-of-discovery undersized batches)
+            if de_buffer:
                 classify_queue.put(
                     _ClassifyBatch(
-                        language=lang_str,
-                        positions=batch,
+                        language="de",
+                        positions=list(de_buffer),
                         item_id=str(batch_id),
-                        remaining_en=rem_en,
-                        remaining_de=rem_de,
+                        remaining_en=len(en_buffer),
+                        remaining_de=0,
                     )
                 )
+                total_batches_ref[0] += 1
                 batch_id += 1
-        classify_queue.put(_NO_MORE_BATCHES)
+                de_buffer.clear()
+            if en_buffer:
+                classify_queue.put(
+                    _ClassifyBatch(
+                        language="en",
+                        positions=list(en_buffer),
+                        item_id=str(batch_id),
+                        remaining_en=0,
+                        remaining_de=0,
+                    )
+                )
+                total_batches_ref[0] += 1
+                batch_id += 1
+                en_buffer.clear()
+            classify_queue.put(_NO_MORE_BATCHES)
 
         # Sentinel cascade: classify drains → forwards _NO_MORE_JUDGES → judge drains → exits
         classify_thread.join()

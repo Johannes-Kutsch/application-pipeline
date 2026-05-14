@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import application_pipeline.parser_log as parser_log
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.types import City, NotServedQuery, Remote
 from application_pipeline.parsers.bundesagentur_api import (
@@ -245,6 +246,35 @@ def test_discover_skips_item_without_referenznummer() -> None:
     assert len(stubs) == 1
     assert isinstance(stubs[0], PositionStub)
     assert base64.b64encode(b"good1").decode() in stubs[0].url
+
+
+# ---------------------------------------------------------------------------
+# discover — missing stellenangebotsTitel
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def reset_parser_log():
+    parser_log._logs_dir = None
+    yield
+    parser_log._logs_dir = None
+
+
+def test_discover_skips_item_with_missing_title_and_logs(tmp_path: Path) -> None:
+    parser_log.configure(tmp_path)
+    no_title_item = {
+        "referenznummer": "notitle1",
+        "veroeffentlichungszeitraum": {"von": "2024-01-15"},
+    }
+    good_item = _item("good1", "Backend Engineer")
+    get = _make_get([_search_body([no_title_item, good_item]), _search_body([])])
+    with BundesagenturParser(_http_get=get) as p:
+        stubs = list(p.discover(_query()))
+    assert len(stubs) == 1
+    assert stubs[0].title == "Backend Engineer"
+    log_content = (tmp_path / "Bundesagentur.log").read_text(encoding="utf-8")
+    assert "missing_title" in log_content
+    assert "notitle1" in log_content
 
 
 # ---------------------------------------------------------------------------

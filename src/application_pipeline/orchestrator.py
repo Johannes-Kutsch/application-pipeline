@@ -850,6 +850,23 @@ def run(
             classify_thread.start()
             judge_thread.start()
 
+            def _flush_classify_batch(language: str) -> None:
+                nonlocal batch_id
+                buffer = de_buffer if language == "de" else en_buffer
+                other = en_buffer if language == "de" else de_buffer
+                classify_queue.put(
+                    _ClassifyBatch(
+                        language=language,
+                        positions=list(buffer),
+                        item_id=str(batch_id),
+                        remaining_en=len(other) if language == "de" else 0,
+                        remaining_de=len(other) if language == "en" else 0,
+                    )
+                )
+                total_batches_ref[0] += 1
+                batch_id += 1
+                buffer.clear()
+
             parsers_remaining: set[str] = set(parser_states.keys())
 
             def _update_parser_row(pid: str, suffix: str = "") -> None:
@@ -963,36 +980,11 @@ def run(
                         prefilter_no_hit_either += 1
                     if verdict.passes:
                         prefilter_passed += 1
-                        if resolution.effective == "de":
-                            de_buffer.append((payload, resolution))
-                            if len(de_buffer) >= batch_size:
-                                classify_queue.put(
-                                    _ClassifyBatch(
-                                        language="de",
-                                        positions=de_buffer[:batch_size],
-                                        item_id=str(batch_id),
-                                        remaining_en=len(en_buffer),
-                                        remaining_de=0,
-                                    )
-                                )
-                                total_batches_ref[0] += 1
-                                batch_id += 1
-                                del de_buffer[:batch_size]
-                        else:
-                            en_buffer.append((payload, resolution))
-                            if len(en_buffer) >= batch_size:
-                                classify_queue.put(
-                                    _ClassifyBatch(
-                                        language="en",
-                                        positions=en_buffer[:batch_size],
-                                        item_id=str(batch_id),
-                                        remaining_de=len(de_buffer),
-                                        remaining_en=0,
-                                    )
-                                )
-                                total_batches_ref[0] += 1
-                                batch_id += 1
-                                del en_buffer[:batch_size]
+                        lang = "de" if resolution.effective == "de" else "en"
+                        buffer = de_buffer if lang == "de" else en_buffer
+                        buffer.append((payload, resolution))
+                        if len(buffer) >= batch_size:
+                            _flush_classify_batch(lang)
                     else:
                         dedup_store.mark_off_domain(payload.stub)
                         prefilter_dropped += 1
@@ -1075,31 +1067,9 @@ def run(
 
             # Flush residual buffers (end-of-discovery undersized batches)
             if de_buffer:
-                classify_queue.put(
-                    _ClassifyBatch(
-                        language="de",
-                        positions=list(de_buffer),
-                        item_id=str(batch_id),
-                        remaining_en=len(en_buffer),
-                        remaining_de=0,
-                    )
-                )
-                total_batches_ref[0] += 1
-                batch_id += 1
-                de_buffer.clear()
+                _flush_classify_batch("de")
             if en_buffer:
-                classify_queue.put(
-                    _ClassifyBatch(
-                        language="en",
-                        positions=list(en_buffer),
-                        item_id=str(batch_id),
-                        remaining_en=0,
-                        remaining_de=0,
-                    )
-                )
-                total_batches_ref[0] += 1
-                batch_id += 1
-                en_buffer.clear()
+                _flush_classify_batch("en")
             classify_queue.put(_NO_MORE_BATCHES)
 
         # Sentinel cascade: classify drains → forwards _NO_MORE_JUDGES → judge drains → exits

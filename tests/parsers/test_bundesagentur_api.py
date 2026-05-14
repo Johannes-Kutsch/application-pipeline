@@ -253,15 +253,10 @@ def test_discover_skips_item_without_referenznummer() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def reset_parser_log():
-    parser_log._logs_dir = None
-    yield
-    parser_log._logs_dir = None
-
-
-def test_discover_skips_item_with_missing_title_and_logs(tmp_path: Path) -> None:
-    parser_log.configure(tmp_path)
+def test_discover_skips_item_with_missing_title_and_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
     no_title_item = {
         "referenznummer": "notitle1",
         "veroeffentlichungszeitraum": {"von": "2024-01-15"},
@@ -271,8 +266,9 @@ def test_discover_skips_item_with_missing_title_and_logs(tmp_path: Path) -> None
     with BundesagenturParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 1
+    assert isinstance(stubs[0], PositionStub)
     assert stubs[0].title == "Backend Engineer"
-    log_content = (tmp_path / "Bundesagentur.log").read_text(encoding="utf-8")
+    log_content = (tmp_path / "bundesagentur_api.log").read_text(encoding="utf-8")
     assert "missing_title" in log_content
     assert "notitle1" in log_content
 

@@ -179,9 +179,8 @@ class BundesagenturParser:
                 title: str = item.get("stellenangebotsTitel") or ""
                 if not title:
                     parser_log.record(
-                        _DISPLAY_NAME,
+                        "bundesagentur_api",
                         "missing_title",
-                        reason="missing_title",
                         item=item,
                     )
                     continue

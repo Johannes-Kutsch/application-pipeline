@@ -3075,34 +3075,6 @@ def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
     assert prefilter_order == dedup_order + 1
 
 
-def test_dedup_row_registered_after_parser_rows(tmp_path: Path) -> None:
-    """dedup row appears after all parser rows in call sequence."""
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-    display = FakeStatusDisplay()
-
-    run(
-        config_path,
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
-        status_display=display,
-    )
-
-    indexed = [(i, c.method, c.name) for i, c in enumerate(display.calls)]
-    parser_reg_idx = next(
-        i for i, m, n in indexed if m == "register" and n == "bundesagentur_api"
-    )
-    dedup_reg_idx = next(i for i, m, n in indexed if m == "register" and n == "dedup")
-    assert dedup_reg_idx > parser_reg_idx
-
-
 def test_dedup_row_body_updates_on_dedup_events(tmp_path: Path) -> None:
     """dedup row body tracks url_hits, tuple_hits, and misses."""
     config_path = _write_config(

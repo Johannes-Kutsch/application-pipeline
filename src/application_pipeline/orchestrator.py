@@ -526,10 +526,9 @@ def run(
 
             status_display.remove("startup")
 
-            _n_parsers = len(threads)
-            status_display.register("dedup", order=2 + _n_parsers, phase="running")
+            status_display.register("dedup", order=2 + len(threads), phase="running")
             status_display.register(
-                "prefilter", order=2 + _n_parsers + 1, phase="running"
+                "prefilter", order=3 + len(threads), phase="running"
             )
 
             parsers_remaining: set[str] = set(parser_inbound.keys())

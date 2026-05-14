@@ -607,37 +607,33 @@ def run(
                     + suffix,
                 )
 
-            _poll_s = min(stall_threshold_s, 5.0)
+            poll_s = min(stall_threshold_s, 5.0)
             while parsers_remaining:
                 try:
-                    pid, payload = outbound.get(timeout=_poll_s)
+                    pid, payload = outbound.get(timeout=poll_s)
                 except queue.Empty:
-                    _now = time.monotonic()
-                    for _stall_pid in parsers_remaining:
-                        _stall_state = parser_states[_stall_pid]
-                        _age = _now - _stall_state.last_event_monotonic
-                        if _age >= stall_threshold_s and not _stall_state.stall_logged:
-                            parser_log.record(
-                                _stall_pid,
-                                "stalled",
-                                last_event_age_s=round(_age, 1),
+                    now = time.monotonic()
+                    frames = sys._current_frames()
+                    threads_by_name = {t.name: t for t in threading.enumerate()}
+                    for stall_pid in parsers_remaining:
+                        stall_state = parser_states[stall_pid]
+                        age = now - stall_state.last_event_monotonic
+                        if age < stall_threshold_s or stall_state.stall_logged:
+                            continue
+                        parser_log.record(
+                            stall_pid, "stalled", last_event_age_s=round(age, 1)
+                        )
+                        thread = threads_by_name.get(f"parser-{stall_pid}")
+                        frame = (
+                            frames.get(thread.ident)
+                            if thread is not None and thread.ident is not None
+                            else None
+                        )
+                        if frame is not None:
+                            parser_log.record_traceback(
+                                stall_pid, "".join(traceback.format_stack(frame))
                             )
-                            _frames = sys._current_frames()
-                            for _thread in threading.enumerate():
-                                if _thread.name == f"parser-{_stall_pid}":
-                                    _ident = _thread.ident
-                                    _frame = (
-                                        _frames.get(_ident)
-                                        if _ident is not None
-                                        else None
-                                    )
-                                    if _frame is not None:
-                                        _tb_str = "".join(
-                                            traceback.format_stack(_frame)
-                                        )
-                                        parser_log.record_traceback(_stall_pid, _tb_str)
-                                    break
-                            _stall_state.stall_logged = True
+                        stall_state.stall_logged = True
                     continue
                 current_stage.set(f"parser:{pid}")
                 state = parser_states[pid]

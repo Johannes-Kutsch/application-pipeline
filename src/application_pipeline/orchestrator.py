@@ -750,19 +750,20 @@ def run(
 
         batch_size = cfg.claude_classify_batch_size
         stats = _BatchStats()
-        total_batches = (
-            (len(de_buffer) + batch_size - 1) // batch_size if de_buffer else 0
-        ) + ((len(en_buffer) + batch_size - 1) // batch_size if en_buffer else 0)
+        total_batches = sum(
+            (len(buf) + batch_size - 1) // batch_size for buf in (de_buffer, en_buffer)
+        )
 
         for lang_str, lang_buffer in [("de", de_buffer), ("en", en_buffer)]:
             for i in range(0, len(lang_buffer), batch_size):
                 batch = lang_buffer[i : i + batch_size]
-                if lang_str == "de":
-                    rem_de = max(0, len(de_buffer) - (i + len(batch)))
-                    rem_en = len(en_buffer)
-                else:
-                    rem_de = 0
-                    rem_en = max(0, len(en_buffer) - (i + len(batch)))
+                sent_in_lang = i + len(batch)
+                rem_de = len(de_buffer) - sent_in_lang if lang_str == "de" else 0
+                rem_en = (
+                    len(en_buffer) - sent_in_lang
+                    if lang_str == "en"
+                    else len(en_buffer)
+                )
                 _process_batch(
                     batch,
                     lang_str,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from typing import Protocol
@@ -17,6 +18,8 @@ class StatusDisplay(Protocol):
     def update_body(self, name: str, *, body: str) -> None: ...
 
     def remove(self, name: str) -> None: ...
+
+    def print(self, *, caller: str, message: str) -> None: ...
 
     def stop(self) -> None: ...
 
@@ -55,8 +58,26 @@ class PlainStatusDisplay:
         parser_log.record(name, "removed")
         print(f"{name}: removed")
 
+    def print(self, *, caller: str, message: str) -> None:
+        pass
+
     def stop(self) -> None:
         pass
+
+
+class _LiveLoggingHandler(logging.Handler):
+    """Routes stdlib logging records to a StatusDisplay while Rich Live is active."""
+
+    def __init__(self, display: StatusDisplay) -> None:
+        super().__init__()
+        self._display = display
+        self.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._display.print(caller=record.name, message=self.format(record))
+        except Exception:
+            self.handleError(record)
 
 
 class RichStatusDisplay:
@@ -67,6 +88,8 @@ class RichStatusDisplay:
         self._rows: dict[str, _RowState] = {}
         self._live = Live(self, refresh_per_second=4)  # type: ignore[arg-type]
         self._live.start()
+        self._log_handler: logging.Handler = _LiveLoggingHandler(self)
+        logging.getLogger().addHandler(self._log_handler)
 
     def __rich_console__(self, console: object, options: object) -> object:
         from rich.table import Table
@@ -108,5 +131,9 @@ class RichStatusDisplay:
             self._rows.pop(name, None)
         parser_log.record(name, "removed")
 
+    def print(self, *, caller: str, message: str) -> None:
+        self._live.console.print(message)
+
     def stop(self) -> None:
+        logging.getLogger().removeHandler(self._log_handler)
         self._live.stop()

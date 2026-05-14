@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import application_pipeline.parser_log as parser_log
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.types import (
     City,
@@ -365,6 +366,28 @@ def test_discover_max_results_stops_mid_page(list_html: bytes) -> None:
     with JobsBeimStaatParser(_http_get=get) as p:
         stubs = list(p.discover(_query(max_results=30)))
     assert len(stubs) == 30
+
+
+# ---------------------------------------------------------------------------
+# discover — discover_page heartbeat
+# ---------------------------------------------------------------------------
+
+
+def test_discover_emits_discover_page_heartbeat_per_page(
+    tmp_path: Path, list_html: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+    get = _make_get(
+        [_jobs_envelope(list_html), _jobs_envelope(list_html), _empty_envelope()]
+    )
+    with JobsBeimStaatParser(_http_get=get) as p:
+        list(p.discover(_query()))
+    log_content = (tmp_path / "jobs_beim_staat_html.log").read_text(encoding="utf-8")
+    lines = [ln for ln in log_content.splitlines() if "discover_page" in ln]
+    assert len(lines) == 3
+    starts = [int(ln.split("start=")[1].split()[0]) for ln in lines]
+    assert starts == sorted(starts)
+    assert starts[0] < starts[-1]
 
 
 # ---------------------------------------------------------------------------

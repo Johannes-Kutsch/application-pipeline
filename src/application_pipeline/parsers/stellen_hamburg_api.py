@@ -9,6 +9,7 @@ from typing import Any, Callable, Literal, NoReturn
 
 import httpx
 
+import application_pipeline.parser_log as parser_log
 from application_pipeline.http import HttpRetryError
 from application_pipeline.http.retry import (
     HttpNotRetryableError,
@@ -209,6 +210,12 @@ class StellenHamburgParser:
                     }
                 }
             ).encode()
+            parser_log.record(
+                _PARSER_TYPE,
+                "discover_page",
+                q=query.keyword,
+                start=first_item,
+            )
             try:
                 raw = _post_with_retry(
                     _SEARCH_URL, body, self._timeout, self._retries, self._http_post

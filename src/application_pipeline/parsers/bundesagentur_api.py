@@ -155,6 +155,12 @@ class BundesagenturParser:
                 **extra_params,
             }
             url = f"{_BASE_URL}/jobs?{urllib.parse.urlencode(params)}"
+            parser_log.record(
+                "bundesagentur_api",
+                "discover_page",
+                q=query.keyword,
+                page=page,
+            )
             try:
                 raw = request_with_retry(
                     url, self._timeout, self._retries, self._http_get

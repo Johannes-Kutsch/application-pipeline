@@ -18,6 +18,7 @@ from application_pipeline.llm import ClaudeUsageLimitError, ExtractorUnreachable
 from application_pipeline.orchestrator import current_stage, run  # noqa: E402
 from application_pipeline.prompts import PromptError  # noqa: E402
 from application_pipeline.results import ResultsFileError  # noqa: E402
+from application_pipeline.status_display import PlainStatusDisplay, RichStatusDisplay  # noqa: E402
 
 _FATAL = (
     ConfigError,
@@ -69,9 +70,10 @@ def main() -> None:
         sys.exit(2)
 
     config_path = Path(args[0])
+    display = RichStatusDisplay() if sys.stdout.isatty() else PlainStatusDisplay()
     try:
         parser_log.configure(config_path.parent / "logs")
-        summary = run(config_path)
+        summary = run(config_path, status_display=display)
     except _FATAL as exc:
         try:
             write_failure(current_stage.get(), exc, _tail.tail(), config_path.parent)

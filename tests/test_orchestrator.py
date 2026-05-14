@@ -10,6 +10,8 @@ import pytest
 
 import application_pipeline.parser_log as _parser_log
 
+from fake_status_display import FakeStatusDisplay
+
 from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError
@@ -2608,7 +2610,9 @@ def test_main_run_complete_line_includes_new_fields(
         claude_cost_usd=0.0042,
         duration_seconds=1.5,
     )
-    monkeypatch.setattr("application_pipeline.__main__.run", lambda _path: fake_summary)
+    monkeypatch.setattr(
+        "application_pipeline.__main__.run", lambda _path, **_kw: fake_summary
+    )
 
     from application_pipeline.__main__ import main
 
@@ -2626,3 +2630,109 @@ def test_main_run_complete_line_includes_new_fields(
         "claude_cost_usd=",
     ):
         assert field in out, f"field {field!r} missing from run complete line: {out!r}"
+
+
+# ---------------------------------------------------------------------------
+# StatusDisplay wiring
+# ---------------------------------------------------------------------------
+
+
+def test_display_pipeline_row_registered_on_run(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path)
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    assert "pipeline" in display.registered_names()
+    register_call = next(
+        c for c in display.calls if c.method == "register" and c.name == "pipeline"
+    )
+    assert register_call.kwargs["order"] == 0
+
+
+def test_display_body_updated_with_discovered_during_run(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("pipeline")
+    assert len(bodies) > 0
+    assert any("discovered=" in b for b in bodies)
+    assert any("written=" in b for b in bodies)
+    assert any("errors=" in b for b in bodies)
+
+
+def test_display_stop_called_on_success(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path)
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    assert display.stopped
+
+
+def test_display_stop_called_on_crash(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path)
+    display = FakeStatusDisplay()
+    failing = MagicMock()
+    failing.prewarm.side_effect = ExtractorUnreachableError("down")
+
+    with pytest.raises(ExtractorUnreachableError):
+        run(
+            config_path,
+            extractor=failing,
+            dedup_store=MagicMock(),
+            results_manager=_stub_results_manager(),
+            status_display=display,
+        )
+
+    assert display.stopped
+
+
+def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
+    """pipeline register() writes a record to pipeline.log via parser_log."""
+    _parser_log.configure(tmp_path / "logs")
+    config_path = _write_config(tmp_path)
+
+    from application_pipeline.status_display import PlainStatusDisplay
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        results_manager=_stub_results_manager(),
+        status_display=PlainStatusDisplay(),
+    )
+
+    log_content = (tmp_path / "logs" / "pipeline.log").read_text(encoding="utf-8")
+    assert "registered" in log_content
+    assert "order=0" in log_content

@@ -3411,3 +3411,91 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
 
     stalled_count = content.count(" stalled ")
     assert stalled_count == 1, f"expected exactly 1 stalled entry, got {stalled_count}"
+
+
+# ---------------------------------------------------------------------------
+# _ParserThread: query_started / query_ended heartbeats (issue #208)
+# ---------------------------------------------------------------------------
+
+
+def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
+    """N queries → exactly N query_started and N query_ended lines in the parser log."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python", "django"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    log_file = logs_dir / "bundesagentur_api.log"
+    content = log_file.read_text(encoding="utf-8")
+
+    # 2 keywords × 1 location = 2 queries
+    started_count = content.count(" query_started ")
+    ended_count = content.count(" query_ended ")
+    assert started_count == 2, f"expected 2 query_started lines, got {started_count}"
+    assert ended_count == 2, f"expected 2 query_ended lines, got {ended_count}"
+
+
+def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
+    """query_ended is written even when discover() raises mid-query (parser dies)."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    class _RaisingParser:
+        def __enter__(self) -> "_RaisingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            yield PositionStub(
+                url="https://raise.example/0", title="Job 0", source="stub"
+            )
+            raise RuntimeError("boom mid-discover")
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    summary = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _RaisingParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.parsers_dead == 1
+
+    log_file = logs_dir / "bundesagentur_api.log"
+    content = log_file.read_text(encoding="utf-8")
+
+    assert " query_started " in content, "query_started must be logged before the crash"
+    assert " query_ended " in content, (
+        "query_ended must fire even when discover() raises"
+    )

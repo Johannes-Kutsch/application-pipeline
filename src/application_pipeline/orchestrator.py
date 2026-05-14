@@ -117,27 +117,46 @@ class _ParserThread(threading.Thread):
     def run(self) -> None:
         try:
             for query in self._worklist:
-                gen = iter(self._parser.discover(query))
+                location_str = (
+                    query.location.name
+                    if isinstance(query.location, City)
+                    else "Remote"
+                )
+                parser_log.record(
+                    self._parser_id,
+                    "query_started",
+                    keyword=query.keyword,
+                    location=location_str,
+                )
                 try:
-                    for item in gen:
-                        self._outbound.put((self._parser_id, item))
-                        if isinstance(item, NotServedQuery):
-                            continue  # fire-and-forget; orchestrator counts, no reply
-                        decision = self._inbound.get()
-                        if decision is _ENRICH:
-                            try:
-                                position = self._parser.enrich(item)
-                                self._outbound.put((self._parser_id, position))
-                            except ParserError as exc:
-                                self._outbound.put((self._parser_id, exc))
-                        elif decision is _SKIP_AND_END_QUERY:
-                            break
-                        # else: _SKIP — continue to next stub
+                    gen = iter(self._parser.discover(query))
+                    try:
+                        for item in gen:
+                            self._outbound.put((self._parser_id, item))
+                            if isinstance(item, NotServedQuery):
+                                continue  # fire-and-forget; orchestrator counts, no reply
+                            decision = self._inbound.get()
+                            if decision is _ENRICH:
+                                try:
+                                    position = self._parser.enrich(item)
+                                    self._outbound.put((self._parser_id, position))
+                                except ParserError as exc:
+                                    self._outbound.put((self._parser_id, exc))
+                            elif decision is _SKIP_AND_END_QUERY:
+                                break
+                            # else: _SKIP — continue to next stub
+                    finally:
+                        close = getattr(gen, "close", None)
+                        if close is not None:
+                            close()
+                    self._outbound.put((self._parser_id, _QUERY_DONE))
                 finally:
-                    close = getattr(gen, "close", None)
-                    if close is not None:
-                        close()
-                self._outbound.put((self._parser_id, _QUERY_DONE))
+                    parser_log.record(
+                        self._parser_id,
+                        "query_ended",
+                        keyword=query.keyword,
+                        location=location_str,
+                    )
         except BaseException as exc:
             self._outbound.put(
                 (self._parser_id, _ParserDead(exc, traceback.format_exc()))

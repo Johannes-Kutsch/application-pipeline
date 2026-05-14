@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import sys
 import threading
 import time
 import traceback
@@ -49,6 +50,7 @@ from application_pipeline.results import ResultsFileError, ResultsFileManager
 _log = logging.getLogger(__name__)
 
 _DISCOVER_SHORT_CIRCUIT_FALLBACK = 50
+_STALL_THRESHOLD_S: float = 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +275,8 @@ class _ParserState:
     total_queries: int
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_monotonic: float = field(default_factory=time.monotonic)
+    last_event_monotonic: float = field(default_factory=time.monotonic)
+    stall_logged: bool = False
     pending_enrich: PositionStub | None = None
     consecutive_url_hits: int = 0
     discovered: int = 0
@@ -427,6 +431,7 @@ def run(
     results_manager: ResultsFileManager | None = None,
     layout: Layout | None = None,
     status_display: StatusDisplay | None = None,
+    stall_threshold_s: float = _STALL_THRESHOLD_S,
 ) -> RunSummary:
     if status_display is None:
         status_display = PlainStatusDisplay()
@@ -560,6 +565,7 @@ def run(
                 state = parser_states[pid]
                 state.started_at = datetime.now(timezone.utc)
                 state.started_monotonic = time.monotonic()
+                state.last_event_monotonic = state.started_monotonic
                 _log.info("parser %s started", pid)
                 parser_log.record(pid, "parser started")
                 status_display.register(
@@ -597,10 +603,38 @@ def run(
                     + suffix,
                 )
 
+            poll_s = min(stall_threshold_s, 5.0)
             while parsers_remaining:
-                pid, payload = outbound.get()
+                try:
+                    pid, payload = outbound.get(timeout=poll_s)
+                except queue.Empty:
+                    now = time.monotonic()
+                    frames = sys._current_frames()
+                    threads_by_name = {t.name: t for t in threading.enumerate()}
+                    for stall_pid in parsers_remaining:
+                        stall_state = parser_states[stall_pid]
+                        age = now - stall_state.last_event_monotonic
+                        if age < stall_threshold_s or stall_state.stall_logged:
+                            continue
+                        parser_log.record(
+                            stall_pid, "stalled", last_event_age_s=round(age, 1)
+                        )
+                        thread = threads_by_name.get(f"parser-{stall_pid}")
+                        frame = (
+                            frames.get(thread.ident)
+                            if thread is not None and thread.ident is not None
+                            else None
+                        )
+                        if frame is not None:
+                            parser_log.record_traceback(
+                                stall_pid, "".join(traceback.format_stack(frame))
+                            )
+                        stall_state.stall_logged = True
+                    continue
                 current_stage.set(f"parser:{pid}")
                 state = parser_states[pid]
+                state.last_event_monotonic = time.monotonic()
+                state.stall_logged = False
 
                 if isinstance(payload, PositionStub):
                     discovered += 1

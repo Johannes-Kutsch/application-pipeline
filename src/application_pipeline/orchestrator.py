@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextvars
 import logging
 import queue
 import threading
@@ -16,6 +15,7 @@ from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline import layout as layout_module
 from application_pipeline import parser_log
+from application_pipeline._context import current_stage
 from application_pipeline.status_display import PlainStatusDisplay, StatusDisplay
 from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
@@ -47,10 +47,6 @@ from application_pipeline.renderer import render
 from application_pipeline.results import ResultsFileError, ResultsFileManager
 
 _log = logging.getLogger(__name__)
-
-current_stage: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "application_pipeline.current_stage", default="orchestrator"
-)
 
 _DISCOVER_SHORT_CIRCUIT_FALLBACK = 50
 

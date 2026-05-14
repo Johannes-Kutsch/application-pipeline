@@ -70,7 +70,7 @@ class ClaudeExtractor:
                 "duration_s": response.duration_s,
             },
         )
-        parser_log.record_event(
+        parser_log.record(
             _COMPONENT_ID,
             "classify_relevance_batch",
             language=language,
@@ -114,7 +114,7 @@ class ClaudeExtractor:
                 "duration_s": response.duration_s,
             },
         )
-        parser_log.record_event(
+        parser_log.record(
             _COMPONENT_ID,
             "judge_match",
             language=language,

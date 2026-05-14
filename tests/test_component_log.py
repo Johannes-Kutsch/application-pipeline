@@ -1,4 +1,4 @@
-"""Tests for the generalised component log interface (record_event, record_transcript, summarize).
+"""Tests for the generalised component log interface (record, record_transcript, summarize).
 
 Covers the LLM call-site use-case described in issue #184, exercised through
 parser_log — the single module that owns both file shapes.
@@ -29,13 +29,13 @@ def reset_logs():
 
 
 # ---------------------------------------------------------------------------
-# record_event
+# record
 # ---------------------------------------------------------------------------
 
 
-def test_record_event_creates_timestamped_event_line(tmp_path: Path) -> None:
+def test_record_creates_timestamped_event_line(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record_event("classify_relevance", "batch_sent")
+    parser_log.record("classify_relevance", "batch_sent")
 
     log_file = tmp_path / "classify_relevance.log"
     assert log_file.exists()
@@ -44,9 +44,9 @@ def test_record_event_creates_timestamped_event_line(tmp_path: Path) -> None:
     assert line.endswith("batch_sent")
 
 
-def test_record_event_appends_key_value_fields(tmp_path: Path) -> None:
+def test_record_appends_key_value_fields(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record_event(
+    parser_log.record(
         "classify_relevance", "batch_malformed", batch_id="b42", reason="bad_json"
     )
 
@@ -56,15 +56,15 @@ def test_record_event_appends_key_value_fields(tmp_path: Path) -> None:
     assert "reason=bad_json" in content
 
 
-def test_record_event_without_configure_is_noop(tmp_path: Path) -> None:
-    parser_log.record_event("classify_relevance", "batch_sent")
+def test_record_without_configure_is_noop(tmp_path: Path) -> None:
+    parser_log.record("classify_relevance", "batch_sent")
     assert not (tmp_path / "classify_relevance.log").exists()
 
 
-def test_record_event_multiple_calls_append_in_order(tmp_path: Path) -> None:
+def test_record_multiple_calls_append_in_order(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record_event("judge_match", "session_start")
-    parser_log.record_event("judge_match", "cli_error", exit_code="1")
+    parser_log.record("judge_match", "session_start")
+    parser_log.record("judge_match", "cli_error", exit_code="1")
 
     lines = (tmp_path / "judge_match.log").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
@@ -72,10 +72,10 @@ def test_record_event_multiple_calls_append_in_order(tmp_path: Path) -> None:
     assert "cli_error" in lines[1]
 
 
-def test_record_event_each_line_has_iso8601_timestamp(tmp_path: Path) -> None:
+def test_record_each_line_has_iso8601_timestamp(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     for event in ("e1", "e2", "e3"):
-        parser_log.record_event("classify_relevance", event)
+        parser_log.record("classify_relevance", event)
 
     lines = (
         (tmp_path / "classify_relevance.log").read_text(encoding="utf-8").splitlines()
@@ -210,13 +210,13 @@ def test_two_sessions_produce_two_summary_blocks_separated_by_blank_line(
     started2 = datetime(2026, 5, 12, 16, 0, 0, tzinfo=timezone.utc)
 
     # Session 1
-    parser_log.record_event("classify_relevance", "batch_sent", batch_id="b1")
+    parser_log.record("classify_relevance", "batch_sent", batch_id="b1")
     parser_log.summarize(
         "classify_relevance", {"batches_sent": 1, "items_classified": 5}, started1
     )
 
     # Session 2
-    parser_log.record_event("classify_relevance", "batch_sent", batch_id="b2")
+    parser_log.record("classify_relevance", "batch_sent", batch_id="b2")
     parser_log.summarize(
         "classify_relevance", {"batches_sent": 1, "items_classified": 3}, started2
     )
@@ -236,7 +236,7 @@ def test_two_sessions_produce_two_summary_blocks_separated_by_blank_line(
 
 def test_event_log_and_transcript_are_independent_files(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record_event("classify_relevance", "batch_sent")
+    parser_log.record("classify_relevance", "batch_sent")
     parser_log.record_transcript(
         "classify_relevance", {"ts": "2026-05-12T10:00:00Z", "status": "ok"}
     )
@@ -247,7 +247,7 @@ def test_event_log_and_transcript_are_independent_files(tmp_path: Path) -> None:
 
 def test_different_component_ids_write_separate_files(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record_event("classify_relevance", "batch_sent")
+    parser_log.record("classify_relevance", "batch_sent")
     parser_log.record_transcript("judge_match", {"ts": "2026-05-12T10:00:00Z"})
 
     assert (tmp_path / "classify_relevance.log").exists()

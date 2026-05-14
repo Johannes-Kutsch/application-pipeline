@@ -374,6 +374,7 @@ def run(
 
     _start = time.monotonic()
     status_display.register("pipeline", order=0, phase="running")
+    status_display.register("startup", order=1, phase="running")
     try:
         # Step 1: Load config
         try:
@@ -391,6 +392,7 @@ def run(
                 raise
             extractor = ClaudeExtractor(cfg, prompts)
 
+        status_display.update_body("startup", body="prewarming claude cli")
         try:
             extractor.prewarm()
         except ExtractorUnreachableError as exc:
@@ -497,6 +499,8 @@ def run(
                 parser_starts[pid] = (datetime.now(timezone.utc), time.monotonic())
                 _log.info("parser %s started", pid)
                 parser_log.record(pid, "parser started")
+
+            status_display.remove("startup")
 
             parsers_remaining: set[str] = set(parser_inbound.keys())
             consecutive_url_hits: dict[str, int] = {pid: 0 for pid in parsers_remaining}

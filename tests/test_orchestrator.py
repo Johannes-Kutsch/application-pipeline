@@ -2736,3 +2736,69 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
     log_content = (tmp_path / "logs" / "pipeline.log").read_text(encoding="utf-8")
     assert "registered" in log_content
     assert "order=0" in log_content
+
+
+# ---------------------------------------------------------------------------
+# StatusDisplay — startup row
+# ---------------------------------------------------------------------------
+
+
+def test_startup_row_ordering(tmp_path: Path) -> None:
+    """register("startup") precedes any parser-row registration;
+    remove("startup") precedes the first PositionStub-triggered pipeline body update."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    indexed = [(i, c.method, c.name) for i, c in enumerate(display.calls)]
+
+    pipeline_register_idx = next(
+        i for i, m, n in indexed if m == "register" and n == "pipeline"
+    )
+    startup_register_idx = next(
+        i for i, m, n in indexed if m == "register" and n == "startup"
+    )
+    remove_startup_idx = next(
+        i for i, m, n in indexed if m == "remove" and n == "startup"
+    )
+    first_pipeline_body_idx = next(
+        i for i, m, n in indexed if m == "update_body" and n == "pipeline"
+    )
+
+    assert startup_register_idx > pipeline_register_idx
+    assert remove_startup_idx < first_pipeline_body_idx
+
+
+def test_startup_row_visible_on_prewarm_failure(tmp_path: Path) -> None:
+    """startup row is not removed and shows a meaningful body when prewarm fails."""
+    config_path = _write_config(tmp_path)
+    display = FakeStatusDisplay()
+    failing = MagicMock()
+    failing.prewarm.side_effect = ExtractorUnreachableError("down")
+
+    with pytest.raises(ExtractorUnreachableError):
+        run(
+            config_path,
+            extractor=failing,
+            dedup_store=MagicMock(),
+            results_manager=_stub_results_manager(),
+            status_display=display,
+        )
+
+    assert not any(c.method == "remove" and c.name == "startup" for c in display.calls)
+    startup_bodies = display.body_updates_for("startup")
+    assert startup_bodies and "prewarm" in startup_bodies[-1]

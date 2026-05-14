@@ -253,6 +253,24 @@ def test_discover_skips_item_without_referenznummer() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_discover_emits_discover_page_heartbeat_per_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+    page1 = _search_body([_item("id1"), _item("id2")])
+    page2 = _search_body([_item("id3")])
+    page3 = _search_body([])
+    get = _make_get([page1, page2, page3])
+    with BundesagenturParser(_http_get=get) as p:
+        list(p.discover(_query()))
+    log_content = (tmp_path / "bundesagentur_api.log").read_text(encoding="utf-8")
+    lines = [ln for ln in log_content.splitlines() if "discover_page" in ln]
+    assert len(lines) == 3
+    pages = [int(ln.split("page=")[1].split()[0]) for ln in lines]
+    assert pages == sorted(pages)
+    assert pages[0] < pages[-1]
+
+
 def test_discover_skips_item_with_missing_title_and_logs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

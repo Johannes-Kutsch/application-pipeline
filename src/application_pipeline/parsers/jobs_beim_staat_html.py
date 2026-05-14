@@ -23,6 +23,7 @@ from typing import Any, assert_never
 import httpx
 from bs4 import BeautifulSoup, Tag
 
+import application_pipeline.parser_log as parser_log
 from application_pipeline.http import HttpRetryError
 
 from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
@@ -248,6 +249,14 @@ class JobsBeimStaatParser:
             }
             url = f"{_BASE_URL}{_REST_PATH}?{urllib.parse.urlencode(params)}"
 
+            parser_log.record(
+                "jobs_beim_staat_html",
+                "discover_page",
+                q=q,
+                place=place,
+                start=start,
+                step=step,
+            )
             self._throttle.wait()
             try:
                 raw = request_with_retry(

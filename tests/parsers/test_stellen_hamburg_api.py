@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-
+import application_pipeline.parser_log as parser_log
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.types import City, NotServedQuery, Remote
 from application_pipeline.parsers.http import HttpGet
@@ -257,6 +257,51 @@ def test_discover_default_post_sends_origin_and_referer() -> None:
     req = route.calls.last.request
     assert req.headers.get("origin") == "https://stellen.hamburg.de"
     assert req.headers.get("referer") == "https://stellen.hamburg.de/"
+
+
+# ---------------------------------------------------------------------------
+# discover — discover_page heartbeat
+# ---------------------------------------------------------------------------
+
+
+def test_discover_emits_discover_page_heartbeat_per_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+
+    def _sh_item(obj_id: str) -> dict:
+        return {
+            "MatchedObjectId": obj_id,
+            "MatchedObjectDescriptor": {"PositionTitle": f"Job {obj_id}"},
+        }
+
+    def _sh_body(items: list[dict], total: int) -> bytes:
+        return json.dumps(
+            {
+                "SearchResult": {
+                    "SearchResultItems": items,
+                    "SearchResultCountAll": total,
+                }
+            }
+        ).encode()
+
+    responses = iter(
+        [_sh_body([_sh_item("1")], total=2), _sh_body([_sh_item("2")], total=2)]
+    )
+
+    def sequential_post(url: str, body: bytes, timeout: float) -> bytes:
+        return next(responses)
+
+    with StellenHamburgParser(_http_post=sequential_post) as p:
+        stubs = list(p.discover(_query()))
+
+    assert len(stubs) == 2
+    log_content = (tmp_path / "stellen_hamburg_api.log").read_text(encoding="utf-8")
+    lines = [ln for ln in log_content.splitlines() if "discover_page" in ln]
+    assert len(lines) == 2
+    starts = [int(ln.split("start=")[1].split()[0]) for ln in lines]
+    assert starts == sorted(starts)
+    assert starts[0] < starts[1]
 
 
 # ---------------------------------------------------------------------------

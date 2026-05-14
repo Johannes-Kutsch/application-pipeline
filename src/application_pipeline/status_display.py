@@ -42,16 +42,16 @@ class PlainStatusDisplay:
     ) -> None:
         with self._lock:
             self._phases[name] = phase
+            parser_log.record(name, "registered", order=order, phase=phase)
             print(f"{name}: registered order={order} phase={phase}")
-        parser_log.record(name, "registered", order=order, phase=phase)
 
     def update_phase(self, name: str, *, phase: str) -> None:
         with self._lock:
             if self._phases.get(name) == phase:
                 return
             self._phases[name] = phase
+            parser_log.record(name, "phase_changed", phase=phase)
             print(f"{name}: phase={phase}")
-        parser_log.record(name, "phase_changed", phase=phase)
 
     def update_body(self, name: str, *, body: str) -> None:
         pass
@@ -59,8 +59,8 @@ class PlainStatusDisplay:
     def remove(self, name: str) -> None:
         with self._lock:
             self._phases.pop(name, None)
+            parser_log.record(name, "removed")
             print(f"{name}: removed")
-        parser_log.record(name, "removed")
 
     def print(self, *, caller: str, message: str) -> None:
         pass

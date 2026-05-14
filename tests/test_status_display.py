@@ -193,30 +193,6 @@ def test_log_warning_forwarded_to_display_print_during_active_session() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_plain_update_body_concurrent_no_interleaved_output(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    display = PlainStatusDisplay()
-    display.register("p", order=0, phase="running")
-    capsys.readouterr()
-
-    threads = [
-        threading.Thread(
-            target=display.update_body, args=("p",), kwargs={"body": f"body-{i}"}
-        )
-        for i in range(50)
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    # update_body is silent in PlainStatusDisplay; all output lines must be complete
-    out = capsys.readouterr().out
-    for line in out.splitlines():
-        assert line == line.strip() or line  # no partial / empty lines from body calls
-
-
 def test_plain_concurrent_phase_updates_produce_complete_lines(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

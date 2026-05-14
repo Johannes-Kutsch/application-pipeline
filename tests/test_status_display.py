@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
 
 import application_pipeline.parser_log as _parser_log
-from application_pipeline.status_display import PlainStatusDisplay
+from application_pipeline.status_display import PlainStatusDisplay, _LiveLoggingHandler
+from fake_status_display import FakeStatusDisplay
 
 
 @pytest.fixture(autouse=True)
@@ -148,3 +150,33 @@ def test_plain_remove_writes_to_parser_log(tmp_path: Path) -> None:
 
     log_content = (tmp_path / "pipeline.log").read_text(encoding="utf-8")
     assert "removed" in log_content
+
+
+# ---------------------------------------------------------------------------
+# Logging shim
+# ---------------------------------------------------------------------------
+
+
+def test_plain_does_not_install_log_handler() -> None:
+    root = logging.getLogger()
+    count_before = len(root.handlers)
+    display = PlainStatusDisplay()
+    display.stop()
+    assert len(root.handlers) == count_before
+
+
+def test_log_warning_forwarded_to_display_print_during_active_session() -> None:
+    fake = FakeStatusDisplay()
+    handler = _LiveLoggingHandler(fake)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        logging.getLogger("application_pipeline.orchestrator").warning(
+            "test warning message"
+        )
+        print_calls = [c for c in fake.calls if c.method == "print"]
+        assert len(print_calls) == 1
+        assert "test warning message" in str(print_calls[0].kwargs["message"])
+        assert print_calls[0].name == "application_pipeline.orchestrator"
+    finally:
+        root.removeHandler(handler)

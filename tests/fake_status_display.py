@@ -33,6 +33,9 @@ class FakeStatusDisplay:
     def remove(self, name: str) -> None:
         self.calls.append(_Call("remove", name))
 
+    def print(self, *, caller: str, message: str) -> None:
+        self.calls.append(_Call("print", caller, {"message": message}))
+
     def stop(self) -> None:
         self.stopped = True
         self.calls.append(_Call("stop", ""))

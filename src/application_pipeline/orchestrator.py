@@ -327,7 +327,7 @@ class _ClassifyThread(_QueueWorker):
         verdicts: list[RelevanceVerdict] | None = None
         try:
             _t0 = time.monotonic()
-            call_verdicts, classify_usage = self._extractor.classify_relevance_batch(
+            verdicts, classify_usage = self._extractor.classify_relevance_batch(
                 batch.language, items
             )
             self.classify_stats.classify_total_s += time.monotonic() - _t0
@@ -339,7 +339,6 @@ class _ClassifyThread(_QueueWorker):
                 classify_usage.cache_read_tokens
             )
             self.classify_stats.classify_cost_usd += classify_usage.cost_usd
-            verdicts = call_verdicts
         except ClaudeUsageLimitError:
             self._run_state.set_degraded("usage_limit", self.name)
             return

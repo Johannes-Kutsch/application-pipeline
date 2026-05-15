@@ -201,7 +201,9 @@ def test_empty_stdout_raises_malformed_error():
         _invoker(_runner(stdout="")).call("p", "en")
 
 
-def test_malformed_result_field_raises_malformed_error():
+def test_malformed_result_field_raises_cli_error_with_result_not_json_class():
+    # Per ADR-0016 amendment: result field not being valid JSON is a transient
+    # CLI error (retried next cron tick), not a crash-class malformed envelope.
     envelope = json.dumps(
         {
             "is_error": False,
@@ -211,8 +213,9 @@ def test_malformed_result_field_raises_malformed_error():
             "session_id": "s",
         }
     )
-    with pytest.raises(ClaudeMalformedEnvelopeError):
+    with pytest.raises(ClaudeCliError) as exc_info:
         _invoker(_runner(stdout=envelope)).call("p", "en")
+    assert exc_info.value.envelope_error_class == "result_not_json"
 
 
 def test_envelope_is_json_array_not_object_raises_malformed_error():
@@ -242,3 +245,80 @@ def test_runner_receives_output_format_json_flag():
     args, _ = calls[0]
     assert "--output-format" in args
     assert "json" in args
+
+
+# --- forensic attributes on exceptions ---
+
+
+def test_empty_result_field_raises_cli_error_with_forensics():
+    stdout_val = json.dumps(
+        {
+            "is_error": False,
+            "result": "",
+            "usage": {"input_tokens": 5, "output_tokens": 2},
+            "total_cost_usd": 0.0,
+            "session_id": "s",
+        }
+    )
+    with pytest.raises(ClaudeCliError) as exc_info:
+        _invoker(_runner(returncode=0, stdout=stdout_val, stderr="")).call("p", "en")
+    err = exc_info.value
+    assert err.envelope_error_class == "empty_result"
+    assert err.returncode == 0
+    assert err.stdout == stdout_val
+    assert err.stderr == ""
+
+
+def test_envelope_not_json_carries_forensics():
+    with pytest.raises(ClaudeMalformedEnvelopeError) as exc_info:
+        _invoker(_runner(returncode=0, stdout="not json", stderr="err")).call("p", "en")
+    err = exc_info.value
+    assert err.envelope_error_class == "envelope_not_json"
+    assert err.envelope is None
+    assert err.stdout == "not json"
+    assert err.stderr == "err"
+
+
+def test_envelope_not_object_carries_forensics():
+    with pytest.raises(ClaudeMalformedEnvelopeError) as exc_info:
+        _invoker(_runner(stdout="[1, 2, 3]", stderr="e")).call("p", "en")
+    err = exc_info.value
+    assert err.envelope_error_class == "envelope_not_object"
+
+
+def test_nonzero_exit_with_usage_limit_in_stderr_raises_usage_limit_error():
+    envelope = json.dumps({"is_error": False, "result": json.dumps({}), "usage": {}})
+    with pytest.raises(ClaudeUsageLimitError):
+        _invoker(
+            _runner(returncode=1, stdout=envelope, stderr="usage limit reached")
+        ).call("p", "en")
+
+
+def test_nonzero_exit_with_rate_limit_in_stderr_raises_usage_limit_error():
+    envelope = json.dumps({"is_error": False, "result": json.dumps({}), "usage": {}})
+    with pytest.raises(ClaudeUsageLimitError):
+        _invoker(
+            _runner(returncode=1, stdout=envelope, stderr="rate limit exceeded")
+        ).call("p", "en")
+
+
+def test_nonzero_exit_without_usage_limit_raises_cli_error_with_nonzero_exit_class():
+    envelope = json.dumps(
+        {"is_error": True, "result": "Something went wrong", "usage": {}}
+    )
+    with pytest.raises(ClaudeCliError) as exc_info:
+        _invoker(_runner(returncode=1, stdout=envelope, stderr="")).call("p", "en")
+    assert exc_info.value.envelope_error_class == "cli_nonzero_exit"
+    assert exc_info.value.returncode == 1
+
+
+def test_cli_error_carries_stdout_and_stderr():
+    stdout_val = json.dumps(
+        {"is_error": True, "result": "Something went wrong", "usage": {}}
+    )
+    with pytest.raises(ClaudeCliError) as exc_info:
+        _invoker(_runner(returncode=1, stdout=stdout_val, stderr="oops")).call(
+            "p", "en"
+        )
+    assert exc_info.value.stdout == stdout_val
+    assert exc_info.value.stderr == "oops"

@@ -297,7 +297,14 @@ def test_classify_relevance_batch_records_transcript(tmp_path: Path) -> None:
 
 def test_classify_batch_cli_error_raises_extractor_unreachable() -> None:
     invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeCliError("exit 1")
+    invoker.call.side_effect = ClaudeCliError(
+        "exit 1",
+        returncode=1,
+        stdout="",
+        stderr="",
+        envelope=None,
+        envelope_error_class="cli_nonzero_exit",
+    )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ExtractorUnreachableError):
         extractor.classify_relevance_batch("en", _items(1))
@@ -305,7 +312,9 @@ def test_classify_batch_cli_error_raises_extractor_unreachable() -> None:
 
 def test_classify_batch_usage_limit_propagates() -> None:
     invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeUsageLimitError("rate limit")
+    invoker.call.side_effect = ClaudeUsageLimitError(
+        "rate limit", returncode=1, stdout="", stderr="rate limit", envelope=None
+    )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ClaudeUsageLimitError):
         extractor.classify_relevance_batch("en", _items(1))
@@ -313,7 +322,14 @@ def test_classify_batch_usage_limit_propagates() -> None:
 
 def test_classify_batch_malformed_envelope_raises_malformed_json_error() -> None:
     invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeMalformedEnvelopeError("bad json")
+    invoker.call.side_effect = ClaudeMalformedEnvelopeError(
+        "bad json",
+        returncode=0,
+        stdout="",
+        stderr="",
+        envelope=None,
+        envelope_error_class="envelope_not_json",
+    )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ExtractorMalformedJSONError):
         extractor.classify_relevance_batch("en", _items(1))
@@ -521,7 +537,14 @@ def test_both_calls_append_to_same_transcript_file(tmp_path: Path) -> None:
 
 def test_judge_cli_error_raises_extractor_unreachable() -> None:
     invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeCliError("exit 1")
+    invoker.call.side_effect = ClaudeCliError(
+        "exit 1",
+        returncode=1,
+        stdout="",
+        stderr="",
+        envelope=None,
+        envelope_error_class="cli_nonzero_exit",
+    )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ExtractorUnreachableError):
         extractor.judge_match("en", "desc")
@@ -529,7 +552,9 @@ def test_judge_cli_error_raises_extractor_unreachable() -> None:
 
 def test_judge_usage_limit_propagates() -> None:
     invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeUsageLimitError("rate limit")
+    invoker.call.side_effect = ClaudeUsageLimitError(
+        "rate limit", returncode=1, stdout="", stderr="rate limit", envelope=None
+    )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ClaudeUsageLimitError):
         extractor.judge_match("en", "desc")
@@ -537,7 +562,14 @@ def test_judge_usage_limit_propagates() -> None:
 
 def test_judge_malformed_envelope_raises_malformed_json_error() -> None:
     invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeMalformedEnvelopeError("bad")
+    invoker.call.side_effect = ClaudeMalformedEnvelopeError(
+        "bad",
+        returncode=0,
+        stdout="",
+        stderr="",
+        envelope=None,
+        envelope_error_class="envelope_not_json",
+    )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ExtractorMalformedJSONError):
         extractor.judge_match("en", "desc")

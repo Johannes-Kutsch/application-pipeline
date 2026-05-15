@@ -790,7 +790,9 @@ def test_degraded_run_never_emits_skip_and_end_query(tmp_path: Path) -> None:
         def classify_relevance_batch(
             self, language: str, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            raise ClaudeUsageLimitError("quota")
+            raise ClaudeUsageLimitError(
+                "quota", returncode=1, stdout="", stderr="quota", envelope=None
+            )
 
         def judge_match(
             self, language: str, raw_description: str
@@ -2786,7 +2788,13 @@ def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
     def _batch(
         lang: str, items: list[ClassifyItem]
     ) -> tuple[list[RelevanceVerdict], CallUsage]:
-        raise ClaudeUsageLimitError("subscription cap")
+        raise ClaudeUsageLimitError(
+            "subscription cap",
+            returncode=1,
+            stdout="",
+            stderr="subscription cap",
+            envelope=None,
+        )
 
     ext = MagicMock()
     ext.prewarm.return_value = None
@@ -2832,7 +2840,13 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
         def classify_relevance_batch(
             self, language: str, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            raise ClaudeUsageLimitError("subscription cap")
+            raise ClaudeUsageLimitError(
+                "subscription cap",
+                returncode=1,
+                stdout="",
+                stderr="subscription cap",
+                envelope=None,
+            )
 
         def judge_match(
             self, language: str, raw_description: str
@@ -4072,7 +4086,9 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
     def _judge(language: str, raw_description: str) -> tuple[MatchVerdict, CallUsage]:
         judge_call_count[0] += 1
         if judge_call_count[0] >= 4:
-            raise ClaudeUsageLimitError("quota")
+            raise ClaudeUsageLimitError(
+                "quota", returncode=1, stdout="", stderr="quota", envelope=None
+            )
         return MatchVerdict(
             tier=MatchTier.green, matched=[], missing=[], summary="ok"
         ), _ZERO_USAGE

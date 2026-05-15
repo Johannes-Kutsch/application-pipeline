@@ -78,3 +78,17 @@ Compare the listing against the profile above and produce a structured assessmen
 
 Job description:
 {raw_description}
+
+Wrap your response in `<verdict>` tags. The content must be a single JSON object with the
+fields `tier`, `matched`, `missing`, and `summary`, and no other text outside the tags.
+
+Example (synthetic data — do not copy these values):
+
+<verdict>
+{{
+  "tier": "green",
+  "matched": ["python"],
+  "missing": ["kubernetes"],
+  "summary": "Strong alignment on core stack; location and seniority are a good fit for this role."
+}}
+</verdict>

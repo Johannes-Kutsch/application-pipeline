@@ -88,6 +88,14 @@ def _usage() -> ClaudeUsage:
     return ClaudeUsage(input_tokens=100, output_tokens=20, cache_read_tokens=0)
 
 
+def _classify_raw(verdicts: object) -> str:
+    return f"<verdicts>{json.dumps(verdicts)}</verdicts>"
+
+
+def _judge_raw(verdict: object) -> str:
+    return f"<verdict>{json.dumps(verdict)}</verdict>"
+
+
 def _batch_response(
     items: list[ClassifyItem], in_domain_map: dict[str, bool] | None = None
 ) -> ClaudeResponse:
@@ -97,10 +105,9 @@ def _batch_response(
     result = [
         {"id": item.id, "in_domain": in_domain_map.get(item.id, True)} for item in items
     ]
-    raw = json.dumps(result)
     return ClaudeResponse(
         parsed_result=result,
-        raw_response=raw,
+        raw_response=_classify_raw(result),
         usage=_usage(),
         cost_usd=0.001,
         duration_s=0.5,
@@ -108,10 +115,7 @@ def _batch_response(
     )
 
 
-_JUDGE_RAW = (
-    '{"tier": "green", "matched": ["python"], "missing": [], "summary": "Good match"}'
-)
-_JUDGE_PARSED = {
+_JUDGE_VERDICT = {
     "tier": "green",
     "matched": ["python"],
     "missing": [],
@@ -121,8 +125,8 @@ _JUDGE_PARSED = {
 
 def _judge_response() -> ClaudeResponse:
     return ClaudeResponse(
-        parsed_result=_JUDGE_PARSED,
-        raw_response=_JUDGE_RAW,
+        parsed_result=_JUDGE_VERDICT,
+        raw_response=_judge_raw(_JUDGE_VERDICT),
         usage=_usage(),
         cost_usd=0.002,
         duration_s=1.2,
@@ -205,7 +209,7 @@ def test_classify_relevance_batch_returns_verdicts_in_input_order() -> None:
     ]
     response = ClaudeResponse(
         parsed_result=reversed_result,
-        raw_response=json.dumps(reversed_result),
+        raw_response=_classify_raw(reversed_result),
         usage=_usage(),
         cost_usd=0.001,
         duration_s=0.5,
@@ -341,7 +345,7 @@ def test_classify_batch_length_mismatch_raises_batch_malformed() -> None:
     short_result = [{"id": "0", "in_domain": True}, {"id": "1", "in_domain": False}]
     response = ClaudeResponse(
         parsed_result=short_result,
-        raw_response=json.dumps(short_result),
+        raw_response=_classify_raw(short_result),
         usage=_usage(),
         cost_usd=0.0,
         duration_s=0.1,
@@ -358,7 +362,7 @@ def test_classify_batch_missing_id_raises_batch_malformed() -> None:
     bad_result = [{"id": "0", "in_domain": True}, {"id": "99", "in_domain": False}]
     response = ClaudeResponse(
         parsed_result=bad_result,
-        raw_response=json.dumps(bad_result),
+        raw_response=_classify_raw(bad_result),
         usage=_usage(),
         cost_usd=0.0,
         duration_s=0.1,
@@ -376,7 +380,7 @@ def test_classify_batch_extra_id_raises_batch_malformed() -> None:
     bad_result = [{"id": "z", "in_domain": True}]
     response = ClaudeResponse(
         parsed_result=bad_result,
-        raw_response=json.dumps(bad_result),
+        raw_response=_classify_raw(bad_result),
         usage=_usage(),
         cost_usd=0.0,
         duration_s=0.1,
@@ -388,9 +392,10 @@ def test_classify_batch_extra_id_raises_batch_malformed() -> None:
 
 
 def test_classify_batch_non_list_response_raises_batch_malformed() -> None:
+    non_list = {"in_domain": True}
     response = ClaudeResponse(
-        parsed_result={"in_domain": True},
-        raw_response='{"in_domain": true}',
+        parsed_result=non_list,
+        raw_response=_classify_raw(non_list),
         usage=_usage(),
         cost_usd=0.0,
         duration_s=0.1,
@@ -498,8 +503,8 @@ def test_judge_match_records_transcript(tmp_path: Path) -> None:
     assert entry["call"] == "judge_match"
     assert entry["language"] == "en"
     assert "prompt" in entry
-    assert entry["raw_response"] == _JUDGE_RAW
-    assert entry["parsed_result"] == _JUDGE_PARSED
+    assert entry["raw_response"] == _judge_raw(_JUDGE_VERDICT)
+    assert entry["parsed_result"] == _JUDGE_VERDICT
     assert entry["usage"]["input_tokens"] == 100
     assert entry["cost_usd"] == pytest.approx(0.002)
     assert entry["duration_s"] == pytest.approx(1.2)
@@ -576,9 +581,10 @@ def test_judge_malformed_envelope_raises_malformed_json_error() -> None:
 
 
 def test_judge_missing_tier_raises_schema_error() -> None:
+    bad_verdict = {"matched": [], "missing": [], "summary": "x"}
     bad = ClaudeResponse(
-        parsed_result={"matched": [], "missing": [], "summary": "x"},
-        raw_response='{"matched": [], "missing": [], "summary": "x"}',
+        parsed_result=bad_verdict,
+        raw_response=_judge_raw(bad_verdict),
         usage=_usage(),
         cost_usd=0.0,
         duration_s=0.1,
@@ -590,9 +596,10 @@ def test_judge_missing_tier_raises_schema_error() -> None:
 
 
 def test_judge_invalid_tier_value_raises_schema_error() -> None:
+    bad_verdict = {"tier": "invalid", "matched": [], "missing": [], "summary": "x"}
     bad = ClaudeResponse(
-        parsed_result={"tier": "invalid", "matched": [], "missing": [], "summary": "x"},
-        raw_response='{"tier": "invalid", "matched": [], "missing": [], "summary": "x"}',
+        parsed_result=bad_verdict,
+        raw_response=_judge_raw(bad_verdict),
         usage=_usage(),
         cost_usd=0.0,
         duration_s=0.1,
@@ -604,14 +611,10 @@ def test_judge_invalid_tier_value_raises_schema_error() -> None:
 
 
 def test_judge_summary_over_600_chars_raises_schema_error() -> None:
+    bad_verdict = {"tier": "green", "matched": [], "missing": [], "summary": "x" * 601}
     bad = ClaudeResponse(
-        parsed_result={
-            "tier": "green",
-            "matched": [],
-            "missing": [],
-            "summary": "x" * 601,
-        },
-        raw_response="",
+        parsed_result=bad_verdict,
+        raw_response=_judge_raw(bad_verdict),
         usage=_usage(),
         cost_usd=0.0,
         duration_s=0.1,
@@ -842,3 +845,161 @@ def test_judge_slots_match_inventory() -> None:
     prompt_sent = invoker.call.call_args.args[0]
     assert "- python" in prompt_sent
     assert "d=MY_DESC" in prompt_sent
+
+
+# ---------------------------------------------------------------------------
+# Agent Output Protocol: tag_missing / json_malformed → extractor errors
+# ---------------------------------------------------------------------------
+
+
+def test_classify_batch_tag_missing_raises_batch_malformed() -> None:
+    response = ClaudeResponse(
+        parsed_result=None,
+        raw_response='[{"id":"0","in_domain":true}]',  # no <verdicts> tag
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    with pytest.raises(ExtractorBatchMalformedError):
+        extractor.classify_relevance_batch("en", _items(1))
+
+
+def test_classify_batch_json_malformed_raises_batch_malformed() -> None:
+    response = ClaudeResponse(
+        parsed_result=None,
+        raw_response="<verdicts>not valid json</verdicts>",
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    with pytest.raises(ExtractorBatchMalformedError):
+        extractor.classify_relevance_batch("en", _items(1))
+
+
+def test_judge_tag_missing_raises_malformed_json_error() -> None:
+    response = ClaudeResponse(
+        parsed_result=None,
+        raw_response='{"tier":"green","matched":[],"missing":[],"summary":"ok"}',
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    with pytest.raises(ExtractorMalformedJSONError):
+        extractor.judge_match("en", "desc")
+
+
+def test_judge_json_malformed_raises_malformed_json_error() -> None:
+    response = ClaudeResponse(
+        parsed_result=None,
+        raw_response="<verdict>not valid json</verdict>",
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    with pytest.raises(ExtractorMalformedJSONError):
+        extractor.judge_match("en", "desc")
+
+
+# ---------------------------------------------------------------------------
+# Agent Output Protocol: failure transcript carries envelope_error_class + raw_response
+# ---------------------------------------------------------------------------
+
+
+def test_classify_tag_missing_writes_failure_transcript_with_kind(
+    tmp_path: Path,
+) -> None:
+    parser_log.configure(tmp_path)
+    response = ClaudeResponse(
+        parsed_result=None,
+        raw_response="no tags here",
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    with pytest.raises(ExtractorBatchMalformedError):
+        extractor.classify_relevance_batch("en", _items(1))
+
+    entry = json.loads(
+        (tmp_path / "classify_relevance.transcripts.jsonl").read_text(encoding="utf-8")
+    )
+    assert entry["envelope_error_class"] == "tag_missing"
+    assert entry["raw_response"] == "no tags here"
+
+
+def test_classify_json_malformed_writes_failure_transcript_with_kind(
+    tmp_path: Path,
+) -> None:
+    parser_log.configure(tmp_path)
+    raw = "<verdicts>bad json</verdicts>"
+    response = ClaudeResponse(
+        parsed_result=None,
+        raw_response=raw,
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    with pytest.raises(ExtractorBatchMalformedError):
+        extractor.classify_relevance_batch("en", _items(1))
+
+    entry = json.loads(
+        (tmp_path / "classify_relevance.transcripts.jsonl").read_text(encoding="utf-8")
+    )
+    assert entry["envelope_error_class"] == "json_malformed"
+    assert entry["raw_response"] == raw
+
+
+def test_judge_tag_missing_writes_failure_transcript_with_kind(tmp_path: Path) -> None:
+    parser_log.configure(tmp_path)
+    response = ClaudeResponse(
+        parsed_result=None,
+        raw_response="no tags here",
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    with pytest.raises(ExtractorMalformedJSONError):
+        extractor.judge_match("en", "desc")
+
+    entry = json.loads(
+        (tmp_path / "judge_match.transcripts.jsonl").read_text(encoding="utf-8")
+    )
+    assert entry["envelope_error_class"] == "tag_missing"
+    assert entry["raw_response"] == "no tags here"
+
+
+def test_judge_json_malformed_writes_failure_transcript_with_kind(
+    tmp_path: Path,
+) -> None:
+    parser_log.configure(tmp_path)
+    raw = "<verdict>bad json</verdict>"
+    response = ClaudeResponse(
+        parsed_result=None,
+        raw_response=raw,
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    with pytest.raises(ExtractorMalformedJSONError):
+        extractor.judge_match("en", "desc")
+
+    entry = json.loads(
+        (tmp_path / "judge_match.transcripts.jsonl").read_text(encoding="utf-8")
+    )
+    assert entry["envelope_error_class"] == "json_malformed"
+    assert entry["raw_response"] == raw

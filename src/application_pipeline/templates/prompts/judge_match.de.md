@@ -82,3 +82,17 @@ Bewertung:
 
 Stellenbeschreibung:
 {raw_description}
+
+Gib deine Antwort in `<verdict>`-Tags aus. Der Inhalt muss ein einzelnes JSON-Objekt mit den
+Feldern `tier`, `matched`, `missing` und `summary` sein, ohne weiteren Text außerhalb der Tags.
+
+Beispiel (synthetische Daten — diese Werte nicht übernehmen):
+
+<verdict>
+{{
+  "tier": "green",
+  "matched": ["python"],
+  "missing": ["kubernetes"],
+  "summary": "Gute Übereinstimmung beim Kern-Stack; Standort und Seniorität passen gut zur Stelle."
+}}
+</verdict>

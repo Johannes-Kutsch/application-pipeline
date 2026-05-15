@@ -26,3 +26,15 @@ Antworte mit einem JSON-Array, einem Eintrag pro Eingabeelement, alle ids beibeh
 Zu klassifizierende Stellenanzeigen:
 
 {ITEMS}
+
+Gib deine Antwort in `<verdicts>`-Tags aus. Der Inhalt muss ein JSON-Array mit einem Objekt pro
+Eingabeelement sein, alle ids beibehaltend, ohne weiteren Text außerhalb der Tags.
+
+Beispiel (synthetische Daten — diese Werte nicht übernehmen):
+
+<verdicts>
+[
+  {{"id": "example-1", "in_domain": true}},
+  {{"id": "example-2", "in_domain": false}}
+]
+</verdicts>

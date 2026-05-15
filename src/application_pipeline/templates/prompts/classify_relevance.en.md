@@ -24,3 +24,15 @@ Respond with a JSON array, one entry per input item, preserving all ids:
 Items to classify:
 
 {ITEMS}
+
+Wrap your response in `<verdicts>` tags. The content must be a JSON array with one object per
+input item, preserving all ids, and no other text outside the tags.
+
+Example (synthetic data — do not copy these values):
+
+<verdicts>
+[
+  {{"id": "example-1", "in_domain": true}},
+  {{"id": "example-2", "in_domain": false}}
+]
+</verdicts>

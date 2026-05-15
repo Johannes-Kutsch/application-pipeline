@@ -6,6 +6,7 @@ from application_pipeline import parser_log
 from application_pipeline.config import Config
 from application_pipeline.prompts import Prompts
 
+from .agent_output import AgentOutputProtocolError, extract_json_block
 from .claude_cli import (
     ClaudeCliError,
     ClaudeCliInvoker,
@@ -73,6 +74,23 @@ class ClaudeExtractor:
             ) from exc
         # ClaudeUsageLimitError propagates as-is for abort handling
 
+        try:
+            parsed = extract_json_block(response.raw_response, "verdicts")
+        except AgentOutputProtocolError as exc:
+            self._write_protocol_failure_transcript(
+                component_id="classify_relevance",
+                call="classify_relevance_batch",
+                language=language,
+                prompt=prompt,
+                raw_response=response.raw_response,
+                kind=exc.kind,
+                duration_s=time.monotonic() - t0,
+                extra={"item_ids": [item.id for item in items]},
+            )
+            raise ExtractorBatchMalformedError(
+                f"classify_relevance_batch: {exc.kind}: <verdicts> block missing or malformed"
+            ) from exc
+
         parser_log.record_transcript(
             _COMPONENT_ID,
             {
@@ -101,7 +119,7 @@ class ClaudeExtractor:
         )
 
         usage = self._usage_from(response)
-        return self._parse_batch_response(response.parsed_result, items), usage
+        return self._parse_batch_response(parsed, items), usage
 
     def judge_match(
         self, language: str, raw_description: str, *, stub_url: str = ""
@@ -137,6 +155,25 @@ class ClaudeExtractor:
             ) from exc
         # ClaudeUsageLimitError propagates as-is for abort handling
 
+        try:
+            data = extract_json_block(response.raw_response, "verdict")
+        except AgentOutputProtocolError as exc:
+            self._write_protocol_failure_transcript(
+                component_id="judge_match",
+                call="judge_match",
+                language=language,
+                prompt=prompt,
+                raw_response=response.raw_response,
+                kind=exc.kind,
+                duration_s=time.monotonic() - t0,
+                extra={"stub_url": stub_url},
+            )
+            raise ExtractorMalformedJSONError(
+                f"judge_match: {exc.kind}: <verdict> block missing or malformed",
+                returncode=None,
+                stderr="",
+            ) from exc
+
         parser_log.record_transcript(
             _COMPONENT_ID,
             {
@@ -163,7 +200,6 @@ class ClaudeExtractor:
         )
 
         usage = self._usage_from(response)
-        data = response.parsed_result
         try:
             return (
                 MatchVerdict(
@@ -181,6 +217,34 @@ class ClaudeExtractor:
 
     def prewarm(self) -> None:
         pass  # Claude CLI is a stateless executable; no warm-up needed
+
+    @staticmethod
+    def _write_protocol_failure_transcript(
+        *,
+        component_id: str,
+        call: str,
+        language: str,
+        prompt: str,
+        raw_response: str,
+        kind: str,
+        duration_s: float,
+        extra: dict[str, object],
+    ) -> None:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        parser_log.record_transcript(
+            component_id,
+            {
+                "ts": ts,
+                "call": call,
+                "language": language,
+                "status": "protocol_error",
+                "prompt": prompt,
+                "raw_response": raw_response,
+                "envelope_error_class": kind,
+                "duration_s": duration_s,
+                **extra,
+            },
+        )
 
     @staticmethod
     def _write_failure_transcript(

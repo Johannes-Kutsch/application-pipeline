@@ -11,6 +11,7 @@ from application_pipeline.http import HttpRetryError
 from application_pipeline.http.retry import (
     HttpNotRetryableError,
     exponential_backoff,
+    retry,
 )
 
 HTTP_CONNECT_TIMEOUT: float = 5.0
@@ -95,39 +96,47 @@ def request_with_retry(
     _sleep: Callable[[float], None] = time.sleep,
 ) -> bytes:
     component_id = _log_component_id()
-    backoff = exponential_backoff(BACKOFF_INITIAL, BACKOFF_MULTIPLIER, BACKOFF_MAX)
-    last_exc: Exception | None = None
+    t_start: list[float] = [0.0]
+    attempt_num: list[int] = [0]
 
-    for attempt in range(retries):
-        parser_log.record(component_id, "http_get_start", url=url, attempt=attempt + 1)
-        t0 = time.monotonic()
-        try:
-            result = http_get(url, timeout)
-            elapsed_ms = round((time.monotonic() - t0) * 1000)
-            parser_log.record(
-                component_id,
-                "http_get_ok",
-                url=url,
-                bytes=len(result),
-                elapsed_ms=elapsed_ms,
-            )
-            return result
-        except HttpNotRetryableError:
-            raise
-        except Exception as exc:
-            elapsed_ms = round((time.monotonic() - t0) * 1000)
-            last_exc = exc
-            if attempt < retries - 1:
-                parser_log.record(
-                    component_id,
-                    "http_get_retry",
-                    url=url,
-                    attempt=attempt + 1,
-                    reason=str(exc),
-                    elapsed_ms=elapsed_ms,
-                )
-                _sleep(backoff(attempt))
+    def _attempt() -> bytes:
+        attempt_num[0] += 1
+        parser_log.record(
+            component_id, "http_get_start", url=url, attempt=attempt_num[0]
+        )
+        t_start[0] = time.monotonic()
+        result = http_get(url, timeout)
+        elapsed_ms = round((time.monotonic() - t_start[0]) * 1000)
+        parser_log.record(
+            component_id,
+            "http_get_ok",
+            url=url,
+            bytes=len(result),
+            elapsed_ms=elapsed_ms,
+        )
+        return result
 
-    raise HttpRetryError(
-        f"HTTP request failed after {retries} retries: {last_exc}"
-    ) from last_exc
+    def _on_retry(attempt: int, exc: Exception) -> None:
+        elapsed_ms = round((time.monotonic() - t_start[0]) * 1000)
+        parser_log.record(
+            component_id,
+            "http_get_retry",
+            url=url,
+            attempt=attempt,
+            reason=str(exc),
+            elapsed_ms=elapsed_ms,
+        )
+
+    return retry(
+        _attempt,
+        predicate=lambda exc: not isinstance(exc, HttpNotRetryableError),
+        backoff_policy=exponential_backoff(
+            BACKOFF_INITIAL, BACKOFF_MULTIPLIER, BACKOFF_MAX
+        ),
+        max_retries=retries,
+        error_factory=lambda n, exc: HttpRetryError(
+            f"HTTP request failed after {n} retries: {exc}"
+        ),
+        on_retry=_on_retry,
+        _sleep=_sleep,
+    )

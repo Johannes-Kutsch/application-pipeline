@@ -32,6 +32,7 @@ def retry(
     backoff_policy: Callable[[int], float],
     max_retries: int,
     error_factory: Callable[[int, Exception | None], Exception],
+    on_retry: Callable[[int, Exception], None] = lambda _n, _exc: None,
     _sleep: Callable[[float], None] = time.sleep,
 ) -> T:
     """Retry *fn* up to *max_retries* times when *predicate(exc)* is True.
@@ -40,6 +41,7 @@ def retry(
     Raises *error_factory(max_retries, last_exc)* when retries are exhausted.
     Raises *error_factory(0, None)* immediately when *max_retries* <= 0.
     Non-retryable exceptions (predicate returns False) propagate immediately.
+    *on_retry(attempt, exc)* is called before each sleep (1-indexed attempt).
     """
     if max_retries <= 0:
         raise error_factory(0, None)
@@ -53,6 +55,7 @@ def retry(
                 raise
             last_exc = exc
             if attempt < max_retries - 1:
+                on_retry(attempt + 1, exc)
                 _sleep(backoff_policy(attempt))
 
     assert last_exc is not None

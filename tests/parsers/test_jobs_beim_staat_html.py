@@ -53,6 +53,17 @@ def _empty_envelope() -> bytes:
     return json.dumps({"jobs": "", "count": 0}).encode()
 
 
+def _make_list_page(start_id: int, count: int) -> bytes:
+    """Build a jobs HTML fragment with `count` cards whose URLs start at `start_id`."""
+    cards = "".join(
+        f'<div class="serp-jobcontet-cards-container-joblist jobcard">'
+        f'<h3><a href="/stellenangebote/{start_id + i}">Job {start_id + i}</a></h3>'
+        f"</div>"
+        for i in range(count)
+    )
+    return cards.encode()
+
+
 def _query(**kwargs: object) -> ParserQuery:
     defaults: dict = {
         "keyword": "python",
@@ -343,10 +354,10 @@ def test_discover_stops_when_jobs_fragment_has_no_cards(list_html: bytes) -> Non
     assert len(stubs) == 21
 
 
-def test_discover_paginates_across_multiple_pages(list_html: bytes) -> None:
-    get = _make_get(
-        [_jobs_envelope(list_html), _jobs_envelope(list_html), _empty_envelope()]
-    )
+def test_discover_paginates_across_multiple_pages() -> None:
+    page1 = _make_list_page(start_id=1, count=21)
+    page2 = _make_list_page(start_id=22, count=21)
+    get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 42
@@ -359,10 +370,10 @@ def test_discover_respects_max_results(list_html: bytes) -> None:
     assert len(stubs) == 5
 
 
-def test_discover_max_results_stops_mid_page(list_html: bytes) -> None:
-    get = _make_get(
-        [_jobs_envelope(list_html), _jobs_envelope(list_html), _empty_envelope()]
-    )
+def test_discover_max_results_stops_mid_page() -> None:
+    page1 = _make_list_page(start_id=1, count=21)
+    page2 = _make_list_page(start_id=22, count=21)
+    get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         stubs = list(p.discover(_query(max_results=30)))
     assert len(stubs) == 30
@@ -374,12 +385,12 @@ def test_discover_max_results_stops_mid_page(list_html: bytes) -> None:
 
 
 def test_discover_emits_discover_page_heartbeat_per_page(
-    tmp_path: Path, list_html: bytes, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
-    get = _make_get(
-        [_jobs_envelope(list_html), _jobs_envelope(list_html), _empty_envelope()]
-    )
+    page1 = _make_list_page(start_id=1, count=21)
+    page2 = _make_list_page(start_id=22, count=21)
+    get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
     with JobsBeimStaatParser(_http_get=get) as p:
         list(p.discover(_query()))
     log_content = (tmp_path / "jobs_beim_staat_html.log").read_text(encoding="utf-8")
@@ -633,3 +644,48 @@ def test_enrich_external_redirect_returns_external_redirect(
         result = p.enrich(stub)
     assert isinstance(result, ExternalRedirect)
     assert "go.opportuno.de/job/123" in result.outbound_url
+
+
+# ---------------------------------------------------------------------------
+# discover — overlap-based termination (infinite-pagination guard)
+# ---------------------------------------------------------------------------
+
+_SMALL_LIST_HTML = b"""
+<div class="serp-jobcontet-cards-container-joblist jobcard">
+  <h3><a href="/stellenangebote/9001">Job Alpha</a></h3>
+</div>
+<div class="serp-jobcontet-cards-container-joblist jobcard">
+  <h3><a href="/stellenangebote/9002">Job Beta</a></h3>
+</div>
+"""
+
+
+def test_discover_stops_when_second_page_urls_already_seen() -> None:
+    """API echoes identical cards — discover() must not loop indefinitely."""
+    call_count = 0
+
+    def counting_get(url: str, timeout: float) -> bytes:
+        nonlocal call_count
+        call_count += 1
+        return json.dumps({"jobs": _SMALL_LIST_HTML.decode()}).encode()
+
+    with JobsBeimStaatParser(_http_get=counting_get) as p:
+        stubs = list(p.discover(_query(max_results=1000)))
+
+    assert len(stubs) == 2
+    assert call_count == 2
+
+
+def test_discover_at_most_one_extra_request_when_first_page_is_undersized() -> None:
+    """First page has fewer cards than normal — API echoes same cards; ≤2 requests total."""
+    call_count = 0
+
+    def counting_get(url: str, timeout: float) -> bytes:
+        nonlocal call_count
+        call_count += 1
+        return json.dumps({"jobs": _SMALL_LIST_HTML.decode()}).encode()
+
+    with JobsBeimStaatParser(_http_get=counting_get) as p:
+        list(p.discover(_query(max_results=1000)))
+
+    assert call_count <= 2

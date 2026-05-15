@@ -106,7 +106,6 @@ def _batch_response(
         {"id": item.id, "in_domain": in_domain_map.get(item.id, True)} for item in items
     ]
     return ClaudeResponse(
-        parsed_result=result,
         raw_response=_classify_raw(result),
         usage=_usage(),
         cost_usd=0.001,
@@ -125,7 +124,6 @@ _JUDGE_VERDICT = {
 
 def _judge_response() -> ClaudeResponse:
     return ClaudeResponse(
-        parsed_result=_JUDGE_VERDICT,
         raw_response=_judge_raw(_JUDGE_VERDICT),
         usage=_usage(),
         cost_usd=0.002,
@@ -208,7 +206,6 @@ def test_classify_relevance_batch_returns_verdicts_in_input_order() -> None:
         {"id": "a", "in_domain": True},
     ]
     response = ClaudeResponse(
-        parsed_result=reversed_result,
         raw_response=_classify_raw(reversed_result),
         usage=_usage(),
         cost_usd=0.001,
@@ -288,7 +285,6 @@ def test_classify_relevance_batch_records_transcript(tmp_path: Path) -> None:
     assert entry["batch_size"] == 2
     assert "prompt" in entry
     assert "raw_response" in entry
-    assert "parsed_result" in entry
     assert "usage" in entry
     assert "cost_usd" in entry
     assert "duration_s" in entry
@@ -344,7 +340,6 @@ def test_classify_batch_length_mismatch_raises_batch_malformed() -> None:
     # Response has only 2 entries
     short_result = [{"id": "0", "in_domain": True}, {"id": "1", "in_domain": False}]
     response = ClaudeResponse(
-        parsed_result=short_result,
         raw_response=_classify_raw(short_result),
         usage=_usage(),
         cost_usd=0.0,
@@ -361,7 +356,6 @@ def test_classify_batch_missing_id_raises_batch_malformed() -> None:
     # Response has unknown id
     bad_result = [{"id": "0", "in_domain": True}, {"id": "99", "in_domain": False}]
     response = ClaudeResponse(
-        parsed_result=bad_result,
         raw_response=_classify_raw(bad_result),
         usage=_usage(),
         cost_usd=0.0,
@@ -379,7 +373,6 @@ def test_classify_batch_extra_id_raises_batch_malformed() -> None:
     # Response has 1 entry but with a different id
     bad_result = [{"id": "z", "in_domain": True}]
     response = ClaudeResponse(
-        parsed_result=bad_result,
         raw_response=_classify_raw(bad_result),
         usage=_usage(),
         cost_usd=0.0,
@@ -394,7 +387,6 @@ def test_classify_batch_extra_id_raises_batch_malformed() -> None:
 def test_classify_batch_non_list_response_raises_batch_malformed() -> None:
     non_list = {"in_domain": True}
     response = ClaudeResponse(
-        parsed_result=non_list,
         raw_response=_classify_raw(non_list),
         usage=_usage(),
         cost_usd=0.0,
@@ -504,7 +496,6 @@ def test_judge_match_records_transcript(tmp_path: Path) -> None:
     assert entry["language"] == "en"
     assert "prompt" in entry
     assert entry["raw_response"] == _judge_raw(_JUDGE_VERDICT)
-    assert entry["parsed_result"] == _JUDGE_VERDICT
     assert entry["usage"]["input_tokens"] == 100
     assert entry["cost_usd"] == pytest.approx(0.002)
     assert entry["duration_s"] == pytest.approx(1.2)
@@ -583,7 +574,6 @@ def test_judge_malformed_envelope_raises_malformed_json_error() -> None:
 def test_judge_missing_tier_raises_schema_error() -> None:
     bad_verdict = {"matched": [], "missing": [], "summary": "x"}
     bad = ClaudeResponse(
-        parsed_result=bad_verdict,
         raw_response=_judge_raw(bad_verdict),
         usage=_usage(),
         cost_usd=0.0,
@@ -598,7 +588,6 @@ def test_judge_missing_tier_raises_schema_error() -> None:
 def test_judge_invalid_tier_value_raises_schema_error() -> None:
     bad_verdict = {"tier": "invalid", "matched": [], "missing": [], "summary": "x"}
     bad = ClaudeResponse(
-        parsed_result=bad_verdict,
         raw_response=_judge_raw(bad_verdict),
         usage=_usage(),
         cost_usd=0.0,
@@ -613,7 +602,6 @@ def test_judge_invalid_tier_value_raises_schema_error() -> None:
 def test_judge_summary_over_600_chars_raises_schema_error() -> None:
     bad_verdict = {"tier": "green", "matched": [], "missing": [], "summary": "x" * 601}
     bad = ClaudeResponse(
-        parsed_result=bad_verdict,
         raw_response=_judge_raw(bad_verdict),
         usage=_usage(),
         cost_usd=0.0,
@@ -878,7 +866,6 @@ def test_judge_slots_match_inventory() -> None:
 
 def test_classify_batch_tag_missing_raises_batch_malformed() -> None:
     response = ClaudeResponse(
-        parsed_result=None,
         raw_response='[{"id":"0","in_domain":true}]',  # no <verdicts> tag
         usage=_usage(),
         cost_usd=0.0,
@@ -892,7 +879,6 @@ def test_classify_batch_tag_missing_raises_batch_malformed() -> None:
 
 def test_classify_batch_json_malformed_raises_batch_malformed() -> None:
     response = ClaudeResponse(
-        parsed_result=None,
         raw_response="<verdicts>not valid json</verdicts>",
         usage=_usage(),
         cost_usd=0.0,
@@ -906,7 +892,6 @@ def test_classify_batch_json_malformed_raises_batch_malformed() -> None:
 
 def test_judge_tag_missing_raises_malformed_json_error() -> None:
     response = ClaudeResponse(
-        parsed_result=None,
         raw_response='{"tier":"green","matched":[],"missing":[],"summary":"ok"}',
         usage=_usage(),
         cost_usd=0.0,
@@ -920,7 +905,6 @@ def test_judge_tag_missing_raises_malformed_json_error() -> None:
 
 def test_judge_json_malformed_raises_malformed_json_error() -> None:
     response = ClaudeResponse(
-        parsed_result=None,
         raw_response="<verdict>not valid json</verdict>",
         usage=_usage(),
         cost_usd=0.0,
@@ -942,7 +926,6 @@ def test_classify_tag_missing_writes_failure_transcript_with_kind(
 ) -> None:
     parser_log.configure(tmp_path)
     response = ClaudeResponse(
-        parsed_result=None,
         raw_response="no tags here",
         usage=_usage(),
         cost_usd=0.0,
@@ -966,7 +949,6 @@ def test_classify_json_malformed_writes_failure_transcript_with_kind(
     parser_log.configure(tmp_path)
     raw = "<verdicts>bad json</verdicts>"
     response = ClaudeResponse(
-        parsed_result=None,
         raw_response=raw,
         usage=_usage(),
         cost_usd=0.0,
@@ -987,7 +969,6 @@ def test_classify_json_malformed_writes_failure_transcript_with_kind(
 def test_judge_tag_missing_writes_failure_transcript_with_kind(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     response = ClaudeResponse(
-        parsed_result=None,
         raw_response="no tags here",
         usage=_usage(),
         cost_usd=0.0,
@@ -1011,7 +992,6 @@ def test_judge_json_malformed_writes_failure_transcript_with_kind(
     parser_log.configure(tmp_path)
     raw = "<verdict>bad json</verdict>"
     response = ClaudeResponse(
-        parsed_result=None,
         raw_response=raw,
         usage=_usage(),
         cost_usd=0.0,

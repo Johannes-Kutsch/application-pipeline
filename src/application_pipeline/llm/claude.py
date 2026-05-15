@@ -103,7 +103,6 @@ class ClaudeExtractor:
                 "batch_size": len(items),
                 "prompt": prompt,
                 "raw_response": response.raw_response,
-                "parsed_result": response.parsed_result,
                 "usage": {
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,
@@ -187,7 +186,6 @@ class ClaudeExtractor:
                 "language": language,
                 "prompt": prompt,
                 "raw_response": response.raw_response,
-                "parsed_result": response.parsed_result,
                 "usage": {
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,

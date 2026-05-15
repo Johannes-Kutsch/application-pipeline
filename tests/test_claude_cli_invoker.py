@@ -54,14 +54,6 @@ def _invoker(runner=None) -> ClaudeCliInvoker:
 # --- happy path ---
 
 
-def test_call_returns_parsed_result():
-    payload = [{"id": "1", "in_domain": True}]
-    response = _invoker(_runner(stdout=_envelope(result=payload))).call(
-        "p", "en", model="haiku"
-    )
-    assert response.parsed_result == payload
-
-
 def test_call_returns_raw_response():
     payload = {"tier": "green"}
     response = _invoker(_runner(stdout=_envelope(result=payload))).call(
@@ -207,23 +199,6 @@ def test_unparseable_envelope_json_raises_malformed_error():
 def test_empty_stdout_raises_malformed_error():
     with pytest.raises(ClaudeMalformedEnvelopeError):
         _invoker(_runner(stdout="")).call("p", "en", model="haiku")
-
-
-def test_malformed_result_field_raises_cli_error_with_result_not_json_class():
-    # Per ADR-0016 amendment: result field not being valid JSON is a transient
-    # CLI error (retried next cron tick), not a crash-class malformed envelope.
-    envelope = json.dumps(
-        {
-            "is_error": False,
-            "result": "this is not json {{{",
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-            "total_cost_usd": 0.001,
-            "session_id": "s",
-        }
-    )
-    with pytest.raises(ClaudeCliError) as exc_info:
-        _invoker(_runner(stdout=envelope)).call("p", "en", model="haiku")
-    assert exc_info.value.envelope_error_class == "result_not_json"
 
 
 def test_envelope_is_json_array_not_object_raises_malformed_error():

@@ -67,7 +67,6 @@ class ClaudeUsage:
 
 @dataclass(frozen=True)
 class ClaudeResponse:
-    parsed_result: Any
     raw_response: str
     usage: ClaudeUsage
     cost_usd: float
@@ -184,18 +183,6 @@ class ClaudeCliInvoker:
                 envelope_error_class="empty_result",
             )
 
-        try:
-            parsed_result = json.loads(raw_response)
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise ClaudeCliError(
-                f"result field is not valid JSON: {exc}",
-                returncode=returncode,
-                stdout=stdout,
-                stderr=stderr,
-                envelope=envelope,
-                envelope_error_class="result_not_json",
-            ) from exc
-
         usage_raw = envelope.get("usage", {})
         usage = ClaudeUsage(
             input_tokens=int(usage_raw.get("input_tokens", 0)),
@@ -204,7 +191,6 @@ class ClaudeCliInvoker:
         )
 
         return ClaudeResponse(
-            parsed_result=parsed_result,
             raw_response=raw_response,
             usage=usage,
             cost_usd=float(envelope.get("total_cost_usd", 0.0)),

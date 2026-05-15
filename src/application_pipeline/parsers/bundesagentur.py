@@ -12,14 +12,15 @@ from application_pipeline.http import HttpRetryError
 from ._text import parse_iso_date, strip_html
 from .errors import ParserError
 from .http import (
-    DEFAULT_RETRIES,
-    DEFAULT_TIMEOUT,
+    HTTP_CONNECT_TIMEOUT,
+    HTTP_READ_TIMEOUT,
+    MAX_RETRIES,
+    USER_AGENT,
     HttpGet,
     Throttle,
     check_response_status,
     request_with_retry,
 )
-from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
 from .types import Position, PositionStub
 
 _BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
@@ -68,8 +69,8 @@ class BundesagenturParser:
         include_remote: bool = False,
         *,
         _http_get: HttpGet | None = None,
-        _timeout: float = DEFAULT_TIMEOUT,
-        _retries: int = DEFAULT_RETRIES,
+        _timeout: float = HTTP_READ_TIMEOUT,
+        _retries: int = MAX_RETRIES,
     ) -> None:
         self._locations = locations
         self._include_remote = include_remote

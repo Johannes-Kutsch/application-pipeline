@@ -5,15 +5,7 @@ import pytest
 import application_pipeline.parser_log as parser_log
 from application_pipeline._context import current_stage
 from application_pipeline.http import HttpRetryError
-from application_pipeline.parsers._http import (
-    MAX_RETRIES,
-    HTTP_READ_TIMEOUT,
-    REQUEST_PACING,
-)
 from application_pipeline.parsers.http import (
-    DEFAULT_RETRIES,
-    DEFAULT_TIMEOUT,
-    THROTTLE_INTERVAL,
     Throttle,
     request_with_retry,
 )
@@ -32,33 +24,6 @@ def reset_parser_log():
 def log_dir(tmp_path):
     parser_log.configure(tmp_path)
     return tmp_path
-
-
-# --- Constants ---
-
-
-def test_default_timeout_is_positive():
-    assert DEFAULT_TIMEOUT > 0
-
-
-def test_default_retries_is_positive():
-    assert DEFAULT_RETRIES > 0
-
-
-def test_throttle_interval_is_half_second():
-    assert THROTTLE_INTERVAL == 0.5
-
-
-def test_http_read_timeout_matches_default_timeout():
-    assert HTTP_READ_TIMEOUT == DEFAULT_TIMEOUT
-
-
-def test_max_retries_matches_default_retries():
-    assert MAX_RETRIES == DEFAULT_RETRIES
-
-
-def test_request_pacing_is_half_second():
-    assert REQUEST_PACING == 0.5
 
 
 # --- Throttle ---

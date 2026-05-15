@@ -26,11 +26,12 @@ from bs4 import BeautifulSoup, Tag
 import application_pipeline.parser_log as parser_log
 from application_pipeline.http import HttpRetryError
 
-from ._http import HTTP_CONNECT_TIMEOUT, HTTP_READ_TIMEOUT, USER_AGENT
 from .errors import ParserError
 from .http import (
-    DEFAULT_RETRIES,
-    DEFAULT_TIMEOUT,
+    HTTP_CONNECT_TIMEOUT,
+    HTTP_READ_TIMEOUT,
+    MAX_RETRIES,
+    USER_AGENT,
     HttpGet,
     Throttle,
     check_response_status,
@@ -186,8 +187,8 @@ class JobsBeimStaatParser:
         self,
         *,
         _http_get: HttpGet | None = None,
-        _timeout: float = DEFAULT_TIMEOUT,
-        _retries: int = DEFAULT_RETRIES,
+        _timeout: float = HTTP_READ_TIMEOUT,
+        _retries: int = MAX_RETRIES,
     ) -> None:
         self._timeout = _timeout
         self._retries = _retries

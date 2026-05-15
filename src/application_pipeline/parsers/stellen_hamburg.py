@@ -17,19 +17,16 @@ from application_pipeline.http.retry import (
 )
 from application_pipeline.text import normalize
 
-from ._http import (
+from ._text import parse_iso_date, strip_html
+from .errors import ParserError
+from .http import (
     BACKOFF_INITIAL,
     BACKOFF_MAX,
     BACKOFF_MULTIPLIER,
     HTTP_CONNECT_TIMEOUT,
     HTTP_READ_TIMEOUT,
+    MAX_RETRIES,
     USER_AGENT,
-)
-from ._text import parse_iso_date, strip_html
-from .errors import ParserError
-from .http import (
-    DEFAULT_RETRIES,
-    DEFAULT_TIMEOUT,
     HttpGet,
     Throttle,
     check_response_status,
@@ -161,8 +158,8 @@ class StellenHamburgParser:
         *,
         _http_get: HttpGet | None = None,
         _http_post: HttpPost | None = None,
-        _timeout: float = DEFAULT_TIMEOUT,
-        _retries: int = DEFAULT_RETRIES,
+        _timeout: float = HTTP_READ_TIMEOUT,
+        _retries: int = MAX_RETRIES,
     ) -> None:
         self._http_get: HttpGet = _http_get or _default_http_get
         self._http_post: HttpPost = _http_post or _default_http_post

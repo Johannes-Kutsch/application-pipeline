@@ -27,6 +27,11 @@ from .types import (
 
 _COMPONENT_ID = "claude_extractor"
 
+_CLASSIFY_MODEL = "haiku"
+_CLASSIFY_EFFORT = ""
+_JUDGE_MODEL = "sonnet"
+_JUDGE_EFFORT = "medium"
+
 
 class ClaudeExtractor:
     def __init__(
@@ -49,7 +54,9 @@ class ClaudeExtractor:
         prompt = self._prompts.classify_relevance[lang].render(ITEMS=items_block)
         t0 = time.monotonic()
         try:
-            response = self._invoker.call(prompt, language)
+            response = self._invoker.call(
+                prompt, language, model=_CLASSIFY_MODEL, effort=_CLASSIFY_EFFORT
+            )
         except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
             status = (
                 "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"
@@ -130,7 +137,9 @@ class ClaudeExtractor:
         )
         t0 = time.monotonic()
         try:
-            response = self._invoker.call(prompt, language)
+            response = self._invoker.call(
+                prompt, language, model=_JUDGE_MODEL, effort=_JUDGE_EFFORT
+            )
         except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
             status = (
                 "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"

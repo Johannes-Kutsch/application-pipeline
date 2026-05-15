@@ -808,6 +808,30 @@ def test_prewarm_is_noop() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Model / effort pinning
+# ---------------------------------------------------------------------------
+
+
+def test_classify_relevance_batch_passes_haiku_model_to_invoker() -> None:
+    items = _items(1)
+    invoker = _fake_invoker(_batch_response(items))
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
+    extractor.classify_relevance_batch("en", items)
+    call_kwargs = invoker.call.call_args.kwargs
+    assert call_kwargs["model"] == "haiku"
+    assert call_kwargs.get("effort", "") == ""
+
+
+def test_judge_match_passes_sonnet_model_and_medium_effort_to_invoker() -> None:
+    invoker = _fake_invoker(_judge_response())
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
+    extractor.judge_match("en", "desc")
+    call_kwargs = invoker.call.call_args.kwargs
+    assert call_kwargs["model"] == "sonnet"
+    assert call_kwargs["effort"] == "medium"
+
+
 def test_claude_extractor_is_llm_extractor() -> None:
     extractor = ClaudeExtractor(
         _config(), _prompts(), _invoker=MagicMock(spec=ClaudeCliInvoker)

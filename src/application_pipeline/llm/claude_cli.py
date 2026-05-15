@@ -111,9 +111,13 @@ class ClaudeCliInvoker:
         self._cli_path = cli_path
         self._runner: SubprocessRunner = _runner or _default_runner
 
-    def call(self, prompt: str, language: str) -> ClaudeResponse:
+    def call(
+        self, prompt: str, language: str, *, model: str, effort: str = ""
+    ) -> ClaudeResponse:
         cli = self._cli_path or shutil.which("claude") or "claude"
-        args = [cli, "-p", "-", "--output-format", "json"]
+        args = [cli, "-p", "-", "--output-format", "json", "--model", model]
+        if effort:
+            args += ["--effort", effort]
 
         t0 = time.monotonic()
         returncode, stdout, stderr = self._runner(args, prompt)

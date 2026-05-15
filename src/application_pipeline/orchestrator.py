@@ -140,8 +140,42 @@ class _ClassifyBatch:
     language: str
     positions: list[tuple["Position", "LanguageResolution"]]
     item_id: str
-    remaining_en: int
-    remaining_de: int
+
+
+@dataclass
+class _PendingDepth:
+    """Live pending-item counters shared between main thread, classify worker, and judge worker."""
+
+    pending_en: int = 0
+    pending_de: int = 0
+    pending_judge: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def add_classify(self, language: str, n: int) -> None:
+        with self._lock:
+            if language == "de":
+                self.pending_de += n
+            else:
+                self.pending_en += n
+
+    def sub_classify(self, language: str, n: int) -> None:
+        with self._lock:
+            if language == "de":
+                self.pending_de -= n
+            else:
+                self.pending_en -= n
+
+    def add_judge(self) -> None:
+        with self._lock:
+            self.pending_judge += 1
+
+    def sub_judge(self) -> None:
+        with self._lock:
+            self.pending_judge -= 1
+
+    def snapshot(self) -> tuple[int, int, int]:
+        with self._lock:
+            return (self.pending_en, self.pending_de, self.pending_judge)
 
 
 class _NoMoreBatches:
@@ -198,6 +232,7 @@ class _QueueWorker(threading.Thread):
                 item = self._input_queue.get()
                 if item is self._sentinel:
                     break
+                self._on_dequeue(item)
                 if not self._run_state.is_degraded:
                     self._process(item)
         except BaseException as exc:
@@ -205,6 +240,9 @@ class _QueueWorker(threading.Thread):
             self._run_state.set_aborted(exc)
         finally:
             self._on_shutdown()
+
+    def _on_dequeue(self, item: object) -> None:
+        pass
 
     def _on_shutdown(self) -> None:
         pass
@@ -301,6 +339,8 @@ class _ClassifyThread(_QueueWorker):
         status_display: "StatusDisplay",
         total_batches_ref: "list[int]",
         classify_stats: "_ClassifyStats",
+        judge_stats: "_JudgeStats",
+        pending_depth: "_PendingDepth",
         run_state: _RunState,
     ) -> None:
         super().__init__(
@@ -316,9 +356,18 @@ class _ClassifyThread(_QueueWorker):
         self._status_display = status_display
         self._total_batches_ref = total_batches_ref
         self.classify_stats = classify_stats
+        self._judge_stats = judge_stats
+        self._pending_depth = pending_depth
+
+    def _on_dequeue(self, item: object) -> None:
+        assert isinstance(item, _ClassifyBatch)
+        self._pending_depth.sub_classify(item.language, len(item.positions))
 
     def _on_shutdown(self) -> None:
         self._judge_queue.put(_NO_MORE_JUDGES)
+        self.classify_stats.refresh_body(
+            self._status_display, self._pending_depth, self._total_batches_ref[0]
+        )
 
     def _process(self, item: object) -> None:
         assert isinstance(item, _ClassifyBatch)
@@ -354,11 +403,10 @@ class _ClassifyThread(_QueueWorker):
             self.classify_stats.classify_failed += 1
             self.classify_stats.items_errored += len(batch.positions)
         finally:
-            self._status_display.update_body(
-                "classify_relevance",
-                body=self.classify_stats.body(
-                    self._total_batches_ref[0], batch.remaining_en, batch.remaining_de
-                ),
+            self.classify_stats.refresh_body(
+                self._status_display,
+                self._pending_depth,
+                self._total_batches_ref[0],
             )
 
         if verdicts is None:
@@ -369,12 +417,16 @@ class _ClassifyThread(_QueueWorker):
                 self._dedup_store.mark_off_domain(position.stub)
                 self.classify_stats.classifier_dropped += 1
             else:
+                self._pending_depth.add_judge()
                 self._judge_queue.put(
                     _JudgeJob(
                         position=position,
                         resolution=resolution,
                         item_id=batch.item_id,
                     )
+                )
+                self._judge_stats.refresh_body(
+                    self._status_display, self._pending_depth
                 )
 
 
@@ -394,6 +446,7 @@ class _JudgeThread(_QueueWorker):
         status_display: "StatusDisplay",
         layout: "Layout",
         judge_stats: "_JudgeStats",
+        pending_depth: "_PendingDepth",
         run_state: _RunState,
     ) -> None:
         super().__init__(
@@ -409,6 +462,10 @@ class _JudgeThread(_QueueWorker):
         self._status_display = status_display
         self._layout = layout
         self.judge_stats = judge_stats
+        self._pending_depth = pending_depth
+
+    def _on_dequeue(self, item: object) -> None:
+        self._pending_depth.sub_judge()
 
     def _process(self, item: object) -> None:
         assert isinstance(item, _JudgeJob)
@@ -453,10 +510,7 @@ class _JudgeThread(_QueueWorker):
             self.judge_stats.judge_failed += 1
             self.judge_stats.errored += 1
         finally:
-            self._status_display.update_body(
-                "judge_match",
-                body=self.judge_stats.body(),
-            )
+            self.judge_stats.refresh_body(self._status_display, self._pending_depth)
 
 
 # ---------------------------------------------------------------------------
@@ -579,11 +633,11 @@ class _ClassifyStats:
     classifier_dropped: int = 0
     items_errored: int = 0
 
-    def body(self, total_batches: int, remaining_en: int, remaining_de: int) -> str:
-        queue_total = remaining_en + remaining_de
+    def body(self, total_batches: int, pending_en: int, pending_de: int) -> str:
+        queue_total = pending_en + pending_de
         result = (
             f"{self.classify_calls}/{total_batches} batches done"
-            f" · {queue_total} items in queue ({remaining_en} en / {remaining_de} de)"
+            f" · {queue_total} items in queue ({pending_en} en / {pending_de} de)"
         )
         if self.classify_failed > 0:
             result += (
@@ -591,6 +645,18 @@ class _ClassifyStats:
                 f" items_errored={self.items_errored}"
             )
         return result
+
+    def refresh_body(
+        self,
+        display: "StatusDisplay",
+        pending: "_PendingDepth",
+        total_batches: int,
+    ) -> None:
+        en, de, _ = pending.snapshot()
+        display.update_body(
+            "classify_relevance",
+            body=self.body(total_batches, en, de),
+        )
 
 
 @dataclass
@@ -609,11 +675,23 @@ class _JudgeStats:
     written_per_source: dict[str, int] = field(default_factory=dict)
     errored: int = 0
 
-    def body(self) -> str:
+    def body(self, pending_judge: int = 0) -> str:
         result = f"{self.judge_calls}/{self.judge_calls} judgments · green={self.green} amber={self.amber} red={self.red}"
         if self.errored > 0:
             result += f" · errored={self.errored}"
+        result += f" · pending={pending_judge}"
         return result
+
+    def refresh_body(
+        self,
+        display: "StatusDisplay",
+        pending: "_PendingDepth",
+    ) -> None:
+        _, _, pending_judge = pending.snapshot()
+        display.update_body(
+            "judge_match",
+            body=self.body(pending_judge),
+        )
 
 
 @dataclass
@@ -802,6 +880,7 @@ def run(
         batch_id = 0
         classify_stats = _ClassifyStats()
         judge_stats = _JudgeStats()
+        pending_depth = _PendingDepth()
         classify_queue: queue.Queue[object] = queue.Queue()
         judge_queue: queue.Queue[object] = queue.Queue()
         _run_started_at = datetime.now(timezone.utc)
@@ -877,6 +956,8 @@ def run(
                 status_display=status_display,
                 total_batches_ref=total_batches_ref,
                 classify_stats=classify_stats,
+                judge_stats=judge_stats,
+                pending_depth=pending_depth,
                 run_state=run_state,
             )
             judge_thread = _JudgeThread(
@@ -887,6 +968,7 @@ def run(
                 status_display=status_display,
                 layout=layout,
                 judge_stats=judge_stats,
+                pending_depth=pending_depth,
                 run_state=run_state,
             )
             classify_thread.start()
@@ -895,19 +977,19 @@ def run(
             def _flush_classify_batch(language: str) -> None:
                 nonlocal batch_id
                 buffer = de_buffer if language == "de" else en_buffer
-                other = en_buffer if language == "de" else de_buffer
                 classify_queue.put(
                     _ClassifyBatch(
                         language=language,
                         positions=list(buffer),
                         item_id=str(batch_id),
-                        remaining_en=len(other) if language == "de" else 0,
-                        remaining_de=len(other) if language == "en" else 0,
                     )
                 )
                 total_batches_ref[0] += 1
                 batch_id += 1
                 buffer.clear()
+                classify_stats.refresh_body(
+                    status_display, pending_depth, total_batches_ref[0]
+                )
 
             parsers_remaining: set[str] = set(parser_states.keys())
 
@@ -1041,6 +1123,7 @@ def run(
                         lang = "de" if resolution.effective == "de" else "en"
                         buffer = de_buffer if lang == "de" else en_buffer
                         buffer.append((payload, resolution))
+                        pending_depth.add_classify(lang, 1)
                         if len(buffer) >= batch_size:
                             _flush_classify_batch(lang)
                     else:

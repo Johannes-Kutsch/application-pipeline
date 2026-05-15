@@ -3774,26 +3774,64 @@ def test_classify_and_judge_rows_body_progression(tmp_path: Path) -> None:
     classify_bodies = display.body_updates_for("classify_relevance")
     judge_bodies = display.body_updates_for("judge_match")
 
-    # 1 de + 1 en survivor, batch_size=1 → 2 classify batches
-    assert len(classify_bodies) == 2
+    # 1 de + 1 en survivor, batch_size=1 → 2 batches × 2 refresh sites + 1 shutdown = 5 updates
+    assert len(classify_bodies) == 5
 
-    # First batch done: incremental counter shows "1/"
-    assert "1/" in classify_bodies[0]
+    # First update: enqueue-time (batch 1 queued, not yet processed)
+    assert "0/" in classify_bodies[0]
+    assert "1 items in queue" in classify_bodies[0]
 
-    # After en batch (2/2 done, queue empty)
-    assert "2/2 batches done" in classify_bodies[1]
+    # Second update: batch 1 completed (pending drained to 0 for that batch)
+    assert "1/" in classify_bodies[1]
     assert "0 items in queue" in classify_bodies[1]
-    assert "0 en" in classify_bodies[1]
-    assert "0 de" in classify_bodies[1]
+
+    # Third update: enqueue-time for batch 2
+    assert "1 items in queue" in classify_bodies[2]
+
+    # Final state: both batches done, queue empty (last body from shutdown or completion)
+    assert "2/2 batches done" in classify_bodies[-1]
+    assert "0 items in queue" in classify_bodies[-1]
+    assert "0 en" in classify_bodies[-1]
+    assert "0 de" in classify_bodies[-1]
 
     # Both items in-domain → 2 judge calls (stub extractor returns green)
-    assert len(judge_bodies) == 2
-    assert "1/1 judgments" in judge_bodies[0]
-    assert "green=1" in judge_bodies[0]
-    assert "2/2 judgments" in judge_bodies[1]
-    assert "green=2" in judge_bodies[1]
-    assert "amber=0" in judge_bodies[1]
-    assert "red=0" in judge_bodies[1]
+    # 2 enqueue-time refreshes (classify worker) + 2 completion refreshes (judge worker) = 4
+    assert len(judge_bodies) == 4
+    # All bodies include pending signal
+    assert all("pending=" in b for b in judge_bodies)
+    # Final state: 2 successful judgments, all green, pending drained
+    assert "2/2 judgments" in judge_bodies[-1]
+    assert "green=2" in judge_bodies[-1]
+    assert "amber=0" in judge_bodies[-1]
+    assert "red=0" in judge_bodies[-1]
+    assert "pending=0" in judge_bodies[-1]
+
+
+def test_classify_body_refreshed_at_enqueue_and_completion(tmp_path: Path) -> None:
+    """Classify row body is refreshed at enqueue (main thread) AND at completion (worker).
+
+    With 2 classify batches (batch_size=1, 1 de + 1 en item), the classify_relevance row
+    must receive 4 body updates: one when the main thread enqueues each batch, and one
+    when the classify worker completes each batch.
+    """
+    display = FakeStatusDisplay()
+
+    run(
+        _batch_size_config(tmp_path, 1),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    classify_bodies = display.body_updates_for("classify_relevance")
+
+    # 2 batches × 2 refresh sites (enqueue + completion) + 1 shutdown refresh = 5 total
+    assert len(classify_bodies) == 5, (
+        f"Expected 5 classify_relevance body updates (2 enqueue + 2 completion + 1 shutdown), "
+        f"got {len(classify_bodies)}: {classify_bodies}"
+    )
 
 
 def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
@@ -4286,3 +4324,61 @@ def test_judge_body_denominator_counts_successes_only(tmp_path: Path) -> None:
         assert "<!-- run " not in content, (
             "Run Divider must not be written on worker abort"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #230 — live pending-depth signal
+# ---------------------------------------------------------------------------
+
+
+def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
+    """Pending figures return to zero at end-of-run on a clean run."""
+    display = FakeStatusDisplay()
+
+    run(
+        _batch_size_config(tmp_path, 1),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    classify_bodies = display.body_updates_for("classify_relevance")
+    assert "0 items in queue" in classify_bodies[-1], (
+        f"Classify pending should be 0 at end-of-run: {classify_bodies[-1]!r}"
+    )
+
+    judge_bodies = display.body_updates_for("judge_match")
+    assert "pending=0" in judge_bodies[-1], (
+        f"Judge pending should be 0 at end-of-run: {judge_bodies[-1]!r}"
+    )
+
+
+def test_pending_drains_to_zero_on_classify_usage_limit(tmp_path: Path) -> None:
+    """On classify ClaudeUsageLimitError, workers drain queues and pending returns to zero."""
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError("quota")
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
+    )
+
+    display = FakeStatusDisplay()
+
+    run(
+        _batch_size_config(tmp_path, 1),
+        extractor=ext,
+        parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    # After degraded drain, classify pending should be 0 in final body
+    classify_bodies = display.body_updates_for("classify_relevance")
+    assert classify_bodies, "expected classify_relevance body updates"
+    assert "0 items in queue" in classify_bodies[-1], (
+        f"Classify pending should drain to 0 after usage limit: {classify_bodies[-1]!r}"
+    )

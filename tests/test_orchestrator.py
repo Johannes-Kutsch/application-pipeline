@@ -628,6 +628,306 @@ def test_integration_dedup_counter_breakdown(
 
 
 # ---------------------------------------------------------------------------
+# Integration: in-run dedup (issue #225)
+# ---------------------------------------------------------------------------
+
+
+def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
+    """Same URL yielded by two different ParserQuerys → second yield is run_hit, enrich() called once."""
+    enrich_calls: list[str] = []
+    duplicate_url = "https://dup.example/job"
+
+    class _DupParser:
+        def __enter__(self) -> "_DupParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=duplicate_url, title="Job", source="stub", language="en"
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            enrich_calls.append(stub.url)
+            return Position(stub=stub, raw_description="good description")
+
+    dedup = MagicMock()
+    dedup.is_seen.return_value = "miss"
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python", "django"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.dedup_run_hits == 1
+    assert enrich_calls.count(duplicate_url) == 1
+
+
+def test_in_run_dedup_does_not_trip_short_circuit(tmp_path: Path) -> None:
+    """In-run dupe interleaved with url_hits does not advance consecutive counter.
+
+    Sequence: dup_url (miss) → dup_url (in-run hit) → 60 url_hits.
+    Threshold is 50 consecutive url_hits.
+
+    With correct behavior: in-run hit leaves consecutive at 0; short-circuit fires
+    after the 50th url_hit → 52 stubs consumed total.
+
+    With buggy behavior (in-run hit increments consecutive): consecutive becomes 1
+    before url_hits start, so the 49th url_hit triggers the short-circuit → only 51
+    stubs consumed.
+    """
+    consumed: list[int] = [0]
+    dup_url = "https://dup.example/dup"
+    # 2 stubs (dup first and second) + 60 url-hit stubs (threshold is 50, need >50 to detect early stop)
+    all_stubs = [
+        PositionStub(url=dup_url, title="Dup", source="stub"),
+        PositionStub(url=dup_url, title="Dup", source="stub"),
+        *[
+            PositionStub(
+                url=f"https://dup.example/hit/{i}", title=f"Hit {i}", source="stub"
+            )
+            for i in range(60)
+        ],
+    ]
+
+    class _DupInterleavedParser:
+        def __enter__(self) -> "_DupInterleavedParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            for stub in all_stubs:
+                consumed[0] += 1
+                yield stub
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="test")
+
+    dedup = MagicMock()
+    # dup_url → miss; second dup_url caught by in-run set (is_seen never called);
+    # url_hit stubs → url_hit from is_seen
+    dedup.is_seen.side_effect = ["miss"] + ["url_hit"] * 60
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _DupInterleavedParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+    )
+
+    # dup (miss) + dup (in-run hit, consecutive stays 0) + 50 url_hits (50th triggers short-circuit) = 52
+    assert consumed[0] == 52
+    assert summary.dedup_run_hits == 1
+    assert summary.dedup_url_hits == 50
+
+
+def test_degraded_run_never_emits_skip_and_end_query(tmp_path: Path) -> None:
+    """When run_state.is_degraded, consecutive url_hits never trigger SKIP_AND_END_QUERY.
+
+    The parser yields 1 miss, then sleeps briefly to let the classify_thread process
+    the batch (batch_size=1) and set run_state.is_degraded, then yields 200 url_hits
+    (far above the 50-consecutive threshold).  All 200 must be consumed.
+    """
+    import time
+
+    consumed: list[int] = [0]
+    miss_stub = PositionStub(
+        url="https://deg.example/miss", title="Miss", source="stub", language="en"
+    )
+    url_hit_stubs = [
+        PositionStub(
+            url=f"https://deg.example/hit/{i}", title=f"Hit {i}", source="stub"
+        )
+        for i in range(200)
+    ]
+
+    class _SyncParser:
+        def __enter__(self) -> "_SyncParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            consumed[0] += 1
+            yield miss_stub
+            # Sleep so that classify_thread can process the batch (batch_size=1)
+            # and set run_state.is_degraded before url_hits arrive at the main loop.
+            time.sleep(0.1)
+            for stub in url_hit_stubs:
+                consumed[0] += 1
+                yield stub
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="test")
+
+    class _DegradingExtractor:
+        def prewarm(self) -> None:
+            pass
+
+        def classify_relevance_batch(
+            self, language: str, items: list[ClassifyItem]
+        ) -> tuple[list[RelevanceVerdict], CallUsage]:
+            raise ClaudeUsageLimitError("quota")
+
+        def judge_match(
+            self, language: str, raw_description: str
+        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
+            raise NotImplementedError
+
+    dedup = MagicMock()
+    # 1 miss (triggers classify/degrade with batch_size=1), then 200 url_hits
+    dedup.is_seen.side_effect = ["miss"] + ["url_hit"] * 200
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    # batch_size=1 so the single "miss" position is flushed to classify_thread immediately
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8") + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 1\n",
+        encoding="utf-8",
+    )
+
+    summary = run(
+        config_path,
+        extractor=_DegradingExtractor(),
+        parser_registry=lambda _: _SyncParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+    )
+
+    # All 201 stubs consumed — degraded run must never SKIP_AND_END_QUERY
+    assert consumed[0] == 201
+    assert summary.dedup_url_hits == 200
+
+
+def test_in_run_dedup_run_hits_in_log_line(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """dedup_run_hits=N appears in the 'run complete:' log line when in-run dupes exist."""
+    import logging
+
+    dup_url = "https://log.example/dup"
+
+    class _DupParser:
+        def __enter__(self) -> "_DupParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=dup_url, title="Dup", source="stub", language="en")
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    dedup = MagicMock()
+    dedup.is_seen.return_value = "miss"
+
+    with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
+        run(
+            _write_config(
+                tmp_path,
+                sources='[SourceEntry(parser_type="bundesagentur_api")]',
+                keywords='["python", "django"]',
+                locations='["Hamburg"]',
+                include_remote=False,
+            ),
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
+            dedup_store=dedup,
+            results_manager=_stub_results_manager(),
+        )
+
+    run_complete = next(
+        r.getMessage() for r in caplog.records if "run complete:" in r.getMessage()
+    )
+    assert "dedup_run_hits=1" in run_complete
+
+
+def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
+    """A second run() call starts with an empty in-run set; the URL seen in run 1 is not a run_hit in run 2."""
+    dup_url = "https://fresh.example/job"
+
+    class _OneStubParser:
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=dup_url, title="Job", source="stub", language="en")
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+    dedup = MagicMock()
+    # Both runs: is_seen returns "miss" (in-run set does not carry across runs)
+    dedup.is_seen.return_value = "miss"
+
+    summary1 = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+    )
+    summary2 = run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+    )
+
+    # Each run sees the URL as a miss (in-run set starts fresh); no run_hits in either run
+    assert summary1.dedup_run_hits == 0
+    assert summary2.dedup_run_hits == 0
+    assert summary1.dedup_misses == 1
+    assert summary2.dedup_misses == 1
+
+
+# ---------------------------------------------------------------------------
 # Integration: language resolution + Pre-Filter pass (slice 4c)
 # ---------------------------------------------------------------------------
 
@@ -1482,6 +1782,50 @@ def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
 
     # Divider is a well-formed HTML comment
     assert last_block.endswith(" -->"), f"divider not closed: {last_block!r}"
+
+
+def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
+    """Run Divider includes dedup_run_hits=N when in-run dupes are present."""
+    results_path = tmp_path / "current.md"
+    dup_url = "https://divider.example/dup"
+
+    class _DupParser:
+        def __enter__(self) -> "_DupParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=dup_url, title="Dup", source="stub", language="en")
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    dedup = MagicMock()
+    dedup.is_seen.return_value = "miss"
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python", "django"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "dedup_run_hits=1" in last_block, (
+        f"dedup_run_hits missing from divider: {last_block!r}"
+    )
 
 
 def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
@@ -3233,6 +3577,53 @@ def test_dedup_row_body_updates_on_dedup_events(tmp_path: Path) -> None:
     assert "misses=3" in final
     assert "url_hits=0" in final
     assert "tuple_hits=0" in final
+
+
+def test_dedup_row_body_shows_run_hits(tmp_path: Path) -> None:
+    """dedup row body includes run_hits=N when in-run dupes are present."""
+    dup_url = "https://status.example/dup"
+
+    class _DupParser:
+        def __enter__(self) -> "_DupParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=dup_url, title="Dup", source="stub", language="en")
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    dedup = MagicMock()
+    dedup.is_seen.return_value = "miss"
+    display = FakeStatusDisplay()
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python", "django"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
+        dedup_store=dedup,
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("dedup")
+    assert bodies, "expected at least one body update for dedup row"
+    final = bodies[-1]
+    assert "run_hits=1" in final, f"run_hits missing from dedup row body: {final!r}"
+    assert "url_hits=0" in final
+    assert "tuple_hits=0" in final
+    assert "misses=1" in final
 
 
 def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:

@@ -476,6 +476,10 @@ def _format_run_divider(
     sources: dict[str, int],
     kept: int,
     errors: int,
+    dedup_url_hits: int,
+    dedup_tuple_hits: int,
+    dedup_run_hits: int,
+    dedup_misses: int,
     classify_calls: int,
     classify_items: int,
     classify_total_s: float,
@@ -498,6 +502,10 @@ def _format_run_divider(
         [
             f"kept={kept}",
             f"errors={errors}",
+            f"dedup_url_hits={dedup_url_hits}",
+            f"dedup_tuple_hits={dedup_tuple_hits}",
+            f"dedup_run_hits={dedup_run_hits}",
+            f"dedup_misses={dedup_misses}",
             f"classify_calls={classify_calls}",
             f"classify_items={classify_items}",
             f"classify_total_s={classify_total_s:.1f}",
@@ -532,6 +540,7 @@ class RunSummary:
     prefilter_no_hit_either: int = 0
     dedup_url_hits: int = 0
     dedup_tuple_hits: int = 0
+    dedup_run_hits: int = 0
     dedup_misses: int = 0
     classifier_dropped: int = 0
     written: int = 0
@@ -603,6 +612,7 @@ class _MainStats:
     skipped: int = 0
     dedup_url_hits: int = 0
     dedup_tuple_hits: int = 0
+    dedup_run_hits: int = 0
     dedup_misses: int = 0
     prefilter_considered: int = 0
     prefilter_passed: int = 0
@@ -622,7 +632,7 @@ class _MainStats:
         )
 
     def dedup_body(self) -> str:
-        return f"url_hits={self.dedup_url_hits} tuple_hits={self.dedup_tuple_hits} misses={self.dedup_misses}"
+        return f"url_hits={self.dedup_url_hits} tuple_hits={self.dedup_tuple_hits} run_hits={self.dedup_run_hits} misses={self.dedup_misses}"
 
     def prefilter_body(self) -> str:
         return (
@@ -774,6 +784,7 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         main_stats = _MainStats()
+        _in_run_seen: set[str] = set()
         de_buffer: list[tuple[Position, LanguageResolution]] = []
         en_buffer: list[tuple[Position, LanguageResolution]] = []
         batch_size = cfg.claude_classify_batch_size
@@ -946,27 +957,36 @@ def run(
                         state.inbound.put(_SKIP_AND_END_QUERY)
                         continue
 
-                    seen_result = dedup_store.is_seen(payload)
-
-                    if seen_result == "miss":
-                        main_stats.dedup_misses += 1
-                        state.consecutive_url_hits = 0
-                        state.pending_enrich = payload
-                        state.inbound.put(_ENRICH)
-                    elif seen_result == "url_hit":
-                        main_stats.dedup_url_hits += 1
-                        state.consecutive_url_hits += 1
-                        main_stats.skipped += 1
-                        if state.consecutive_url_hits >= state.threshold:
-                            state.consecutive_url_hits = 0
-                            state.inbound.put(_SKIP_AND_END_QUERY)
-                        else:
-                            state.inbound.put(_SKIP)
-                    else:  # tuple_hit
-                        main_stats.dedup_tuple_hits += 1
-                        state.consecutive_url_hits = 0
+                    if payload.url in _in_run_seen:
+                        main_stats.dedup_run_hits += 1
                         main_stats.skipped += 1
                         state.inbound.put(_SKIP)
+                    else:
+                        seen_result = dedup_store.is_seen(payload)
+
+                        if seen_result == "miss":
+                            main_stats.dedup_misses += 1
+                            state.consecutive_url_hits = 0
+                            _in_run_seen.add(payload.url)
+                            state.pending_enrich = payload
+                            state.inbound.put(_ENRICH)
+                        elif seen_result == "url_hit":
+                            main_stats.dedup_url_hits += 1
+                            state.consecutive_url_hits += 1
+                            main_stats.skipped += 1
+                            if (
+                                state.consecutive_url_hits >= state.threshold
+                                and not run_state.is_degraded
+                            ):
+                                state.consecutive_url_hits = 0
+                                state.inbound.put(_SKIP_AND_END_QUERY)
+                            else:
+                                state.inbound.put(_SKIP)
+                        else:  # tuple_hit
+                            main_stats.dedup_tuple_hits += 1
+                            state.consecutive_url_hits = 0
+                            main_stats.skipped += 1
+                            state.inbound.put(_SKIP)
                     status_display.update_body(
                         "pipeline",
                         body=main_stats.pipeline_body(written=0, judge_errored=0),
@@ -1172,6 +1192,10 @@ def run(
             sources=judge_stats.written_per_source,
             kept=judge_stats.written,
             errors=judge_stats.errored,
+            dedup_url_hits=main_stats.dedup_url_hits,
+            dedup_tuple_hits=main_stats.dedup_tuple_hits,
+            dedup_run_hits=main_stats.dedup_run_hits,
+            dedup_misses=main_stats.dedup_misses,
             classify_calls=classify_stats.classify_calls,
             classify_items=classify_stats.classify_items,
             classify_total_s=classify_stats.classify_total_s,
@@ -1194,7 +1218,7 @@ def run(
             "run complete: discovered=%d skipped=%d "
             "prefilter_considered=%d prefilter_passed=%d prefilter_dropped=%d "
             "prefilter_whitelist_hits=%d prefilter_blacklist_hits=%d prefilter_no_hit_either=%d "
-            "dedup_url_hits=%d dedup_tuple_hits=%d dedup_misses=%d "
+            "dedup_url_hits=%d dedup_tuple_hits=%d dedup_run_hits=%d dedup_misses=%d "
             "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
             "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
             main_stats.discovered,
@@ -1207,6 +1231,7 @@ def run(
             main_stats.prefilter_no_hit_either,
             main_stats.dedup_url_hits,
             main_stats.dedup_tuple_hits,
+            main_stats.dedup_run_hits,
             main_stats.dedup_misses,
             classify_stats.classifier_dropped,
             judge_stats.written,
@@ -1231,6 +1256,7 @@ def run(
             prefilter_no_hit_either=main_stats.prefilter_no_hit_either,
             dedup_url_hits=main_stats.dedup_url_hits,
             dedup_tuple_hits=main_stats.dedup_tuple_hits,
+            dedup_run_hits=main_stats.dedup_run_hits,
             dedup_misses=main_stats.dedup_misses,
             classifier_dropped=classify_stats.classifier_dropped,
             written=judge_stats.written,

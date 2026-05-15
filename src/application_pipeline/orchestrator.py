@@ -29,6 +29,7 @@ from application_pipeline.llm import (
     ExtractorUnreachableError,
     LLMExtractor,
     MatchTier,
+    RelevanceVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.parsers import (
@@ -323,6 +324,7 @@ class _ClassifyThread(_QueueWorker):
         assert isinstance(item, _ClassifyBatch)
         batch = item
         items = _make_classify_items(batch.positions)
+        verdicts: list[RelevanceVerdict] | None = None
         try:
             _t0 = time.monotonic()
             verdicts, classify_usage = self._extractor.classify_relevance_batch(
@@ -351,14 +353,16 @@ class _ClassifyThread(_QueueWorker):
             )
             self.classify_stats.classify_failed += 1
             self.classify_stats.items_errored += len(batch.positions)
-            return
+        finally:
+            self._status_display.update_body(
+                "classify_relevance",
+                body=self.classify_stats.body(
+                    self._total_batches_ref[0], batch.remaining_en, batch.remaining_de
+                ),
+            )
 
-        self._status_display.update_body(
-            "classify_relevance",
-            body=self.classify_stats.body(
-                self._total_batches_ref[0], batch.remaining_en, batch.remaining_de
-            ),
-        )
+        if verdicts is None:
+            return
 
         for verdict, (position, resolution) in zip(verdicts, batch.positions):
             if not verdict.in_domain:
@@ -420,6 +424,21 @@ class _JudgeThread(_QueueWorker):
             self.judge_stats.judge_output_tokens += judge_usage.output_tokens
             self.judge_stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
             self.judge_stats.judge_cost_usd += judge_usage.cost_usd
+            number = self._results_manager.next_position_number()
+            rendered = render(job.position, match_verdict, number, self._layout)
+            self._results_manager.append(rendered)
+            self._dedup_store.mark_kept(job.position.stub)
+            self.judge_stats.written += 1
+            src = job.position.stub.source
+            self.judge_stats.written_per_source[src] = (
+                self.judge_stats.written_per_source.get(src, 0) + 1
+            )
+            if match_verdict.tier == MatchTier.green:
+                self.judge_stats.green += 1
+            elif match_verdict.tier == MatchTier.amber:
+                self.judge_stats.amber += 1
+            else:
+                self.judge_stats.red += 1
         except ClaudeUsageLimitError:
             self._run_state.set_degraded("usage_limit", self.name)
             return
@@ -433,28 +452,11 @@ class _JudgeThread(_QueueWorker):
             )
             self.judge_stats.judge_failed += 1
             self.judge_stats.errored += 1
-            return
-
-        number = self._results_manager.next_position_number()
-        rendered = render(job.position, match_verdict, number, self._layout)
-        self._results_manager.append(rendered)
-        self._dedup_store.mark_kept(job.position.stub)
-        self.judge_stats.written += 1
-        src = job.position.stub.source
-        self.judge_stats.written_per_source[src] = (
-            self.judge_stats.written_per_source.get(src, 0) + 1
-        )
-        if match_verdict.tier == MatchTier.green:
-            self.judge_stats.green += 1
-        elif match_verdict.tier == MatchTier.amber:
-            self.judge_stats.amber += 1
-        else:
-            self.judge_stats.red += 1
-
-        self._status_display.update_body(
-            "judge_match",
-            body=self.judge_stats.body(),
-        )
+        finally:
+            self._status_display.update_body(
+                "judge_match",
+                body=self.judge_stats.body(),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -579,10 +581,16 @@ class _ClassifyStats:
 
     def body(self, total_batches: int, remaining_en: int, remaining_de: int) -> str:
         queue_total = remaining_en + remaining_de
-        return (
+        result = (
             f"{self.classify_calls}/{total_batches} batches done"
             f" · {queue_total} items in queue ({remaining_en} en / {remaining_de} de)"
         )
+        if self.classify_failed > 0:
+            result += (
+                f" · batches_failed={self.classify_failed}"
+                f" items_errored={self.items_errored}"
+            )
+        return result
 
 
 @dataclass
@@ -602,8 +610,10 @@ class _JudgeStats:
     errored: int = 0
 
     def body(self) -> str:
-        total_judged = self.judge_calls + self.judge_failed
-        return f"{self.judge_calls}/{total_judged} judgments · green={self.green} amber={self.amber} red={self.red}"
+        result = f"{self.judge_calls}/{self.judge_calls} judgments · green={self.green} amber={self.amber} red={self.red}"
+        if self.errored > 0:
+            result += f" · errored={self.errored}"
+        return result
 
 
 @dataclass

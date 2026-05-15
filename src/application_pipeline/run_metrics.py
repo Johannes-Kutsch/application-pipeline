@@ -265,7 +265,6 @@ class RunMetrics:
         with self._lock:
             sources = dict(self._written_per_source)
             kept = self._written
-            errors = self._judge_errored
             dedup_url_hits = self._dedup_url_hits
             dedup_tuple_hits = self._dedup_tuple_hits
             dedup_run_hits = self._dedup_run_hits
@@ -286,7 +285,11 @@ class RunMetrics:
             degraded_reason = self._degraded_reason
             classify_batches_failed = self._classify_failed
             classify_items_abandoned = self._classify_items_errored
-            judge_items_abandoned = self._judge_errored
+            # Roll up classify-stage abandons into the judge-stage error total,
+            # matching today's `judge_stats.errored += classify_stats.items_errored`
+            # step that runs before the divider is formatted.
+            judge_items_abandoned = self._judge_errored + self._classify_items_errored
+            errors = judge_items_abandoned
 
         parts = [f"run {timestamp}"]
         if tag is not None:
@@ -355,7 +358,7 @@ class RunMetrics:
                 red=self._red,
                 enrich_failed=self._enrich_failed,
                 external_redirects=self._external_redirects,
-                errored=self._judge_errored,
+                errored=self._judge_errored + self._classify_items_errored,
                 parsers_dead=self._parsers_dead,
                 classify_items=self._classify_items,
                 claude_input_tokens=claude_input_tokens,

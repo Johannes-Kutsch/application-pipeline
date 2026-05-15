@@ -433,6 +433,29 @@ def test_classify_batches_failed_present_when_nonzero():
     assert "classify_items_abandoned=2" in result
 
 
+def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned():
+    """Today the orchestrator does `judge_stats.errored += classify_stats.items_errored`
+    before formatting the divider, so abandoned classify items count as errors
+    and toward judge_items_abandoned. The module must preserve that roll-up."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.classify_buffered("en", 3)
+    metrics.classify_batch_enqueued("en", 3)
+    metrics.classify_batch_dequeued("en", 3)
+    metrics.classify_batch_failed(items=3)
+    metrics.judge_enqueued()
+    metrics.judge_dequeued()
+    metrics.judge_failed()
+
+    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    assert "errors=4" in result
+    assert "judge_items_abandoned=4" in result
+    assert "classify_items_abandoned=3" in result
+
+    summary = metrics.to_run_summary(duration_s=1.0)
+    assert summary.errored == 4
+
+
 def test_judge_items_abandoned_absent_when_zero():
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)

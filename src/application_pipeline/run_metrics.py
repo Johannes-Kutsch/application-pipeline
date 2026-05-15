@@ -1,13 +1,44 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from datetime import datetime
 
 from application_pipeline import parser_log
 from application_pipeline.llm.types import CallUsage, MatchTier
-from application_pipeline.orchestrator import RunSummary
 from application_pipeline.prefilter import PreFilterVerdict
 from application_pipeline.status_display import StatusDisplay
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    discovered: int = 0
+    skipped: int = 0
+    prefilter_considered: int = 0
+    prefilter_passed: int = 0
+    prefilter_dropped: int = 0
+    prefilter_whitelist_hits: int = 0
+    prefilter_blacklist_hits: int = 0
+    prefilter_no_hit_either: int = 0
+    dedup_url_hits: int = 0
+    dedup_tuple_hits: int = 0
+    dedup_run_hits: int = 0
+    dedup_misses: int = 0
+    classifier_dropped: int = 0
+    written: int = 0
+    green: int = 0
+    amber: int = 0
+    red: int = 0
+    enrich_failed: int = 0
+    external_redirects: int = 0
+    errored: int = 0
+    parsers_dead: int = 0
+    classify_items: int = 0
+    claude_input_tokens: int = 0
+    claude_output_tokens: int = 0
+    claude_cache_read_tokens: int = 0
+    claude_cost_usd: float = 0.0
+    duration_seconds: float = 0.0
 
 
 class RunMetrics:
@@ -75,13 +106,12 @@ class RunMetrics:
     # -----------------------------------------------------------------------
 
     def register_rows(self, starting_order: int) -> None:
-        self._display.register("pipeline", order=starting_order, phase="running")
-        self._display.register("dedup", order=starting_order + 1, phase="running")
-        self._display.register("prefilter", order=starting_order + 2, phase="running")
+        self._display.register("dedup", order=starting_order, phase="running")
+        self._display.register("prefilter", order=starting_order + 1, phase="running")
         self._display.register(
-            "classify_relevance", order=starting_order + 3, phase="running"
+            "classify_relevance", order=starting_order + 2, phase="running"
         )
-        self._display.register("judge_match", order=starting_order + 4, phase="running")
+        self._display.register("judge_match", order=starting_order + 3, phase="running")
 
     # -----------------------------------------------------------------------
     # Degraded reason
@@ -104,18 +134,21 @@ class RunMetrics:
     def dedup_url_hit(self) -> None:
         with self._lock:
             self._dedup_url_hits += 1
+            self._skipped += 1
             body = self._dedup_body()
         self._display.update_body("dedup", body=body)
 
     def dedup_tuple_hit(self) -> None:
         with self._lock:
             self._dedup_tuple_hits += 1
+            self._skipped += 1
             body = self._dedup_body()
         self._display.update_body("dedup", body=body)
 
     def dedup_run_hit(self) -> None:
         with self._lock:
             self._dedup_run_hits += 1
+            self._skipped += 1
             body = self._dedup_body()
         self._display.update_body("dedup", body=body)
 

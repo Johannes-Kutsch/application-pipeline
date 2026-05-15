@@ -17,6 +17,7 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline import layout as layout_module
 from application_pipeline import parser_log
 from application_pipeline._context import current_stage
+from application_pipeline.run_metrics import RunMetrics, RunSummary
 from application_pipeline.status_display import PlainStatusDisplay, StatusDisplay
 from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
@@ -28,8 +29,6 @@ from application_pipeline.llm import (
     ExtractorError,
     ExtractorUnreachableError,
     LLMExtractor,
-    MatchTier,
-    RelevanceVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.parsers import (
@@ -140,42 +139,6 @@ class _ClassifyBatch:
     language: str
     positions: list[tuple["Position", "LanguageResolution"]]
     item_id: str
-
-
-@dataclass
-class _PendingDepth:
-    """Live pending-item counters shared between main thread, classify worker, and judge worker."""
-
-    pending_en: int = 0
-    pending_de: int = 0
-    pending_judge: int = 0
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-
-    def add_classify(self, language: str, n: int) -> None:
-        with self._lock:
-            if language == "de":
-                self.pending_de += n
-            else:
-                self.pending_en += n
-
-    def sub_classify(self, language: str, n: int) -> None:
-        with self._lock:
-            if language == "de":
-                self.pending_de -= n
-            else:
-                self.pending_en -= n
-
-    def add_judge(self) -> None:
-        with self._lock:
-            self.pending_judge += 1
-
-    def sub_judge(self) -> None:
-        with self._lock:
-            self.pending_judge -= 1
-
-    def snapshot(self) -> tuple[int, int, int]:
-        with self._lock:
-            return (self.pending_en, self.pending_de, self.pending_judge)
 
 
 class _NoMoreBatches:
@@ -336,11 +299,7 @@ class _ClassifyThread(_QueueWorker):
         judge_queue: "queue.Queue[object]",
         extractor: LLMExtractor,
         dedup_store: DeduplicationStore,
-        status_display: "StatusDisplay",
-        total_batches_ref: "list[int]",
-        classify_stats: "_ClassifyStats",
-        judge_stats: "_JudgeStats",
-        pending_depth: "_PendingDepth",
+        metrics: "RunMetrics",
         run_state: _RunState,
     ) -> None:
         super().__init__(
@@ -353,41 +312,23 @@ class _ClassifyThread(_QueueWorker):
         self._judge_queue = judge_queue
         self._extractor = extractor
         self._dedup_store = dedup_store
-        self._status_display = status_display
-        self._total_batches_ref = total_batches_ref
-        self.classify_stats = classify_stats
-        self._judge_stats = judge_stats
-        self._pending_depth = pending_depth
+        self._metrics = metrics
 
     def _on_dequeue(self, item: object) -> None:
         assert isinstance(item, _ClassifyBatch)
-        self._pending_depth.sub_classify(item.language, len(item.positions))
+        self._metrics.classify_batch_dequeued(item.language, len(item.positions))
 
     def _on_shutdown(self) -> None:
         self._judge_queue.put(_NO_MORE_JUDGES)
-        self.classify_stats.refresh_body(
-            self._status_display, self._pending_depth, self._total_batches_ref[0]
-        )
 
     def _process(self, item: object) -> None:
         assert isinstance(item, _ClassifyBatch)
         batch = item
         items = _make_classify_items(batch.positions)
-        verdicts: list[RelevanceVerdict] | None = None
         try:
-            _t0 = time.monotonic()
             verdicts, classify_usage = self._extractor.classify_relevance_batch(
                 batch.language, items
             )
-            self.classify_stats.classify_total_s += time.monotonic() - _t0
-            self.classify_stats.classify_calls += 1
-            self.classify_stats.classify_items += len(items)
-            self.classify_stats.classify_input_tokens += classify_usage.input_tokens
-            self.classify_stats.classify_output_tokens += classify_usage.output_tokens
-            self.classify_stats.classify_cache_read_tokens += (
-                classify_usage.cache_read_tokens
-            )
-            self.classify_stats.classify_cost_usd += classify_usage.cost_usd
         except ClaudeUsageLimitError:
             self._run_state.set_degraded("usage_limit", self.name)
             return
@@ -402,24 +343,16 @@ class _ClassifyThread(_QueueWorker):
                 stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
                 error=str(exc),
             )
-            self.classify_stats.classify_failed += 1
-            self.classify_stats.items_errored += len(batch.positions)
-        finally:
-            self.classify_stats.refresh_body(
-                self._status_display,
-                self._pending_depth,
-                self._total_batches_ref[0],
-            )
-
-        if verdicts is None:
+            self._metrics.classify_batch_failed(len(batch.positions))
             return
 
+        classifier_dropped = 0
         for verdict, (position, resolution) in zip(verdicts, batch.positions):
             if not verdict.in_domain:
                 self._dedup_store.mark_off_domain(position.stub)
-                self.classify_stats.classifier_dropped += 1
+                classifier_dropped += 1
             else:
-                self._pending_depth.add_judge()
+                self._metrics.judge_enqueued()
                 self._judge_queue.put(
                     _JudgeJob(
                         position=position,
@@ -427,9 +360,9 @@ class _ClassifyThread(_QueueWorker):
                         item_id=batch.item_id,
                     )
                 )
-                self._judge_stats.refresh_body(
-                    self._status_display, self._pending_depth
-                )
+        self._metrics.classify_batch_complete(
+            classify_usage, len(items), classifier_dropped
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -445,10 +378,8 @@ class _JudgeThread(_QueueWorker):
         extractor: LLMExtractor,
         results_manager: "ResultsFileManager",
         dedup_store: DeduplicationStore,
-        status_display: "StatusDisplay",
         layout: "Layout",
-        judge_stats: "_JudgeStats",
-        pending_depth: "_PendingDepth",
+        metrics: "RunMetrics",
         run_state: _RunState,
     ) -> None:
         super().__init__(
@@ -461,45 +392,28 @@ class _JudgeThread(_QueueWorker):
         self._extractor = extractor
         self._results_manager = results_manager
         self._dedup_store = dedup_store
-        self._status_display = status_display
         self._layout = layout
-        self.judge_stats = judge_stats
-        self._pending_depth = pending_depth
+        self._metrics = metrics
 
     def _on_dequeue(self, item: object) -> None:
-        self._pending_depth.sub_judge()
+        self._metrics.judge_dequeued()
 
     def _process(self, item: object) -> None:
         assert isinstance(item, _JudgeJob)
         job = item
         try:
-            _t0 = time.monotonic()
             match_verdict, judge_usage = self._extractor.judge_match(
                 job.resolution.effective,
                 job.position.raw_description,
                 stub_url=job.position.stub.url,
             )
-            self.judge_stats.judge_total_s += time.monotonic() - _t0
-            self.judge_stats.judge_calls += 1
-            self.judge_stats.judge_input_tokens += judge_usage.input_tokens
-            self.judge_stats.judge_output_tokens += judge_usage.output_tokens
-            self.judge_stats.judge_cache_read_tokens += judge_usage.cache_read_tokens
-            self.judge_stats.judge_cost_usd += judge_usage.cost_usd
             number = self._results_manager.next_position_number()
             rendered = render(job.position, match_verdict, number, self._layout)
             self._results_manager.append(rendered)
             self._dedup_store.mark_kept(job.position.stub)
-            self.judge_stats.written += 1
-            src = job.position.stub.source
-            self.judge_stats.written_per_source[src] = (
-                self.judge_stats.written_per_source.get(src, 0) + 1
+            self._metrics.judge_complete(
+                judge_usage, match_verdict.tier, job.position.stub.source
             )
-            if match_verdict.tier == MatchTier.green:
-                self.judge_stats.green += 1
-            elif match_verdict.tier == MatchTier.amber:
-                self.judge_stats.amber += 1
-            else:
-                self.judge_stats.red += 1
         except ClaudeUsageLimitError:
             self._run_state.set_degraded("usage_limit", self.name)
             return
@@ -513,10 +427,7 @@ class _JudgeThread(_QueueWorker):
                 stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
                 error=str(exc),
             )
-            self.judge_stats.judge_failed += 1
-            self.judge_stats.errored += 1
-        finally:
-            self.judge_stats.refresh_body(self._status_display, self._pending_depth)
+            self._metrics.judge_failed()
 
 
 # ---------------------------------------------------------------------------
@@ -529,220 +440,6 @@ def _discover_release_tag() -> str | None:
         return Path("current").readlink().name or None
     except OSError:
         return None
-
-
-def _format_run_divider(
-    *,
-    timestamp: str,
-    tag: str | None,
-    sources: dict[str, int],
-    kept: int,
-    errors: int,
-    dedup_url_hits: int,
-    dedup_tuple_hits: int,
-    dedup_run_hits: int,
-    dedup_misses: int,
-    classify_calls: int,
-    classify_items: int,
-    classify_total_s: float,
-    judge_calls: int,
-    judge_total_s: float,
-    claude_input_tokens: int,
-    claude_output_tokens: int,
-    claude_cache_read_tokens: int,
-    claude_cost_usd: float,
-    elapsed_s: float,
-    degraded_reason: str | None = None,
-    classify_batches_failed: int = 0,
-    classify_items_abandoned: int = 0,
-    judge_items_abandoned: int = 0,
-) -> str:
-    parts = [f"run {timestamp}"]
-    if tag is not None:
-        parts.append(f"tag={tag}")
-    if sources:
-        sources_str = ",".join(f"{k}:{v}" for k, v in sources.items())
-        parts.append(f"sources={sources_str}")
-    parts.extend(
-        [
-            f"kept={kept}",
-            f"errors={errors}",
-            f"dedup_url_hits={dedup_url_hits}",
-            f"dedup_tuple_hits={dedup_tuple_hits}",
-            f"dedup_run_hits={dedup_run_hits}",
-            f"dedup_misses={dedup_misses}",
-            f"classify_calls={classify_calls}",
-            f"classify_items={classify_items}",
-            f"classify_total_s={classify_total_s:.1f}",
-            f"judge_calls={judge_calls}",
-            f"judge_total_s={judge_total_s:.1f}",
-            f"claude_input_tokens={claude_input_tokens}",
-            f"claude_output_tokens={claude_output_tokens}",
-            f"claude_cache_read_tokens={claude_cache_read_tokens}",
-            f"claude_cost_usd={claude_cost_usd:.6f}",
-            f"elapsed_s={elapsed_s:.1f}",
-        ]
-    )
-    if degraded_reason is not None:
-        parts.append(f"degraded_reason={degraded_reason}")
-    if classify_batches_failed > 0:
-        parts.append(f"classify_batches_failed={classify_batches_failed}")
-    if classify_items_abandoned > 0:
-        parts.append(f"classify_items_abandoned={classify_items_abandoned}")
-    if judge_items_abandoned > 0:
-        parts.append(f"judge_items_abandoned={judge_items_abandoned}")
-    return f"<!-- {' '.join(parts)} -->\n"
-
-
-# ---------------------------------------------------------------------------
-# RunSummary
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class RunSummary:
-    discovered: int = 0
-    skipped: int = 0
-    prefilter_considered: int = 0
-    prefilter_passed: int = 0
-    prefilter_dropped: int = 0
-    prefilter_whitelist_hits: int = 0
-    prefilter_blacklist_hits: int = 0
-    prefilter_no_hit_either: int = 0
-    dedup_url_hits: int = 0
-    dedup_tuple_hits: int = 0
-    dedup_run_hits: int = 0
-    dedup_misses: int = 0
-    classifier_dropped: int = 0
-    written: int = 0
-    green: int = 0
-    amber: int = 0
-    red: int = 0
-    enrich_failed: int = 0
-    external_redirects: int = 0
-    errored: int = 0
-    parsers_dead: int = 0
-    classify_items: int = 0
-    claude_input_tokens: int = 0
-    claude_output_tokens: int = 0
-    claude_cache_read_tokens: int = 0
-    claude_cost_usd: float = 0.0
-    duration_seconds: float = 0.0
-
-
-# ---------------------------------------------------------------------------
-# Batch classify + pipeline helpers
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _ClassifyStats:
-    classify_calls: int = 0
-    classify_items: int = 0
-    classify_failed: int = 0
-    classify_total_s: float = 0.0
-    classify_input_tokens: int = 0
-    classify_output_tokens: int = 0
-    classify_cache_read_tokens: int = 0
-    classify_cost_usd: float = 0.0
-    classifier_dropped: int = 0
-    items_errored: int = 0
-
-    def body(self, total_batches: int, pending_en: int, pending_de: int) -> str:
-        queue_total = pending_en + pending_de
-        result = (
-            f"{self.classify_calls}/{total_batches} batches done"
-            f" · {queue_total} items in queue ({pending_en} en / {pending_de} de)"
-        )
-        if self.classify_failed > 0:
-            result += (
-                f" · batches_failed={self.classify_failed}"
-                f" items_errored={self.items_errored}"
-            )
-        return result
-
-    def refresh_body(
-        self,
-        display: "StatusDisplay",
-        pending: "_PendingDepth",
-        total_batches: int,
-    ) -> None:
-        en, de, _ = pending.snapshot()
-        display.update_body(
-            "classify_relevance",
-            body=self.body(total_batches, en, de),
-        )
-
-
-@dataclass
-class _JudgeStats:
-    judge_calls: int = 0
-    judge_failed: int = 0
-    judge_total_s: float = 0.0
-    judge_input_tokens: int = 0
-    judge_output_tokens: int = 0
-    judge_cache_read_tokens: int = 0
-    judge_cost_usd: float = 0.0
-    written: int = 0
-    green: int = 0
-    amber: int = 0
-    red: int = 0
-    written_per_source: dict[str, int] = field(default_factory=dict)
-    errored: int = 0
-
-    def body(self, pending_judge: int = 0) -> str:
-        result = f"{self.judge_calls}/{self.judge_calls} judgments · green={self.green} amber={self.amber} red={self.red}"
-        if self.errored > 0:
-            result += f" · errored={self.errored}"
-        result += f" · pending={pending_judge}"
-        return result
-
-    def refresh_body(
-        self,
-        display: "StatusDisplay",
-        pending: "_PendingDepth",
-    ) -> None:
-        _, _, pending_judge = pending.snapshot()
-        display.update_body(
-            "judge_match",
-            body=self.body(pending_judge),
-        )
-
-
-@dataclass
-class _MainStats:
-    discovered: int = 0
-    skipped: int = 0
-    dedup_url_hits: int = 0
-    dedup_tuple_hits: int = 0
-    dedup_run_hits: int = 0
-    dedup_misses: int = 0
-    prefilter_considered: int = 0
-    prefilter_passed: int = 0
-    prefilter_dropped: int = 0
-    prefilter_whitelist_hits: int = 0
-    prefilter_blacklist_hits: int = 0
-    prefilter_no_hit_either: int = 0
-    enrich_failed: int = 0
-    external_redirects: int = 0
-    parsers_dead: int = 0
-    language_anomalies: int = 0
-
-    def pipeline_body(self, *, written: int, judge_errored: int) -> str:
-        return (
-            f"discovered={self.discovered} written={written}"
-            f" errors={self.enrich_failed + self.parsers_dead + judge_errored}"
-        )
-
-    def dedup_body(self) -> str:
-        return f"url_hits={self.dedup_url_hits} tuple_hits={self.dedup_tuple_hits} run_hits={self.dedup_run_hits} misses={self.dedup_misses}"
-
-    def prefilter_body(self) -> str:
-        return (
-            f"considered={self.prefilter_considered} passed={self.prefilter_passed}"
-            f" dropped={self.prefilter_dropped}"
-            f" (wl={self.prefilter_whitelist_hits} bl={self.prefilter_blacklist_hits})"
-        )
 
 
 @dataclass
@@ -886,16 +583,13 @@ def run(
             raise
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
-        main_stats = _MainStats()
+        metrics = RunMetrics(status_display)
         _in_run_seen: set[str] = set()
         de_buffer: list[tuple[Position, LanguageResolution]] = []
         en_buffer: list[tuple[Position, LanguageResolution]] = []
         batch_size = cfg.claude_classify_batch_size
-        total_batches_ref: list[int] = [0]
         batch_id = 0
-        classify_stats = _ClassifyStats()
-        judge_stats = _JudgeStats()
-        pending_depth = _PendingDepth()
+        language_anomalies = 0
         classify_queue: queue.Queue[object] = queue.Queue()
         judge_queue: queue.Queue[object] = queue.Queue()
         _run_started_at = datetime.now(timezone.utc)
@@ -952,27 +646,14 @@ def run(
 
             status_display.remove("startup")
 
-            status_display.register("dedup", order=2 + len(threads), phase="running")
-            status_display.register(
-                "prefilter", order=3 + len(threads), phase="running"
-            )
-            status_display.register(
-                "classify_relevance", order=4 + len(threads), phase="running"
-            )
-            status_display.register(
-                "judge_match", order=5 + len(threads), phase="running"
-            )
+            metrics.register_rows(starting_order=2 + len(threads))
 
             classify_thread = _ClassifyThread(
                 classify_queue=classify_queue,
                 judge_queue=judge_queue,
                 extractor=extractor,
                 dedup_store=dedup_store,
-                status_display=status_display,
-                total_batches_ref=total_batches_ref,
-                classify_stats=classify_stats,
-                judge_stats=judge_stats,
-                pending_depth=pending_depth,
+                metrics=metrics,
                 run_state=run_state,
             )
             judge_thread = _JudgeThread(
@@ -980,10 +661,8 @@ def run(
                 extractor=extractor,
                 results_manager=results_manager,
                 dedup_store=dedup_store,
-                status_display=status_display,
                 layout=layout,
-                judge_stats=judge_stats,
-                pending_depth=pending_depth,
+                metrics=metrics,
                 run_state=run_state,
             )
             classify_thread.start()
@@ -999,12 +678,9 @@ def run(
                         item_id=str(batch_id),
                     )
                 )
-                total_batches_ref[0] += 1
+                metrics.classify_batch_enqueued(language, len(buffer))
                 batch_id += 1
                 buffer.clear()
-                classify_stats.refresh_body(
-                    status_display, pending_depth, total_batches_ref[0]
-                )
 
             parsers_remaining: set[str] = set(parser_states.keys())
 
@@ -1057,7 +733,7 @@ def run(
                 state.stall_logged = False
 
                 if isinstance(payload, PositionStub):
-                    main_stats.discovered += 1
+                    metrics.discovered()
                     state.discovered += 1
 
                     if run_state.is_aborted:
@@ -1065,22 +741,20 @@ def run(
                         continue
 
                     if payload.url in _in_run_seen:
-                        main_stats.dedup_run_hits += 1
-                        main_stats.skipped += 1
+                        metrics.dedup_run_hit()
                         state.inbound.put(_SKIP)
                     else:
                         seen_result = dedup_store.is_seen(payload)
 
                         if seen_result == "miss":
-                            main_stats.dedup_misses += 1
+                            metrics.dedup_miss()
                             state.consecutive_url_hits = 0
                             _in_run_seen.add(payload.url)
                             state.pending_enrich = payload
                             state.inbound.put(_ENRICH)
                         elif seen_result == "url_hit":
-                            main_stats.dedup_url_hits += 1
+                            metrics.dedup_url_hit()
                             state.consecutive_url_hits += 1
-                            main_stats.skipped += 1
                             if (
                                 state.consecutive_url_hits >= state.threshold
                                 and not run_state.is_degraded
@@ -1090,18 +764,9 @@ def run(
                             else:
                                 state.inbound.put(_SKIP)
                         else:  # tuple_hit
-                            main_stats.dedup_tuple_hits += 1
+                            metrics.dedup_tuple_hit()
                             state.consecutive_url_hits = 0
-                            main_stats.skipped += 1
                             state.inbound.put(_SKIP)
-                    status_display.update_body(
-                        "pipeline",
-                        body=main_stats.pipeline_body(written=0, judge_errored=0),
-                    )
-                    status_display.update_body(
-                        "dedup",
-                        body=main_stats.dedup_body(),
-                    )
                     _update_parser_row(pid)
 
                 elif isinstance(payload, Position):
@@ -1124,30 +789,20 @@ def run(
                             detected=resolution.detected,
                             detection_source=resolution.source,
                         )
-                        main_stats.language_anomalies += 1
+                        language_anomalies += 1
+                        metrics.language_anomaly()
                     verdict = prefilter.classify(payload)
-                    main_stats.prefilter_considered += 1
-                    if verdict.whitelist_hit:
-                        main_stats.prefilter_whitelist_hits += 1
-                    if verdict.blacklist_hit:
-                        main_stats.prefilter_blacklist_hits += 1
-                    if not verdict.whitelist_hit and not verdict.blacklist_hit:
-                        main_stats.prefilter_no_hit_either += 1
                     if verdict.passes:
-                        main_stats.prefilter_passed += 1
+                        metrics.prefilter_passed(verdict)
                         lang = "de" if resolution.effective == "de" else "en"
                         buffer = de_buffer if lang == "de" else en_buffer
                         buffer.append((payload, resolution))
-                        pending_depth.add_classify(lang, 1)
+                        metrics.classify_buffered(lang, 1)
                         if len(buffer) >= batch_size:
                             _flush_classify_batch(lang)
                     else:
                         dedup_store.mark_off_domain(payload.stub)
-                        main_stats.prefilter_dropped += 1
-                    status_display.update_body(
-                        "prefilter",
-                        body=main_stats.prefilter_body(),
-                    )
+                        metrics.prefilter_dropped(verdict)
                     _update_parser_row(pid)
 
                 elif isinstance(payload, ParserError):
@@ -1162,12 +817,8 @@ def run(
                             reason=str(payload),
                         )
                         dedup_store.mark_enrich_failed(stub)
-                    main_stats.enrich_failed += 1
+                    metrics.enrich_failed()
                     state.enrich_failed += 1
-                    status_display.update_body(
-                        "pipeline",
-                        body=main_stats.pipeline_body(written=0, judge_errored=0),
-                    )
 
                 elif isinstance(payload, ExternalRedirect):
                     stub = state.pending_enrich
@@ -1180,7 +831,7 @@ def run(
                             outbound=payload.outbound_url,
                         )
                         dedup_store.mark_external_redirect(stub)
-                    main_stats.external_redirects += 1
+                    metrics.external_redirect()
                     state.external_redirects += 1
 
                 elif isinstance(payload, NotServedQuery):
@@ -1196,14 +847,10 @@ def run(
 
                 elif isinstance(payload, _ParserDead):
                     parser_log.record_traceback(pid, payload.traceback_str)
-                    main_stats.parsers_dead += 1
+                    metrics.parser_dead()
                     state.parsers_dead += 1
                     parsers_remaining.discard(pid)
                     _update_parser_row(pid, " · dead")
-                    status_display.update_body(
-                        "pipeline",
-                        body=main_stats.pipeline_body(written=0, judge_errored=0),
-                    )
 
             for _, t in threads:
                 t.join()
@@ -1217,7 +864,7 @@ def run(
                 )
             parser_log.summarize(
                 "language",
-                {"anomalies": main_stats.language_anomalies},
+                {"anomalies": language_anomalies},
                 _run_started_at,
             )
 
@@ -1237,87 +884,17 @@ def run(
         if judge_thread.exc is not None:
             raise judge_thread.exc
 
-        judge_stats.errored += classify_stats.items_errored
-
-        status_display.update_body(
-            "pipeline",
-            body=main_stats.pipeline_body(
-                written=judge_stats.written, judge_errored=judge_stats.errored
-            ),
-        )
-
         # Emit per-call-site SUMMARY OF SESSION trailers
-        parser_log.summarize(
-            "classify_relevance",
-            {
-                "batches_sent": classify_stats.classify_calls,
-                "items_classified": classify_stats.classify_items,
-                "in_domain": classify_stats.classify_items
-                - classify_stats.classifier_dropped,
-                "off_domain": classify_stats.classifier_dropped,
-                "batches_failed": classify_stats.classify_failed,
-                "input_tokens": classify_stats.classify_input_tokens,
-                "output_tokens": classify_stats.classify_output_tokens,
-                "cache_read_tokens": classify_stats.classify_cache_read_tokens,
-                "cost_usd": round(classify_stats.classify_cost_usd, 6),
-                "duration_s": round(classify_stats.classify_total_s, 1),
-            },
-            _run_started_at,
-        )
-        parser_log.summarize(
-            "judge_match",
-            {
-                "judges_sent": judge_stats.judge_calls,
-                "judges_failed": judge_stats.judge_failed,
-                "green": judge_stats.green,
-                "amber": judge_stats.amber,
-                "red": judge_stats.red,
-                "input_tokens": judge_stats.judge_input_tokens,
-                "output_tokens": judge_stats.judge_output_tokens,
-                "cache_read_tokens": judge_stats.judge_cache_read_tokens,
-                "cost_usd": round(judge_stats.judge_cost_usd, 6),
-                "duration_s": round(judge_stats.judge_total_s, 1),
-            },
-            _run_started_at,
-        )
+        metrics.summarize_to_parser_log(_run_started_at)
 
         # Step 13: Append Run Divider — only on successful completion
         elapsed_s = time.monotonic() - _start
-        claude_input_tokens = (
-            classify_stats.classify_input_tokens + judge_stats.judge_input_tokens
-        )
-        claude_output_tokens = (
-            classify_stats.classify_output_tokens + judge_stats.judge_output_tokens
-        )
-        claude_cache_read_tokens = (
-            classify_stats.classify_cache_read_tokens
-            + judge_stats.judge_cache_read_tokens
-        )
-        claude_cost_usd = classify_stats.classify_cost_usd + judge_stats.judge_cost_usd
-        divider = _format_run_divider(
+        if run_state.degraded_reason is not None:
+            metrics.set_degraded_reason(run_state.degraded_reason)
+        divider = metrics.format_run_divider(
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             tag=_discover_release_tag(),
-            sources=judge_stats.written_per_source,
-            kept=judge_stats.written,
-            errors=judge_stats.errored,
-            dedup_url_hits=main_stats.dedup_url_hits,
-            dedup_tuple_hits=main_stats.dedup_tuple_hits,
-            dedup_run_hits=main_stats.dedup_run_hits,
-            dedup_misses=main_stats.dedup_misses,
-            classify_calls=classify_stats.classify_calls,
-            classify_items=classify_stats.classify_items,
-            classify_total_s=classify_stats.classify_total_s,
-            judge_calls=judge_stats.judge_calls,
-            judge_total_s=judge_stats.judge_total_s,
-            claude_input_tokens=claude_input_tokens,
-            claude_output_tokens=claude_output_tokens,
-            claude_cache_read_tokens=claude_cache_read_tokens,
-            claude_cost_usd=claude_cost_usd,
             elapsed_s=elapsed_s,
-            degraded_reason=run_state.degraded_reason,
-            classify_batches_failed=classify_stats.classify_failed,
-            classify_items_abandoned=classify_stats.items_errored,
-            judge_items_abandoned=judge_stats.errored,
         )
         try:
             results_manager.append(divider)
@@ -1325,6 +902,7 @@ def run(
             _log.error("run divider append failed: %s", exc)
             raise
 
+        summary = metrics.to_run_summary(duration_s=elapsed_s)
         _log.info(
             "run complete: discovered=%d skipped=%d "
             "prefilter_considered=%d prefilter_passed=%d prefilter_dropped=%d "
@@ -1332,57 +910,28 @@ def run(
             "dedup_url_hits=%d dedup_tuple_hits=%d dedup_run_hits=%d dedup_misses=%d "
             "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
             "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
-            main_stats.discovered,
-            main_stats.skipped,
-            main_stats.prefilter_considered,
-            main_stats.prefilter_passed,
-            main_stats.prefilter_dropped,
-            main_stats.prefilter_whitelist_hits,
-            main_stats.prefilter_blacklist_hits,
-            main_stats.prefilter_no_hit_either,
-            main_stats.dedup_url_hits,
-            main_stats.dedup_tuple_hits,
-            main_stats.dedup_run_hits,
-            main_stats.dedup_misses,
-            classify_stats.classifier_dropped,
-            judge_stats.written,
-            judge_stats.green,
-            judge_stats.amber,
-            judge_stats.red,
-            main_stats.enrich_failed,
-            main_stats.external_redirects,
-            judge_stats.errored,
-            main_stats.parsers_dead,
+            summary.discovered,
+            summary.skipped,
+            summary.prefilter_considered,
+            summary.prefilter_passed,
+            summary.prefilter_dropped,
+            summary.prefilter_whitelist_hits,
+            summary.prefilter_blacklist_hits,
+            summary.prefilter_no_hit_either,
+            summary.dedup_url_hits,
+            summary.dedup_tuple_hits,
+            summary.dedup_run_hits,
+            summary.dedup_misses,
+            summary.classifier_dropped,
+            summary.written,
+            summary.green,
+            summary.amber,
+            summary.red,
+            summary.enrich_failed,
+            summary.external_redirects,
+            summary.errored,
+            summary.parsers_dead,
         )
-
-        return RunSummary(
-            duration_seconds=elapsed_s,
-            discovered=main_stats.discovered,
-            skipped=main_stats.skipped,
-            prefilter_considered=main_stats.prefilter_considered,
-            prefilter_passed=main_stats.prefilter_passed,
-            prefilter_dropped=main_stats.prefilter_dropped,
-            prefilter_whitelist_hits=main_stats.prefilter_whitelist_hits,
-            prefilter_blacklist_hits=main_stats.prefilter_blacklist_hits,
-            prefilter_no_hit_either=main_stats.prefilter_no_hit_either,
-            dedup_url_hits=main_stats.dedup_url_hits,
-            dedup_tuple_hits=main_stats.dedup_tuple_hits,
-            dedup_run_hits=main_stats.dedup_run_hits,
-            dedup_misses=main_stats.dedup_misses,
-            classifier_dropped=classify_stats.classifier_dropped,
-            written=judge_stats.written,
-            green=judge_stats.green,
-            amber=judge_stats.amber,
-            red=judge_stats.red,
-            enrich_failed=main_stats.enrich_failed,
-            external_redirects=main_stats.external_redirects,
-            errored=judge_stats.errored,
-            parsers_dead=main_stats.parsers_dead,
-            classify_items=classify_stats.classify_items,
-            claude_input_tokens=claude_input_tokens,
-            claude_output_tokens=claude_output_tokens,
-            claude_cache_read_tokens=claude_cache_read_tokens,
-            claude_cost_usd=claude_cost_usd,
-        )
+        return summary
     finally:
         status_display.stop()

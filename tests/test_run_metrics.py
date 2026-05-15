@@ -10,7 +10,7 @@ from fake_status_display import FakeStatusDisplay
 
 from application_pipeline import parser_log as _parser_log
 from application_pipeline.llm.types import CallUsage, MatchTier
-from application_pipeline.orchestrator import RunSummary, _format_run_divider  # type: ignore[attr-defined]
+from application_pipeline.orchestrator import RunSummary
 from application_pipeline.prefilter import PreFilterVerdict
 from application_pipeline.run_metrics import RunMetrics
 
@@ -72,17 +72,16 @@ def _last_body(display: FakeStatusDisplay, row: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_register_rows_creates_five_rows_with_correct_order_and_phase():
+def test_register_rows_creates_four_rows_with_correct_order_and_phase():
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
     metrics.register_rows(starting_order=10)
 
     assert _registers(display) == [
-        ("pipeline", 10, "running"),
-        ("dedup", 11, "running"),
-        ("prefilter", 12, "running"),
-        ("classify_relevance", 13, "running"),
-        ("judge_match", 14, "running"),
+        ("dedup", 10, "running"),
+        ("prefilter", 11, "running"),
+        ("classify_relevance", 12, "running"),
+        ("judge_match", 13, "running"),
     ]
 
 
@@ -92,7 +91,7 @@ def test_register_rows_starting_at_zero():
     metrics.register_rows(starting_order=0)
 
     orders = [c.kwargs["order"] for c in display.calls if c.method == "register"]
-    assert orders == [0, 1, 2, 3, 4]
+    assert orders == [0, 1, 2, 3]
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +278,57 @@ def test_judge_body_pending_count():
 # ---------------------------------------------------------------------------
 # format_run_divider — byte-identical to _format_run_divider
 # ---------------------------------------------------------------------------
+
+
+def _format_run_divider(
+    *,
+    timestamp: str,
+    tag: str | None,
+    sources: dict[str, int],
+    kept: int,
+    errors: int,
+    dedup_url_hits: int,
+    dedup_tuple_hits: int,
+    dedup_run_hits: int,
+    dedup_misses: int,
+    classify_calls: int,
+    classify_items: int,
+    classify_total_s: float,
+    judge_calls: int,
+    judge_total_s: float,
+    claude_input_tokens: int,
+    claude_output_tokens: int,
+    claude_cache_read_tokens: int,
+    claude_cost_usd: float,
+    elapsed_s: float,
+) -> str:
+    parts = [f"run {timestamp}"]
+    if tag is not None:
+        parts.append(f"tag={tag}")
+    if sources:
+        sources_str = ",".join(f"{k}:{v}" for k, v in sources.items())
+        parts.append(f"sources={sources_str}")
+    parts.extend(
+        [
+            f"kept={kept}",
+            f"errors={errors}",
+            f"dedup_url_hits={dedup_url_hits}",
+            f"dedup_tuple_hits={dedup_tuple_hits}",
+            f"dedup_run_hits={dedup_run_hits}",
+            f"dedup_misses={dedup_misses}",
+            f"classify_calls={classify_calls}",
+            f"classify_items={classify_items}",
+            f"classify_total_s={classify_total_s:.1f}",
+            f"judge_calls={judge_calls}",
+            f"judge_total_s={judge_total_s:.1f}",
+            f"claude_input_tokens={claude_input_tokens}",
+            f"claude_output_tokens={claude_output_tokens}",
+            f"claude_cache_read_tokens={claude_cache_read_tokens}",
+            f"claude_cost_usd={claude_cost_usd:.6f}",
+            f"elapsed_s={elapsed_s:.1f}",
+        ]
+    )
+    return f"<!-- {' '.join(parts)} -->\n"
 
 
 def _build_populated_metrics(display: FakeStatusDisplay) -> RunMetrics:

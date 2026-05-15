@@ -887,6 +887,8 @@ def run(
                 try:
                     pid, payload = outbound.get(timeout=poll_s)
                 except queue.Empty:
+                    if run_state.is_aborted:
+                        continue
                     now = time.monotonic()
                     frames = sys._current_frames()
                     threads_by_name = {t.name: t for t in threading.enumerate()}
@@ -918,36 +920,40 @@ def run(
                 if isinstance(payload, PositionStub):
                     discovered += 1
                     state.discovered += 1
-                    seen_result = dedup_store.is_seen(payload)
 
-                    if seen_result == "miss":
-                        dedup_misses += 1
-                        state.consecutive_url_hits = 0
-                        state.pending_enrich = payload
-                        state.inbound.put(_ENRICH)
-                    elif seen_result == "url_hit":
-                        dedup_url_hits += 1
-                        state.consecutive_url_hits += 1
-                        skipped += 1
-                        if state.consecutive_url_hits >= state.threshold:
+                    if run_state.is_aborted:
+                        state.inbound.put(_SKIP_AND_END_QUERY)
+                    else:
+                        seen_result = dedup_store.is_seen(payload)
+
+                        if seen_result == "miss":
+                            dedup_misses += 1
                             state.consecutive_url_hits = 0
-                            state.inbound.put(_SKIP_AND_END_QUERY)
-                        else:
+                            state.pending_enrich = payload
+                            state.inbound.put(_ENRICH)
+                        elif seen_result == "url_hit":
+                            dedup_url_hits += 1
+                            state.consecutive_url_hits += 1
+                            skipped += 1
+                            if state.consecutive_url_hits >= state.threshold:
+                                state.consecutive_url_hits = 0
+                                state.inbound.put(_SKIP_AND_END_QUERY)
+                            else:
+                                state.inbound.put(_SKIP)
+                        else:  # tuple_hit
+                            dedup_tuple_hits += 1
+                            state.consecutive_url_hits = 0
+                            skipped += 1
                             state.inbound.put(_SKIP)
-                    else:  # tuple_hit
-                        dedup_tuple_hits += 1
-                        state.consecutive_url_hits = 0
-                        skipped += 1
-                        state.inbound.put(_SKIP)
-                    status_display.update_body(
-                        "pipeline",
-                        body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
-                    )
-                    status_display.update_body(
-                        "dedup",
-                        body=f"url_hits={dedup_url_hits} tuple_hits={dedup_tuple_hits} misses={dedup_misses}",
-                    )
-                    _update_parser_row(pid)
+                        status_display.update_body(
+                            "pipeline",
+                            body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
+                        )
+                        status_display.update_body(
+                            "dedup",
+                            body=f"url_hits={dedup_url_hits} tuple_hits={dedup_tuple_hits} misses={dedup_misses}",
+                        )
+                        _update_parser_row(pid)
 
                 elif isinstance(payload, Position):
                     for warning in payload._warnings:

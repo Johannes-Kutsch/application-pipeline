@@ -10,25 +10,9 @@ from dotenv import load_dotenv
 load_dotenv(Path.home() / ".env")
 
 from application_pipeline import parser_log  # noqa: E402
-from application_pipeline.config import ConfigError  # noqa: E402
-from application_pipeline.dedup import DedupStoreError  # noqa: E402
 from application_pipeline.failure_report import write_failure  # noqa: E402
-from application_pipeline.layout import LayoutError  # noqa: E402
-from application_pipeline.llm import ClaudeUsageLimitError, ExtractorUnreachableError  # noqa: E402
 from application_pipeline.orchestrator import current_stage, run  # noqa: E402
-from application_pipeline.prompts import PromptError  # noqa: E402
-from application_pipeline.results import ResultsFileError  # noqa: E402
 from application_pipeline.status_display import PlainStatusDisplay, RichStatusDisplay  # noqa: E402
-
-_FATAL = (
-    ConfigError,
-    ClaudeUsageLimitError,
-    LayoutError,
-    PromptError,
-    ExtractorUnreachableError,
-    DedupStoreError,
-    ResultsFileError,
-)
 
 
 class _TailHandler(logging.Handler):
@@ -74,7 +58,7 @@ def main() -> None:
     try:
         parser_log.configure(config_path.parent / "logs")
         summary = run(config_path, status_display=display)
-    except _FATAL as exc:
+    except Exception as exc:
         try:
             write_failure(current_stage.get(), exc, _tail.tail(), config_path.parent)
         except Exception:

@@ -3624,3 +3624,152 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
     assert " query_ended " in content, (
         "query_ended must fire even when discover() raises"
     )
+
+
+# ---------------------------------------------------------------------------
+# Degraded-run policy: ClaudeUsageLimitError + non-quota abort (issue #217)
+# ---------------------------------------------------------------------------
+
+
+def test_claude_usage_limit_error_on_judge_degrades_gracefully(
+    tmp_path: Path,
+) -> None:
+    """ClaudeUsageLimitError on 4th judge_match → exit 0, degraded_reason in divider, 4th item unmarked."""
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+
+    judge_call_count = [0]
+
+    def _judge(language: str, raw_description: str) -> tuple[MatchVerdict, CallUsage]:
+        judge_call_count[0] += 1
+        if judge_call_count[0] >= 4:
+            raise ClaudeUsageLimitError("quota")
+        return MatchVerdict(
+            tier=MatchTier.green, matched=[], missing=[], summary="ok"
+        ), _ZERO_USAGE
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.side_effect = _judge
+
+    class _FourStubParser:
+        def __enter__(self) -> "_FourStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
+                )
+                for i in range(4)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    summary = run(
+        _batch_size_config(tmp_path, 1),
+        extractor=ext,
+        parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    assert summary.written == 3
+
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    # First 3 judge calls succeeded → marked kept
+    assert all(
+        seen_data.get(_ERR_URLS[i], {}).get("status") == "kept" for i in range(3)
+    )
+    # 4th item: judge raised ClaudeUsageLimitError → not marked
+    assert _ERR_URLS[3] not in seen_data
+
+    content = results_path.read_text(encoding="utf-8")
+    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "degraded_reason=usage_limit" in last_line, (
+        f"expected degraded_reason in divider: {last_line!r}"
+    )
+
+
+def test_non_quota_worker_exception_writes_failure_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RuntimeError from judge worker → failure report written, exit 1, no Run Divider."""
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+
+    class _AbortingExtractor:
+        def prewarm(self) -> None:
+            pass
+
+        def classify_relevance_batch(
+            self, language: str, items: list[ClassifyItem]
+        ) -> tuple[list[RelevanceVerdict], CallUsage]:
+            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+
+        def judge_match(
+            self, language: str, raw_description: str
+        ) -> tuple[MatchVerdict, CallUsage]:
+            raise RuntimeError("disk full")
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.ClaudeExtractor",
+        lambda *a, **kw: _AbortingExtractor(),
+    )
+
+    class _OneStubParser:
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://abort.example/0",
+                    title="Job",
+                    source="s",
+                    language="en",
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="software engineering role")
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator._default_registry",
+        type("_Reg", (), {"get": staticmethod(lambda _: _OneStubParser)})(),
+    )
+
+    from application_pipeline.__main__ import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+
+    failures_dir = tmp_path / "failures"
+    reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
+    assert len(reports) == 1, f"expected one failure report, got {reports}"
+
+    body = reports[0].read_text(encoding="utf-8")
+    assert "RuntimeError" in body
+
+    results_path = tmp_path / "results" / "current.md"
+    if results_path.exists():
+        content = results_path.read_text(encoding="utf-8")
+        assert "<!-- run " not in content, (
+            "Run Divider must not be written on worker abort"
+        )

@@ -5,17 +5,62 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+_USAGE_LIMIT_PHRASES = ("usage limit", "rate limit")
+
 
 class ClaudeUsageLimitError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        returncode: int,
+        stdout: str,
+        stderr: str,
+        envelope: dict[str, Any] | None,
+    ) -> None:
+        super().__init__(message)
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.envelope = envelope
 
 
 class ClaudeCliError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        returncode: int,
+        stdout: str,
+        stderr: str,
+        envelope: dict[str, Any] | None,
+        envelope_error_class: str,
+    ) -> None:
+        super().__init__(message)
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.envelope = envelope
+        self.envelope_error_class = envelope_error_class
 
 
 class ClaudeMalformedEnvelopeError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        returncode: int,
+        stdout: str,
+        stderr: str,
+        envelope: dict[str, Any] | None,
+        envelope_error_class: str,
+    ) -> None:
+        super().__init__(message)
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.envelope = envelope
+        self.envelope_error_class = envelope_error_class
 
 
 @dataclass(frozen=True)
@@ -44,14 +89,16 @@ def _default_runner(args: list[str], stdin: str) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
-_USAGE_LIMIT_PHRASES = ("usage limit", "rate limit")
-
-
-def _signals_usage_limit(envelope: dict[str, Any]) -> bool:
+def _signals_usage_limit_envelope(envelope: dict[str, Any]) -> bool:
     if not envelope.get("is_error"):
         return False
     result_lower = str(envelope.get("result", "")).lower()
     return any(phrase in result_lower for phrase in _USAGE_LIMIT_PHRASES)
+
+
+def _signals_usage_limit_stderr(stderr: str) -> bool:
+    stderr_lower = stderr.lower()
+    return any(phrase in stderr_lower for phrase in _USAGE_LIMIT_PHRASES)
 
 
 class ClaudeCliInvoker:
@@ -81,29 +128,73 @@ class ClaudeCliInvoker:
             envelope = json.loads(stdout)
         except (json.JSONDecodeError, ValueError) as exc:
             raise ClaudeMalformedEnvelopeError(
-                f"envelope JSON unparseable: {exc}"
+                f"envelope JSON unparseable: {exc}",
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+                envelope=None,
+                envelope_error_class="envelope_not_json",
             ) from exc
 
         if not isinstance(envelope, dict):
-            raise ClaudeMalformedEnvelopeError("envelope is not a JSON object")
+            raise ClaudeMalformedEnvelopeError(
+                "envelope is not a JSON object",
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+                envelope=None,
+                envelope_error_class="envelope_not_object",
+            )
 
-        if _signals_usage_limit(envelope):
+        if _signals_usage_limit_envelope(envelope):
             raise ClaudeUsageLimitError(
-                f"Claude subscription cap reached: {envelope.get('result', '')}"
+                f"Claude subscription cap reached: {envelope.get('result', '')}",
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+                envelope=envelope,
             )
 
         if returncode != 0:
+            if _signals_usage_limit_stderr(stderr):
+                raise ClaudeUsageLimitError(
+                    f"Claude usage limit signalled in stderr: {stderr.strip()[:200]}",
+                    returncode=returncode,
+                    stdout=stdout,
+                    stderr=stderr,
+                    envelope=envelope,
+                )
             raise ClaudeCliError(
                 f"claude CLI exited {returncode}: "
-                f"{stderr.strip() or str(envelope.get('result', ''))}"
+                f"{stderr.strip() or str(envelope.get('result', ''))}",
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+                envelope=envelope,
+                envelope_error_class="cli_nonzero_exit",
             )
 
         raw_response = str(envelope.get("result", ""))
+        if not raw_response:
+            raise ClaudeCliError(
+                "claude CLI returned empty result field",
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+                envelope=envelope,
+                envelope_error_class="empty_result",
+            )
+
         try:
             parsed_result = json.loads(raw_response)
         except (json.JSONDecodeError, ValueError) as exc:
-            raise ClaudeMalformedEnvelopeError(
-                f"result field is not valid JSON: {exc}"
+            raise ClaudeCliError(
+                f"result field is not valid JSON: {exc}",
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+                envelope=envelope,
+                envelope_error_class="result_not_json",
             ) from exc
 
         usage_raw = envelope.get("usage", {})

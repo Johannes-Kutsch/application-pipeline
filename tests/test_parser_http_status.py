@@ -1,4 +1,4 @@
-"""Tests for HTTP status discrimination and constants in parsers/_http.py and parsers/http.py."""
+"""Tests for HTTP status discrimination and constants in parsers/http.py."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pytest
 import respx
 
 from application_pipeline.http.retry import HttpNotRetryableError
-from application_pipeline.parsers._http import (
+from application_pipeline.parsers.http import (
     BACKOFF_INITIAL,
     BACKOFF_MAX,
     BACKOFF_MULTIPLIER,
@@ -17,8 +17,6 @@ from application_pipeline.parsers._http import (
     REQUEST_PACING,
     RETRY_STATUSES,
     USER_AGENT,
-)
-from application_pipeline.parsers.http import (
     _default_http_get,
     check_response_status,
 )

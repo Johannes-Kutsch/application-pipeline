@@ -13,22 +13,15 @@ from application_pipeline.http.retry import (
     exponential_backoff,
 )
 
-from ._http import (
-    BACKOFF_INITIAL,
-    BACKOFF_MAX,
-    BACKOFF_MULTIPLIER,
-    HTTP_CONNECT_TIMEOUT,
-    HTTP_READ_TIMEOUT,
-    MAX_RETRIES,
-    REQUEST_PACING,
-    RETRY_STATUSES,
-    USER_AGENT,
-)
-
-# Backward-compatible aliases kept so existing callers compile without changes.
-DEFAULT_TIMEOUT = HTTP_READ_TIMEOUT
-DEFAULT_RETRIES = MAX_RETRIES
-THROTTLE_INTERVAL = REQUEST_PACING
+HTTP_CONNECT_TIMEOUT: float = 5.0
+HTTP_READ_TIMEOUT: float = 30.0
+MAX_RETRIES: int = 3
+BACKOFF_INITIAL: float = 1.0
+BACKOFF_MULTIPLIER: float = 2.0
+BACKOFF_MAX: float = 8.0
+RETRY_STATUSES: frozenset[int] = frozenset({429, 502, 503, 504})
+REQUEST_PACING: float = 0.5
+USER_AGENT: str = "application-pipeline/0.1 (job-discovery-bot)"
 
 HttpGet = Callable[[str, float], bytes]
 

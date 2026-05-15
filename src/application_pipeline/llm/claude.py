@@ -46,26 +46,29 @@ class ClaudeExtractor:
         lang = self._lang_or_en(language)
         items_block = self._format_classify_items(items)
         prompt = self._prompts.classify_relevance[lang].render(ITEMS=items_block)
-        _t0 = time.monotonic()
+        t0 = time.monotonic()
         try:
             response = self._invoker.call(prompt, language)
-        except ClaudeCliError as exc:
-            self._write_classify_failure_transcript(
-                language, prompt, exc, time.monotonic() - _t0, items, "cli_error"
+        except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
+            status = (
+                "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"
             )
-            raise ExtractorUnreachableError(
-                str(exc), returncode=exc.returncode, stderr=exc.stderr
-            ) from exc
-        except ClaudeMalformedEnvelopeError as exc:
-            self._write_classify_failure_transcript(
-                language,
-                prompt,
-                exc,
-                time.monotonic() - _t0,
-                items,
-                "malformed_envelope",
+            self._write_failure_transcript(
+                component_id="classify_relevance",
+                call="classify_relevance_batch",
+                language=language,
+                prompt=prompt,
+                exc=exc,
+                duration_s=time.monotonic() - t0,
+                status=status,
+                extra={"item_ids": [item.id for item in items]},
             )
-            raise ExtractorMalformedJSONError(
+            err_cls = (
+                ExtractorUnreachableError
+                if isinstance(exc, ClaudeCliError)
+                else ExtractorMalformedJSONError
+            )
+            raise err_cls(
                 str(exc), returncode=exc.returncode, stderr=exc.stderr
             ) from exc
         # ClaudeUsageLimitError propagates as-is for abort handling
@@ -107,26 +110,29 @@ class ClaudeExtractor:
         prompt = self._prompts.judge_match[lang].render(
             skills=self._skills_block, raw_description=raw_description
         )
-        _t0 = time.monotonic()
+        t0 = time.monotonic()
         try:
             response = self._invoker.call(prompt, language)
-        except ClaudeCliError as exc:
-            self._write_judge_failure_transcript(
-                language, prompt, exc, time.monotonic() - _t0, stub_url, "cli_error"
+        except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
+            status = (
+                "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"
             )
-            raise ExtractorUnreachableError(
-                str(exc), returncode=exc.returncode, stderr=exc.stderr
-            ) from exc
-        except ClaudeMalformedEnvelopeError as exc:
-            self._write_judge_failure_transcript(
-                language,
-                prompt,
-                exc,
-                time.monotonic() - _t0,
-                stub_url,
-                "malformed_envelope",
+            self._write_failure_transcript(
+                component_id="judge_match",
+                call="judge_match",
+                language=language,
+                prompt=prompt,
+                exc=exc,
+                duration_s=time.monotonic() - t0,
+                status=status,
+                extra={"stub_url": stub_url},
             )
-            raise ExtractorMalformedJSONError(
+            err_cls = (
+                ExtractorUnreachableError
+                if isinstance(exc, ClaudeCliError)
+                else ExtractorMalformedJSONError
+            )
+            raise err_cls(
                 str(exc), returncode=exc.returncode, stderr=exc.stderr
             ) from exc
         # ClaudeUsageLimitError propagates as-is for abort handling
@@ -177,20 +183,23 @@ class ClaudeExtractor:
         pass  # Claude CLI is a stateless executable; no warm-up needed
 
     @staticmethod
-    def _write_classify_failure_transcript(
+    def _write_failure_transcript(
+        *,
+        component_id: str,
+        call: str,
         language: str,
         prompt: str,
         exc: ClaudeCliError | ClaudeMalformedEnvelopeError,
         duration_s: float,
-        items: list[ClassifyItem],
         status: str,
+        extra: dict[str, object],
     ) -> None:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         parser_log.record_transcript(
-            "classify_relevance",
+            component_id,
             {
                 "ts": ts,
-                "call": "classify_relevance_batch",
+                "call": call,
                 "language": language,
                 "status": status,
                 "prompt": prompt,
@@ -200,35 +209,7 @@ class ClaudeExtractor:
                 "envelope": exc.envelope,
                 "envelope_error_class": exc.envelope_error_class,
                 "duration_s": duration_s,
-                "item_ids": [item.id for item in items],
-            },
-        )
-
-    @staticmethod
-    def _write_judge_failure_transcript(
-        language: str,
-        prompt: str,
-        exc: ClaudeCliError | ClaudeMalformedEnvelopeError,
-        duration_s: float,
-        stub_url: str,
-        status: str,
-    ) -> None:
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        parser_log.record_transcript(
-            "judge_match",
-            {
-                "ts": ts,
-                "call": "judge_match",
-                "language": language,
-                "status": status,
-                "stub_url": stub_url,
-                "prompt": prompt,
-                "stdout": exc.stdout,
-                "stderr": exc.stderr,
-                "returncode": exc.returncode,
-                "envelope": exc.envelope,
-                "envelope_error_class": exc.envelope_error_class,
-                "duration_s": duration_s,
+                **extra,
             },
         )
 

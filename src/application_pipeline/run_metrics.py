@@ -204,6 +204,8 @@ class RunMetrics:
                 self._pending_de += n
             else:
                 self._pending_en += n
+            body = self._classify_body()
+        self._display.update_body("classify_relevance", body=body)
 
     def classify_batch_enqueued(self, language: str, n: int) -> None:
         with self._lock:

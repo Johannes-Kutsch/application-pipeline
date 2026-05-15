@@ -227,6 +227,20 @@ def test_classify_body_pending_counts_en_de():
     assert "6 items in queue (4 en / 2 de)" in body
 
 
+def test_classify_body_updates_per_item_without_batch_flush():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    metrics.classify_buffered("en", 1)
+    body_after_first = _last_body(display, "classify_relevance")
+    assert "1 items in queue (1 en / 0 de)" in body_after_first
+
+    metrics.classify_buffered("de", 1)
+    body_after_second = _last_body(display, "classify_relevance")
+    assert "2 items in queue (1 en / 1 de)" in body_after_second
+
+
 # ---------------------------------------------------------------------------
 # Judge-stage events → judge_match row body
 # ---------------------------------------------------------------------------

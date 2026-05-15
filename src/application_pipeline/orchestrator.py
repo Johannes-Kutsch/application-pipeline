@@ -598,6 +598,41 @@ class _JudgeStats:
 
 
 @dataclass
+class _MainStats:
+    discovered: int = 0
+    skipped: int = 0
+    dedup_url_hits: int = 0
+    dedup_tuple_hits: int = 0
+    dedup_misses: int = 0
+    prefilter_considered: int = 0
+    prefilter_passed: int = 0
+    prefilter_dropped: int = 0
+    prefilter_whitelist_hits: int = 0
+    prefilter_blacklist_hits: int = 0
+    prefilter_no_hit_either: int = 0
+    enrich_failed: int = 0
+    external_redirects: int = 0
+    parsers_dead: int = 0
+    language_anomalies: int = 0
+
+    def pipeline_body(self, *, written: int, judge_errored: int) -> str:
+        return (
+            f"discovered={self.discovered} written={written}"
+            f" errors={self.enrich_failed + self.parsers_dead + judge_errored}"
+        )
+
+    def dedup_body(self) -> str:
+        return f"url_hits={self.dedup_url_hits} tuple_hits={self.dedup_tuple_hits} misses={self.dedup_misses}"
+
+    def prefilter_body(self) -> str:
+        return (
+            f"considered={self.prefilter_considered} passed={self.prefilter_passed}"
+            f" dropped={self.prefilter_dropped}"
+            f" (wl={self.prefilter_whitelist_hits} bl={self.prefilter_blacklist_hits})"
+        )
+
+
+@dataclass
 class _ParserState:
     parser_id: str
     inbound: queue.Queue[object]
@@ -738,20 +773,7 @@ def run(
             raise
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
-        discovered = 0
-        skipped = 0
-        dedup_url_hits = 0
-        dedup_tuple_hits = 0
-        dedup_misses = 0
-        prefilter_considered = 0
-        prefilter_passed = 0
-        prefilter_dropped = 0
-        prefilter_whitelist_hits = 0
-        prefilter_blacklist_hits = 0
-        prefilter_no_hit_either = 0
-        enrich_failed = 0
-        external_redirects = 0
-        parsers_dead = 0
+        main_stats = _MainStats()
         de_buffer: list[tuple[Position, LanguageResolution]] = []
         en_buffer: list[tuple[Position, LanguageResolution]] = []
         batch_size = cfg.claude_classify_batch_size
@@ -761,7 +783,6 @@ def run(
         judge_stats = _JudgeStats()
         classify_queue: queue.Queue[object] = queue.Queue()
         judge_queue: queue.Queue[object] = queue.Queue()
-        language_anomalies = 0
         _run_started_at = datetime.now(timezone.utc)
 
         locations: list[Location] = [City(loc) for loc in cfg.locations]
@@ -918,7 +939,7 @@ def run(
                 state.stall_logged = False
 
                 if isinstance(payload, PositionStub):
-                    discovered += 1
+                    main_stats.discovered += 1
                     state.discovered += 1
 
                     if run_state.is_aborted:
@@ -928,31 +949,31 @@ def run(
                     seen_result = dedup_store.is_seen(payload)
 
                     if seen_result == "miss":
-                        dedup_misses += 1
+                        main_stats.dedup_misses += 1
                         state.consecutive_url_hits = 0
                         state.pending_enrich = payload
                         state.inbound.put(_ENRICH)
                     elif seen_result == "url_hit":
-                        dedup_url_hits += 1
+                        main_stats.dedup_url_hits += 1
                         state.consecutive_url_hits += 1
-                        skipped += 1
+                        main_stats.skipped += 1
                         if state.consecutive_url_hits >= state.threshold:
                             state.consecutive_url_hits = 0
                             state.inbound.put(_SKIP_AND_END_QUERY)
                         else:
                             state.inbound.put(_SKIP)
                     else:  # tuple_hit
-                        dedup_tuple_hits += 1
+                        main_stats.dedup_tuple_hits += 1
                         state.consecutive_url_hits = 0
-                        skipped += 1
+                        main_stats.skipped += 1
                         state.inbound.put(_SKIP)
                     status_display.update_body(
                         "pipeline",
-                        body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
+                        body=main_stats.pipeline_body(written=0, judge_errored=0),
                     )
                     status_display.update_body(
                         "dedup",
-                        body=f"url_hits={dedup_url_hits} tuple_hits={dedup_tuple_hits} misses={dedup_misses}",
+                        body=main_stats.dedup_body(),
                     )
                     _update_parser_row(pid)
 
@@ -976,17 +997,17 @@ def run(
                             detected=resolution.detected,
                             detection_source=resolution.source,
                         )
-                        language_anomalies += 1
+                        main_stats.language_anomalies += 1
                     verdict = prefilter.classify(payload)
-                    prefilter_considered += 1
+                    main_stats.prefilter_considered += 1
                     if verdict.whitelist_hit:
-                        prefilter_whitelist_hits += 1
+                        main_stats.prefilter_whitelist_hits += 1
                     if verdict.blacklist_hit:
-                        prefilter_blacklist_hits += 1
+                        main_stats.prefilter_blacklist_hits += 1
                     if not verdict.whitelist_hit and not verdict.blacklist_hit:
-                        prefilter_no_hit_either += 1
+                        main_stats.prefilter_no_hit_either += 1
                     if verdict.passes:
-                        prefilter_passed += 1
+                        main_stats.prefilter_passed += 1
                         lang = "de" if resolution.effective == "de" else "en"
                         buffer = de_buffer if lang == "de" else en_buffer
                         buffer.append((payload, resolution))
@@ -994,10 +1015,10 @@ def run(
                             _flush_classify_batch(lang)
                     else:
                         dedup_store.mark_off_domain(payload.stub)
-                        prefilter_dropped += 1
+                        main_stats.prefilter_dropped += 1
                     status_display.update_body(
                         "prefilter",
-                        body=f"considered={prefilter_considered} passed={prefilter_passed} dropped={prefilter_dropped} (wl={prefilter_whitelist_hits} bl={prefilter_blacklist_hits})",
+                        body=main_stats.prefilter_body(),
                     )
                     _update_parser_row(pid)
 
@@ -1013,11 +1034,11 @@ def run(
                             reason=str(payload),
                         )
                         dedup_store.mark_enrich_failed(stub)
-                    enrich_failed += 1
+                    main_stats.enrich_failed += 1
                     state.enrich_failed += 1
                     status_display.update_body(
                         "pipeline",
-                        body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
+                        body=main_stats.pipeline_body(written=0, judge_errored=0),
                     )
 
                 elif isinstance(payload, ExternalRedirect):
@@ -1031,7 +1052,7 @@ def run(
                             outbound=payload.outbound_url,
                         )
                         dedup_store.mark_external_redirect(stub)
-                    external_redirects += 1
+                    main_stats.external_redirects += 1
                     state.external_redirects += 1
 
                 elif isinstance(payload, NotServedQuery):
@@ -1047,13 +1068,13 @@ def run(
 
                 elif isinstance(payload, _ParserDead):
                     parser_log.record_traceback(pid, payload.traceback_str)
-                    parsers_dead += 1
+                    main_stats.parsers_dead += 1
                     state.parsers_dead += 1
                     parsers_remaining.discard(pid)
                     _update_parser_row(pid, " · dead")
                     status_display.update_body(
                         "pipeline",
-                        body=f"discovered={discovered} written=0 errors={enrich_failed + parsers_dead}",
+                        body=main_stats.pipeline_body(written=0, judge_errored=0),
                     )
 
             for _, t in threads:
@@ -1068,7 +1089,7 @@ def run(
                 )
             parser_log.summarize(
                 "language",
-                {"anomalies": language_anomalies},
+                {"anomalies": main_stats.language_anomalies},
                 _run_started_at,
             )
 
@@ -1092,7 +1113,9 @@ def run(
 
         status_display.update_body(
             "pipeline",
-            body=f"discovered={discovered} written={judge_stats.written} errors={enrich_failed + parsers_dead + judge_stats.errored}",
+            body=main_stats.pipeline_body(
+                written=judge_stats.written, judge_errored=judge_stats.errored
+            ),
         )
 
         # Emit per-call-site SUMMARY OF SESSION trailers
@@ -1174,50 +1197,50 @@ def run(
             "dedup_url_hits=%d dedup_tuple_hits=%d dedup_misses=%d "
             "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
             "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
-            discovered,
-            skipped,
-            prefilter_considered,
-            prefilter_passed,
-            prefilter_dropped,
-            prefilter_whitelist_hits,
-            prefilter_blacklist_hits,
-            prefilter_no_hit_either,
-            dedup_url_hits,
-            dedup_tuple_hits,
-            dedup_misses,
+            main_stats.discovered,
+            main_stats.skipped,
+            main_stats.prefilter_considered,
+            main_stats.prefilter_passed,
+            main_stats.prefilter_dropped,
+            main_stats.prefilter_whitelist_hits,
+            main_stats.prefilter_blacklist_hits,
+            main_stats.prefilter_no_hit_either,
+            main_stats.dedup_url_hits,
+            main_stats.dedup_tuple_hits,
+            main_stats.dedup_misses,
             classify_stats.classifier_dropped,
             judge_stats.written,
             judge_stats.green,
             judge_stats.amber,
             judge_stats.red,
-            enrich_failed,
-            external_redirects,
+            main_stats.enrich_failed,
+            main_stats.external_redirects,
             judge_stats.errored,
-            parsers_dead,
+            main_stats.parsers_dead,
         )
 
         return RunSummary(
             duration_seconds=elapsed_s,
-            discovered=discovered,
-            skipped=skipped,
-            prefilter_considered=prefilter_considered,
-            prefilter_passed=prefilter_passed,
-            prefilter_dropped=prefilter_dropped,
-            prefilter_whitelist_hits=prefilter_whitelist_hits,
-            prefilter_blacklist_hits=prefilter_blacklist_hits,
-            prefilter_no_hit_either=prefilter_no_hit_either,
-            dedup_url_hits=dedup_url_hits,
-            dedup_tuple_hits=dedup_tuple_hits,
-            dedup_misses=dedup_misses,
+            discovered=main_stats.discovered,
+            skipped=main_stats.skipped,
+            prefilter_considered=main_stats.prefilter_considered,
+            prefilter_passed=main_stats.prefilter_passed,
+            prefilter_dropped=main_stats.prefilter_dropped,
+            prefilter_whitelist_hits=main_stats.prefilter_whitelist_hits,
+            prefilter_blacklist_hits=main_stats.prefilter_blacklist_hits,
+            prefilter_no_hit_either=main_stats.prefilter_no_hit_either,
+            dedup_url_hits=main_stats.dedup_url_hits,
+            dedup_tuple_hits=main_stats.dedup_tuple_hits,
+            dedup_misses=main_stats.dedup_misses,
             classifier_dropped=classify_stats.classifier_dropped,
             written=judge_stats.written,
             green=judge_stats.green,
             amber=judge_stats.amber,
             red=judge_stats.red,
-            enrich_failed=enrich_failed,
-            external_redirects=external_redirects,
+            enrich_failed=main_stats.enrich_failed,
+            external_redirects=main_stats.external_redirects,
             errored=judge_stats.errored,
-            parsers_dead=parsers_dead,
+            parsers_dead=main_stats.parsers_dead,
             classify_items=classify_stats.classify_items,
             claude_input_tokens=claude_input_tokens,
             claude_output_tokens=claude_output_tokens,

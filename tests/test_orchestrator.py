@@ -4466,3 +4466,140 @@ def test_pending_drains_to_zero_on_classify_usage_limit(tmp_path: Path) -> None:
     assert "0 items in queue" in classify_bodies[-1], (
         f"Classify pending should drain to 0 after usage limit: {classify_bodies[-1]!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #233: Run Divider conditional counters for abandoned batches / judges
+# ---------------------------------------------------------------------------
+
+
+def test_run_divider_includes_classify_abandoned_counters_on_batch_failure(
+    tmp_path: Path,
+) -> None:
+    """A run with one failing classify batch writes classify_batches_failed and classify_items_abandoned in the Run Divider."""
+    results_path = tmp_path / "current.md"
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "classify_batches_failed=1" in last_line, (
+        f"classify_batches_failed missing from divider: {last_line!r}"
+    )
+    assert "classify_items_abandoned=2" in last_line, (
+        f"classify_items_abandoned missing from divider: {last_line!r}"
+    )
+
+
+def test_run_divider_includes_judge_items_abandoned_on_judge_failure(
+    tmp_path: Path,
+) -> None:
+    """A run with one failing judge_match call writes judge_items_abandoned=1 in the Run Divider."""
+    results_path = tmp_path / "current.md"
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.side_effect = ExtractorError("judge boom")
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "judge_items_abandoned=2" in last_line, (
+        f"judge_items_abandoned missing from divider: {last_line!r}"
+    )
+
+
+def test_run_divider_omits_abandoned_counters_on_clean_run(tmp_path: Path) -> None:
+    """A clean run (no LLM failures) writes a Run Divider without any abandoned-counter fields."""
+    results_path = tmp_path / "current.md"
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "classify_batches_failed" not in last_line, (
+        f"classify_batches_failed should be absent on clean run: {last_line!r}"
+    )
+    assert "classify_items_abandoned" not in last_line, (
+        f"classify_items_abandoned should be absent on clean run: {last_line!r}"
+    )
+    assert "judge_items_abandoned" not in last_line, (
+        f"judge_items_abandoned should be absent on clean run: {last_line!r}"
+    )
+
+
+def test_abandoned_classify_batch_does_not_set_degraded_reason(tmp_path: Path) -> None:
+    """An abandoned classify batch does not cause degraded_reason to appear in the Run Divider."""
+    results_path = tmp_path / "current.md"
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "degraded_reason" not in last_line, (
+        f"degraded_reason must be absent when only classify batch abandoned: {last_line!r}"
+    )
+
+
+def test_degraded_run_preserves_degraded_reason_independent_of_abandoned_counters(
+    tmp_path: Path,
+) -> None:
+    """A degraded run still writes degraded_reason=usage_limit; abandoned counters are orthogonal."""
+    results_path = tmp_path / "current.md"
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError(
+        "cap", returncode=1, stdout="", stderr="cap", envelope=None
+    )
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "degraded_reason=usage_limit" in last_line, (
+        f"degraded_reason=usage_limit must be present: {last_line!r}"
+    )

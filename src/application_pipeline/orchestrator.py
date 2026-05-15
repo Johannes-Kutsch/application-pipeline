@@ -553,6 +553,9 @@ def _format_run_divider(
     claude_cost_usd: float,
     elapsed_s: float,
     degraded_reason: str | None = None,
+    classify_batches_failed: int = 0,
+    classify_items_abandoned: int = 0,
+    judge_items_abandoned: int = 0,
 ) -> str:
     parts = [f"run {timestamp}"]
     if tag is not None:
@@ -582,6 +585,12 @@ def _format_run_divider(
     )
     if degraded_reason is not None:
         parts.append(f"degraded_reason={degraded_reason}")
+    if classify_batches_failed > 0:
+        parts.append(f"classify_batches_failed={classify_batches_failed}")
+    if classify_items_abandoned > 0:
+        parts.append(f"classify_items_abandoned={classify_items_abandoned}")
+    if judge_items_abandoned > 0:
+        parts.append(f"judge_items_abandoned={judge_items_abandoned}")
     return f"<!-- {' '.join(parts)} -->\n"
 
 
@@ -1306,6 +1315,9 @@ def run(
             claude_cost_usd=claude_cost_usd,
             elapsed_s=elapsed_s,
             degraded_reason=run_state.degraded_reason,
+            classify_batches_failed=classify_stats.classify_failed,
+            classify_items_abandoned=classify_stats.items_errored,
+            judge_items_abandoned=judge_stats.errored,
         )
         try:
             results_manager.append(divider)

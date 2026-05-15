@@ -1,3 +1,5 @@
+import time
+from datetime import datetime, timezone
 from typing import Literal
 
 from application_pipeline import parser_log
@@ -44,12 +46,28 @@ class ClaudeExtractor:
         lang = self._lang_or_en(language)
         items_block = self._format_classify_items(items)
         prompt = self._prompts.classify_relevance[lang].render(ITEMS=items_block)
+        _t0 = time.monotonic()
         try:
             response = self._invoker.call(prompt, language)
         except ClaudeCliError as exc:
-            raise ExtractorUnreachableError(str(exc)) from exc
+            self._write_classify_failure_transcript(
+                language, prompt, exc, time.monotonic() - _t0, items, "cli_error"
+            )
+            raise ExtractorUnreachableError(
+                str(exc), returncode=exc.returncode, stderr=exc.stderr
+            ) from exc
         except ClaudeMalformedEnvelopeError as exc:
-            raise ExtractorMalformedJSONError(str(exc)) from exc
+            self._write_classify_failure_transcript(
+                language,
+                prompt,
+                exc,
+                time.monotonic() - _t0,
+                items,
+                "malformed_envelope",
+            )
+            raise ExtractorMalformedJSONError(
+                str(exc), returncode=exc.returncode, stderr=exc.stderr
+            ) from exc
         # ClaudeUsageLimitError propagates as-is for abort handling
 
         parser_log.record_transcript(
@@ -83,18 +101,34 @@ class ClaudeExtractor:
         return self._parse_batch_response(response.parsed_result, items), usage
 
     def judge_match(
-        self, language: str, raw_description: str
+        self, language: str, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]:
         lang = self._lang_or_en(language)
         prompt = self._prompts.judge_match[lang].render(
             skills=self._skills_block, raw_description=raw_description
         )
+        _t0 = time.monotonic()
         try:
             response = self._invoker.call(prompt, language)
         except ClaudeCliError as exc:
-            raise ExtractorUnreachableError(str(exc)) from exc
+            self._write_judge_failure_transcript(
+                language, prompt, exc, time.monotonic() - _t0, stub_url, "cli_error"
+            )
+            raise ExtractorUnreachableError(
+                str(exc), returncode=exc.returncode, stderr=exc.stderr
+            ) from exc
         except ClaudeMalformedEnvelopeError as exc:
-            raise ExtractorMalformedJSONError(str(exc)) from exc
+            self._write_judge_failure_transcript(
+                language,
+                prompt,
+                exc,
+                time.monotonic() - _t0,
+                stub_url,
+                "malformed_envelope",
+            )
+            raise ExtractorMalformedJSONError(
+                str(exc), returncode=exc.returncode, stderr=exc.stderr
+            ) from exc
         # ClaudeUsageLimitError propagates as-is for abort handling
 
         parser_log.record_transcript(
@@ -141,6 +175,62 @@ class ClaudeExtractor:
 
     def prewarm(self) -> None:
         pass  # Claude CLI is a stateless executable; no warm-up needed
+
+    @staticmethod
+    def _write_classify_failure_transcript(
+        language: str,
+        prompt: str,
+        exc: ClaudeCliError | ClaudeMalformedEnvelopeError,
+        duration_s: float,
+        items: list[ClassifyItem],
+        status: str,
+    ) -> None:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        parser_log.record_transcript(
+            "classify_relevance",
+            {
+                "ts": ts,
+                "call": "classify_relevance_batch",
+                "language": language,
+                "status": status,
+                "prompt": prompt,
+                "stdout": exc.stdout,
+                "stderr": exc.stderr,
+                "returncode": exc.returncode,
+                "envelope": exc.envelope,
+                "envelope_error_class": exc.envelope_error_class,
+                "duration_s": duration_s,
+                "item_ids": [item.id for item in items],
+            },
+        )
+
+    @staticmethod
+    def _write_judge_failure_transcript(
+        language: str,
+        prompt: str,
+        exc: ClaudeCliError | ClaudeMalformedEnvelopeError,
+        duration_s: float,
+        stub_url: str,
+        status: str,
+    ) -> None:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        parser_log.record_transcript(
+            "judge_match",
+            {
+                "ts": ts,
+                "call": "judge_match",
+                "language": language,
+                "status": status,
+                "stub_url": stub_url,
+                "prompt": prompt,
+                "stdout": exc.stdout,
+                "stderr": exc.stderr,
+                "returncode": exc.returncode,
+                "envelope": exc.envelope,
+                "envelope_error_class": exc.envelope_error_class,
+                "duration_s": duration_s,
+            },
+        )
 
     @staticmethod
     def _usage_from(response: ClaudeResponse) -> CallUsage:

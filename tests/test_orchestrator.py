@@ -795,7 +795,7 @@ def test_degraded_run_never_emits_skip_and_end_query(tmp_path: Path) -> None:
             )
 
         def judge_match(
-            self, language: str, raw_description: str
+            self, language: str, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
@@ -1135,7 +1135,7 @@ class _FakeExtractor:
         return verdicts, _FAKE_CLASSIFY_USAGE
 
     def judge_match(
-        self, language: str, raw_description: str
+        self, language: str, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]:
         # Extract job index from description ("description for job N")
         for idx, url in enumerate(_STUB_URLS_LLM):
@@ -1257,7 +1257,7 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
             return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
         def judge_match(
-            self, language: str, raw_description: str
+            self, language: str, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:
             call_log.append("judge")
             return (
@@ -1851,7 +1851,7 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
             raise RuntimeError("unexpected crash escaping main path")
 
         def judge_match(
-            self, language: str, raw_description: str
+            self, language: str, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
@@ -2196,7 +2196,7 @@ def test_language_log_anomaly_entries(tmp_path: Path) -> None:
             return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
         def judge_match(
-            self, language: str, raw_description: str
+            self, language: str, raw_description: str, *, stub_url: str = ""
         ) -> "tuple[MatchVerdict, CallUsage]":
             return (
                 MatchVerdict(
@@ -2752,8 +2752,10 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
     assert _ERR_URLS[0] not in seen_data
 
 
-def test_batch_malformed_logs_to_classify_relevance_log(tmp_path: Path) -> None:
-    """ExtractorBatchMalformedError is logged to classify_relevance.log via parser_log."""
+def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
+    tmp_path: Path,
+) -> None:
+    """ExtractorBatchMalformedError is logged as batch_abandoned (not batch_error) to classify_relevance.log."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -2777,7 +2779,69 @@ def test_batch_malformed_logs_to_classify_relevance_log(tmp_path: Path) -> None:
     log_file = logs_dir / "classify_relevance.log"
     assert log_file.exists(), "classify_relevance.log must be created on batch error"
     content = log_file.read_text(encoding="utf-8")
-    assert "batch_error" in content
+    assert "batch_abandoned" in content
+    assert "batch_error" not in content
+
+
+def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
+    """ExtractorUnreachableError with forensics → returncode and stderr_excerpt in classify_relevance.log."""
+    import application_pipeline.parser_log as pl
+    from application_pipeline.llm import ExtractorUnreachableError
+
+    logs_dir = tmp_path / "synched" / "logs"
+    pl.configure(logs_dir)
+
+    def _batch(
+        lang: str, items: list[ClassifyItem]
+    ) -> tuple[list[RelevanceVerdict], CallUsage]:
+        raise ExtractorUnreachableError("cli gone", returncode=1, stderr="no such file")
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = _batch
+
+    run(
+        _batch_size_config(tmp_path, 100),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    content = (logs_dir / "classify_relevance.log").read_text(encoding="utf-8")
+    assert "returncode=1" in content
+    assert "stderr_excerpt=no such file" in content
+
+
+def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
+    """ExtractorUnreachableError with forensics → returncode and stderr_excerpt in judge_match.log."""
+    import application_pipeline.parser_log as pl
+    from application_pipeline.llm import ExtractorUnreachableError
+
+    logs_dir = tmp_path / "synched" / "logs"
+    pl.configure(logs_dir)
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.side_effect = ExtractorUnreachableError(
+        "cli gone", returncode=2, stderr="timeout on judge"
+    )
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    content = (logs_dir / "judge_match.log").read_text(encoding="utf-8")
+    assert "returncode=2" in content
+    assert "stderr_excerpt=timeout on judge" in content
 
 
 def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
@@ -2849,7 +2913,7 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
             )
 
         def judge_match(
-            self, language: str, raw_description: str
+            self, language: str, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
@@ -4083,7 +4147,9 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
 
     judge_call_count = [0]
 
-    def _judge(language: str, raw_description: str) -> tuple[MatchVerdict, CallUsage]:
+    def _judge(
+        language: str, raw_description: str, *, stub_url: str = ""
+    ) -> tuple[MatchVerdict, CallUsage]:
         judge_call_count[0] += 1
         if judge_call_count[0] >= 4:
             raise ClaudeUsageLimitError(
@@ -4164,7 +4230,7 @@ def test_non_quota_worker_exception_writes_failure_report(
             return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
         def judge_match(
-            self, language: str, raw_description: str
+            self, language: str, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:
             raise RuntimeError("disk full")
 

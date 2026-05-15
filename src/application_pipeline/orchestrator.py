@@ -395,9 +395,11 @@ class _ClassifyThread(_QueueWorker):
             _log.warning("classify_relevance_batch failed: %s", exc)
             parser_log.record(
                 "classify_relevance",
-                "batch_error",
+                "batch_abandoned",
                 language=batch.language,
                 batch_size=len(batch.positions),
+                returncode=getattr(exc, "returncode", None),
+                stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
                 error=str(exc),
             )
             self.classify_stats.classify_failed += 1
@@ -473,7 +475,9 @@ class _JudgeThread(_QueueWorker):
         try:
             _t0 = time.monotonic()
             match_verdict, judge_usage = self._extractor.judge_match(
-                job.resolution.effective, job.position.raw_description
+                job.resolution.effective,
+                job.position.raw_description,
+                stub_url=job.position.stub.url,
             )
             self.judge_stats.judge_total_s += time.monotonic() - _t0
             self.judge_stats.judge_calls += 1
@@ -505,6 +509,8 @@ class _JudgeThread(_QueueWorker):
                 "judge_match",
                 "error",
                 stub_url=job.position.stub.url,
+                returncode=getattr(exc, "returncode", None),
+                stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
                 error=str(exc),
             )
             self.judge_stats.judge_failed += 1

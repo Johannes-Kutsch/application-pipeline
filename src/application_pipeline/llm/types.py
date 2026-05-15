@@ -8,11 +8,21 @@ class ExtractorError(Exception):
 
 
 class ExtractorUnreachableError(ExtractorError):
-    pass
+    def __init__(
+        self, message: str, *, returncode: int | None = None, stderr: str = ""
+    ) -> None:
+        super().__init__(message)
+        self.returncode = returncode
+        self.stderr = stderr
 
 
 class ExtractorMalformedJSONError(ExtractorError):
-    pass
+    def __init__(
+        self, message: str, *, returncode: int | None = None, stderr: str = ""
+    ) -> None:
+        super().__init__(message)
+        self.returncode = returncode
+        self.stderr = stderr
 
 
 class ExtractorSchemaError(ExtractorError):
@@ -86,7 +96,7 @@ class LLMExtractor(Protocol):
     ) -> tuple[list[RelevanceVerdict], CallUsage]: ...
 
     def judge_match(
-        self, language: str, raw_description: str
+        self, language: str, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]: ...
 
     def prewarm(self) -> None: ...

@@ -4158,6 +4158,128 @@ def test_non_quota_worker_exception_writes_failure_report(
     body = reports[0].read_text(encoding="utf-8")
     assert "RuntimeError" in body
 
+
+# ---------------------------------------------------------------------------
+# Issue #229 — status-row body refreshed on error exit paths
+# ---------------------------------------------------------------------------
+
+
+def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
+    """ExtractorError on classify: classify_relevance row body is refreshed with batches_failed=N items_errored=M."""
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
+    )
+
+    display = FakeStatusDisplay()
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    classify_bodies = display.body_updates_for("classify_relevance")
+    assert classify_bodies, "expected at least one classify_relevance body update"
+    last_body = classify_bodies[-1]
+    assert "batches_failed=1" in last_body
+    assert "items_errored=2" in last_body
+
+
+def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
+    """ExtractorError on judge_match: judge_match row body is refreshed with errored=N."""
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.side_effect = [
+        ExtractorError("judge boom"),
+        (
+            MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+            _ZERO_USAGE,
+        ),
+    ]
+
+    display = FakeStatusDisplay()
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    judge_bodies = display.body_updates_for("judge_match")
+    assert judge_bodies, "expected at least one judge_match body update"
+    last_body = judge_bodies[-1]
+    assert "errored=1" in last_body
+
+
+def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
+    """On a clean run, classify and judge bodies contain no error tokens."""
+    display = FakeStatusDisplay()
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    for body in display.body_updates_for("classify_relevance"):
+        assert "batches_failed=" not in body
+        assert "items_errored=" not in body
+
+    for body in display.body_updates_for("judge_match"):
+        assert "errored=" not in body
+
+
+def test_judge_body_denominator_counts_successes_only(tmp_path: Path) -> None:
+    """judge_match body success ratio denominator counts successes only, not successes+failed."""
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    # First judge fails, second succeeds
+    ext.judge_match.side_effect = [
+        ExtractorError("judge boom"),
+        (
+            MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+            _ZERO_USAGE,
+        ),
+    ]
+
+    display = FakeStatusDisplay()
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+        status_display=display,
+    )
+
+    judge_bodies = display.body_updates_for("judge_match")
+    assert judge_bodies, "expected judge_match body updates"
+    last_body = judge_bodies[-1]
+    # 1 success out of 1 success (not 1 out of 2)
+    assert "1/1 judgments" in last_body
+
     results_path = tmp_path / "results" / "current.md"
     if results_path.exists():
         content = results_path.read_text(encoding="utf-8")

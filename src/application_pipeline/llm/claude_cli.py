@@ -8,7 +8,7 @@ from typing import Any, Protocol
 _USAGE_LIMIT_PHRASES = ("usage limit", "rate limit")
 
 
-class ClaudeUsageLimitError(Exception):
+class _ClaudeCliForensicsError(Exception):
     def __init__(
         self,
         message: str,
@@ -25,26 +25,11 @@ class ClaudeUsageLimitError(Exception):
         self.envelope = envelope
 
 
-class ClaudeCliError(Exception):
-    def __init__(
-        self,
-        message: str,
-        *,
-        returncode: int,
-        stdout: str,
-        stderr: str,
-        envelope: dict[str, Any] | None,
-        envelope_error_class: str,
-    ) -> None:
-        super().__init__(message)
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-        self.envelope = envelope
-        self.envelope_error_class = envelope_error_class
+class ClaudeUsageLimitError(_ClaudeCliForensicsError):
+    pass
 
 
-class ClaudeMalformedEnvelopeError(Exception):
+class _ClaudeClassifiedError(_ClaudeCliForensicsError):
     def __init__(
         self,
         message: str,
@@ -55,12 +40,22 @@ class ClaudeMalformedEnvelopeError(Exception):
         envelope: dict[str, Any] | None,
         envelope_error_class: str,
     ) -> None:
-        super().__init__(message)
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-        self.envelope = envelope
+        super().__init__(
+            message,
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            envelope=envelope,
+        )
         self.envelope_error_class = envelope_error_class
+
+
+class ClaudeCliError(_ClaudeClassifiedError):
+    pass
+
+
+class ClaudeMalformedEnvelopeError(_ClaudeClassifiedError):
+    pass
 
 
 @dataclass(frozen=True)

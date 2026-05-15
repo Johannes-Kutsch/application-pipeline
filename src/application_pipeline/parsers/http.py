@@ -96,17 +96,16 @@ def request_with_retry(
     _sleep: Callable[[float], None] = time.sleep,
 ) -> bytes:
     component_id = _log_component_id()
-    t_start: list[float] = [0.0]
-    attempt_num: list[int] = [0]
+    t_start = 0.0
+    attempt_num = 0
 
     def _attempt() -> bytes:
-        attempt_num[0] += 1
-        parser_log.record(
-            component_id, "http_get_start", url=url, attempt=attempt_num[0]
-        )
-        t_start[0] = time.monotonic()
+        nonlocal t_start, attempt_num
+        attempt_num += 1
+        parser_log.record(component_id, "http_get_start", url=url, attempt=attempt_num)
+        t_start = time.monotonic()
         result = http_get(url, timeout)
-        elapsed_ms = round((time.monotonic() - t_start[0]) * 1000)
+        elapsed_ms = round((time.monotonic() - t_start) * 1000)
         parser_log.record(
             component_id,
             "http_get_ok",
@@ -117,7 +116,7 @@ def request_with_retry(
         return result
 
     def _on_retry(attempt: int, exc: Exception) -> None:
-        elapsed_ms = round((time.monotonic() - t_start[0]) * 1000)
+        elapsed_ms = round((time.monotonic() - t_start) * 1000)
         parser_log.record(
             component_id,
             "http_get_retry",

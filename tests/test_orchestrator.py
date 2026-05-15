@@ -4375,7 +4375,9 @@ def test_pending_drains_to_zero_on_classify_usage_limit(tmp_path: Path) -> None:
     """On classify ClaudeUsageLimitError, workers drain queues and pending returns to zero."""
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError("quota")
+    ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError(
+        "quota", returncode=1, stdout="", stderr="quota", envelope=None
+    )
     ext.judge_match.return_value = (
         MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
         _ZERO_USAGE,

@@ -96,27 +96,15 @@ def request_with_retry(
         raise HttpRetryError("HTTP request failed after 0 retries: None")
 
     last_exc: Exception | None = None
-    t_start = 0.0
     for attempt in range(retries):
         attempt_num = attempt + 1
+        parser_log.record(component_id, "http_get_start", url=url, attempt=attempt_num)
+        t_start = time.monotonic()
         try:
-            parser_log.record(
-                component_id, "http_get_start", url=url, attempt=attempt_num
-            )
-            t_start = time.monotonic()
             result = http_get(url, timeout)
-            elapsed_ms = round((time.monotonic() - t_start) * 1000)
-            parser_log.record(
-                component_id,
-                "http_get_ok",
-                url=url,
-                bytes=len(result),
-                elapsed_ms=elapsed_ms,
-            )
-            return result
+        except HttpNotRetryableError:
+            raise
         except Exception as exc:
-            if isinstance(exc, HttpNotRetryableError):
-                raise
             last_exc = exc
             if attempt < retries - 1:
                 elapsed_ms = round((time.monotonic() - t_start) * 1000)
@@ -129,6 +117,16 @@ def request_with_retry(
                     elapsed_ms=elapsed_ms,
                 )
                 _sleep(min(BACKOFF_INITIAL * BACKOFF_MULTIPLIER**attempt, BACKOFF_MAX))
+            continue
+        elapsed_ms = round((time.monotonic() - t_start) * 1000)
+        parser_log.record(
+            component_id,
+            "http_get_ok",
+            url=url,
+            bytes=len(result),
+            elapsed_ms=elapsed_ms,
+        )
+        return result
 
     assert last_exc is not None
     raise HttpRetryError(

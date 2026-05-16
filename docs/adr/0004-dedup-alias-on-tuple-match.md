@@ -5,15 +5,14 @@ When the **Deduplication Store**'s `is_seen` finds a match via the lowercased `(
 ## Why
 
 - **Most stubs expose the URL before the description.** Parsers that hit list pages get the URL as the first cheap field; checking the URL is a single dict lookup. Re-doing the tuple normalisation + lookup on every run for an already-recognised syndicated copy is repeated work for no new information.
-- **Keeps the public interface to exactly `load`, `is_seen`, `mark_seen`.** A pure-read `is_seen` would force the orchestrator to either receive a richer return value (and call `mark_seen` again to persist the alias) or call a separate `record_alias` method. Both broaden the surface for one rare case.
-- **Side effect is internal-only.** The write is an index optimization that does not change the answer (`is_seen` returns `True` either way). On-disk shape stays flat (`{url: record}`); every entry is self-describing.
+- **The alias-write is internal to the dedup module.** The orchestrator does not need to know that an alias was written — `is_seen` returns the tier that matched (per ADR-0008) for metrics, but routing the alias-persist through the caller would force a `record_alias` second method that every caller must remember to invoke. Keeping the side effect inside `is_seen` removes that footgun.
+- **On-disk shape stays flat.** The write is an index optimization that does not change the answer (any later `is_seen` returns a hit either way). The store remains `{url: record}`; every entry is self-describing.
 - **`first_seen` semantics stay correct.** The alias copies the *original*'s `first_seen`, so the paper trail still answers "when did this *role* first appear, under which URL", not "when did this URL first appear".
 
 ## Considered alternatives
 
 - **Don't record the alias — accept the tuple-lookup cost on every appearance.** Rejected: defeats the cheap-URL-lookup property the parser API was designed to enable.
-- **`is_seen` returns a 3-valued enum (`URL` / `TUPLE` / `NONE`); orchestrator calls `record_alias` on `TUPLE`.** Rejected: pushes one bit of dedup-internal logic into every `is_seen` caller for no semantic reason — the orchestrator has nothing to decide; it would always record the alias.
-- **`is_seen` returns a richer `SeenResult` carrying `matched_by` and `status`; orchestrator re-routes through `mark_seen`.** Rejected: same broader-interface objection, plus `mark_seen` would need a path that doesn't override `first_seen` from today's date.
+- **Caller-driven alias persistence (`is_seen` is pure-read; orchestrator calls a separate `record_alias` on tuple hit).** Rejected: every `is_seen` caller would have to remember the follow-up call. Folding the write into `is_seen` is the safe shape; the return value (per ADR-0008) still carries which tier matched, so the metrics layer can count tuple hits without the caller persisting anything.
 - **Indirection on disk (`{url: {alias_of: <canonical_url>}}`).** Rejected: turns the on-disk shape into a sum type, hurts `git log -p` readability for marginal byte savings.
 
 ## Consequences

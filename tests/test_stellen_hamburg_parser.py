@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from typing import Callable
 
 import pytest
 
@@ -13,8 +12,6 @@ from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
 )
-
-HttpPost = Callable[[str, bytes, float], bytes]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -83,13 +80,13 @@ def _detail_html(
     return f"<html><head>{script}</head><body></body></html>".encode()
 
 
-def _make_post(responses: list[bytes]) -> HttpPost:
+def _make_search_get(responses: list[bytes]) -> HttpGet:
     it = iter(responses)
 
-    def http_post(url: str, body: bytes, timeout: float) -> bytes:
+    def http_get(url: str, timeout: float) -> bytes:
         return next(it)
 
-    return http_post
+    return http_get
 
 
 def _make_get(responses: list[bytes]) -> HttpGet:
@@ -150,67 +147,67 @@ def test_parser_is_usable_as_context_manager() -> None:
 
 
 def test_discover_yields_one_stub_per_result() -> None:
-    post = _make_post(
+    get = _make_search_get(
         [
             _search_body([_item("1", "Dev A"), _item("2", "Dev B")]),
         ]
     )
-    with StellenHamburgParser(_http_post=post) as p:
+    with StellenHamburgParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 2
 
 
 def test_discover_stub_title_matches_descriptor_position_title() -> None:
-    post = _make_post([_search_body([_item("1", "Data Scientist")])])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([_search_body([_item("1", "Data Scientist")])])
+    with StellenHamburgParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.title == "Data Scientist"
 
 
 def test_discover_stub_source_is_stellen_hamburg() -> None:
-    post = _make_post([_search_body([_item()])])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([_search_body([_item()])])
+    with StellenHamburgParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.source == "stellen.hamburg"
 
 
 def test_discover_stub_company_from_organization_name() -> None:
-    post = _make_post([_search_body([_item(company="Finanzbehörde Hamburg")])])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([_search_body([_item(company="Finanzbehörde Hamburg")])])
+    with StellenHamburgParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company == "Finanzbehörde Hamburg"
 
 
 def test_discover_stub_location_from_position_location() -> None:
-    post = _make_post([_search_body([_item(location="Hamburg")])])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([_search_body([_item(location="Hamburg")])])
+    with StellenHamburgParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
 
 
 def test_discover_stub_url_contains_object_id() -> None:
-    post = _make_post([_search_body([_item("99999")])])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([_search_body([_item("99999")])])
+    with StellenHamburgParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert "99999" in stub.url
 
 
 def test_discover_stub_company_none_when_organization_absent() -> None:
-    post = _make_post([_search_body([_item(company=None)])])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([_search_body([_item(company=None)])])
+    with StellenHamburgParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company is None
 
 
 def test_discover_stub_location_none_when_position_location_absent() -> None:
-    post = _make_post([_search_body([_item(location=None)])])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([_search_body([_item(location=None)])])
+    with StellenHamburgParser(_http_get=get) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location is None
@@ -224,8 +221,8 @@ def test_discover_stub_location_none_when_position_location_absent() -> None:
 def test_discover_paginates_until_total_reached() -> None:
     page0 = _search_body([_item("1"), _item("2")], total=4)
     page1 = _search_body([_item("3"), _item("4")], total=4)
-    post = _make_post([page0, page1])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([page0, page1])
+    with StellenHamburgParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 4
 
@@ -240,8 +237,8 @@ def test_discover_stops_on_empty_items() -> None:
             }
         }
     ).encode()
-    post = _make_post([body])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([body])
+    with StellenHamburgParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert stubs == []
 
@@ -256,8 +253,8 @@ def test_discover_stops_on_null_search_result_items() -> None:
             }
         }
     ).encode()
-    post = _make_post([body])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([body])
+    with StellenHamburgParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert stubs == []
 
@@ -271,8 +268,8 @@ def test_discover_deduplicates_same_object_id() -> None:
     shared = _item("same_id", "Dev")
     page0 = _search_body([shared], total=2)
     page1 = _search_body([shared], total=2)
-    post = _make_post([page0, page1])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([page0, page1])
+    with StellenHamburgParser(_http_get=get) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 1
 
@@ -284,8 +281,8 @@ def test_discover_deduplicates_same_object_id() -> None:
 
 def test_discover_respects_max_results() -> None:
     items = [_item(str(i)) for i in range(10)]
-    post = _make_post([_search_body(items, total=10)])
-    with StellenHamburgParser(_http_post=post) as p:
+    get = _make_search_get([_search_body(items, total=10)])
+    with StellenHamburgParser(_http_get=get) as p:
         stubs = list(p.discover(_query(max_results=3)))
     assert len(stubs) == 3
 
@@ -298,10 +295,10 @@ def test_discover_respects_max_results() -> None:
 def test_discover_raises_parser_error_on_http_failure() -> None:
     from application_pipeline.parsers import ParserError
 
-    def failing_post(url: str, body: bytes, timeout: float) -> bytes:
+    def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("refused")
 
-    with StellenHamburgParser(_http_post=failing_post, _retries=1) as p:
+    with StellenHamburgParser(_http_get=failing_get, _retries=1) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
 

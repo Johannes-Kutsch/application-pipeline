@@ -3,27 +3,19 @@ from __future__ import annotations
 import html.parser
 import json
 import sys
-import time
+import urllib.parse
 from collections.abc import Iterator
-from typing import Any, Callable, Literal, NoReturn
+from typing import Any, Literal, NoReturn
 
 import httpx
 
 import application_pipeline.parser_log as parser_log
 from application_pipeline.http import HttpRetryError
-from application_pipeline.http.retry import (
-    HttpNotRetryableError,
-    exponential_backoff,
-    retry,
-)
 from application_pipeline.text import normalize
 
 from ._text import parse_iso_date, strip_html
 from .errors import ParserError
 from .http import (
-    BACKOFF_INITIAL,
-    BACKOFF_MAX,
-    BACKOFF_MULTIPLIER,
     HTTP_CONNECT_TIMEOUT,
     HTTP_READ_TIMEOUT,
     MAX_RETRIES,
@@ -57,24 +49,6 @@ def remote_wire() -> NoReturn:
     raise AssertionError("stellen_hamburg_api does not serve remote")
 
 
-HttpPost = Callable[[str, bytes, float], bytes]
-
-
-def _default_http_post(url: str, body: bytes, timeout: float) -> bytes:
-    with httpx.Client(
-        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
-            "Origin": "https://stellen.hamburg.de",
-            "Referer": "https://stellen.hamburg.de/",
-        },
-    ) as client:
-        resp = client.post(url, content=body, timeout=timeout)
-        check_response_status(resp, url)
-        return resp.content
-
-
 def _default_http_get(url: str, timeout: float) -> bytes:
     with httpx.Client(
         timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
@@ -83,29 +57,6 @@ def _default_http_get(url: str, timeout: float) -> bytes:
         resp = client.get(url, timeout=timeout)
         check_response_status(resp, url)
         return resp.content
-
-
-def _post_with_retry(
-    url: str,
-    body: bytes,
-    timeout: float,
-    retries: int,
-    http_post: HttpPost,
-    *,
-    _sleep: Callable[[float], None] = time.sleep,
-) -> bytes:
-    return retry(
-        lambda: http_post(url, body, timeout),
-        predicate=lambda exc: not isinstance(exc, HttpNotRetryableError),
-        backoff_policy=exponential_backoff(
-            BACKOFF_INITIAL, BACKOFF_MULTIPLIER, BACKOFF_MAX
-        ),
-        max_retries=retries,
-        error_factory=lambda n, exc: HttpRetryError(
-            f"HTTP POST failed after {n} retries: {exc}"
-        ),
-        _sleep=_sleep,
-    )
 
 
 class _JsonLdExtractor(html.parser.HTMLParser):
@@ -162,17 +113,32 @@ def _employment_type(
     return None
 
 
+def _search_url(keyword: str, page_number: int) -> str:
+    data = json.dumps(
+        {
+            "SearchCriteria": [
+                {
+                    "CriterionName": "PositionFormattedDescription.Content",
+                    "CriterionValue": keyword,
+                }
+            ],
+            "PageSize": _PAGE_SIZE,
+            "PageNumber": page_number,
+        },
+        separators=(",", ":"),
+    )
+    return f"{_SEARCH_URL}?{urllib.parse.urlencode({'data': data})}"
+
+
 class StellenHamburgParser:
     def __init__(
         self,
         *,
         _http_get: HttpGet | None = None,
-        _http_post: HttpPost | None = None,
         _timeout: float = HTTP_READ_TIMEOUT,
         _retries: int = MAX_RETRIES,
     ) -> None:
         self._http_get: HttpGet = _http_get or _default_http_get
-        self._http_post: HttpPost = _http_post or _default_http_post
         self._timeout = _timeout
         self._retries = _retries
         self._throttle = Throttle()
@@ -195,27 +161,19 @@ class StellenHamburgParser:
 
         seen: set[str] = set()
         count = 0
-        first_item = 0
+        page_number = 1
         while True:
             self._throttle.wait()
-            body = json.dumps(
-                {
-                    "SearchParameters": {
-                        "PositionTitle": query.keyword,
-                        "CountItem": _PAGE_SIZE,
-                        "FirstItem": first_item,
-                    }
-                }
-            ).encode()
+            url = _search_url(query.keyword, page_number)
             parser_log.record(
                 _PARSER_TYPE,
                 "discover_page",
                 q=query.keyword,
-                start=first_item,
+                start=(page_number - 1) * _PAGE_SIZE,
             )
             try:
-                raw = _post_with_retry(
-                    _SEARCH_URL, body, self._timeout, self._retries, self._http_post
+                raw = request_with_retry(
+                    url, self._timeout, self._retries, self._http_get
                 )
                 data: dict[str, Any] = json.loads(raw)
             except HttpRetryError as exc:
@@ -242,8 +200,9 @@ class StellenHamburgParser:
                 count += 1
 
             total: int = result.get("SearchResultCountAll") or 0
-            first_item += len(items)
-            if not any_new or first_item >= total:
+            items_seen = (page_number - 1) * _PAGE_SIZE + len(items)
+            page_number += 1
+            if not any_new or items_seen >= total:
                 break
 
     def _to_stub(self, descriptor: dict[str, Any], obj_id: str) -> PositionStub:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -703,7 +704,6 @@ def test_concurrent_events_produce_correct_final_counts():
 
 def test_parser_summary_reflects_events_for_that_parser_id():
     """discovered(parser_id) updates per-parser entry AND aggregate independently."""
-    import time
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
@@ -728,7 +728,6 @@ def test_parser_summary_reflects_events_for_that_parser_id():
 
 def test_parser_summary_key_set_is_exact():
     """parser_summary returns exactly the required keys."""
-    import time
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
@@ -751,7 +750,6 @@ def test_parser_summary_key_set_is_exact():
 
 def test_parser_summary_all_events_tracked():
     """All six per-parser event methods update the right counter in parser_summary."""
-    import time
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
@@ -779,7 +777,6 @@ def test_parser_summary_all_events_tracked():
 
 def test_parser_summary_duration_rounded_to_one_decimal():
     """duration = round(end - start, 1)."""
-    import time
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
@@ -794,7 +791,6 @@ def test_parser_summary_duration_rounded_to_one_decimal():
 
 def test_interleaved_parsers_produce_independent_per_parser_totals():
     """Events for two parsers are tracked independently; aggregate is their sum."""
-    import time
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
@@ -841,7 +837,6 @@ def test_parser_accessor_methods_reflect_enriched_and_queries_done():
 
 def test_parser_summary_unknown_parser_id_returns_zeros():
     """parser_summary for a never-seen parser_id returns all-zero counts."""
-    import time
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)

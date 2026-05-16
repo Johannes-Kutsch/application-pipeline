@@ -132,12 +132,9 @@ class ClaudeExtractor:
     ) -> tuple[Any, ClaudeResponse]:
         t0 = time.monotonic()
         try:
-            if site.effort:
-                response = self._invoker.call(
-                    prompt, language, model=site.model, effort=site.effort
-                )
-            else:
-                response = self._invoker.call(prompt, language, model=site.model)
+            response = self._invoker.call(
+                prompt, language, model=site.model, effort=site.effort
+            )
         except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
             status = (
                 "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"

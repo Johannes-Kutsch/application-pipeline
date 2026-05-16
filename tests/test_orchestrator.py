@@ -62,13 +62,13 @@ def _write_config(
     *,
     sources: str = '[SourceEntry(parser_type="bundesagentur_api")]',
     seen_store_path: str | None = None,
-    with_prompt_files: bool = True,
+    with_user_info_files: bool = True,
     keywords: str = '["python"]',
     locations: str = '["Hamburg"]',
     include_remote: bool = True,
     negative_keywords: str = "[]",
 ) -> Path:
-    """Write a minimal valid config.py and a prompts dir into tmp_path."""
+    """Write a minimal valid config.py and a user-info dir into tmp_path."""
     seen_line = (
         f"SEEN_STORE_PATH = {seen_store_path!r}" if seen_store_path is not None else ""
     )
@@ -86,15 +86,12 @@ def _write_config(
         """),
         encoding="utf-8",
     )
-    prompts_dir = tmp_path / "prompts"
-    prompts_dir.mkdir(exist_ok=True)
-    if with_prompt_files:
-        for name in ("classify_relevance.de.md", "classify_relevance.en.md"):
-            (prompts_dir / name).write_text("{ITEMS}", encoding="utf-8")
-        for name in ("judge_match.de.md", "judge_match.en.md"):
-            (prompts_dir / name).write_text(
-                "{skills} {raw_description}", encoding="utf-8"
-            )
+    user_info_dir = tmp_path / "user-info"
+    user_info_dir.mkdir(exist_ok=True)
+    if with_user_info_files:
+        (user_info_dir / "self-description.md").write_text("dev background\n")
+        (user_info_dir / "domain-fit.md").write_text("ML roles\n")
+        (user_info_dir / "match-criteria.md").write_text("Hamburg, remote\n")
     return config_path
 
 
@@ -163,8 +160,8 @@ def test_config_error_propagates(tmp_path: Path) -> None:
 
 
 def test_prompt_error_propagates(tmp_path: Path) -> None:
-    # prompts dir exists but contains no prompt files → PromptError on load
-    config_path = _write_config(tmp_path, with_prompt_files=False)
+    # user-info dir exists but files are missing → PromptError on load_prompts
+    config_path = _write_config(tmp_path, with_user_info_files=False)
 
     with pytest.raises(PromptError):
         run(
@@ -2966,27 +2963,22 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
 
 
 def test_prompt_loader_only_de_and_en_for_classify(tmp_path: Path) -> None:
-    """load_prompts only loads classify_relevance.de.md and classify_relevance.en.md."""
+    """load_prompts loads templates for de and en from package resources."""
     from application_pipeline.prompts import load_prompts
     from application_pipeline import Config, SourceEntry
 
-    prompts_dir = tmp_path / "prompts"
-    prompts_dir.mkdir()
-    (prompts_dir / "classify_relevance.de.md").write_text("{ITEMS}", encoding="utf-8")
-    (prompts_dir / "classify_relevance.en.md").write_text("{ITEMS}", encoding="utf-8")
-    (prompts_dir / "judge_match.de.md").write_text(
-        "{skills} {raw_description}", encoding="utf-8"
-    )
-    (prompts_dir / "judge_match.en.md").write_text(
-        "{skills} {raw_description}", encoding="utf-8"
-    )
+    user_info_dir = tmp_path / "user-info"
+    user_info_dir.mkdir()
+    (user_info_dir / "self-description.md").write_text("dev background\n")
+    (user_info_dir / "domain-fit.md").write_text("ML roles\n")
+    (user_info_dir / "match-criteria.md").write_text("Hamburg, remote\n")
 
     cfg = Config(
         keywords=["python"],
         skills=["python"],
         sources=[SourceEntry(parser_type="bundesagentur_api")],
         locations=["Hamburg"],
-        prompts_dir=prompts_dir,
+        user_info_dir=user_info_dir,
     )
     prompts = load_prompts(cfg)
 
@@ -2994,25 +2986,19 @@ def test_prompt_loader_only_de_and_en_for_classify(tmp_path: Path) -> None:
     assert set(prompts.judge_match.keys()) == {"de", "en"}
 
 
-def test_init_does_not_materialise_other_or_unknown_prompt_files(
+def test_init_materialises_user_info_files(
     tmp_path: Path,
 ) -> None:
-    """init command copies only de + en prompt files; no 'other' or 'unknown' files."""
+    """init command seeds the three user-info template files."""
     from application_pipeline.init_cmd import init
 
     init(tmp_path)
 
-    prompt_files = list((tmp_path / "prompts").glob("*.md"))
-    names = {f.name for f in prompt_files}
+    user_info_files = {f.name for f in (tmp_path / "user-info").glob("*.md")}
 
-    assert "classify_relevance.other.md" not in names
-    assert "classify_relevance.unknown.md" not in names
-    assert "judge_match.other.md" not in names
-    assert "judge_match.unknown.md" not in names
-    assert "classify_relevance.de.md" in names
-    assert "classify_relevance.en.md" in names
-    assert "judge_match.de.md" in names
-    assert "judge_match.en.md" in names
+    assert "self-description.md" in user_info_files
+    assert "domain-fit.md" in user_info_files
+    assert "match-criteria.md" in user_info_files
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,9 @@ def init(target_dir: Path) -> None:
     _seed(pkg, target_dir, Path())
 
 
+_EXCLUDE_DIRS = frozenset({"prompts"})
+
+
 def _seed(
     node: importlib.resources.abc.Traversable, target_dir: Path, rel: Path
 ) -> None:
@@ -18,6 +21,8 @@ def _seed(
             continue
         item_rel = rel / item.name
         if item.is_dir():
+            if item.name in _EXCLUDE_DIRS:
+                continue
             _seed(item, target_dir, item_rel)
         else:
             dest = target_dir / item_rel

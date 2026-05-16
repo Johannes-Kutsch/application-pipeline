@@ -47,10 +47,10 @@ def load(path: pathlib.Path) -> Config:
         "LAYOUT", config_dir, getattr(module, "LAYOUT", None)
     )
 
-    prompts_dir = _resolve_dir(
-        "PROMPTS_DIR",
+    user_info_dir = _resolve_dir(
+        "USER_INFO_DIR",
         config_dir,
-        getattr(module, "PROMPTS_DIR", pathlib.Path("prompts")),
+        getattr(module, "USER_INFO_DIR", pathlib.Path("user-info")),
     )
 
     classify_relevance_prompt = _resolve_optional_file(
@@ -80,7 +80,7 @@ def load(path: pathlib.Path) -> Config:
         negative_keywords=getattr(module, "NEGATIVE_KEYWORDS", []),
         seen_store_path=seen_store_path,
         layout=layout,
-        prompts_dir=prompts_dir,
+        user_info_dir=user_info_dir,
         classify_relevance_prompt=classify_relevance_prompt,
         judge_match_prompt=judge_match_prompt,
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
@@ -138,9 +138,9 @@ def _validate(config: Config) -> None:
     if not config.locations and not config.include_remote:
         raise ConfigError("nothing to search")
 
-    if not config.prompts_dir.is_dir():
+    if not config.user_info_dir.is_dir():
         raise ConfigError(
-            f"PROMPTS_DIR: {config.prompts_dir} does not exist or is not a directory"
+            f"USER_INFO_DIR: {config.user_info_dir} does not exist or is not a directory"
         )
 
     _check_unique("KEYWORDS", config.keywords, item_label="value")

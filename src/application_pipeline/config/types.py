@@ -37,7 +37,9 @@ class Config:
         default_factory=lambda: pathlib.Path(".seen.json")
     )
     layout: pathlib.Path | None = None
-    prompts_dir: pathlib.Path = field(default_factory=lambda: pathlib.Path("prompts"))
+    user_info_dir: pathlib.Path = field(
+        default_factory=lambda: pathlib.Path("user-info")
+    )
     classify_relevance_prompt: pathlib.Path | None = None
     judge_match_prompt: pathlib.Path | None = None
     claude_cli_path: str | None = None

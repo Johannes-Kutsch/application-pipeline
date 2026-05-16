@@ -23,15 +23,7 @@ REQUIRED_BODY = textwrap.dedent(
 def write_config(tmp_path: pathlib.Path, body: str) -> pathlib.Path:
     path = tmp_path / "config.py"
     path.write_text(textwrap.dedent(body))
-    prompts = tmp_path / "prompts"
-    prompts.mkdir(exist_ok=True)
-    for name in (
-        "classify_relevance.de.md",
-        "classify_relevance.en.md",
-        "judge_match.de.md",
-        "judge_match.en.md",
-    ):
-        (prompts / name).write_text(f"{name}\n")
+    (tmp_path / "user-info").mkdir(exist_ok=True)
     return path
 
 
@@ -100,7 +92,6 @@ def test_load_defaults_when_optional_fields_absent(tmp_path: pathlib.Path) -> No
     config = load(path)
 
     assert config.include_remote is True
-    assert config.prompts_dir == tmp_path / "prompts"
 
 
 def test_include_remote_can_be_set_to_false(tmp_path: pathlib.Path) -> None:
@@ -217,67 +208,48 @@ def test_layout_raises_when_path_is_directory(tmp_path: pathlib.Path) -> None:
         load(path)
 
 
-# --- prompts_dir ---
+# --- user_info_dir ---
 
 
-def test_prompts_dir_raises_when_not_a_directory(tmp_path: pathlib.Path) -> None:
-    missing_dir = tmp_path / "no_such_prompts"
+def test_user_info_dir_defaults_to_user_info_subdir(tmp_path: pathlib.Path) -> None:
+    user_info = tmp_path / "user-info"
+    user_info.mkdir()
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.user_info_dir == tmp_path / "user-info"
+
+
+def test_user_info_dir_raises_when_not_a_directory(tmp_path: pathlib.Path) -> None:
+    missing_dir = tmp_path / "no_such_user_info"
     path = write_config(
         tmp_path,
         REQUIRED_BODY
-        + f"\nimport pathlib\nPROMPTS_DIR = pathlib.Path(r'{missing_dir}')\n",
+        + f"\nimport pathlib\nUSER_INFO_DIR = pathlib.Path(r'{missing_dir}')\n",
     )
 
-    with pytest.raises(ConfigError, match="PROMPTS_DIR"):
+    with pytest.raises(ConfigError, match="USER_INFO_DIR"):
         load(path)
 
 
-def test_load_resolves_relative_prompts_dir_against_config_dir(
+def test_load_resolves_relative_user_info_dir_against_config_dir(
     tmp_path: pathlib.Path,
 ) -> None:
     settings = tmp_path / "settings"
     settings.mkdir()
-    custom_prompts = settings / "custom_prompts"
-    custom_prompts.mkdir()
-    for name in (
-        "classify_relevance.de.md",
-        "classify_relevance.en.md",
-        "judge_match.de.md",
-        "judge_match.en.md",
-    ):
-        (custom_prompts / name).write_text(f"{name}\n")
+    user_info = settings / "my-user-info"
+    user_info.mkdir()
     path = write_config(
         settings,
         REQUIRED_BODY
         + "\nimport pathlib\n"
-        + 'PROMPTS_DIR = pathlib.Path("custom_prompts")\n',
+        + 'USER_INFO_DIR = pathlib.Path("my-user-info")\n',
     )
 
     config = load(path)
 
-    assert config.prompts_dir == settings / "custom_prompts"
-
-
-def test_load_passes_absolute_prompts_dir_through(tmp_path: pathlib.Path) -> None:
-    abs_prompts = tmp_path / "abs_prompts"
-    abs_prompts.mkdir()
-    for name in (
-        "classify_relevance.de.md",
-        "classify_relevance.en.md",
-        "judge_match.de.md",
-        "judge_match.en.md",
-    ):
-        (abs_prompts / name).write_text(f"{name}\n")
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY
-        + "\nimport pathlib\n"
-        + f'PROMPTS_DIR = pathlib.Path(r"{abs_prompts}")\n',
-    )
-
-    config = load(path)
-
-    assert config.prompts_dir == abs_prompts
+    assert config.user_info_dir == settings / "my-user-info"
 
 
 # --- per-prompt-file fields ---

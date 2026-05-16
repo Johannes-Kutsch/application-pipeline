@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from application_pipeline.http.retry import HttpNotRetryableError
+from application_pipeline.http import HttpNotRetryableError
 from application_pipeline.parsers.http import (
     BACKOFF_INITIAL,
     BACKOFF_MAX,

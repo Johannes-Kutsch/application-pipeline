@@ -7,12 +7,7 @@ import httpx
 
 from application_pipeline import parser_log
 from application_pipeline._context import current_stage
-from application_pipeline.http import HttpRetryError
-from application_pipeline.http.retry import (
-    HttpNotRetryableError,
-    exponential_backoff,
-    retry,
-)
+from application_pipeline.http import HttpNotRetryableError, HttpRetryError
 
 HTTP_CONNECT_TIMEOUT: float = 5.0
 HTTP_READ_TIMEOUT: float = 30.0
@@ -96,46 +91,46 @@ def request_with_retry(
     _sleep: Callable[[float], None] = time.sleep,
 ) -> bytes:
     component_id = _log_component_id()
+
+    if retries <= 0:
+        raise HttpRetryError("HTTP request failed after 0 retries: None")
+
+    last_exc: Exception | None = None
     t_start = 0.0
-    attempt_num = 0
+    for attempt in range(retries):
+        attempt_num = attempt + 1
+        try:
+            parser_log.record(
+                component_id, "http_get_start", url=url, attempt=attempt_num
+            )
+            t_start = time.monotonic()
+            result = http_get(url, timeout)
+            elapsed_ms = round((time.monotonic() - t_start) * 1000)
+            parser_log.record(
+                component_id,
+                "http_get_ok",
+                url=url,
+                bytes=len(result),
+                elapsed_ms=elapsed_ms,
+            )
+            return result
+        except Exception as exc:
+            if isinstance(exc, HttpNotRetryableError):
+                raise
+            last_exc = exc
+            if attempt < retries - 1:
+                elapsed_ms = round((time.monotonic() - t_start) * 1000)
+                parser_log.record(
+                    component_id,
+                    "http_get_retry",
+                    url=url,
+                    attempt=attempt_num,
+                    reason=str(exc),
+                    elapsed_ms=elapsed_ms,
+                )
+                _sleep(min(BACKOFF_INITIAL * BACKOFF_MULTIPLIER**attempt, BACKOFF_MAX))
 
-    def _attempt() -> bytes:
-        nonlocal t_start, attempt_num
-        attempt_num += 1
-        parser_log.record(component_id, "http_get_start", url=url, attempt=attempt_num)
-        t_start = time.monotonic()
-        result = http_get(url, timeout)
-        elapsed_ms = round((time.monotonic() - t_start) * 1000)
-        parser_log.record(
-            component_id,
-            "http_get_ok",
-            url=url,
-            bytes=len(result),
-            elapsed_ms=elapsed_ms,
-        )
-        return result
-
-    def _on_retry(attempt: int, exc: Exception) -> None:
-        elapsed_ms = round((time.monotonic() - t_start) * 1000)
-        parser_log.record(
-            component_id,
-            "http_get_retry",
-            url=url,
-            attempt=attempt,
-            reason=str(exc),
-            elapsed_ms=elapsed_ms,
-        )
-
-    return retry(
-        _attempt,
-        predicate=lambda exc: not isinstance(exc, HttpNotRetryableError),
-        backoff_policy=exponential_backoff(
-            BACKOFF_INITIAL, BACKOFF_MULTIPLIER, BACKOFF_MAX
-        ),
-        max_retries=retries,
-        error_factory=lambda n, exc: HttpRetryError(
-            f"HTTP request failed after {n} retries: {exc}"
-        ),
-        on_retry=_on_retry,
-        _sleep=_sleep,
-    )
+    assert last_exc is not None
+    raise HttpRetryError(
+        f"HTTP request failed after {retries} retries: {last_exc}"
+    ) from last_exc

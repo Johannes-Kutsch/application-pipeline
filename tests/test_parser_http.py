@@ -202,3 +202,45 @@ def test_log_routes_to_parser_pid_stripping_prefix(log_dir):
 
     assert (log_dir / "jobs_beim_staat_html.log").exists()
     assert not (log_dir / "parser:jobs_beim_staat_html.log").exists()
+
+
+def test_request_with_retry_sleep_sequence_matches_backoff_formula():
+    sleeps: list[float] = []
+
+    def http_get(url: str, timeout: float) -> bytes:
+        raise OSError("fail")
+
+    with pytest.raises(HttpRetryError):
+        request_with_retry("http://host/path", 30.0, 3, http_get, _sleep=sleeps.append)
+
+    assert sleeps == pytest.approx([1.0, 2.0])
+
+
+def test_request_with_retry_backoff_caps_at_max():
+    sleeps: list[float] = []
+
+    def http_get(url: str, timeout: float) -> bytes:
+        raise OSError("fail")
+
+    with pytest.raises(HttpRetryError):
+        request_with_retry("http://host/path", 30.0, 6, http_get, _sleep=sleeps.append)
+
+    assert sleeps[-1] == pytest.approx(8.0)
+
+
+def test_request_with_retry_retry_log_has_one_indexed_attempt(log_dir):
+    current_stage.set("parser:my_parser")
+    attempt = 0
+
+    def http_get(url: str, timeout: float) -> bytes:
+        nonlocal attempt
+        attempt += 1
+        if attempt == 1:
+            raise OSError("refused")
+        return b"ok"
+
+    request_with_retry("http://example.com/feed", 30.0, 2, http_get, _sleep=_NO_SLEEP)
+
+    log = (log_dir / "my_parser.log").read_text(encoding="utf-8")
+    assert "http_get_retry" in log
+    assert "attempt=1" in log

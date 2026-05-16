@@ -291,23 +291,8 @@ def test_classify_relevance_batch_records_transcript(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# classify_relevance_batch: error mapping
+# classify_relevance_batch: error mapping (call-site-specific shape validators)
 # ---------------------------------------------------------------------------
-
-
-def test_classify_batch_cli_error_raises_extractor_unreachable() -> None:
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeCliError(
-        "exit 1",
-        returncode=1,
-        stdout="",
-        stderr="",
-        envelope=None,
-        envelope_error_class="cli_nonzero_exit",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    with pytest.raises(ExtractorUnreachableError):
-        extractor.classify_relevance_batch("en", _items(1))
 
 
 def test_classify_batch_usage_limit_propagates() -> None:
@@ -317,21 +302,6 @@ def test_classify_batch_usage_limit_propagates() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ClaudeUsageLimitError):
-        extractor.classify_relevance_batch("en", _items(1))
-
-
-def test_classify_batch_malformed_envelope_raises_malformed_json_error() -> None:
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeMalformedEnvelopeError(
-        "bad json",
-        returncode=0,
-        stdout="",
-        stderr="",
-        envelope=None,
-        envelope_error_class="envelope_not_json",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    with pytest.raises(ExtractorMalformedJSONError):
         extractor.classify_relevance_batch("en", _items(1))
 
 
@@ -527,23 +497,8 @@ def test_both_calls_append_to_same_transcript_file(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# judge_match: error mapping
+# judge_match: error mapping (call-site-specific shape validators)
 # ---------------------------------------------------------------------------
-
-
-def test_judge_cli_error_raises_extractor_unreachable() -> None:
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeCliError(
-        "exit 1",
-        returncode=1,
-        stdout="",
-        stderr="",
-        envelope=None,
-        envelope_error_class="cli_nonzero_exit",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    with pytest.raises(ExtractorUnreachableError):
-        extractor.judge_match("en", "desc")
 
 
 def test_judge_usage_limit_propagates() -> None:
@@ -553,21 +508,6 @@ def test_judge_usage_limit_propagates() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ClaudeUsageLimitError):
-        extractor.judge_match("en", "desc")
-
-
-def test_judge_malformed_envelope_raises_malformed_json_error() -> None:
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeMalformedEnvelopeError(
-        "bad",
-        returncode=0,
-        stdout="",
-        stderr="",
-        envelope=None,
-        envelope_error_class="envelope_not_json",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    with pytest.raises(ExtractorMalformedJSONError):
         extractor.judge_match("en", "desc")
 
 
@@ -614,58 +554,8 @@ def test_judge_summary_over_600_chars_raises_schema_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# classify_relevance_batch: failure transcripts
+# Failure-path: does not pollute the success transcript file
 # ---------------------------------------------------------------------------
-
-
-def test_classify_cli_error_writes_failure_transcript(tmp_path: Path) -> None:
-    parser_log.configure(tmp_path)
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeCliError(
-        "empty result",
-        returncode=0,
-        stdout='{"type":"result","result":"","is_error":false}',
-        stderr="some stderr",
-        envelope={"type": "result", "result": "", "is_error": False},
-        envelope_error_class="empty_result",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-
-    with pytest.raises(ExtractorUnreachableError):
-        extractor.classify_relevance_batch("en", _items(2))
-
-    transcript_file = tmp_path / "classify_relevance.transcripts.jsonl"
-    assert transcript_file.exists()
-    entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
-    assert entry["status"] == "cli_error"
-    assert "prompt" in entry
-    assert entry["stdout"] == '{"type":"result","result":"","is_error":false}'
-    assert entry["stderr"] == "some stderr"
-    assert entry["returncode"] == 0
-    assert entry["envelope_error_class"] == "empty_result"
-
-
-def test_classify_malformed_envelope_writes_failure_transcript(tmp_path: Path) -> None:
-    parser_log.configure(tmp_path)
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeMalformedEnvelopeError(
-        "bad json",
-        returncode=0,
-        stdout="not-json",
-        stderr="",
-        envelope=None,
-        envelope_error_class="envelope_not_json",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-
-    with pytest.raises(ExtractorMalformedJSONError):
-        extractor.classify_relevance_batch("en", _items(1))
-
-    transcript_file = tmp_path / "classify_relevance.transcripts.jsonl"
-    assert transcript_file.exists()
-    entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
-    assert entry["status"] == "malformed_envelope"
-    assert entry["envelope"] is None
 
 
 def test_classify_failure_transcript_does_not_write_to_extractor_file(
@@ -687,96 +577,6 @@ def test_classify_failure_transcript_does_not_write_to_extractor_file(
         extractor.classify_relevance_batch("en", _items(1))
 
     assert not (tmp_path / "claude_extractor.transcripts.jsonl").exists()
-
-
-# ---------------------------------------------------------------------------
-# judge_match: failure transcripts
-# ---------------------------------------------------------------------------
-
-
-def test_judge_cli_error_writes_failure_transcript(tmp_path: Path) -> None:
-    parser_log.configure(tmp_path)
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeCliError(
-        "empty result",
-        returncode=0,
-        stdout='{"type":"result","result":"","is_error":false}',
-        stderr="judge stderr",
-        envelope={"type": "result", "result": "", "is_error": False},
-        envelope_error_class="empty_result",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-
-    with pytest.raises(ExtractorUnreachableError):
-        extractor.judge_match("en", "desc", stub_url="https://example.com/job/1")
-
-    transcript_file = tmp_path / "judge_match.transcripts.jsonl"
-    assert transcript_file.exists()
-    entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
-    assert entry["status"] == "cli_error"
-    assert entry["stub_url"] == "https://example.com/job/1"
-    assert "prompt" in entry
-    assert entry["returncode"] == 0
-    assert entry["stderr"] == "judge stderr"
-    assert entry["envelope_error_class"] == "empty_result"
-
-
-def test_judge_malformed_envelope_writes_failure_transcript(tmp_path: Path) -> None:
-    parser_log.configure(tmp_path)
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeMalformedEnvelopeError(
-        "bad json",
-        returncode=0,
-        stdout="not-json",
-        stderr="",
-        envelope=None,
-        envelope_error_class="envelope_not_json",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-
-    with pytest.raises(ExtractorMalformedJSONError):
-        extractor.judge_match("en", "desc", stub_url="https://example.com/job/2")
-
-    transcript_file = tmp_path / "judge_match.transcripts.jsonl"
-    assert transcript_file.exists()
-    entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
-    assert entry["status"] == "malformed_envelope"
-    assert entry["stub_url"] == "https://example.com/job/2"
-    assert entry["envelope"] is None
-
-
-def test_classify_unreachable_error_carries_forensics() -> None:
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeCliError(
-        "exit 2",
-        returncode=2,
-        stdout="",
-        stderr="some stderr text",
-        envelope=None,
-        envelope_error_class="cli_nonzero_exit",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    with pytest.raises(ExtractorUnreachableError) as exc_info:
-        extractor.classify_relevance_batch("en", _items(1))
-    assert exc_info.value.returncode == 2
-    assert exc_info.value.stderr == "some stderr text"
-
-
-def test_judge_unreachable_error_carries_forensics() -> None:
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    invoker.call.side_effect = ClaudeCliError(
-        "exit 3",
-        returncode=3,
-        stdout="",
-        stderr="judge fail details",
-        envelope=None,
-        envelope_error_class="cli_nonzero_exit",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    with pytest.raises(ExtractorUnreachableError) as exc_info:
-        extractor.judge_match("en", "desc")
-    assert exc_info.value.returncode == 3
-    assert exc_info.value.stderr == "judge fail details"
 
 
 # ---------------------------------------------------------------------------
@@ -860,150 +660,183 @@ def test_judge_slots_match_inventory() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Agent Output Protocol: tag_missing / json_malformed → extractor errors
+# Parametrised failure-path tests: CLI error, malformed envelope,
+# tag missing, JSON malformed — parameter selects the call site.
 # ---------------------------------------------------------------------------
 
 
-def test_classify_batch_tag_missing_raises_batch_malformed() -> None:
-    response = ClaudeResponse(
-        raw_response='[{"id":"0","in_domain":true}]',  # no <verdicts> tag
-        usage=_usage(),
-        cost_usd=0.0,
-        duration_s=0.1,
-        session_id="s",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    with pytest.raises(ExtractorBatchMalformedError):
-        extractor.classify_relevance_batch("en", _items(1))
-
-
-def test_classify_batch_json_malformed_raises_batch_malformed() -> None:
-    response = ClaudeResponse(
-        raw_response="<verdicts>not valid json</verdicts>",
-        usage=_usage(),
-        cost_usd=0.0,
-        duration_s=0.1,
-        session_id="s",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    with pytest.raises(ExtractorBatchMalformedError):
-        extractor.classify_relevance_batch("en", _items(1))
-
-
-def test_judge_tag_missing_raises_malformed_json_error() -> None:
-    response = ClaudeResponse(
-        raw_response='{"tier":"green","matched":[],"missing":[],"summary":"ok"}',
-        usage=_usage(),
-        cost_usd=0.0,
-        duration_s=0.1,
-        session_id="s",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    with pytest.raises(ExtractorMalformedJSONError):
-        extractor.judge_match("en", "desc")
-
-
-def test_judge_json_malformed_raises_malformed_json_error() -> None:
-    response = ClaudeResponse(
-        raw_response="<verdict>not valid json</verdict>",
-        usage=_usage(),
-        cost_usd=0.0,
-        duration_s=0.1,
-        session_id="s",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    with pytest.raises(ExtractorMalformedJSONError):
-        extractor.judge_match("en", "desc")
-
-
-# ---------------------------------------------------------------------------
-# Agent Output Protocol: failure transcript carries envelope_error_class + raw_response
-# ---------------------------------------------------------------------------
-
-
-def test_classify_tag_missing_writes_failure_transcript_with_kind(
+@pytest.mark.parametrize(
+    "invoke,transcript_file,stderr,extra_transcript_assertions",
+    [
+        pytest.param(
+            lambda e: e.classify_relevance_batch("en", _items(2)),
+            "classify_relevance.transcripts.jsonl",
+            "some stderr",
+            {"stdout": '{"type":"result","result":"","is_error":false}'},
+            id="classify",
+        ),
+        pytest.param(
+            lambda e: e.judge_match("en", "desc", stub_url="https://example.com/job/1"),
+            "judge_match.transcripts.jsonl",
+            "judge stderr",
+            {"stub_url": "https://example.com/job/1"},
+            id="judge",
+        ),
+    ],
+)
+def test_cli_error(
     tmp_path: Path,
+    invoke: object,
+    transcript_file: str,
+    stderr: str,
+    extra_transcript_assertions: dict[str, object],
 ) -> None:
     parser_log.configure(tmp_path)
+    invoker = MagicMock(spec=ClaudeCliInvoker)
+    invoker.call.side_effect = ClaudeCliError(
+        "empty result",
+        returncode=0,
+        stdout='{"type":"result","result":"","is_error":false}',
+        stderr=stderr,
+        envelope={"type": "result", "result": "", "is_error": False},
+        envelope_error_class="empty_result",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
+
+    with pytest.raises(ExtractorUnreachableError) as exc_info:
+        invoke(extractor)  # type: ignore[operator]
+
+    assert exc_info.value.returncode == 0
+    assert exc_info.value.stderr == stderr
+
+    entry = json.loads((tmp_path / transcript_file).read_text(encoding="utf-8"))
+    assert entry["status"] == "cli_error"
+    assert "prompt" in entry
+    assert entry["returncode"] == 0
+    assert entry["stderr"] == stderr
+    assert entry["envelope_error_class"] == "empty_result"
+    for key, val in extra_transcript_assertions.items():
+        assert entry[key] == val
+
+
+@pytest.mark.parametrize(
+    "invoke,transcript_file,extra_transcript_assertions",
+    [
+        pytest.param(
+            lambda e: e.classify_relevance_batch("en", _items(1)),
+            "classify_relevance.transcripts.jsonl",
+            {},
+            id="classify",
+        ),
+        pytest.param(
+            lambda e: e.judge_match("en", "desc", stub_url="https://example.com/job/2"),
+            "judge_match.transcripts.jsonl",
+            {"stub_url": "https://example.com/job/2"},
+            id="judge",
+        ),
+    ],
+)
+def test_malformed_envelope(
+    tmp_path: Path,
+    invoke: object,
+    transcript_file: str,
+    extra_transcript_assertions: dict[str, object],
+) -> None:
+    parser_log.configure(tmp_path)
+    invoker = MagicMock(spec=ClaudeCliInvoker)
+    invoker.call.side_effect = ClaudeMalformedEnvelopeError(
+        "bad json",
+        returncode=0,
+        stdout="not-json",
+        stderr="",
+        envelope=None,
+        envelope_error_class="envelope_not_json",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
+
+    with pytest.raises(ExtractorMalformedJSONError):
+        invoke(extractor)  # type: ignore[operator]
+
+    entry = json.loads((tmp_path / transcript_file).read_text(encoding="utf-8"))
+    assert entry["status"] == "malformed_envelope"
+    assert entry["envelope"] is None
+    for key, val in extra_transcript_assertions.items():
+        assert entry[key] == val
+
+
+@pytest.mark.parametrize(
+    "invoke,transcript_file,expected_error_cls",
+    [
+        pytest.param(
+            lambda e: e.classify_relevance_batch("en", _items(1)),
+            "classify_relevance.transcripts.jsonl",
+            ExtractorBatchMalformedError,
+            id="classify",
+        ),
+        pytest.param(
+            lambda e: e.judge_match("en", "desc"),
+            "judge_match.transcripts.jsonl",
+            ExtractorMalformedJSONError,
+            id="judge",
+        ),
+    ],
+)
+def test_tag_missing(
+    tmp_path: Path,
+    invoke: object,
+    transcript_file: str,
+    expected_error_cls: type,
+) -> None:
+    parser_log.configure(tmp_path)
+    raw = "no tags here"
     response = ClaudeResponse(
-        raw_response="no tags here",
-        usage=_usage(),
-        cost_usd=0.0,
-        duration_s=0.1,
-        session_id="s",
+        raw_response=raw, usage=_usage(), cost_usd=0.0, duration_s=0.1, session_id="s"
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    with pytest.raises(ExtractorBatchMalformedError):
-        extractor.classify_relevance_batch("en", _items(1))
 
-    entry = json.loads(
-        (tmp_path / "classify_relevance.transcripts.jsonl").read_text(encoding="utf-8")
-    )
+    with pytest.raises(expected_error_cls):
+        invoke(extractor)  # type: ignore[operator]
+
+    entry = json.loads((tmp_path / transcript_file).read_text(encoding="utf-8"))
     assert entry["envelope_error_class"] == "tag_missing"
-    assert entry["raw_response"] == "no tags here"
-
-
-def test_classify_json_malformed_writes_failure_transcript_with_kind(
-    tmp_path: Path,
-) -> None:
-    parser_log.configure(tmp_path)
-    raw = "<verdicts>bad json</verdicts>"
-    response = ClaudeResponse(
-        raw_response=raw,
-        usage=_usage(),
-        cost_usd=0.0,
-        duration_s=0.1,
-        session_id="s",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    with pytest.raises(ExtractorBatchMalformedError):
-        extractor.classify_relevance_batch("en", _items(1))
-
-    entry = json.loads(
-        (tmp_path / "classify_relevance.transcripts.jsonl").read_text(encoding="utf-8")
-    )
-    assert entry["envelope_error_class"] == "json_malformed"
     assert entry["raw_response"] == raw
 
 
-def test_judge_tag_missing_writes_failure_transcript_with_kind(tmp_path: Path) -> None:
-    parser_log.configure(tmp_path)
-    response = ClaudeResponse(
-        raw_response="no tags here",
-        usage=_usage(),
-        cost_usd=0.0,
-        duration_s=0.1,
-        session_id="s",
-    )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    with pytest.raises(ExtractorMalformedJSONError):
-        extractor.judge_match("en", "desc")
-
-    entry = json.loads(
-        (tmp_path / "judge_match.transcripts.jsonl").read_text(encoding="utf-8")
-    )
-    assert entry["envelope_error_class"] == "tag_missing"
-    assert entry["raw_response"] == "no tags here"
-
-
-def test_judge_json_malformed_writes_failure_transcript_with_kind(
+@pytest.mark.parametrize(
+    "invoke,transcript_file,expected_error_cls,raw",
+    [
+        pytest.param(
+            lambda e: e.classify_relevance_batch("en", _items(1)),
+            "classify_relevance.transcripts.jsonl",
+            ExtractorBatchMalformedError,
+            "<verdicts>bad json</verdicts>",
+            id="classify",
+        ),
+        pytest.param(
+            lambda e: e.judge_match("en", "desc"),
+            "judge_match.transcripts.jsonl",
+            ExtractorMalformedJSONError,
+            "<verdict>bad json</verdict>",
+            id="judge",
+        ),
+    ],
+)
+def test_json_malformed(
     tmp_path: Path,
+    invoke: object,
+    transcript_file: str,
+    expected_error_cls: type,
+    raw: str,
 ) -> None:
     parser_log.configure(tmp_path)
-    raw = "<verdict>bad json</verdict>"
     response = ClaudeResponse(
-        raw_response=raw,
-        usage=_usage(),
-        cost_usd=0.0,
-        duration_s=0.1,
-        session_id="s",
+        raw_response=raw, usage=_usage(), cost_usd=0.0, duration_s=0.1, session_id="s"
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    with pytest.raises(ExtractorMalformedJSONError):
-        extractor.judge_match("en", "desc")
 
-    entry = json.loads(
-        (tmp_path / "judge_match.transcripts.jsonl").read_text(encoding="utf-8")
-    )
+    with pytest.raises(expected_error_cls):
+        invoke(extractor)  # type: ignore[operator]
+
+    entry = json.loads((tmp_path / transcript_file).read_text(encoding="utf-8"))
     assert entry["envelope_error_class"] == "json_malformed"
     assert entry["raw_response"] == raw

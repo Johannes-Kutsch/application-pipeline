@@ -32,18 +32,6 @@ class RunScopedDedup:
 
         return result
 
-    def mark_off_domain(self, key: _SeenKey) -> None:
-        self._store.mark_off_domain(key)
-
-    def mark_kept(self, key: _SeenKey) -> None:
-        self._store.mark_kept(key)
-
-    def mark_enrich_failed(self, key: _SeenKey) -> None:
-        self._store.mark_enrich_failed(key)
-
-    def mark_external_redirect(self, key: _SeenKey) -> None:
-        self._store.mark_external_redirect(key)
-
     def _clear(self) -> None:
         with self._lock:
             self._in_run.clear()

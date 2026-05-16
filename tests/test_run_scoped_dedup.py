@@ -131,29 +131,6 @@ def test_re_entering_run_scope_starts_fresh(store) -> None:
         assert result == "miss"
 
 
-# --- Behavior 7: delegation methods write correct status to underlying store ---
-
-
-@pytest.mark.parametrize(
-    "method,expected_status",
-    [
-        ("mark_off_domain", "off_domain"),
-        ("mark_kept", "kept"),
-        ("mark_enrich_failed", "enrich_failed"),
-        ("mark_external_redirect", "external_redirect"),
-    ],
-)
-def test_delegation_methods_write_to_underlying_store(
-    store_path: Path, store, method: str, expected_status: str
-) -> None:
-    stub = Stub(url="https://example.com/delegated")
-    with store.run_scope() as scope:
-        getattr(scope, method)(stub)
-
-    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk[stub.url]["status"] == expected_status
-
-
 # --- Behavior 8: RunScopedSeenResult has exactly 4 variants ---
 
 

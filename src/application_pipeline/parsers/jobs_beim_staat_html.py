@@ -176,7 +176,6 @@ def _parse_card(card: Tag, today: date) -> PositionStub | None:
         source=_DISPLAY_NAME,
         company=company,
         location=location,
-        language="de",
         posted_date=posted_date,
         _warnings=warnings,
     )

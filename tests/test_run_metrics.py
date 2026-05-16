@@ -189,14 +189,14 @@ def test_classify_body_no_failures():
     metrics.register_rows(0)
 
     usage = _make_usage()
-    metrics.classify_buffered("en", 5)
-    metrics.classify_batch_enqueued("en", 5)
-    metrics.classify_batch_dequeued("en", 5)
+    metrics.classify_buffered(5)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
 
     body = _last_body(display, "classify_relevance")
     # 1 batch done out of 1 total, 0 pending
-    assert body == "1/1 batches done · 0 items in queue (0 en / 0 de)"
+    assert body == "1/1 batches done · 0 items in queue"
     assert "batches_failed" not in body
 
 
@@ -205,26 +205,26 @@ def test_classify_body_with_failures():
     metrics = RunMetrics(display)
     metrics.register_rows(0)
 
-    metrics.classify_buffered("de", 3)
-    metrics.classify_batch_enqueued("de", 3)
-    metrics.classify_batch_dequeued("de", 3)
+    metrics.classify_buffered(3)
+    metrics.classify_batch_enqueued(3)
+    metrics.classify_batch_dequeued(3)
     metrics.classify_batch_failed(items=3)
 
     body = _last_body(display, "classify_relevance")
     assert "batches_failed=1 items_errored=3" in body
 
 
-def test_classify_body_pending_counts_en_de():
+def test_classify_body_pending_count():
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
     metrics.register_rows(0)
 
-    metrics.classify_buffered("en", 4)
-    metrics.classify_buffered("de", 2)
-    metrics.classify_batch_enqueued("en", 4)
+    metrics.classify_buffered(4)
+    metrics.classify_buffered(2)
+    metrics.classify_batch_enqueued(4)
 
     body = _last_body(display, "classify_relevance")
-    assert "6 items in queue (4 en / 2 de)" in body
+    assert "6 items in queue" in body
 
 
 def test_classify_body_updates_per_item_without_batch_flush():
@@ -232,13 +232,13 @@ def test_classify_body_updates_per_item_without_batch_flush():
     metrics = RunMetrics(display)
     metrics.register_rows(0)
 
-    metrics.classify_buffered("en", 1)
+    metrics.classify_buffered(1)
     body_after_first = _last_body(display, "classify_relevance")
-    assert "1 items in queue (1 en / 0 de)" in body_after_first
+    assert "1 items in queue" in body_after_first
 
-    metrics.classify_buffered("de", 1)
+    metrics.classify_buffered(1)
     body_after_second = _last_body(display, "classify_relevance")
-    assert "2 items in queue (1 en / 1 de)" in body_after_second
+    assert "2 items in queue" in body_after_second
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +363,6 @@ def _build_populated_metrics(display: FakeStatusDisplay) -> RunMetrics:
     metrics.enrich_failed()
     metrics.external_redirect()
     metrics.parser_dead()
-    metrics.language_anomaly()
 
     classify_usage = _make_usage(
         input_tokens=500,
@@ -372,9 +371,9 @@ def _build_populated_metrics(display: FakeStatusDisplay) -> RunMetrics:
         cost_usd=0.002,
         duration_s=2.5,
     )
-    metrics.classify_buffered("en", 2)
-    metrics.classify_batch_enqueued("en", 2)
-    metrics.classify_batch_dequeued("en", 2)
+    metrics.classify_buffered(2)
+    metrics.classify_batch_enqueued(2)
+    metrics.classify_batch_dequeued(2)
     metrics.classify_batch_complete(classify_usage, items=2, classifier_dropped=1)
 
     judge_usage = _make_usage(
@@ -487,9 +486,9 @@ def test_classify_batches_failed_absent_when_zero():
 def test_classify_batches_failed_present_when_nonzero():
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
-    metrics.classify_buffered("en", 2)
-    metrics.classify_batch_enqueued("en", 2)
-    metrics.classify_batch_dequeued("en", 2)
+    metrics.classify_buffered(2)
+    metrics.classify_batch_enqueued(2)
+    metrics.classify_batch_dequeued(2)
     metrics.classify_batch_failed(items=2)
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
@@ -503,9 +502,9 @@ def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned():
     and toward judge_items_abandoned. The module must preserve that roll-up."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
-    metrics.classify_buffered("en", 3)
-    metrics.classify_batch_enqueued("en", 3)
-    metrics.classify_batch_dequeued("en", 3)
+    metrics.classify_buffered(3)
+    metrics.classify_batch_enqueued(3)
+    metrics.classify_batch_dequeued(3)
     metrics.classify_batch_failed(items=3)
     metrics.judge_enqueued()
     metrics.judge_dequeued()
@@ -665,9 +664,9 @@ def test_concurrent_events_produce_correct_final_counts():
             metrics.prefilter_passed(verdict_pass)
             metrics.prefilter_dropped(verdict_drop)
             metrics.enrich_failed()
-            metrics.classify_buffered("en", 1)
-            metrics.classify_batch_enqueued("en", 1)
-            metrics.classify_batch_dequeued("en", 1)
+            metrics.classify_buffered(1)
+            metrics.classify_batch_enqueued(1)
+            metrics.classify_batch_dequeued(1)
             metrics.classify_batch_complete(usage, items=1, classifier_dropped=0)
             metrics.judge_enqueued()
             metrics.judge_dequeued()

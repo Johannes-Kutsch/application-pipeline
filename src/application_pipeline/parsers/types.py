@@ -38,7 +38,6 @@ class PositionStub:
     source: str
     company: str | None = None
     location: str | None = None
-    language: Literal["de", "en"] | None = None
     posted_date: date | None = None
     _warnings: tuple[str, ...] = ()
 

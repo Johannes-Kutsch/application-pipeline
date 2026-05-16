@@ -92,11 +92,11 @@ class CallUsage:
 @runtime_checkable
 class LLMExtractor(Protocol):
     def classify_relevance_batch(
-        self, language: str, items: list[ClassifyItem]
+        self, items: list[ClassifyItem]
     ) -> tuple[list[RelevanceVerdict], CallUsage]: ...
 
     def judge_match(
-        self, language: str, raw_description: str, *, stub_url: str = ""
+        self, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]: ...
 
     def prewarm(self) -> None: ...

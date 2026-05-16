@@ -28,10 +28,6 @@ def render(
     for f in dataclasses.fields(position.stub):
         placeholders[f.name] = getattr(position.stub, f.name)
 
-    # Normalize language to uppercase
-    if placeholders.get("language") is not None:
-        placeholders["language"] = str(placeholders["language"]).upper()
-
     # Verdict and derived fields
     placeholders["tier"] = tier.value
     placeholders["summary"] = verdict.summary

@@ -52,7 +52,6 @@ _DENSE_STUB = PositionStub(
     source="example",
     company="ACME Corp",
     location="Berlin",
-    language="de",
     posted_date=date(2026, 1, 15),
 )
 

@@ -201,7 +201,6 @@ class BundesagenturParser:
                     source=_DISPLAY_NAME,
                     company=item.get("firma") or None,
                     location=city,
-                    language="de",
                 )
                 count += 1
 

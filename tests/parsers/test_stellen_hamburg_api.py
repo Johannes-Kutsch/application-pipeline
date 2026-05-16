@@ -192,14 +192,6 @@ def test_discover_stub_location_extracted(search_json: bytes) -> None:
     assert stub.location == "Hamburg"
 
 
-def test_discover_stub_language_is_de(search_json: bytes) -> None:
-    post = _make_post(search_json)
-    with StellenHamburgParser(_http_post=post) as p:
-        (stub, *_) = list(p.discover(_query()))
-    assert isinstance(stub, PositionStub)
-    assert stub.language == "de"
-
-
 # ---------------------------------------------------------------------------
 # discover — max_results cap
 # ---------------------------------------------------------------------------

@@ -67,20 +67,12 @@ def _config(**kwargs: object) -> Config:
 
 
 def _prompts(
-    classify_de: str = "DE: {ITEMS}",
-    classify_en: str = "EN: {ITEMS}",
-    judge_de: str = "DE judge: {skills} {raw_description}",
-    judge_en: str = "EN judge: {skills} {raw_description}",
+    classify: str = "classify: {ITEMS}",
+    judge: str = "judge: {skills} {raw_description}",
 ) -> Prompts:
     return Prompts(
-        classify_relevance={
-            "de": PromptTemplate(classify_de, CLASSIFY_RELEVANCE_SLOTS),
-            "en": PromptTemplate(classify_en, CLASSIFY_RELEVANCE_SLOTS),
-        },
-        judge_match={
-            "de": PromptTemplate(judge_de, JUDGE_MATCH_SLOTS),
-            "en": PromptTemplate(judge_en, JUDGE_MATCH_SLOTS),
-        },
+        classify_relevance=PromptTemplate(classify, CLASSIFY_RELEVANCE_SLOTS),
+        judge_match=PromptTemplate(judge, JUDGE_MATCH_SLOTS),
     )
 
 
@@ -157,7 +149,7 @@ def test_classify_relevance_batch_returns_in_domain_true() -> None:
         _prompts(),
         _invoker=_fake_invoker(_batch_response(items, {"0": True})),
     )
-    results, usage = extractor.classify_relevance_batch("en", items)
+    results, usage = extractor.classify_relevance_batch(items)
     assert len(results) == 1
     assert isinstance(results[0], RelevanceVerdict)
     assert results[0].in_domain is True
@@ -172,7 +164,7 @@ def test_classify_relevance_batch_returns_in_domain_false() -> None:
         _prompts(),
         _invoker=_fake_invoker(_batch_response(items, {"0": False})),
     )
-    results, _ = extractor.classify_relevance_batch("en", items)
+    results, _ = extractor.classify_relevance_batch(items)
     assert results[0].in_domain is False
 
 
@@ -181,9 +173,9 @@ def test_classify_relevance_batch_n3_items_framed_in_prompt() -> None:
     items = _items(3)
     invoker = _fake_invoker(_batch_response(items))
     extractor = ClaudeExtractor(
-        _config(), _prompts(classify_en="EN: {ITEMS}"), _invoker=invoker
+        _config(), _prompts(classify="EN: {ITEMS}"), _invoker=invoker
     )
-    extractor.classify_relevance_batch("en", items)
+    extractor.classify_relevance_batch(items)
     prompt_sent = invoker.call.call_args.args[0]
     # Each item is framed with [Item id=N]
     for item in items:
@@ -213,55 +205,11 @@ def test_classify_relevance_batch_returns_verdicts_in_input_order() -> None:
         session_id="s",
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
-    results, _ = extractor.classify_relevance_batch("en", items)
+    results, _ = extractor.classify_relevance_batch(items)
     assert len(results) == 3
     assert results[0].in_domain is True  # id=a
     assert results[1].in_domain is True  # id=b
     assert results[2].in_domain is False  # id=c
-
-
-# ---------------------------------------------------------------------------
-# classify_relevance_batch: language routing
-# ---------------------------------------------------------------------------
-
-
-def test_classify_relevance_batch_uses_german_prompt_for_de() -> None:
-    items = _items(1)
-    invoker = _fake_invoker(_batch_response(items))
-    extractor = ClaudeExtractor(
-        _config(),
-        _prompts(classify_de="DE: {ITEMS}", classify_en="EN: {ITEMS}"),
-        _invoker=invoker,
-    )
-    extractor.classify_relevance_batch("de", items)
-    prompt_sent = invoker.call.call_args.args[0]
-    assert prompt_sent.startswith("DE:")
-
-
-def test_classify_relevance_batch_uses_english_prompt_for_en() -> None:
-    items = _items(1)
-    invoker = _fake_invoker(_batch_response(items))
-    extractor = ClaudeExtractor(
-        _config(),
-        _prompts(classify_de="DE: {ITEMS}", classify_en="EN: {ITEMS}"),
-        _invoker=invoker,
-    )
-    extractor.classify_relevance_batch("en", items)
-    prompt_sent = invoker.call.call_args.args[0]
-    assert prompt_sent.startswith("EN:")
-
-
-def test_classify_relevance_batch_falls_back_to_english_for_unknown() -> None:
-    items = _items(1)
-    invoker = _fake_invoker(_batch_response(items))
-    extractor = ClaudeExtractor(
-        _config(),
-        _prompts(classify_en="EN: {ITEMS}"),
-        _invoker=invoker,
-    )
-    extractor.classify_relevance_batch("fr", items)
-    prompt_sent = invoker.call.call_args.args[0]
-    assert prompt_sent.startswith("EN:")
 
 
 # ---------------------------------------------------------------------------
@@ -275,13 +223,12 @@ def test_classify_relevance_batch_records_transcript(tmp_path: Path) -> None:
     invoker = _fake_invoker(_batch_response(items))
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
 
-    extractor.classify_relevance_batch("en", items)
+    extractor.classify_relevance_batch(items)
 
     transcript_file = tmp_path / "claude_extractor.transcripts.jsonl"
     assert transcript_file.exists()
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert entry["call"] == "classify_relevance_batch"
-    assert entry["language"] == "en"
     assert entry["batch_size"] == 2
     assert "prompt" in entry
     assert "raw_response" in entry
@@ -302,7 +249,7 @@ def test_classify_batch_usage_limit_propagates() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ClaudeUsageLimitError):
-        extractor.classify_relevance_batch("en", _items(1))
+        extractor.classify_relevance_batch(_items(1))
 
 
 def test_classify_batch_length_mismatch_raises_batch_malformed() -> None:
@@ -318,7 +265,7 @@ def test_classify_batch_length_mismatch_raises_batch_malformed() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
     with pytest.raises(ExtractorBatchMalformedError):
-        extractor.classify_relevance_batch("en", items)
+        extractor.classify_relevance_batch(items)
 
 
 def test_classify_batch_missing_id_raises_batch_malformed() -> None:
@@ -334,7 +281,7 @@ def test_classify_batch_missing_id_raises_batch_malformed() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
     with pytest.raises(ExtractorBatchMalformedError):
-        extractor.classify_relevance_batch("en", items)
+        extractor.classify_relevance_batch(items)
 
 
 def test_classify_batch_extra_id_raises_batch_malformed() -> None:
@@ -351,7 +298,7 @@ def test_classify_batch_extra_id_raises_batch_malformed() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
     with pytest.raises(ExtractorBatchMalformedError):
-        extractor.classify_relevance_batch("en", items)
+        extractor.classify_relevance_batch(items)
 
 
 def test_classify_batch_non_list_response_raises_batch_malformed() -> None:
@@ -365,7 +312,7 @@ def test_classify_batch_non_list_response_raises_batch_malformed() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
     with pytest.raises(ExtractorBatchMalformedError):
-        extractor.classify_relevance_batch("en", _items(1))
+        extractor.classify_relevance_batch(_items(1))
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +324,7 @@ def test_judge_match_returns_match_verdict() -> None:
     extractor = ClaudeExtractor(
         _config(), _prompts(), _invoker=_fake_invoker(_judge_response())
     )
-    result, usage = extractor.judge_match("en", "Looking for Python dev")
+    result, usage = extractor.judge_match("Looking for Python dev")
     assert isinstance(result, MatchVerdict)
     assert result.tier == MatchTier.green
     assert result.matched == ["python"]
@@ -385,35 +332,6 @@ def test_judge_match_returns_match_verdict() -> None:
     assert result.summary == "Good match"
     assert usage.input_tokens == 100
     assert usage.cost_usd == pytest.approx(0.002)
-
-
-# ---------------------------------------------------------------------------
-# judge_match: language routing
-# ---------------------------------------------------------------------------
-
-
-def test_judge_match_uses_german_prompt_for_de() -> None:
-    invoker = _fake_invoker(_judge_response())
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    extractor.judge_match("de", "Stelle")
-    prompt_sent = invoker.call.call_args.args[0]
-    assert prompt_sent.startswith("DE judge:")
-
-
-def test_judge_match_uses_english_prompt_for_en() -> None:
-    invoker = _fake_invoker(_judge_response())
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    extractor.judge_match("en", "Job posting")
-    prompt_sent = invoker.call.call_args.args[0]
-    assert prompt_sent.startswith("EN judge:")
-
-
-def test_judge_match_falls_back_to_english_for_unknown() -> None:
-    invoker = _fake_invoker(_judge_response())
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    extractor.judge_match("fr", "Job posting")
-    prompt_sent = invoker.call.call_args.args[0]
-    assert prompt_sent.startswith("EN judge:")
 
 
 # ---------------------------------------------------------------------------
@@ -425,10 +343,10 @@ def test_judge_match_renders_skills_into_prompt() -> None:
     invoker = _fake_invoker(_judge_response())
     extractor = ClaudeExtractor(
         _config(skills=["python", "docker"]),
-        _prompts(judge_en="skills={skills} desc={raw_description}"),
+        _prompts(judge="skills={skills} desc={raw_description}"),
         _invoker=invoker,
     )
-    extractor.judge_match("en", "desc")
+    extractor.judge_match("desc")
     prompt_sent = invoker.call.call_args.args[0]
     assert "- python" in prompt_sent
     assert "- docker" in prompt_sent
@@ -438,10 +356,10 @@ def test_judge_match_skills_bound_at_construction() -> None:
     invoker = _fake_invoker(_judge_response())
     extractor = ClaudeExtractor(
         _config(skills=["go"]),
-        _prompts(judge_en="s={skills} d={raw_description}"),
+        _prompts(judge="s={skills} d={raw_description}"),
         _invoker=invoker,
     )
-    extractor.judge_match("en", "MY_DESC")
+    extractor.judge_match("MY_DESC")
     prompt_sent = invoker.call.call_args.args[0]
     assert "- go" in prompt_sent
     assert "d=MY_DESC" in prompt_sent
@@ -457,13 +375,12 @@ def test_judge_match_records_transcript(tmp_path: Path) -> None:
     invoker = _fake_invoker(_judge_response())
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
 
-    extractor.judge_match("en", "Looking for Python dev")
+    extractor.judge_match("Looking for Python dev")
 
     transcript_file = tmp_path / "claude_extractor.transcripts.jsonl"
     assert transcript_file.exists()
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert entry["call"] == "judge_match"
-    assert entry["language"] == "en"
     assert "prompt" in entry
     assert entry["raw_response"] == _judge_raw(_JUDGE_VERDICT)
     assert entry["usage"]["input_tokens"] == 100
@@ -482,8 +399,8 @@ def test_both_calls_append_to_same_transcript_file(tmp_path: Path) -> None:
             **{"call.side_effect": [_batch_response(items), _judge_response()]},
         ),
     )
-    extractor.classify_relevance_batch("en", items)
-    extractor.judge_match("en", "desc")
+    extractor.classify_relevance_batch(items)
+    extractor.judge_match("desc")
 
     lines = (
         (tmp_path / "claude_extractor.transcripts.jsonl")
@@ -508,7 +425,7 @@ def test_judge_usage_limit_propagates() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     with pytest.raises(ClaudeUsageLimitError):
-        extractor.judge_match("en", "desc")
+        extractor.judge_match("desc")
 
 
 def test_judge_missing_tier_raises_schema_error() -> None:
@@ -522,7 +439,7 @@ def test_judge_missing_tier_raises_schema_error() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(bad))
     with pytest.raises(ExtractorSchemaError):
-        extractor.judge_match("en", "desc")
+        extractor.judge_match("desc")
 
 
 def test_judge_invalid_tier_value_raises_schema_error() -> None:
@@ -536,7 +453,7 @@ def test_judge_invalid_tier_value_raises_schema_error() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(bad))
     with pytest.raises(ExtractorSchemaError):
-        extractor.judge_match("en", "desc")
+        extractor.judge_match("desc")
 
 
 def test_judge_summary_over_600_chars_raises_schema_error() -> None:
@@ -550,7 +467,7 @@ def test_judge_summary_over_600_chars_raises_schema_error() -> None:
     )
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(bad))
     with pytest.raises(ExtractorSchemaError):
-        extractor.judge_match("en", "desc")
+        extractor.judge_match("desc")
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +491,7 @@ def test_classify_failure_transcript_does_not_write_to_extractor_file(
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
 
     with pytest.raises(ExtractorUnreachableError):
-        extractor.classify_relevance_batch("en", _items(1))
+        extractor.classify_relevance_batch(_items(1))
 
     assert not (tmp_path / "claude_extractor.transcripts.jsonl").exists()
 
@@ -605,7 +522,7 @@ def test_classify_relevance_batch_passes_haiku_model_to_invoker() -> None:
     items = _items(1)
     invoker = _fake_invoker(_batch_response(items))
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    extractor.classify_relevance_batch("en", items)
+    extractor.classify_relevance_batch(items)
     call_kwargs = invoker.call.call_args.kwargs
     assert call_kwargs["model"] == "haiku"
     assert call_kwargs.get("effort", "") == ""
@@ -614,7 +531,7 @@ def test_classify_relevance_batch_passes_haiku_model_to_invoker() -> None:
 def test_judge_match_passes_sonnet_model_and_medium_effort_to_invoker() -> None:
     invoker = _fake_invoker(_judge_response())
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    extractor.judge_match("en", "desc")
+    extractor.judge_match("desc")
     call_kwargs = invoker.call.call_args.kwargs
     assert call_kwargs["model"] == "sonnet"
     assert call_kwargs["effort"] == "medium"
@@ -637,10 +554,10 @@ def test_classify_slots_match_inventory() -> None:
     invoker = _fake_invoker(_batch_response(items))
     extractor = ClaudeExtractor(
         _config(),
-        _prompts(classify_en="content={ITEMS}"),
+        _prompts(classify="content={ITEMS}"),
         _invoker=invoker,
     )
-    extractor.classify_relevance_batch("en", items)
+    extractor.classify_relevance_batch(items)
     prompt_sent = invoker.call.call_args.args[0]
     assert "MY_TITLE" in prompt_sent
     assert "MY_DESC" in prompt_sent
@@ -650,10 +567,10 @@ def test_judge_slots_match_inventory() -> None:
     invoker = _fake_invoker(_judge_response())
     extractor = ClaudeExtractor(
         _config(skills=["python"]),
-        _prompts(judge_en="s={skills} d={raw_description}"),
+        _prompts(judge="s={skills} d={raw_description}"),
         _invoker=invoker,
     )
-    extractor.judge_match("en", "MY_DESC")
+    extractor.judge_match("MY_DESC")
     prompt_sent = invoker.call.call_args.args[0]
     assert "- python" in prompt_sent
     assert "d=MY_DESC" in prompt_sent
@@ -669,14 +586,14 @@ def test_judge_slots_match_inventory() -> None:
     "invoke,transcript_file,stderr,extra_transcript_assertions",
     [
         pytest.param(
-            lambda e: e.classify_relevance_batch("en", _items(2)),
+            lambda e: e.classify_relevance_batch(_items(2)),
             "classify_relevance.transcripts.jsonl",
             "some stderr",
             {"stdout": '{"type":"result","result":"","is_error":false}'},
             id="classify",
         ),
         pytest.param(
-            lambda e: e.judge_match("en", "desc", stub_url="https://example.com/job/1"),
+            lambda e: e.judge_match("desc", stub_url="https://example.com/job/1"),
             "judge_match.transcripts.jsonl",
             "judge stderr",
             {"stub_url": "https://example.com/job/1"},
@@ -723,13 +640,13 @@ def test_cli_error(
     "invoke,transcript_file,extra_transcript_assertions",
     [
         pytest.param(
-            lambda e: e.classify_relevance_batch("en", _items(1)),
+            lambda e: e.classify_relevance_batch(_items(1)),
             "classify_relevance.transcripts.jsonl",
             {},
             id="classify",
         ),
         pytest.param(
-            lambda e: e.judge_match("en", "desc", stub_url="https://example.com/job/2"),
+            lambda e: e.judge_match("desc", stub_url="https://example.com/job/2"),
             "judge_match.transcripts.jsonl",
             {"stub_url": "https://example.com/job/2"},
             id="judge",
@@ -768,13 +685,13 @@ def test_malformed_envelope(
     "invoke,transcript_file,expected_error_cls",
     [
         pytest.param(
-            lambda e: e.classify_relevance_batch("en", _items(1)),
+            lambda e: e.classify_relevance_batch(_items(1)),
             "classify_relevance.transcripts.jsonl",
             ExtractorBatchMalformedError,
             id="classify",
         ),
         pytest.param(
-            lambda e: e.judge_match("en", "desc"),
+            lambda e: e.judge_match("desc"),
             "judge_match.transcripts.jsonl",
             ExtractorMalformedJSONError,
             id="judge",
@@ -806,14 +723,14 @@ def test_tag_missing(
     "invoke,transcript_file,expected_error_cls,raw",
     [
         pytest.param(
-            lambda e: e.classify_relevance_batch("en", _items(1)),
+            lambda e: e.classify_relevance_batch(_items(1)),
             "classify_relevance.transcripts.jsonl",
             ExtractorBatchMalformedError,
             "<verdicts>bad json</verdicts>",
             id="classify",
         ),
         pytest.param(
-            lambda e: e.judge_match("en", "desc"),
+            lambda e: e.judge_match("desc"),
             "judge_match.transcripts.jsonl",
             ExtractorMalformedJSONError,
             "<verdict>bad json</verdict>",

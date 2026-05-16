@@ -103,7 +103,7 @@ _ZERO_USAGE = CallUsage(
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+    ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
     )
@@ -575,9 +575,7 @@ def test_integration_dedup_counter_breakdown(
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [
-                PositionStub(
-                    url=_DEDUP_URLS[i], title=f"Job {i}", source="stub", language="en"
-                )
+                PositionStub(url=_DEDUP_URLS[i], title=f"Job {i}", source="stub")
                 for i in range(7)
             ]
 
@@ -642,11 +640,7 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
             pass
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [
-                PositionStub(
-                    url=duplicate_url, title="Job", source="stub", language="en"
-                )
-            ]
+            return [PositionStub(url=duplicate_url, title="Job", source="stub")]
 
         def enrich(self, stub: PositionStub) -> Position:
             enrich_calls.append(stub.url)
@@ -751,7 +745,7 @@ def test_degraded_run_never_emits_skip_and_end_query(tmp_path: Path) -> None:
 
     consumed: list[int] = [0]
     miss_stub = PositionStub(
-        url="https://deg.example/miss", title="Miss", source="stub", language="en"
+        url="https://deg.example/miss", title="Miss", source="stub"
     )
     url_hit_stubs = [
         PositionStub(
@@ -785,14 +779,14 @@ def test_degraded_run_never_emits_skip_and_end_query(tmp_path: Path) -> None:
             pass
 
         def classify_relevance_batch(
-            self, language: str, items: list[ClassifyItem]
+            self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
             raise ClaudeUsageLimitError(
                 "quota", returncode=1, stdout="", stderr="quota", envelope=None
             )
 
         def judge_match(
-            self, language: str, raw_description: str, *, stub_url: str = ""
+            self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
@@ -842,9 +836,7 @@ def test_in_run_dedup_run_hits_in_log_line(
             pass
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [
-                PositionStub(url=dup_url, title="Dup", source="stub", language="en")
-            ]
+            return [PositionStub(url=dup_url, title="Dup", source="stub")]
 
         def enrich(self, stub: PositionStub) -> Position:
             return Position(stub=stub, raw_description="good description")
@@ -885,9 +877,7 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
             pass
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [
-                PositionStub(url=dup_url, title="Job", source="stub", language="en")
-            ]
+            return [PositionStub(url=dup_url, title="Job", source="stub")]
 
         def enrich(self, stub: PositionStub) -> Position:
             return Position(stub=stub, raw_description="good description")
@@ -927,7 +917,7 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Integration: language resolution + Pre-Filter pass (slice 4c)
+# Integration: Pre-Filter pass
 # ---------------------------------------------------------------------------
 
 _STUB_URLS_PF = [f"https://stub.example/pf/{i}" for i in range(6)]
@@ -945,9 +935,7 @@ class _PreFilterStubParser:
 
     def discover(self, query: ParserQuery) -> list[PositionStub]:
         return [
-            PositionStub(
-                url=_STUB_URLS_PF[i], title=f"Job {i}", source="stub", language="en"
-            )
+            PositionStub(url=_STUB_URLS_PF[i], title=f"Job {i}", source="stub")
             for i in range(6)
         ]
 
@@ -1013,7 +1001,7 @@ class _WhitelistRescueStubParser:
 
     def discover(self, query: ParserQuery) -> list[PositionStub]:
         return [
-            PositionStub(url=url, title=f"Job {i}", source="stub", language="en")
+            PositionStub(url=url, title=f"Job {i}", source="stub")
             for i, url in enumerate(_STUB_URLS_WL)
         ]
 
@@ -1086,7 +1074,6 @@ class _LLMStubParser:
                 url=_STUB_URLS_LLM[i],
                 title=f"Job {i}",
                 source="stub",
-                language="en",
             )
             for i in range(6)
         ]
@@ -1124,7 +1111,7 @@ class _FakeExtractor:
         pass
 
     def classify_relevance_batch(
-        self, language: str, items: list[ClassifyItem]
+        self, items: list[ClassifyItem]
     ) -> tuple[list[RelevanceVerdict], CallUsage]:
         verdicts = [
             RelevanceVerdict(in_domain=(item.title != "Job 1")) for item in items
@@ -1132,7 +1119,7 @@ class _FakeExtractor:
         return verdicts, _FAKE_CLASSIFY_USAGE
 
     def judge_match(
-        self, language: str, raw_description: str, *, stub_url: str = ""
+        self, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]:
         # Extract job index from description ("description for job N")
         for idx, url in enumerate(_STUB_URLS_LLM):
@@ -1248,13 +1235,13 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
             pass
 
         def classify_relevance_batch(
-            self, language: str, items: list[ClassifyItem]
+            self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
             call_log.extend(["classify"] * len(items))
             return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
         def judge_match(
-            self, language: str, raw_description: str, *, stub_url: str = ""
+            self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:
             call_log.append("judge")
             return (
@@ -1279,7 +1266,6 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
                     url=f"https://batch.example/{i}",
                     title=f"Job {i}",
                     source="stub",
-                    language="en",
                 )
                 for i in range(5)
             ]
@@ -1331,9 +1317,7 @@ class _TwoStubParser:
 
     def discover(self, query: ParserQuery) -> list[PositionStub]:
         return [
-            PositionStub(
-                url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
-            )
+            PositionStub(url=_ERR_URLS[i], title=f"Job {i}", source="stub")
             for i in range(2)
         ]
 
@@ -1358,7 +1342,7 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
     call_count = [0]
 
     def _batch_side_effect(
-        lang: str, items: list[ClassifyItem]
+        items: list[ClassifyItem],
     ) -> tuple[list[RelevanceVerdict], CallUsage]:
         call_count[0] += 1
         if call_count[0] == 1:
@@ -1411,7 +1395,7 @@ def test_extractor_error_on_judge_leaves_position_unseen(tmp_path: Path) -> None
 
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+    ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
     )
@@ -1455,9 +1439,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [
-                PositionStub(
-                    url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
-                )
+                PositionStub(url=_ERR_URLS[i], title=f"Job {i}", source="stub")
                 for i in range(3)
             ]
 
@@ -1509,9 +1491,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [
-                PositionStub(
-                    url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
-                )
+                PositionStub(url=_ERR_URLS[i], title=f"Job {i}", source="stub")
                 for i in range(2)
             ]
 
@@ -1566,9 +1546,7 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
         def discover(self, query: ParserQuery):  # type: ignore[return]
             # Yield 3 stubs then raise ParserError
             for i in range(3):
-                yield PositionStub(
-                    url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
-                )
+                yield PositionStub(url=_ERR_URLS[i], title=f"Job {i}", source="stub")
             raise ParserError("mid-discover boom")
 
         def enrich(self, stub: PositionStub) -> Position:
@@ -1663,7 +1641,6 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
                     url="https://ok.example/0",
                     title="Job 0",
                     source="healthy",
-                    language="en",
                 )
             ]
 
@@ -1796,9 +1773,7 @@ def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
             pass
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [
-                PositionStub(url=dup_url, title="Dup", source="stub", language="en")
-            ]
+            return [PositionStub(url=dup_url, title="Dup", source="stub")]
 
         def enrich(self, stub: PositionStub) -> Position:
             return Position(stub=stub, raw_description="good description")
@@ -1843,12 +1818,12 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
             pass
 
         def classify_relevance_batch(
-            self, language: str, items: list[ClassifyItem]
+            self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
             raise RuntimeError("unexpected crash escaping main path")
 
         def judge_match(
-            self, language: str, raw_description: str, *, stub_url: str = ""
+            self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
@@ -2066,12 +2041,8 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
             pass
 
         def discover(self, query: ParserQuery):  # type: ignore[return]
-            yield PositionStub(
-                url=_STUB_URLS[0], title="Job 0", source="stub", language="en"
-            )
-            yield PositionStub(
-                url=_STUB_URLS[1], title="Job 1", source="stub", language="en"
-            )
+            yield PositionStub(url=_STUB_URLS[0], title="Job 0", source="stub")
+            yield PositionStub(url=_STUB_URLS[1], title="Job 1", source="stub")
             raise RuntimeError("thread crashed")
 
         def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
@@ -2114,134 +2085,6 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
     assert "enrich_failed=1" in content
     assert "external_redirects=1" in content
     assert "parsers_dead=1" in content
-
-
-# ---------------------------------------------------------------------------
-# language.log integration
-# ---------------------------------------------------------------------------
-
-
-def test_language_log_anomaly_entries(tmp_path: Path) -> None:
-    """German position → no anomaly; French position → detected=other; short → detected=unknown.
-
-    Exactly one SUMMARY trailer must appear in language.log.
-    Downstream classify input uses effective language in {de, en} only.
-    """
-    import application_pipeline.parser_log as parser_log
-
-    logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
-
-    _DE_DESCRIPTION = (
-        "Wir suchen einen erfahrenen Softwareentwickler für unser Team in Hamburg. "
-        "Das Unternehmen bietet interessante Projekte und eine gute Bezahlung. "
-        "Bewerben Sie sich jetzt mit Ihren vollständigen Unterlagen."
-    )
-    _FR_DESCRIPTION = (
-        "Nous recherchons un ingénieur logiciel expérimenté pour rejoindre notre équipe. "
-        "L'entreprise offre des projets intéressants et une bonne rémunération. "
-        "Postulez maintenant avec vos documents complets."
-    )
-    _SHORT_DESCRIPTION = "456 789 012"
-
-    _LANGUAGE_STUB_URLS = [
-        "https://lang.example/de",
-        "https://lang.example/fr",
-        "https://lang.example/short",
-    ]
-
-    class _LanguageTestParser:
-        def __enter__(self) -> "_LanguageTestParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [
-                PositionStub(
-                    url=_LANGUAGE_STUB_URLS[0],
-                    title="Softwareentwickler",
-                    source="test",
-                ),
-                PositionStub(
-                    url=_LANGUAGE_STUB_URLS[1],
-                    title="Ingénieur logiciel",
-                    source="test",
-                ),
-                PositionStub(url=_LANGUAGE_STUB_URLS[2], title="123", source="test"),
-            ]
-
-        def enrich(self, stub: PositionStub) -> Position:
-            if stub.url == _LANGUAGE_STUB_URLS[0]:
-                return Position(stub=stub, raw_description=_DE_DESCRIPTION)
-            elif stub.url == _LANGUAGE_STUB_URLS[1]:
-                return Position(stub=stub, raw_description=_FR_DESCRIPTION)
-            else:
-                return Position(stub=stub, raw_description=_SHORT_DESCRIPTION)
-
-    captured_languages: list[str] = []
-
-    class _CapturingExtractor:
-        def prewarm(self) -> None:
-            pass
-
-        def classify_relevance_batch(
-            self, language: str, items: list[ClassifyItem]
-        ) -> "tuple[list[RelevanceVerdict], CallUsage]":
-            captured_languages.append(language)
-            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
-
-        def judge_match(
-            self, language: str, raw_description: str, *, stub_url: str = ""
-        ) -> "tuple[MatchVerdict, CallUsage]":
-            return (
-                MatchVerdict(
-                    tier=MatchTier.green, matched=[], missing=[], summary="ok"
-                ),
-                _ZERO_USAGE,
-            )
-
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-
-    run(
-        config_path,
-        extractor=_CapturingExtractor(),  # type: ignore[arg-type]
-        parser_registry=lambda _: _LanguageTestParser,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
-    )
-
-    # Downstream classify only receives "de" or "en"
-    assert all(lang in ("de", "en") for lang in captured_languages), (
-        f"classify_relevance must only receive 'de' or 'en', got: {captured_languages}"
-    )
-
-    log_file = logs_dir / "language.log"
-    assert log_file.exists(), "language.log must be created"
-
-    content = log_file.read_text(encoding="utf-8")
-
-    # German position produces no anomaly entry
-    assert "lang.example/de" not in content
-
-    # French position: detected=other anomaly
-    assert "lang.example/fr" in content
-    assert "detected=other" in content
-
-    # Short position: detected=unknown anomaly
-    assert "lang.example/short" in content
-    assert "detected=unknown" in content
-
-    # Exactly one SUMMARY trailer
-    assert content.count("SUMMARY OF SESSION") == 1
-    assert "anomalies=2" in content
 
 
 # ---------------------------------------------------------------------------
@@ -2385,9 +2228,7 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
     """batch_size=2 with 4 positions → classify_relevance_batch called twice with 2 items each."""
     batch_sizes_seen: list[int] = []
 
-    def _batch(
-        lang: str, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         batch_sizes_seen.append(len(items))
         return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
@@ -2412,7 +2253,6 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
                     url=f"https://batch.example/{i}",
                     title=f"Job {i}",
                     source="stub",
-                    language="en",
                 )
                 for i in range(4)
             ]
@@ -2456,7 +2296,6 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
                     url=f"https://slow.example/{i}",
                     title=f"Job {i}",
                     source="s",
-                    language="en",
                 )
                 for i in range(2)
             ]
@@ -2493,8 +2332,8 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
     )
 
 
-def test_classify_thread_two_language_three_batch_happy_path(tmp_path: Path) -> None:
-    """_ClassifyThread happy path: 2 de + 4 en survivors, batch_size=2 → 3 batches total.
+def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) -> None:
+    """_ClassifyThread happy path: 6 survivors, batch_size=2 → 3 batches total.
 
     All positions are in-domain and judged green.  Asserts set-equality on the
     URLs that appear in current.md and on the 'kept' members of .seen.json.
@@ -2502,16 +2341,12 @@ def test_classify_thread_two_language_three_batch_happy_path(tmp_path: Path) -> 
     seen_path = tmp_path / ".seen.json"
     results_path = tmp_path / "current.md"
 
-    _DE_DESCRIPTION = (
-        "Wir suchen einen erfahrenen Softwareentwickler für unser Team. "
-        "Das Unternehmen bietet interessante Projekte und eine gute Bezahlung."
-    )
-    _DE_URLS = [f"https://ct3b.example/de/{i}" for i in range(2)]
-    _EN_URLS = [f"https://ct3b.example/en/{i}" for i in range(4)]
-    _ALL_URLS = set(_DE_URLS + _EN_URLS)
+    _URLS_A = [f"https://ct3b.example/a/{i}" for i in range(2)]
+    _URLS_B = [f"https://ct3b.example/b/{i}" for i in range(4)]
+    _ALL_URLS = set(_URLS_A + _URLS_B)
 
-    class _TwoLangSixStubParser:
-        def __enter__(self) -> "_TwoLangSixStubParser":
+    class _SixStubParser:
+        def __enter__(self) -> "_SixStubParser":
             return self
 
         def __exit__(self, *args: object) -> None:
@@ -2519,32 +2354,24 @@ def test_classify_thread_two_language_three_batch_happy_path(tmp_path: Path) -> 
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             stubs = []
-            for url in _DE_URLS:
-                stubs.append(
-                    PositionStub(url=url, title=f"Entwickler {url}", source="s")
-                )
-            for url in _EN_URLS:
-                stubs.append(
-                    PositionStub(
-                        url=url, title=f"Engineer {url}", source="s", language="en"
-                    )
-                )
+            for url in _URLS_A:
+                stubs.append(PositionStub(url=url, title=f"Role A {url}", source="s"))
+            for url in _URLS_B:
+                stubs.append(PositionStub(url=url, title=f"Role B {url}", source="s"))
             return stubs
 
         def enrich(self, stub: PositionStub) -> Position:
-            if "de" in stub.url:
-                return Position(stub=stub, raw_description=_DE_DESCRIPTION)
             return Position(stub=stub, raw_description="Software engineering role.")
 
     summary = run(
         _batch_size_config(tmp_path, 2),
         extractor=_stub_extractor(),
-        parser_registry=lambda _: _TwoLangSixStubParser,  # type: ignore[return-value]
+        parser_registry=lambda _: _SixStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
         results_manager=ResultsFileManager(results_path, "# Results\n\n"),
     )
 
-    # 2 de + 4 en → 3 batches (1 de + 2 en)
+    # 6 positions → 3 batches of 2
     assert summary.written == 6
     assert summary.classify_items == 6
     assert summary.classifier_dropped == 0
@@ -2560,14 +2387,12 @@ def test_classify_thread_two_language_three_batch_happy_path(tmp_path: Path) -> 
     assert urls_in_content == _ALL_URLS
 
 
-def test_language_routing_de_and_en_buffers(tmp_path: Path) -> None:
-    """German positions go to de classify call, English positions go to en classify call."""
-    lang_batches: dict[str, list[int]] = {}
+def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
+    """Mixed-language listings are all accumulated in a single buffer and classified together."""
+    batch_sizes: list[int] = []
 
-    def _batch(
-        lang: str, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
-        lang_batches[lang] = lang_batches.get(lang, []) + [len(items)]
+    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
+        batch_sizes.append(len(items))
         return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
@@ -2578,13 +2403,8 @@ def test_language_routing_de_and_en_buffers(tmp_path: Path) -> None:
         _ZERO_USAGE,
     )
 
-    _DE_DESCRIPTION = (
-        "Wir suchen einen erfahrenen Softwareentwickler für unser Team. "
-        "Das Unternehmen bietet interessante Projekte und eine gute Bezahlung."
-    )
-
-    class _MixedLangParser:
-        def __enter__(self) -> "_MixedLangParser":
+    class _FourStubParser:
+        def __enter__(self) -> "_FourStubParser":
             return self
 
         def __exit__(self, *args: object) -> None:
@@ -2593,45 +2413,27 @@ def test_language_routing_de_and_en_buffers(tmp_path: Path) -> None:
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [
                 PositionStub(
-                    url="https://ml.example/de1", title="Entwickler", source="s"
+                    url="https://ml.example/1", title="Entwickler", source="s"
                 ),
-                PositionStub(
-                    url="https://ml.example/de2", title="Ingenieur", source="s"
-                ),
-                PositionStub(
-                    url="https://ml.example/en1",
-                    title="Engineer",
-                    source="s",
-                    language="en",
-                ),
-                PositionStub(
-                    url="https://ml.example/en2",
-                    title="Developer",
-                    source="s",
-                    language="en",
-                ),
+                PositionStub(url="https://ml.example/2", title="Ingenieur", source="s"),
+                PositionStub(url="https://ml.example/3", title="Engineer", source="s"),
+                PositionStub(url="https://ml.example/4", title="Developer", source="s"),
             ]
 
         def enrich(self, stub: PositionStub) -> Position:
-            if "de" in stub.url:
-                return Position(stub=stub, raw_description=_DE_DESCRIPTION)
-            return Position(
-                stub=stub, raw_description="Software engineering role in English."
-            )
+            return Position(stub=stub, raw_description="Software engineering role.")
 
     summary = run(
         _batch_size_config(tmp_path, 100),
         extractor=ext,
-        parser_registry=lambda _: _MixedLangParser,  # type: ignore[return-value]
+        parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_manager=_stub_results_manager(),
     )
 
     assert summary.written == 4
-    assert "de" in lang_batches
-    assert "en" in lang_batches
-    assert lang_batches["de"] == [2]
-    assert lang_batches["en"] == [2]
+    # All 4 positions accumulated in a single batch (batch_size=100)
+    assert batch_sizes == [4]
 
 
 def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
@@ -2640,9 +2442,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     _OFF_URL = "https://offdomain.example/0"
     _ON_URL = "https://offdomain.example/1"
 
-    def _batch(
-        lang: str, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         # First item off-domain, second in-domain
         return [
             RelevanceVerdict(in_domain=(item.raw_description != "off domain content"))
@@ -2666,12 +2466,8 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [
-                PositionStub(
-                    url=_OFF_URL, title="Off-domain Job", source="s", language="en"
-                ),
-                PositionStub(
-                    url=_ON_URL, title="On-domain Job", source="s", language="en"
-                ),
+                PositionStub(url=_OFF_URL, title="Off-domain Job", source="s"),
+                PositionStub(url=_ON_URL, title="On-domain Job", source="s"),
             ]
 
         def enrich(self, stub: PositionStub) -> Position:
@@ -2702,9 +2498,7 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
 
     call_count = [0]
 
-    def _batch(
-        lang: str, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         call_count[0] += 1
         if call_count[0] == 1:
             raise ExtractorBatchMalformedError("length mismatch")
@@ -2758,7 +2552,7 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
     logs_dir = tmp_path / "synched" / "logs"
     pl.configure(logs_dir)
 
-    def _batch(lang: str, items: list[ClassifyItem]) -> list[RelevanceVerdict]:
+    def _batch(items: list[ClassifyItem]) -> list[RelevanceVerdict]:
         raise ExtractorBatchMalformedError("id mismatch")
 
     ext = MagicMock()
@@ -2788,9 +2582,7 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     logs_dir = tmp_path / "synched" / "logs"
     pl.configure(logs_dir)
 
-    def _batch(
-        lang: str, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         raise ExtractorUnreachableError("cli gone", returncode=1, stderr="no such file")
 
     ext = MagicMock()
@@ -2820,7 +2612,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+    ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
     )
@@ -2846,9 +2638,7 @@ def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
     seen_path = tmp_path / ".seen.json"
     results_path = tmp_path / "current.md"
 
-    def _batch(
-        lang: str, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         raise ClaudeUsageLimitError(
             "subscription cap",
             returncode=1,
@@ -2899,7 +2689,7 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
             pass
 
         def classify_relevance_batch(
-            self, language: str, items: list[ClassifyItem]
+            self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
             raise ClaudeUsageLimitError(
                 "subscription cap",
@@ -2910,7 +2700,7 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
             )
 
         def judge_match(
-            self, language: str, raw_description: str, *, stub_url: str = ""
+            self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
@@ -2934,7 +2724,6 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
                     url="https://limit.example/0",
                     title="Job",
                     source="s",
-                    language="en",
                 )
             ]
 
@@ -2962,10 +2751,10 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
 # ---------------------------------------------------------------------------
 
 
-def test_prompt_loader_only_de_and_en_for_classify(tmp_path: Path) -> None:
-    """load_prompts loads templates for de and en from package resources."""
+def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> None:
+    """load_prompts returns a single PromptTemplate per call site."""
     from application_pipeline.prompts import load_prompts
-    from application_pipeline import Config, SourceEntry
+    from application_pipeline import Config, PromptTemplate, SourceEntry
 
     user_info_dir = tmp_path / "user-info"
     user_info_dir.mkdir()
@@ -2982,8 +2771,8 @@ def test_prompt_loader_only_de_and_en_for_classify(tmp_path: Path) -> None:
     )
     prompts = load_prompts(cfg)
 
-    assert set(prompts.classify_relevance.keys()) == {"de", "en"}
-    assert set(prompts.judge_match.keys()) == {"de", "en"}
+    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.judge_match, PromptTemplate)
 
 
 def test_init_materialises_user_info_files(
@@ -3697,7 +3486,6 @@ class _MixedLangParser199:
                 url="https://cl199.example/en1",
                 title="Engineer",
                 source="s",
-                language="en",
             ),
         ]
 
@@ -3979,7 +3767,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
     judge_call_count = [0]
 
     def _judge(
-        language: str, raw_description: str, *, stub_url: str = ""
+        raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]:
         judge_call_count[0] += 1
         if judge_call_count[0] >= 4:
@@ -3992,7 +3780,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
 
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+    ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
     )
@@ -4007,9 +3795,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [
-                PositionStub(
-                    url=_ERR_URLS[i], title=f"Job {i}", source="stub", language="en"
-                )
+                PositionStub(url=_ERR_URLS[i], title=f"Job {i}", source="stub")
                 for i in range(4)
             ]
 
@@ -4056,12 +3842,12 @@ def test_non_quota_worker_exception_writes_failure_report(
             pass
 
         def classify_relevance_batch(
-            self, language: str, items: list[ClassifyItem]
+            self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
             return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
         def judge_match(
-            self, language: str, raw_description: str, *, stub_url: str = ""
+            self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:
             raise RuntimeError("disk full")
 
@@ -4083,7 +3869,6 @@ def test_non_quota_worker_exception_writes_failure_report(
                     url="https://abort.example/0",
                     title="Job",
                     source="s",
-                    language="en",
                 )
             ]
 
@@ -4147,7 +3932,7 @@ def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
     """ExtractorError on judge_match: judge_match row body is refreshed with errored=N."""
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+    ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
     )
@@ -4201,7 +3986,7 @@ def test_judge_body_denominator_counts_successes_only(tmp_path: Path) -> None:
     """judge_match body success ratio denominator counts successes only, not successes+failed."""
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+    ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
     )
@@ -4340,7 +4125,7 @@ def test_run_divider_includes_judge_items_abandoned_on_judge_failure(
 
     ext = MagicMock()
     ext.prewarm.return_value = None
-    ext.classify_relevance_batch.side_effect = lambda lang, items: (
+    ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
     )

@@ -29,7 +29,6 @@ _GROUPABLE_FIELDS = frozenset(
         "title",
         "company",
         "location",
-        "language",
         "url",
         "source",
         # Position fields (excluding raw_description)
@@ -52,7 +51,6 @@ _DENSE_STUB = PositionStub(
     source="example",
     company="ACME Corp",
     location="Berlin",
-    language="de",
     posted_date=date(2026, 1, 15),
 )
 

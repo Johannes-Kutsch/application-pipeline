@@ -21,7 +21,6 @@ from application_pipeline.run_metrics import RunMetrics, RunSummary
 from application_pipeline.status_display import PlainStatusDisplay, StatusDisplay
 from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
-from application_pipeline.language import LanguageResolution, resolve_language
 from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
     ClassifyItem,
@@ -136,8 +135,7 @@ _QUERY_DONE = _QueryDone()
 
 @dataclass
 class _ClassifyBatch:
-    language: str
-    positions: list[tuple["Position", "LanguageResolution"]]
+    positions: list["Position"]
     item_id: str
 
 
@@ -156,7 +154,6 @@ _NO_MORE_BATCHES = _NoMoreBatches()
 @dataclass
 class _JudgeJob:
     position: "Position"
-    resolution: "LanguageResolution"
     item_id: str
 
 
@@ -316,7 +313,7 @@ class _ClassifyThread(_QueueWorker):
 
     def _on_dequeue(self, item: object) -> None:
         assert isinstance(item, _ClassifyBatch)
-        self._metrics.classify_batch_dequeued(item.language, len(item.positions))
+        self._metrics.classify_batch_dequeued(len(item.positions))
 
     def _on_shutdown(self) -> None:
         self._judge_queue.put(_NO_MORE_JUDGES)
@@ -326,9 +323,7 @@ class _ClassifyThread(_QueueWorker):
         batch = item
         items = _make_classify_items(batch.positions)
         try:
-            verdicts, classify_usage = self._extractor.classify_relevance_batch(
-                batch.language, items
-            )
+            verdicts, classify_usage = self._extractor.classify_relevance_batch(items)
         except ClaudeUsageLimitError:
             self._run_state.set_degraded("usage_limit", self.name)
             return
@@ -337,7 +332,6 @@ class _ClassifyThread(_QueueWorker):
             parser_log.record(
                 "classify_relevance",
                 "batch_abandoned",
-                language=batch.language,
                 batch_size=len(batch.positions),
                 returncode=getattr(exc, "returncode", None),
                 stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
@@ -347,7 +341,7 @@ class _ClassifyThread(_QueueWorker):
             return
 
         classifier_dropped = 0
-        for verdict, (position, resolution) in zip(verdicts, batch.positions):
+        for verdict, position in zip(verdicts, batch.positions):
             if not verdict.in_domain:
                 self._dedup_store.mark_off_domain(position.stub)
                 classifier_dropped += 1
@@ -356,7 +350,6 @@ class _ClassifyThread(_QueueWorker):
                 self._judge_queue.put(
                     _JudgeJob(
                         position=position,
-                        resolution=resolution,
                         item_id=batch.item_id,
                     )
                 )
@@ -403,7 +396,6 @@ class _JudgeThread(_QueueWorker):
         job = item
         try:
             match_verdict, judge_usage = self._extractor.judge_match(
-                job.resolution.effective,
                 job.position.raw_description,
                 stub_url=job.position.stub.url,
             )
@@ -475,16 +467,14 @@ class _ParserState:
         }
 
 
-def _make_classify_items(
-    batch: list[tuple[Position, LanguageResolution]],
-) -> list[ClassifyItem]:
+def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:
     return [
         ClassifyItem(
             id=str(idx),
             title=pos.stub.title,
             raw_description=pos.raw_description,
         )
-        for idx, (pos, _) in enumerate(batch)
+        for idx, pos in enumerate(batch)
     ]
 
 
@@ -585,11 +575,9 @@ def run(
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display)
         _in_run_seen: set[str] = set()
-        de_buffer: list[tuple[Position, LanguageResolution]] = []
-        en_buffer: list[tuple[Position, LanguageResolution]] = []
+        classify_buffer: list[Position] = []
         batch_size = cfg.claude_classify_batch_size
         batch_id = 0
-        language_anomalies = 0
         classify_queue: queue.Queue[object] = queue.Queue()
         judge_queue: queue.Queue[object] = queue.Queue()
         _run_started_at = datetime.now(timezone.utc)
@@ -668,19 +656,17 @@ def run(
             classify_thread.start()
             judge_thread.start()
 
-            def _flush_classify_batch(language: str) -> None:
+            def _flush_classify_batch() -> None:
                 nonlocal batch_id
-                buffer = de_buffer if language == "de" else en_buffer
                 classify_queue.put(
                     _ClassifyBatch(
-                        language=language,
-                        positions=list(buffer),
+                        positions=list(classify_buffer),
                         item_id=str(batch_id),
                     )
                 )
-                metrics.classify_batch_enqueued(language, len(buffer))
+                metrics.classify_batch_enqueued(len(classify_buffer))
                 batch_id += 1
-                buffer.clear()
+                classify_buffer.clear()
 
             parsers_remaining: set[str] = set(parser_states.keys())
 
@@ -775,31 +761,13 @@ def run(
                         if warning.startswith("unparseable_date"):
                             state.unparseable_dates += 1
                     state.enriched += 1
-                    resolution = resolve_language(payload)
-                    if resolution.detected not in ("de", "en"):
-                        parser_log.record(
-                            "language",
-                            "anomaly",
-                            stub_url=payload.stub.url,
-                            title=payload.stub.title,
-                            source_parser=payload.stub.source,
-                            company=payload.stub.company,
-                            location=payload.stub.location,
-                            language=resolution.effective,
-                            detected=resolution.detected,
-                            detection_source=resolution.source,
-                        )
-                        language_anomalies += 1
-                        metrics.language_anomaly()
                     verdict = prefilter.classify(payload)
                     if verdict.passes:
                         metrics.prefilter_passed(verdict)
-                        lang = "de" if resolution.effective == "de" else "en"
-                        buffer = de_buffer if lang == "de" else en_buffer
-                        buffer.append((payload, resolution))
-                        metrics.classify_buffered(lang, 1)
-                        if len(buffer) >= batch_size:
-                            _flush_classify_batch(lang)
+                        classify_buffer.append(payload)
+                        metrics.classify_buffered(1)
+                        if len(classify_buffer) >= batch_size:
+                            _flush_classify_batch()
                     else:
                         dedup_store.mark_off_domain(payload.stub)
                         metrics.prefilter_dropped(verdict)
@@ -862,17 +830,10 @@ def run(
                     pstate.summary_dict(parsers_done_monotonic),
                     pstate.started_at,
                 )
-            parser_log.summarize(
-                "language",
-                {"anomalies": language_anomalies},
-                _run_started_at,
-            )
 
-            # Flush residual buffers (end-of-discovery undersized batches)
-            if de_buffer:
-                _flush_classify_batch("de")
-            if en_buffer:
-                _flush_classify_batch("en")
+            # Flush residual buffer (end-of-discovery undersized batch)
+            if classify_buffer:
+                _flush_classify_batch()
             classify_queue.put(_NO_MORE_BATCHES)
 
         # Sentinel cascade: classify drains → forwards _NO_MORE_JUDGES → judge drains → exits

@@ -2,7 +2,6 @@ import importlib.resources
 import pathlib
 import string
 from dataclasses import dataclass
-from typing import Literal
 
 from .config import Config
 
@@ -13,8 +12,6 @@ class PromptError(Exception):
 
 CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"ITEMS"})
 JUDGE_MATCH_SLOTS: frozenset[str] = frozenset({"skills", "raw_description"})
-
-_LANGS: tuple[Literal["de", "en"], ...] = ("de", "en")
 
 _PACKAGE_CLASSIFY_SLOTS: frozenset[str] = frozenset({"ITEMS", "USER_INFO"})
 _PACKAGE_JUDGE_SLOTS: frozenset[str] = frozenset(
@@ -40,8 +37,8 @@ class PromptTemplate:
 
 @dataclass(frozen=True)
 class Prompts:
-    classify_relevance: dict[Literal["de", "en"], PromptTemplate]
-    judge_match: dict[Literal["de", "en"], PromptTemplate]
+    classify_relevance: PromptTemplate
+    judge_match: PromptTemplate
 
 
 def load_prompts(config: Config) -> Prompts:
@@ -53,28 +50,20 @@ def load_prompts(config: Config) -> Prompts:
     judge_user_info = f"<user-info>\n{self_desc}\n{match_criteria}\n</user-info>"
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
-    classify = {
-        lang: _load_package_template(
-            pkg,
-            "classify_relevance",
-            lang,
-            _PACKAGE_CLASSIFY_SLOTS,
-            CLASSIFY_RELEVANCE_SLOTS,
-            classify_user_info,
-        )
-        for lang in _LANGS
-    }
-    judge = {
-        lang: _load_package_template(
-            pkg,
-            "judge_match",
-            lang,
-            _PACKAGE_JUDGE_SLOTS,
-            JUDGE_MATCH_SLOTS,
-            judge_user_info,
-        )
-        for lang in _LANGS
-    }
+    classify = _load_package_template(
+        pkg,
+        "classify_relevance",
+        _PACKAGE_CLASSIFY_SLOTS,
+        CLASSIFY_RELEVANCE_SLOTS,
+        classify_user_info,
+    )
+    judge = _load_package_template(
+        pkg,
+        "judge_match",
+        _PACKAGE_JUDGE_SLOTS,
+        JUDGE_MATCH_SLOTS,
+        judge_user_info,
+    )
     return Prompts(classify_relevance=classify, judge_match=judge)
 
 
@@ -92,12 +81,11 @@ def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:
 def _load_package_template(
     pkg: importlib.resources.abc.Traversable,
     call_site: str,
-    lang: str,
     package_slots: frozenset[str],
     render_slots: frozenset[str],
     user_info: str,
 ) -> PromptTemplate:
-    filename = f"{call_site}.{lang}.md"
+    filename = f"{call_site}.md"
     resource = pkg / filename
     try:
         raw = resource.read_text(encoding="utf-8-sig")

@@ -334,14 +334,6 @@ def test_discover_stub_location_extracted(list_html: bytes) -> None:
     assert stub.location == "Hamburg"
 
 
-def test_discover_stub_language_is_de(list_html: bytes) -> None:
-    get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
-        (stub, *_) = list(p.discover(_query()))
-    assert isinstance(stub, PositionStub)
-    assert stub.language == "de"
-
-
 # ---------------------------------------------------------------------------
 # discover — pagination and stop conditions
 # ---------------------------------------------------------------------------

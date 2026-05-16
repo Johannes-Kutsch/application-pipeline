@@ -152,8 +152,10 @@ def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) 
 
     prompts = load_prompts(config)
 
-    assert set(prompts.classify_relevance) == {"de", "en"}
-    assert set(prompts.judge_match) == {"de", "en"}
+    from application_pipeline import PromptTemplate
+
+    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.judge_match, PromptTemplate)
 
 
 def test_rerun_is_idempotent(tmp_path: Path) -> None:

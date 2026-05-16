@@ -80,17 +80,15 @@ def test_prompt_template_preserves_template_verbatim() -> None:
 # --- load_prompts: package-resource templates + user-info injection ---
 
 
-def test_load_prompts_returns_templates_from_package_resources(
+def test_load_prompts_returns_single_template_per_call_site(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
 
-    assert isinstance(prompts.classify_relevance["de"], PromptTemplate)
-    assert isinstance(prompts.classify_relevance["en"], PromptTemplate)
-    assert isinstance(prompts.judge_match["de"], PromptTemplate)
-    assert isinstance(prompts.judge_match["en"], PromptTemplate)
+    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.judge_match, PromptTemplate)
 
 
 def test_load_prompts_embeds_user_info_in_classify_prompt(
@@ -99,7 +97,7 @@ def test_load_prompts_embeds_user_info_in_classify_prompt(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance["de"].render(ITEMS="test items")
+    rendered = prompts.classify_relevance.render(ITEMS="test items")
 
     assert "<user-info>" in rendered
     assert "I am a developer" in rendered
@@ -112,9 +110,7 @@ def test_load_prompts_embeds_user_info_in_judge_prompt(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.judge_match["de"].render(
-        skills="Python", raw_description="some job"
-    )
+    rendered = prompts.judge_match.render(skills="Python", raw_description="some job")
 
     assert "<user-info>" in rendered
     assert "I am a developer" in rendered
@@ -127,7 +123,7 @@ def test_load_prompts_classify_does_not_embed_match_criteria(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance["de"].render(ITEMS="test items")
+    rendered = prompts.classify_relevance.render(ITEMS="test items")
 
     assert "Hamburg, remote" not in rendered
 
@@ -138,9 +134,7 @@ def test_load_prompts_judge_does_not_embed_domain_fit(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.judge_match["de"].render(
-        skills="Python", raw_description="some job"
-    )
+    rendered = prompts.judge_match.render(skills="Python", raw_description="some job")
 
     assert "ML roles" not in rendered
 
@@ -151,7 +145,7 @@ def test_load_prompts_classify_contains_verdicts_tag_instruction(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance["de"].render(ITEMS="test items")
+    rendered = prompts.classify_relevance.render(ITEMS="test items")
 
     assert "<verdicts>" in rendered
 
@@ -162,9 +156,7 @@ def test_load_prompts_judge_contains_verdict_tag_instruction(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.judge_match["de"].render(
-        skills="Python", raw_description="some job"
-    )
+    rendered = prompts.judge_match.render(skills="Python", raw_description="some job")
 
     assert "<verdict>" in rendered
 
@@ -217,8 +209,8 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     config = load(path)
     prompts = load_prompts(config)
 
-    assert "de" in prompts.classify_relevance
-    assert "en" in prompts.classify_relevance
+    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.judge_match, PromptTemplate)
 
 
 # --- Prompts dataclass ---
@@ -227,14 +219,11 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
 def test_prompts_is_frozen() -> None:
     tpl = PromptTemplate("{ITEMS}", CLASSIFY_RELEVANCE_SLOTS)
     prompts = Prompts(
-        classify_relevance={"de": tpl, "en": tpl},
-        judge_match={
-            "de": PromptTemplate("{skills} {raw_description}", JUDGE_MATCH_SLOTS),
-            "en": PromptTemplate("{skills} {raw_description}", JUDGE_MATCH_SLOTS),
-        },
+        classify_relevance=tpl,
+        judge_match=PromptTemplate("{skills} {raw_description}", JUDGE_MATCH_SLOTS),
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
-        prompts.classify_relevance = {}  # type: ignore[misc]
+        prompts.classify_relevance = tpl  # type: ignore[misc]
 
 
 # --- error hierarchy ---

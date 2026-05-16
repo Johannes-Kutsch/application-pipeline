@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
 
 from application_pipeline import parser_log
 from application_pipeline.config import Config
@@ -77,14 +77,12 @@ class ClaudeExtractor:
         self._skills_block = "\n".join(f"- {s}" for s in config.skills)
 
     def classify_relevance_batch(
-        self, language: str, items: list[ClassifyItem]
+        self, items: list[ClassifyItem]
     ) -> tuple[list[RelevanceVerdict], CallUsage]:
-        lang = self._lang_or_en(language)
         items_block = self._format_classify_items(items)
-        prompt = self._prompts.classify_relevance[lang].render(ITEMS=items_block)
+        prompt = self._prompts.classify_relevance.render(ITEMS=items_block)
         parsed, response = self._invoke(
             _CLASSIFY_SITE,
-            language,
             prompt,
             {"item_ids": [item.id for item in items]},
             batch_size=len(items),
@@ -93,15 +91,12 @@ class ClaudeExtractor:
         return self._parse_batch_response(parsed, items), usage
 
     def judge_match(
-        self, language: str, raw_description: str, *, stub_url: str = ""
+        self, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]:
-        lang = self._lang_or_en(language)
-        prompt = self._prompts.judge_match[lang].render(
+        prompt = self._prompts.judge_match.render(
             skills=self._skills_block, raw_description=raw_description
         )
-        data, response = self._invoke(
-            _JUDGE_SITE, language, prompt, {"stub_url": stub_url}
-        )
+        data, response = self._invoke(_JUDGE_SITE, prompt, {"stub_url": stub_url})
         usage = self._usage_from(response)
         try:
             return (
@@ -124,7 +119,6 @@ class ClaudeExtractor:
     def _invoke(
         self,
         site: _CallSite,
-        language: str,
         prompt: str,
         extra: dict[str, object],
         *,
@@ -132,16 +126,13 @@ class ClaudeExtractor:
     ) -> tuple[Any, ClaudeResponse]:
         t0 = time.monotonic()
         try:
-            response = self._invoker.call(
-                prompt, language, model=site.model, effort=site.effort
-            )
+            response = self._invoker.call(prompt, model=site.model, effort=site.effort)
         except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
             status = (
                 "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"
             )
             self._write_transcript(
                 site=site,
-                language=language,
                 prompt=prompt,
                 status=status,
                 duration_s=time.monotonic() - t0,
@@ -163,7 +154,6 @@ class ClaudeExtractor:
         except AgentOutputProtocolError as exc:
             self._write_transcript(
                 site=site,
-                language=language,
                 prompt=prompt,
                 status="protocol_error",
                 duration_s=time.monotonic() - t0,
@@ -177,7 +167,6 @@ class ClaudeExtractor:
 
         transcript: dict[str, object] = {
             "call": site.call,
-            "language": language,
             "prompt": prompt,
             "raw_response": response.raw_response,
             "usage": {
@@ -193,7 +182,6 @@ class ClaudeExtractor:
         parser_log.record_transcript(_COMPONENT_ID, transcript)
 
         record_kwargs: dict[str, object] = {
-            "language": language,
             "cost_usd": response.cost_usd,
             "duration_s": f"{response.duration_s:.3f}",
         }
@@ -207,7 +195,6 @@ class ClaudeExtractor:
     def _write_transcript(
         *,
         site: _CallSite,
-        language: str,
         prompt: str,
         status: str,
         duration_s: float,
@@ -220,7 +207,6 @@ class ClaudeExtractor:
         entry: dict[str, object] = {
             "ts": ts,
             "call": site.call,
-            "language": language,
             "status": status,
             "prompt": prompt,
             "duration_s": duration_s,
@@ -247,10 +233,6 @@ class ClaudeExtractor:
             cost_usd=response.cost_usd,
             duration_s=response.duration_s,
         )
-
-    @staticmethod
-    def _lang_or_en(language: str) -> Literal["de", "en"]:
-        return "de" if language == "de" else "en"
 
     @staticmethod
     def _format_classify_items(items: list[ClassifyItem]) -> str:

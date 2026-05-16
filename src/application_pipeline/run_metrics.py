@@ -64,7 +64,6 @@ class RunMetrics:
         self._enrich_failed = 0
         self._external_redirects = 0
         self._parsers_dead = 0
-        self._language_anomalies = 0
 
         # Classify-stage counters
         self._classify_calls = 0
@@ -80,8 +79,7 @@ class RunMetrics:
         self._total_batches = 0
 
         # Pending-depth counters
-        self._pending_en = 0
-        self._pending_de = 0
+        self._pending_classify = 0
         self._pending_judge = 0
 
         # Judge-stage counters
@@ -190,35 +188,25 @@ class RunMetrics:
             body = self._pipeline_body()
         self._display.update_body("pipeline", body=body)
 
-    def language_anomaly(self) -> None:
-        with self._lock:
-            self._language_anomalies += 1
-
     # -----------------------------------------------------------------------
     # Classify-stage events
     # -----------------------------------------------------------------------
 
-    def classify_buffered(self, language: str, n: int) -> None:
+    def classify_buffered(self, n: int) -> None:
         with self._lock:
-            if language == "de":
-                self._pending_de += n
-            else:
-                self._pending_en += n
+            self._pending_classify += n
             body = self._classify_body()
         self._display.update_body("classify_relevance", body=body)
 
-    def classify_batch_enqueued(self, language: str, n: int) -> None:
+    def classify_batch_enqueued(self, n: int) -> None:
         with self._lock:
             self._total_batches += 1
             body = self._classify_body()
         self._display.update_body("classify_relevance", body=body)
 
-    def classify_batch_dequeued(self, language: str, n: int) -> None:
+    def classify_batch_dequeued(self, n: int) -> None:
         with self._lock:
-            if language == "de":
-                self._pending_de -= n
-            else:
-                self._pending_en -= n
+            self._pending_classify -= n
             body = self._classify_body()
         self._display.update_body("classify_relevance", body=body)
 
@@ -484,11 +472,9 @@ class RunMetrics:
         )
 
     def _classify_body(self) -> str:
-        queue_total = self._pending_en + self._pending_de
         result = (
             f"{self._classify_calls}/{self._total_batches} batches done"
-            f" · {queue_total} items in queue"
-            f" ({self._pending_en} en / {self._pending_de} de)"
+            f" · {self._pending_classify} items in queue"
         )
         if self._classify_failed > 0:
             result += (

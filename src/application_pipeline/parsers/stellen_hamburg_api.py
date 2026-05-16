@@ -262,7 +262,6 @@ class StellenHamburgParser:
             source=_DISPLAY_NAME,
             company=descriptor.get("OrganizationName") or None,
             location=location,
-            language="de",
         )
 
     def enrich(self, stub: PositionStub) -> Position:

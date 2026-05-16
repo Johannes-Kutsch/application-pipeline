@@ -157,14 +157,6 @@ def test_discover_stub_source_is_display_name() -> None:
     assert stub.source == "Bundesagentur"
 
 
-def test_discover_stub_language_is_de() -> None:
-    get = _make_get([_search_body([_item()]), _search_body([])])
-    with BundesagenturParser(_http_get=get) as p:
-        (stub,) = list(p.discover(_query()))
-    assert isinstance(stub, PositionStub)
-    assert stub.language == "de"
-
-
 def test_discover_stub_company_from_firma() -> None:
     get = _make_get([_search_body([_item(company="Muster GmbH")]), _search_body([])])
     with BundesagenturParser(_http_get=get) as p:

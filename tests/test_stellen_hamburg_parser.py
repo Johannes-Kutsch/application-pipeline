@@ -176,14 +176,6 @@ def test_discover_stub_source_is_stellen_hamburg() -> None:
     assert stub.source == "stellen.hamburg"
 
 
-def test_discover_stub_language_is_de() -> None:
-    post = _make_post([_search_body([_item()])])
-    with StellenHamburgParser(_http_post=post) as p:
-        (stub,) = list(p.discover(_query()))
-    assert isinstance(stub, PositionStub)
-    assert stub.language == "de"
-
-
 def test_discover_stub_company_from_organization_name() -> None:
     post = _make_post([_search_body([_item(company="Finanzbehörde Hamburg")])])
     with StellenHamburgParser(_http_post=post) as p:

@@ -116,11 +116,11 @@ def test_match_verdict_is_frozen():
 
 class _StubExtractor:
     def classify_relevance_batch(
-        self, language: str, items: list[ClassifyItem]
+        self, items: list[ClassifyItem]
     ) -> list[RelevanceVerdict]:
         return [RelevanceVerdict(in_domain=True) for _ in items]
 
-    def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
+    def judge_match(self, raw_description: str) -> MatchVerdict:
         return MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok")
 
     def prewarm(self) -> None:
@@ -134,7 +134,7 @@ def test_conforming_class_is_llm_extractor():
 def test_class_missing_judge_match_is_not_llm_extractor():
     class _Bad:
         def classify_relevance_batch(
-            self, language: str, items: list[ClassifyItem]
+            self, items: list[ClassifyItem]
         ) -> list[RelevanceVerdict]:
             return []
 
@@ -143,7 +143,7 @@ def test_class_missing_judge_match_is_not_llm_extractor():
 
 def test_class_missing_classify_relevance_batch_is_not_llm_extractor():
     class _Bad:
-        def judge_match(self, language: str, raw_description: str) -> MatchVerdict:
+        def judge_match(self, raw_description: str) -> MatchVerdict:
             return MatchVerdict(tier=MatchTier.red, matched=[], missing=[], summary="x")
 
     assert not isinstance(_Bad(), LLMExtractor)
@@ -154,7 +154,7 @@ def test_stub_classify_relevance_batch_returns_relevance_verdicts():
     items = [
         ClassifyItem(id="0", title="Data Scientist", raw_description="some description")
     ]
-    results = extractor.classify_relevance_batch("de", items)
+    results = extractor.classify_relevance_batch(items)
     assert len(results) == 1
     assert isinstance(results[0], RelevanceVerdict)
     assert results[0].in_domain is True
@@ -162,6 +162,6 @@ def test_stub_classify_relevance_batch_returns_relevance_verdicts():
 
 def test_stub_judge_match_returns_match_verdict():
     extractor: LLMExtractor = _StubExtractor()
-    result = extractor.judge_match("en", "some description")
+    result = extractor.judge_match("some description")
     assert isinstance(result, MatchVerdict)
     assert result.tier is MatchTier.green

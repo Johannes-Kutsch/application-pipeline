@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "application-pipeline"
-version = "0.1.0"
+dynamic = ["version"]
 requires-python = ">=3.11.3"
 dependencies = [
     "beautifulsoup4",
@@ -21,6 +21,8 @@ dev = [
     "respx",
     "ruff",
 ]
+
+[tool.setuptools_scm]
 
 [tool.setuptools.packages.find]
 where = ["src"]

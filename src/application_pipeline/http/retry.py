@@ -3,15 +3,11 @@ from __future__ import annotations
 import time
 from typing import Callable, TypeVar
 
+from .errors import HttpNotRetryableError, HttpRetryError
+
+__all__ = ["HttpRetryError", "HttpNotRetryableError"]
+
 T = TypeVar("T")
-
-
-class HttpRetryError(Exception):
-    """All retries exhausted."""
-
-
-class HttpNotRetryableError(Exception):
-    """HTTP error that must not be retried (e.g. 404, auth failure)."""
 
 
 def exponential_backoff(

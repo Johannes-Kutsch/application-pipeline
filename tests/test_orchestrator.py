@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import textwrap
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -119,6 +120,26 @@ def _stub_results_manager() -> MagicMock:
     rm.ensure_initialized.return_value = None
     rm.next_position_number.return_value = 1
     return rm
+
+
+def _wire_run_scope(dedup: MagicMock) -> None:
+    """Configure a MagicMock dedup store so run_scope() yields a real RunScopedDedup.
+
+    Tests that set dedup.is_seen.side_effect/return_value need this so that the
+    orchestrator's dedup_run (a RunScopedDedup wrapping the mock) forwards is_seen()
+    calls to the mock's configured behaviour.
+    """
+    from application_pipeline.dedup.run_scope import RunScopedDedup
+
+    @contextmanager
+    def _run_scope():
+        scope = RunScopedDedup(dedup)
+        try:
+            yield scope
+        finally:
+            scope._clear()
+
+    dedup.run_scope.side_effect = _run_scope
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +462,7 @@ def test_integration_dedup_counter_breakdown(
         "url_hit",
         "miss",
     ]
+    _wire_run_scope(dedup)
 
     with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
         summary = run(
@@ -496,6 +518,7 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
 
     dedup = MagicMock()
     dedup.is_seen.return_value = "miss"
+    _wire_run_scope(dedup)
 
     summary = run(
         _write_config(
@@ -545,6 +568,7 @@ def test_consecutive_url_hits_never_trigger_skip_and_end_query(tmp_path: Path) -
 
     dedup = MagicMock()
     dedup.is_seen.return_value = "url_hit"
+    _wire_run_scope(dedup)
 
     summary = run(
         _write_config(
@@ -599,6 +623,7 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
 
     dedup = MagicMock()
     dedup.is_seen.side_effect = ["url_hit"] * 80 + ["miss"]
+    _wire_run_scope(dedup)
 
     summary = run(
         _write_config(
@@ -643,6 +668,7 @@ def test_in_run_dedup_run_hits_in_log_line(
 
     dedup = MagicMock()
     dedup.is_seen.return_value = "miss"
+    _wire_run_scope(dedup)
 
     with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
         run(
@@ -693,6 +719,7 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
     dedup = MagicMock()
     # Both runs: is_seen returns "miss" (in-run set does not carry across runs)
     dedup.is_seen.return_value = "miss"
+    _wire_run_scope(dedup)
 
     summary1 = run(
         config_path,
@@ -1580,6 +1607,7 @@ def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
 
     dedup = MagicMock()
     dedup.is_seen.return_value = "miss"
+    _wire_run_scope(dedup)
 
     run(
         _write_config(

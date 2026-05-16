@@ -543,7 +543,6 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display)
-        _in_run_seen: set[str] = set()
         classify_buffer: list[Position] = []
         batch_size = cfg.claude_classify_batch_size
         batch_id = 0
@@ -561,6 +560,7 @@ def run(
             parsers_list: list[tuple[Parser, SourceEntry]] = [
                 (stack.enter_context(cls()), source) for cls, source in resolved
             ]
+            dedup_run = stack.enter_context(dedup_store.run_scope())
 
             parser_states: dict[str, _ParserState] = {}
             threads: list[tuple[str, _ParserThread]] = []
@@ -676,23 +676,13 @@ def run(
                         state.inbound.put(_SKIP_AND_END_QUERY)
                         continue
 
-                    if payload.url in _in_run_seen:
-                        metrics.dedup_run_hit()
-                        state.inbound.put(_SKIP)
+                    result = dedup_run.is_seen(payload)
+                    metrics.record_dedup(result)
+                    if result == "miss":
+                        state.pending_enrich = payload
+                        state.inbound.put(_ENRICH)
                     else:
-                        seen_result = dedup_store.is_seen(payload)
-
-                        if seen_result == "miss":
-                            metrics.dedup_miss()
-                            _in_run_seen.add(payload.url)
-                            state.pending_enrich = payload
-                            state.inbound.put(_ENRICH)
-                        elif seen_result == "url_hit":
-                            metrics.dedup_url_hit()
-                            state.inbound.put(_SKIP)
-                        else:  # tuple_hit
-                            metrics.dedup_tuple_hit()
-                            state.inbound.put(_SKIP)
+                        state.inbound.put(_SKIP)
 
                 elif isinstance(payload, Position):
                     for warning in payload._warnings:

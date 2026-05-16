@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from application_pipeline import parser_log
+from application_pipeline.dedup import RunScopedSeenResult
 from application_pipeline.llm.types import CallUsage, MatchTier
 from application_pipeline.prefilter import PreFilterVerdict
 from application_pipeline.status_display import StatusDisplay
@@ -172,30 +173,19 @@ class RunMetrics:
         if parser_id and parser_body is not None:
             self._display.update_body(parser_id, body=parser_body)
 
-    def dedup_url_hit(self) -> None:
+    def record_dedup(self, result: RunScopedSeenResult) -> None:
         with self._lock:
-            self._dedup_url_hits += 1
-            self._skipped += 1
-            body = self._dedup_body()
-        self._display.update_body("dedup", body=body)
-
-    def dedup_tuple_hit(self) -> None:
-        with self._lock:
-            self._dedup_tuple_hits += 1
-            self._skipped += 1
-            body = self._dedup_body()
-        self._display.update_body("dedup", body=body)
-
-    def dedup_run_hit(self) -> None:
-        with self._lock:
-            self._dedup_run_hits += 1
-            self._skipped += 1
-            body = self._dedup_body()
-        self._display.update_body("dedup", body=body)
-
-    def dedup_miss(self) -> None:
-        with self._lock:
-            self._dedup_misses += 1
+            if result == "url_hit":
+                self._dedup_url_hits += 1
+                self._skipped += 1
+            elif result == "tuple_hit":
+                self._dedup_tuple_hits += 1
+                self._skipped += 1
+            elif result == "run_hit":
+                self._dedup_run_hits += 1
+                self._skipped += 1
+            else:  # miss
+                self._dedup_misses += 1
             body = self._dedup_body()
         self._display.update_body("dedup", body=body)
 

@@ -136,12 +136,12 @@ def test_dedup_body_matches_main_stats_format():
     metrics = RunMetrics(display)
     metrics.register_rows(0)
 
-    metrics.dedup_url_hit()
-    metrics.dedup_url_hit()
-    metrics.dedup_tuple_hit()
-    metrics.dedup_run_hit()
-    metrics.dedup_run_hit()
-    metrics.dedup_miss()
+    metrics.record_dedup("url_hit")
+    metrics.record_dedup("url_hit")
+    metrics.record_dedup("tuple_hit")
+    metrics.record_dedup("run_hit")
+    metrics.record_dedup("run_hit")
+    metrics.record_dedup("miss")
 
     body = _last_body(display, "dedup")
     assert body == "url_hits=2 tuple_hits=1 run_hits=2 misses=1"
@@ -353,11 +353,11 @@ def _build_populated_metrics(display: FakeStatusDisplay) -> RunMetrics:
 
     metrics.discovered()
     metrics.discovered()
-    metrics.dedup_url_hit()
-    metrics.dedup_tuple_hit()
-    metrics.dedup_run_hit()
-    metrics.dedup_miss()
-    metrics.dedup_miss()
+    metrics.record_dedup("url_hit")
+    metrics.record_dedup("tuple_hit")
+    metrics.record_dedup("run_hit")
+    metrics.record_dedup("miss")
+    metrics.record_dedup("miss")
     metrics.prefilter_passed(_verdict(passes=True, whitelist_hit=True))
     metrics.prefilter_passed(_verdict(passes=True))
     metrics.prefilter_dropped(_verdict(passes=False, blacklist_hit=True))
@@ -660,8 +660,8 @@ def test_concurrent_events_produce_correct_final_counts():
     def worker() -> None:
         for _ in range(iters):
             metrics.discovered()
-            metrics.dedup_url_hit()
-            metrics.dedup_miss()
+            metrics.record_dedup("url_hit")
+            metrics.record_dedup("miss")
             metrics.prefilter_passed(verdict_pass)
             metrics.prefilter_dropped(verdict_drop)
             metrics.enrich_failed()

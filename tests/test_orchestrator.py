@@ -402,158 +402,6 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
 
 
 # ---------------------------------------------------------------------------
-# Integration: discover short-circuit on consecutive url_hits (issue #111)
-# ---------------------------------------------------------------------------
-
-
-def test_discover_short_circuits_after_n_consecutive_url_hits(tmp_path: Path) -> None:
-    """3 misses + 60 url_hits → short-circuit after 50th url_hit; 53 stubs consumed."""
-    consumed: list[int] = [0]
-
-    all_stubs = [
-        PositionStub(url=f"https://sc.example/{i}", title=f"Job {i}", source="stub")
-        for i in range(63)
-    ]
-
-    class _GenParser:
-        def __enter__(self) -> "_GenParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery):  # type: ignore[return]
-            for stub in all_stubs:
-                consumed[0] += 1
-                yield stub
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="test")
-
-    dedup = MagicMock()
-    dedup.is_seen.side_effect = ["miss"] * 3 + ["url_hit"] * 60
-
-    summary = run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-        ),
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _GenParser,  # type: ignore[return-value]
-        dedup_store=dedup,
-        results_manager=_stub_results_manager(),
-    )
-
-    assert consumed[0] == 53  # 3 misses + 50 url_hits before close
-    assert summary.discovered == 53
-    assert summary.skipped == 50
-
-
-def test_discover_counter_resets_on_miss(tmp_path: Path) -> None:
-    """3 url_hits, 1 miss, 49 url_hits → counter resets at miss; all 53 consumed without short-circuit."""
-    consumed: list[int] = [0]
-
-    all_stubs = [
-        PositionStub(url=f"https://sc.example/{i}", title=f"Job {i}", source="stub")
-        for i in range(53)
-    ]
-
-    class _GenParser:
-        def __enter__(self) -> "_GenParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery):  # type: ignore[return]
-            for stub in all_stubs:
-                consumed[0] += 1
-                yield stub
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="test")
-
-    dedup = MagicMock()
-    dedup.is_seen.side_effect = ["url_hit"] * 3 + ["miss"] + ["url_hit"] * 49
-
-    summary = run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-        ),
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _GenParser,  # type: ignore[return-value]
-        dedup_store=dedup,
-        results_manager=_stub_results_manager(),
-    )
-
-    assert consumed[0] == 53  # all consumed — miss reset the counter after 3
-    assert summary.discovered == 53
-    assert summary.skipped == 52  # 3 + 49 url_hits
-
-
-def test_discover_tuple_hit_resets_url_hit_counter(tmp_path: Path) -> None:
-    """tuple_hits interspersed in url_hits reset the counter; no false short-circuit."""
-    consumed: list[int] = [0]
-
-    # 25 url_hits, tuple_hit (resets), 25 url_hits, tuple_hit (resets), 25 url_hits = 77
-    all_stubs = [
-        PositionStub(url=f"https://sc.example/{i}", title=f"Job {i}", source="stub")
-        for i in range(77)
-    ]
-
-    class _GenParser:
-        def __enter__(self) -> "_GenParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery):  # type: ignore[return]
-            for stub in all_stubs:
-                consumed[0] += 1
-                yield stub
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="test")
-
-    dedup = MagicMock()
-    dedup.is_seen.side_effect = (
-        ["url_hit"] * 25
-        + ["tuple_hit"]
-        + ["url_hit"] * 25
-        + ["tuple_hit"]
-        + ["url_hit"] * 25
-    )
-
-    summary = run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-        ),
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _GenParser,  # type: ignore[return-value]
-        dedup_store=dedup,
-        results_manager=_stub_results_manager(),
-    )
-
-    assert (
-        consumed[0] == 77
-    )  # all consumed — tuple_hits reset counter, never reached 50 consecutive
-    assert summary.discovered == 77
-    assert summary.skipped == 77
-
-
-# ---------------------------------------------------------------------------
 # Integration: dedup counter breakdown (issue #177)
 # ---------------------------------------------------------------------------
 
@@ -667,35 +515,21 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
     assert enrich_calls.count(duplicate_url) == 1
 
 
-def test_in_run_dedup_does_not_trip_short_circuit(tmp_path: Path) -> None:
-    """In-run dupe interleaved with url_hits does not advance consecutive counter.
+def test_consecutive_url_hits_never_trigger_skip_and_end_query(tmp_path: Path) -> None:
+    """A long run of url_hits never causes the orchestrator to emit SKIP_AND_END_QUERY.
 
-    Sequence: dup_url (miss) → dup_url (in-run hit) → 60 url_hits.
-    Threshold is 50 consecutive url_hits.
-
-    With correct behavior: in-run hit leaves consecutive at 0; short-circuit fires
-    after the 50th url_hit → 52 stubs consumed total.
-
-    With buggy behavior (in-run hit increments consecutive): consecutive becomes 1
-    before url_hits start, so the 49th url_hit triggers the short-circuit → only 51
-    stubs consumed.
+    100 consecutive url_hits (well above any former threshold) must all be consumed.
     """
     consumed: list[int] = [0]
-    dup_url = "https://dup.example/dup"
-    # 2 stubs (dup first and second) + 60 url-hit stubs (threshold is 50, need >50 to detect early stop)
     all_stubs = [
-        PositionStub(url=dup_url, title="Dup", source="stub"),
-        PositionStub(url=dup_url, title="Dup", source="stub"),
-        *[
-            PositionStub(
-                url=f"https://dup.example/hit/{i}", title=f"Hit {i}", source="stub"
-            )
-            for i in range(60)
-        ],
+        PositionStub(
+            url=f"https://noearlystop.example/{i}", title=f"Job {i}", source="stub"
+        )
+        for i in range(100)
     ]
 
-    class _DupInterleavedParser:
-        def __enter__(self) -> "_DupInterleavedParser":
+    class _HitOnlyParser:
+        def __enter__(self) -> "_HitOnlyParser":
             return self
 
         def __exit__(self, *args: object) -> None:
@@ -706,13 +540,11 @@ def test_in_run_dedup_does_not_trip_short_circuit(tmp_path: Path) -> None:
                 consumed[0] += 1
                 yield stub
 
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="test")
+        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
+            raise NotImplementedError
 
     dedup = MagicMock()
-    # dup_url → miss; second dup_url caught by in-run set (is_seen never called);
-    # url_hit stubs → url_hit from is_seen
-    dedup.is_seen.side_effect = ["miss"] + ["url_hit"] * 60
+    dedup.is_seen.return_value = "url_hit"
 
     summary = run(
         _write_config(
@@ -723,101 +555,69 @@ def test_in_run_dedup_does_not_trip_short_circuit(tmp_path: Path) -> None:
             include_remote=False,
         ),
         extractor=_stub_extractor(),
-        parser_registry=lambda _: _DupInterleavedParser,  # type: ignore[return-value]
+        parser_registry=lambda _: _HitOnlyParser,  # type: ignore[return-value]
         dedup_store=dedup,
         results_manager=_stub_results_manager(),
     )
 
-    # dup (miss) + dup (in-run hit, consecutive stays 0) + 50 url_hits (50th triggers short-circuit) = 52
-    assert consumed[0] == 52
-    assert summary.dedup_run_hits == 1
-    assert summary.dedup_url_hits == 50
+    assert consumed[0] == 100
+    assert summary.discovered == 100
+    assert summary.dedup_url_hits == 100
+    assert summary.skipped == 100
 
 
-def test_degraded_run_never_emits_skip_and_end_query(tmp_path: Path) -> None:
-    """When run_state.is_degraded, consecutive url_hits never trigger SKIP_AND_END_QUERY.
+def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
+    tmp_path: Path,
+) -> None:
+    """A leading run of url_hit stubs does not prevent the trailing unseen stub from being enriched.
 
-    The parser yields 1 miss, then sleeps briefly to let the classify_thread process
-    the batch (batch_size=1) and set run_state.is_degraded, then yields 200 url_hits
-    (far above the 50-consecutive threshold).  All 200 must be consumed.
+    AC4: A run whose parser yields N url_hit stubs followed by one unseen stub
+    reaches and enriches the unseen stub.
     """
-    import time
-
-    consumed: list[int] = [0]
-    miss_stub = PositionStub(
-        url="https://deg.example/miss", title="Miss", source="stub"
-    )
-    url_hit_stubs = [
+    enrich_calls: list[str] = []
+    unseen_url = "https://trailing.example/new"
+    all_stubs = [
         PositionStub(
-            url=f"https://deg.example/hit/{i}", title=f"Hit {i}", source="stub"
+            url=f"https://trailing.example/old/{i}", title=f"Old {i}", source="stub"
         )
-        for i in range(200)
-    ]
+        for i in range(80)
+    ] + [PositionStub(url=unseen_url, title="New Job", source="stub")]
 
-    class _SyncParser:
-        def __enter__(self) -> "_SyncParser":
+    class _TrailingParser:
+        def __enter__(self) -> "_TrailingParser":
             return self
 
         def __exit__(self, *args: object) -> None:
             pass
 
-        def discover(self, query: ParserQuery):  # type: ignore[return]
-            consumed[0] += 1
-            yield miss_stub
-            # Sleep so that classify_thread can process the batch (batch_size=1)
-            # and set run_state.is_degraded before url_hits arrive at the main loop.
-            time.sleep(0.1)
-            for stub in url_hit_stubs:
-                consumed[0] += 1
-                yield stub
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return all_stubs
 
         def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="test")
-
-    class _DegradingExtractor:
-        def prewarm(self) -> None:
-            pass
-
-        def classify_relevance_batch(
-            self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            raise ClaudeUsageLimitError(
-                "quota", returncode=1, stdout="", stderr="quota", envelope=None
-            )
-
-        def judge_match(
-            self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
-            raise NotImplementedError
+            enrich_calls.append(stub.url)
+            return Position(stub=stub, raw_description="new and relevant")
 
     dedup = MagicMock()
-    # 1 miss (triggers classify/degrade with batch_size=1), then 200 url_hits
-    dedup.is_seen.side_effect = ["miss"] + ["url_hit"] * 200
-
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-    # batch_size=1 so the single "miss" position is flushed to classify_thread immediately
-    config_path.write_text(
-        config_path.read_text(encoding="utf-8") + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 1\n",
-        encoding="utf-8",
-    )
+    dedup.is_seen.side_effect = ["url_hit"] * 80 + ["miss"]
 
     summary = run(
-        config_path,
-        extractor=_DegradingExtractor(),
-        parser_registry=lambda _: _SyncParser,  # type: ignore[return-value]
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TrailingParser,  # type: ignore[return-value]
         dedup_store=dedup,
         results_manager=_stub_results_manager(),
     )
 
-    # All 201 stubs consumed — degraded run must never SKIP_AND_END_QUERY
-    assert consumed[0] == 201
-    assert summary.dedup_url_hits == 200
+    assert unseen_url in enrich_calls, "trailing unseen stub must be enriched"
+    assert summary.discovered == 81
+    assert summary.dedup_url_hits == 80
+    assert summary.dedup_misses == 1
 
 
 def test_in_run_dedup_run_hits_in_log_line(

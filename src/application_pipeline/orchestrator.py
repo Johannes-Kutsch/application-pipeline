@@ -48,7 +48,6 @@ from application_pipeline.results import ResultsFileError, ResultsFileManager
 
 _log = logging.getLogger(__name__)
 
-_DISCOVER_SHORT_CIRCUIT_FALLBACK = 50
 _STALL_THRESHOLD_S: float = 60.0
 
 
@@ -438,14 +437,12 @@ def _discover_release_tag() -> str | None:
 class _ParserState:
     parser_id: str
     inbound: queue.Queue[object]
-    threshold: int
     total_queries: int
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_monotonic: float = field(default_factory=time.monotonic)
     last_event_monotonic: float = field(default_factory=time.monotonic)
     stall_logged: bool = False
     pending_enrich: PositionStub | None = None
-    consecutive_url_hits: int = 0
     discovered: int = 0
     enrich_failed: int = 0
     external_redirects: int = 0
@@ -609,9 +606,6 @@ def run(
                 parser_states[parser_id] = _ParserState(
                     parser_id=parser_id,
                     inbound=inbound,
-                    threshold=getattr(
-                        parser, "page_size", _DISCOVER_SHORT_CIRCUIT_FALLBACK
-                    ),
                     total_queries=len(worklist),
                 )
                 t = _ParserThread(parser_id, parser, worklist, outbound, inbound)
@@ -734,24 +728,14 @@ def run(
 
                         if seen_result == "miss":
                             metrics.dedup_miss()
-                            state.consecutive_url_hits = 0
                             _in_run_seen.add(payload.url)
                             state.pending_enrich = payload
                             state.inbound.put(_ENRICH)
                         elif seen_result == "url_hit":
                             metrics.dedup_url_hit()
-                            state.consecutive_url_hits += 1
-                            if (
-                                state.consecutive_url_hits >= state.threshold
-                                and not run_state.is_degraded
-                            ):
-                                state.consecutive_url_hits = 0
-                                state.inbound.put(_SKIP_AND_END_QUERY)
-                            else:
-                                state.inbound.put(_SKIP)
+                            state.inbound.put(_SKIP)
                         else:  # tuple_hit
                             metrics.dedup_tuple_hit()
-                            state.consecutive_url_hits = 0
                             state.inbound.put(_SKIP)
                     _update_parser_row(pid)
 

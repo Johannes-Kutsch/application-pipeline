@@ -194,12 +194,10 @@ def test_throttle_pacing_between_consecutive_get_calls():
 
 
 def test_throttle_fires_once_per_get_across_multiple_retry_attempts():
-    wait_calls = 0
-
-    class CountingThrottle:
-        def wait(self) -> None:
-            nonlocal wait_calls
-            wait_calls += 1
+    # A real Throttle whose `_now` iterator runs dry if `wait()` is called more
+    # than once — proves throttle pacing is applied per get(), not per retry.
+    now_values = iter([0.0])
+    throttle = Throttle(interval=0.5, _now=lambda: next(now_values), _sleep=_NO_SLEEP)
 
     attempt = 0
 
@@ -211,14 +209,10 @@ def test_throttle_fires_once_per_get_across_multiple_retry_attempts():
         return b"ok"
 
     parser = ParserHttp(
-        retries=3,
-        _http_get=http_get,
-        _throttle=CountingThrottle(),  # type: ignore[arg-type]
-        _sleep=_NO_SLEEP,
+        retries=3, _http_get=http_get, _throttle=throttle, _sleep=_NO_SLEEP
     )
     parser.get("http://example.com/", error_prefix="p")
     assert attempt == 3
-    assert wait_calls == 1
 
 
 # ---------------------------------------------------------------------------

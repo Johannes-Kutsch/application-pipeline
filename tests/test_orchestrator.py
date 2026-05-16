@@ -917,7 +917,7 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Integration: language resolution + Pre-Filter pass (slice 4c)
+# Integration: Pre-Filter pass
 # ---------------------------------------------------------------------------
 
 _STUB_URLS_PF = [f"https://stub.example/pf/{i}" for i in range(6)]

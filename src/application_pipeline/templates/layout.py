@@ -13,7 +13,7 @@ TIER_COLOR = {
 # Each group collapses its fields with the separator, omitting None values.
 # The result replaces the group name as a placeholder in the templates below.
 PLACEHOLDER_GROUPS = {
-    "meta": (" · ", ["location", "language", "url"]),
+    "meta": (" · ", ["location", "url"]),
 }
 
 EMPTY_LIST_PLACEHOLDER = "—"

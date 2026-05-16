@@ -14,7 +14,7 @@ _MINIMAL_BODY = textwrap.dedent(
     """
     TIER_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}
     TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}
-    PLACEHOLDER_GROUPS = {"meta": (" · ", ["location", "language", "url"])}
+    PLACEHOLDER_GROUPS = {"meta": (" · ", ["location", "url"])}
     FILE_HEADER = "# Results\\n"
     CARD_TEMPLATE = "## {number}. {company}\\n"
     HEADLINE_TEMPLATE = "## {number}. {company}\\n"
@@ -43,9 +43,7 @@ def test_load_returns_populated_layout(tmp_path: pathlib.Path) -> None:
         "amber": "#d29922",
         "red": "#da3633",
     }
-    assert layout.placeholder_groups == {
-        "meta": (" · ", ["location", "language", "url"])
-    }
+    assert layout.placeholder_groups == {"meta": (" · ", ["location", "url"])}
     assert layout.file_header == "# Results\n"
     assert layout.card_template == "## {number}. {company}\n"
     assert layout.headline_template == "## {number}. {company}\n"

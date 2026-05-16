@@ -11,9 +11,13 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Generator, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .run_scope import RunScopedDedup
 
 from application_pipeline.text import normalize
 
@@ -149,6 +153,13 @@ class DeduplicationStore:
     def mark_external_redirect(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "external_redirect")
+
+    @contextmanager
+    def run_scope(self) -> Generator[RunScopedDedup, None, None]:
+        from .run_scope import _run_scope
+
+        with _run_scope(self) as scope:
+            yield scope
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]

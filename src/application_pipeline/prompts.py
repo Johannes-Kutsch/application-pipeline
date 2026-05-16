@@ -21,8 +21,6 @@ _PACKAGE_JUDGE_SLOTS: frozenset[str] = frozenset(
     {"skills", "raw_description", "USER_INFO"}
 )
 
-_USER_INFO_FILES = ("self-description.md", "domain-fit.md", "match-criteria.md")
-
 
 @dataclass(frozen=True)
 class PromptTemplate:

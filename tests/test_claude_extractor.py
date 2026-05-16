@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -686,7 +686,7 @@ def test_judge_slots_match_inventory() -> None:
 )
 def test_cli_error(
     tmp_path: Path,
-    invoke: object,
+    invoke: Callable[[ClaudeExtractor], object],
     transcript_file: str,
     stderr: str,
     extra_transcript_assertions: dict[str, object],
@@ -704,7 +704,7 @@ def test_cli_error(
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
 
     with pytest.raises(ExtractorUnreachableError) as exc_info:
-        invoke(extractor)  # type: ignore[operator]
+        invoke(extractor)
 
     assert exc_info.value.returncode == 0
     assert exc_info.value.stderr == stderr
@@ -738,7 +738,7 @@ def test_cli_error(
 )
 def test_malformed_envelope(
     tmp_path: Path,
-    invoke: object,
+    invoke: Callable[[ClaudeExtractor], object],
     transcript_file: str,
     extra_transcript_assertions: dict[str, object],
 ) -> None:
@@ -755,7 +755,7 @@ def test_malformed_envelope(
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
 
     with pytest.raises(ExtractorMalformedJSONError):
-        invoke(extractor)  # type: ignore[operator]
+        invoke(extractor)
 
     entry = json.loads((tmp_path / transcript_file).read_text(encoding="utf-8"))
     assert entry["status"] == "malformed_envelope"
@@ -783,7 +783,7 @@ def test_malformed_envelope(
 )
 def test_tag_missing(
     tmp_path: Path,
-    invoke: object,
+    invoke: Callable[[ClaudeExtractor], object],
     transcript_file: str,
     expected_error_cls: type,
 ) -> None:
@@ -795,7 +795,7 @@ def test_tag_missing(
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
 
     with pytest.raises(expected_error_cls):
-        invoke(extractor)  # type: ignore[operator]
+        invoke(extractor)
 
     entry = json.loads((tmp_path / transcript_file).read_text(encoding="utf-8"))
     assert entry["envelope_error_class"] == "tag_missing"
@@ -823,7 +823,7 @@ def test_tag_missing(
 )
 def test_json_malformed(
     tmp_path: Path,
-    invoke: object,
+    invoke: Callable[[ClaudeExtractor], object],
     transcript_file: str,
     expected_error_cls: type,
     raw: str,
@@ -835,7 +835,7 @@ def test_json_malformed(
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
 
     with pytest.raises(expected_error_cls):
-        invoke(extractor)  # type: ignore[operator]
+        invoke(extractor)
 
     entry = json.loads((tmp_path / transcript_file).read_text(encoding="utf-8"))
     assert entry["envelope_error_class"] == "json_malformed"

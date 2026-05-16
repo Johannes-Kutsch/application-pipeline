@@ -10,6 +10,18 @@ from application_pipeline.prefilter import PreFilterVerdict
 from application_pipeline.status_display import StatusDisplay
 
 
+@dataclass
+class _ParserCounters:
+    discovered: int = 0
+    enrich_failed: int = 0
+    external_redirects: int = 0
+    not_served_queries: int = 0
+    parsers_dead: int = 0
+    unparseable_dates: int = 0
+    enriched: int = 0
+    queries_done: int = 0
+
+
 @dataclass(frozen=True)
 class RunSummary:
     discovered: int = 0
@@ -99,6 +111,9 @@ class RunMetrics:
 
         self._degraded_reason: str | None = None
 
+        # Per-parser counters (lazily allocated on first event)
+        self._per_parser: dict[str, _ParserCounters] = {}
+
     # -----------------------------------------------------------------------
     # Row registration
     # -----------------------------------------------------------------------
@@ -120,12 +135,26 @@ class RunMetrics:
             self._degraded_reason = reason
 
     # -----------------------------------------------------------------------
+    # Internal per-parser helpers (called under lock)
+    # -----------------------------------------------------------------------
+
+    def _parser_entry(self, parser_id: str) -> _ParserCounters:
+        try:
+            return self._per_parser[parser_id]
+        except KeyError:
+            entry = _ParserCounters()
+            self._per_parser[parser_id] = entry
+            return entry
+
+    # -----------------------------------------------------------------------
     # Parser-side events
     # -----------------------------------------------------------------------
 
-    def discovered(self) -> None:
+    def discovered(self, parser_id: str = "") -> None:
         with self._lock:
             self._discovered += 1
+            if parser_id:
+                self._parser_entry(parser_id).discovered += 1
             body = self._pipeline_body()
         self._display.update_body("pipeline", body=body)
 
@@ -172,21 +201,74 @@ class RunMetrics:
             body = self._prefilter_body()
         self._display.update_body("prefilter", body=body)
 
-    def enrich_failed(self) -> None:
+    def enrich_failed(self, parser_id: str = "") -> None:
         with self._lock:
             self._enrich_failed += 1
+            if parser_id:
+                self._parser_entry(parser_id).enrich_failed += 1
             body = self._pipeline_body()
         self._display.update_body("pipeline", body=body)
 
-    def external_redirect(self) -> None:
+    def external_redirect(self, parser_id: str = "") -> None:
         with self._lock:
             self._external_redirects += 1
+            if parser_id:
+                self._parser_entry(parser_id).external_redirects += 1
 
-    def parser_dead(self) -> None:
+    def parser_dead(self, parser_id: str = "") -> None:
         with self._lock:
             self._parsers_dead += 1
+            if parser_id:
+                self._parser_entry(parser_id).parsers_dead += 1
             body = self._pipeline_body()
         self._display.update_body("pipeline", body=body)
+
+    def not_served_query(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).not_served_queries += 1
+
+    def unparseable_date(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).unparseable_dates += 1
+
+    def query_done(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).queries_done += 1
+
+    def enriched(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).enriched += 1
+
+    # -----------------------------------------------------------------------
+    # Per-parser query/display accessors
+    # -----------------------------------------------------------------------
+
+    def parser_discovered(self, parser_id: str) -> int:
+        with self._lock:
+            return self._per_parser.get(parser_id, _ParserCounters()).discovered
+
+    def parser_enriched(self, parser_id: str) -> int:
+        with self._lock:
+            return self._per_parser.get(parser_id, _ParserCounters()).enriched
+
+    def parser_queries_done(self, parser_id: str) -> int:
+        with self._lock:
+            return self._per_parser.get(parser_id, _ParserCounters()).queries_done
+
+    def parser_summary(
+        self, parser_id: str, end_monotonic: float, started_monotonic: float
+    ) -> dict[str, int | float]:
+        with self._lock:
+            c = self._per_parser.get(parser_id, _ParserCounters())
+            return {
+                "discovered": c.discovered,
+                "enrich_failed": c.enrich_failed,
+                "external_redirects": c.external_redirects,
+                "not_served_queries": c.not_served_queries,
+                "parsers_dead": c.parsers_dead,
+                "unparseable_dates": c.unparseable_dates,
+                "duration": round(end_monotonic - started_monotonic, 1),
+            }
 
     # -----------------------------------------------------------------------
     # Classify-stage events

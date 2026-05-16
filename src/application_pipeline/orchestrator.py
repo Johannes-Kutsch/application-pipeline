@@ -443,25 +443,6 @@ class _ParserState:
     last_event_monotonic: float = field(default_factory=time.monotonic)
     stall_logged: bool = False
     pending_enrich: PositionStub | None = None
-    discovered: int = 0
-    enrich_failed: int = 0
-    external_redirects: int = 0
-    not_served: int = 0
-    parsers_dead: int = 0
-    unparseable_dates: int = 0
-    enriched: int = 0
-    queries_done: int = 0
-
-    def summary_dict(self, end_monotonic: float) -> dict[str, int | float]:
-        return {
-            "discovered": self.discovered,
-            "enrich_failed": self.enrich_failed,
-            "external_redirects": self.external_redirects,
-            "not_served_queries": self.not_served,
-            "parsers_dead": self.parsers_dead,
-            "unparseable_dates": self.unparseable_dates,
-            "duration": round(end_monotonic - self.started_monotonic, 1),
-        }
 
 
 def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:
@@ -669,10 +650,10 @@ def run(
                 status_display.update_body(
                     pid,
                     body=_make_parser_body(
-                        s.queries_done,
+                        metrics.parser_queries_done(pid),
                         s.total_queries,
-                        s.discovered,
-                        s.enriched,
+                        metrics.parser_discovered(pid),
+                        metrics.parser_enriched(pid),
                     )
                     + suffix,
                 )
@@ -713,8 +694,7 @@ def run(
                 state.stall_logged = False
 
                 if isinstance(payload, PositionStub):
-                    metrics.discovered()
-                    state.discovered += 1
+                    metrics.discovered(pid)
 
                     if run_state.is_aborted:
                         state.inbound.put(_SKIP_AND_END_QUERY)
@@ -743,8 +723,8 @@ def run(
                     for warning in payload._warnings:
                         parser_log.record(pid, warning)
                         if warning.startswith("unparseable_date"):
-                            state.unparseable_dates += 1
-                    state.enriched += 1
+                            metrics.unparseable_date(pid)
+                    metrics.enriched(pid)
                     verdict = prefilter.classify(payload)
                     if verdict.passes:
                         metrics.prefilter_passed(verdict)
@@ -769,8 +749,7 @@ def run(
                             reason=str(payload),
                         )
                         dedup_store.mark_enrich_failed(stub)
-                    metrics.enrich_failed()
-                    state.enrich_failed += 1
+                    metrics.enrich_failed(pid)
 
                 elif isinstance(payload, ExternalRedirect):
                     stub = state.pending_enrich
@@ -783,14 +762,13 @@ def run(
                             outbound=payload.outbound_url,
                         )
                         dedup_store.mark_external_redirect(stub)
-                    metrics.external_redirect()
-                    state.external_redirects += 1
+                    metrics.external_redirect(pid)
 
                 elif isinstance(payload, NotServedQuery):
-                    state.not_served += 1
+                    metrics.not_served_query(pid)
 
                 elif payload is _QUERY_DONE:
-                    state.queries_done += 1
+                    metrics.query_done(pid)
                     _update_parser_row(pid)
 
                 elif payload is _PARSER_DONE:
@@ -799,8 +777,7 @@ def run(
 
                 elif isinstance(payload, _ParserDead):
                     parser_log.record_traceback(pid, payload.traceback_str)
-                    metrics.parser_dead()
-                    state.parsers_dead += 1
+                    metrics.parser_dead(pid)
                     parsers_remaining.discard(pid)
                     _update_parser_row(pid, " · dead")
 
@@ -811,7 +788,9 @@ def run(
             for pid, pstate in parser_states.items():
                 parser_log.summarize(
                     pid,
-                    pstate.summary_dict(parsers_done_monotonic),
+                    metrics.parser_summary(
+                        pid, parsers_done_monotonic, pstate.started_monotonic
+                    ),
                     pstate.started_at,
                 )
 

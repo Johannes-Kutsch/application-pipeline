@@ -694,3 +694,165 @@ def test_concurrent_events_produce_correct_final_counts():
     assert f"kept={total}" in result
     assert f"classify_calls={total}" in result
     assert f"judge_calls={total}" in result
+
+
+# ---------------------------------------------------------------------------
+# Per-parser counters in RunMetrics (new for issue #267)
+# ---------------------------------------------------------------------------
+
+
+def test_parser_summary_reflects_events_for_that_parser_id():
+    """discovered(parser_id) updates per-parser entry AND aggregate independently."""
+    import time
+
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    started = time.monotonic()
+    metrics.discovered("parser_a")
+    metrics.discovered("parser_a")
+    metrics.discovered("parser_b")
+    end = time.monotonic()
+
+    summary_a = metrics.parser_summary("parser_a", end, started)
+    assert summary_a["discovered"] == 2
+
+    summary_b = metrics.parser_summary("parser_b", end, started)
+    assert summary_b["discovered"] == 1
+
+    # Aggregate is unaffected
+    run_summary = metrics.to_run_summary(1.0)
+    assert run_summary.discovered == 3
+
+
+def test_parser_summary_key_set_is_exact():
+    """parser_summary returns exactly the required keys."""
+    import time
+
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+
+    started = time.monotonic()
+    metrics.discovered("p")
+    end = time.monotonic()
+
+    summary = metrics.parser_summary("p", end, started)
+    assert set(summary.keys()) == {
+        "discovered",
+        "enrich_failed",
+        "external_redirects",
+        "not_served_queries",
+        "parsers_dead",
+        "unparseable_dates",
+        "duration",
+    }
+
+
+def test_parser_summary_all_events_tracked():
+    """All six per-parser event methods update the right counter in parser_summary."""
+    import time
+
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    started = time.monotonic()
+    metrics.discovered("p")
+    metrics.enrich_failed("p")
+    metrics.external_redirect("p")
+    metrics.parser_dead("p")
+    metrics.not_served_query("p")
+    metrics.unparseable_date("p")
+    end = time.monotonic()
+
+    s = metrics.parser_summary("p", end, started)
+    assert s["discovered"] == 1
+    assert s["enrich_failed"] == 1
+    assert s["external_redirects"] == 1
+    assert s["parsers_dead"] == 1
+    assert s["not_served_queries"] == 1
+    assert s["unparseable_dates"] == 1
+    assert isinstance(s["duration"], float)
+    assert s["duration"] >= 0.0
+
+
+def test_parser_summary_duration_rounded_to_one_decimal():
+    """duration = round(end - start, 1)."""
+    import time
+
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.discovered("p")
+
+    started = 1000.0
+    end = 1002.34567
+
+    s = metrics.parser_summary("p", end, started)
+    assert s["duration"] == round(end - started, 1)
+
+
+def test_interleaved_parsers_produce_independent_per_parser_totals():
+    """Events for two parsers are tracked independently; aggregate is their sum."""
+    import time
+
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    started = time.monotonic()
+    for _ in range(3):
+        metrics.discovered("alpha")
+        metrics.enrich_failed("alpha")
+    for _ in range(5):
+        metrics.discovered("beta")
+        metrics.external_redirect("beta")
+    end = time.monotonic()
+
+    sa = metrics.parser_summary("alpha", end, started)
+    sb = metrics.parser_summary("beta", end, started)
+
+    assert sa["discovered"] == 3
+    assert sa["enrich_failed"] == 3
+    assert sb["discovered"] == 5
+    assert sb["external_redirects"] == 5
+    assert sa["external_redirects"] == 0
+    assert sb["enrich_failed"] == 0
+
+    summary = metrics.to_run_summary(1.0)
+    assert summary.discovered == 8
+    assert summary.enrich_failed == 3
+    assert summary.external_redirects == 5
+
+
+def test_parser_accessor_methods_reflect_enriched_and_queries_done():
+    """parser_enriched and parser_queries_done return correct values."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+
+    metrics.enriched("p")
+    metrics.enriched("p")
+    metrics.query_done("p")
+
+    assert metrics.parser_enriched("p") == 2
+    assert metrics.parser_queries_done("p") == 1
+    assert metrics.parser_discovered("p") == 0
+
+
+def test_parser_summary_unknown_parser_id_returns_zeros():
+    """parser_summary for a never-seen parser_id returns all-zero counts."""
+    import time
+
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+
+    started = time.monotonic()
+    end = time.monotonic()
+
+    s = metrics.parser_summary("never_seen", end, started)
+    assert s["discovered"] == 0
+    assert s["enrich_failed"] == 0
+    assert s["external_redirects"] == 0
+    assert s["not_served_queries"] == 0
+    assert s["parsers_dead"] == 0
+    assert s["unparseable_dates"] == 0

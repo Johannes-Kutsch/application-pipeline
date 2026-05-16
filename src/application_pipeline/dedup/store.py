@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generator, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from .run_scope import RunScopedDedup
@@ -156,10 +157,13 @@ class DeduplicationStore:
 
     @contextmanager
     def run_scope(self) -> Generator[RunScopedDedup, None, None]:
-        from .run_scope import _run_scope
+        from .run_scope import RunScopedDedup
 
-        with _run_scope(self) as scope:
+        scope = RunScopedDedup(self)
+        try:
             yield scope
+        finally:
+            scope._clear()
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]

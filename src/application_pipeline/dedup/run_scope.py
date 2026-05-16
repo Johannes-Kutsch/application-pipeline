@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import threading
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Generator, Literal
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from .store import DeduplicationStore, SeenResult, _SeenKey
@@ -48,12 +47,3 @@ class RunScopedDedup:
     def _clear(self) -> None:
         with self._lock:
             self._in_run.clear()
-
-
-@contextmanager
-def _run_scope(store: DeduplicationStore) -> Generator[RunScopedDedup, None, None]:
-    scope = RunScopedDedup(store)
-    try:
-        yield scope
-    finally:
-        scope._clear()

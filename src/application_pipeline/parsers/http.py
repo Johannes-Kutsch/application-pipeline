@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Callable
 
 import httpx
@@ -8,6 +9,7 @@ import httpx
 from application_pipeline import parser_log
 from application_pipeline._context import current_stage
 from application_pipeline.http import HttpNotRetryableError, HttpRetryError
+from application_pipeline.parsers.errors import ParserError
 
 HTTP_CONNECT_TIMEOUT: float = 5.0
 HTTP_READ_TIMEOUT: float = 30.0
@@ -132,3 +134,50 @@ def request_with_retry(
     raise HttpRetryError(
         f"HTTP request failed after {retries} retries: {last_exc}"
     ) from last_exc
+
+
+class ParserHttp:
+    """Owns one httpx.Client, one Throttle, the retry loop, and error wrapping."""
+
+    def __init__(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+        timeout: float = HTTP_READ_TIMEOUT,
+        retries: int = MAX_RETRIES,
+        _http_get: HttpGet | None = None,
+        _throttle: Throttle | None = None,
+        _sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        merged_headers: dict[str, str] = {"User-Agent": USER_AGENT, **(headers or {})}
+        self._timeout = timeout
+        self._retries = retries
+        self._sleep = _sleep
+        self._throttle = _throttle if _throttle is not None else Throttle()
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(timeout, connect=HTTP_CONNECT_TIMEOUT),
+            headers=merged_headers,
+        )
+        self._http_get: HttpGet = (
+            _http_get if _http_get is not None else self._real_http_get
+        )
+
+    def _real_http_get(self, url: str, timeout: float) -> bytes:
+        resp = self._client.get(url, timeout=timeout)
+        check_response_status(resp, url)
+        return resp.content
+
+    def get(self, url: str, *, error_prefix: str) -> bytes:
+        self._throttle.wait()
+        try:
+            return request_with_retry(
+                url, self._timeout, self._retries, self._http_get, _sleep=self._sleep
+            )
+        except HttpRetryError as exc:
+            raise ParserError(f"{error_prefix}: {exc}") from exc.__cause__
+
+    def __enter__(self) -> ParserHttp:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self._client.close()

@@ -56,7 +56,7 @@ def _empty_envelope() -> bytes:
 def _make_list_page(start_id: int, count: int) -> bytes:
     """Build a jobs HTML fragment with `count` cards whose URLs start at `start_id`."""
     cards = "".join(
-        f'<div class="serp-jobcontet-cards-container-joblist jobcard">'
+        f'<div class="serp-jobcontet-cards-container-joblist jobcard" id="{start_id + i}">'
         f'<h3><a href="/stellenangebote/{start_id + i}">Job {start_id + i}</a></h3>'
         f"</div>"
         for i in range(count)
@@ -651,10 +651,10 @@ def test_enrich_external_redirect_returns_external_redirect(
 # ---------------------------------------------------------------------------
 
 _SMALL_LIST_HTML = b"""
-<div class="serp-jobcontet-cards-container-joblist jobcard">
+<div class="serp-jobcontet-cards-container-joblist jobcard" id="9001">
   <h3><a href="/stellenangebote/9001">Job Alpha</a></h3>
 </div>
-<div class="serp-jobcontet-cards-container-joblist jobcard">
+<div class="serp-jobcontet-cards-container-joblist jobcard" id="9002">
   <h3><a href="/stellenangebote/9002">Job Beta</a></h3>
 </div>
 """
@@ -689,3 +689,61 @@ def test_discover_at_most_one_extra_request_when_first_page_is_undersized() -> N
         list(p.discover(_query(max_results=1000)))
 
     assert call_count <= 2
+
+
+# ---------------------------------------------------------------------------
+# discover — mail-teaser card filtering
+# ---------------------------------------------------------------------------
+
+_ONE_REAL_ONE_TEASER_HTML = b"""
+<div class="serp-jobcontet-cards-container-joblist jobcard" id="9001">
+  <h3><a href="/stellenangebote/9001">Real Job</a></h3>
+</div>
+<div class="serp-jobcontet-cards-container-joblist jobcard">
+  <div id="mail-container">Subscribe to job alerts</div>
+</div>
+"""
+
+_ONLY_TEASER_HTML = b"""
+<div class="serp-jobcontet-cards-container-joblist jobcard">
+  <div id="mail-container">Subscribe to job alerts</div>
+</div>
+"""
+
+
+def test_discover_terminates_after_one_request_when_only_mail_teaser_present() -> None:
+    """A page whose only .jobcard is a mail-teaser must terminate — not paginate infinitely."""
+    call_count = 0
+
+    def counting_get(url: str, timeout: float) -> bytes:
+        nonlocal call_count
+        call_count += 1
+        return json.dumps({"jobs": _ONLY_TEASER_HTML.decode()}).encode()
+
+    with JobsBeimStaatParser(_http_get=counting_get) as p:
+        stubs = list(p.discover(_query()))
+
+    assert stubs == []
+    assert call_count == 1
+
+
+def test_discover_filters_mail_teaser_yields_one_stub_from_mixed_page() -> None:
+    """A page with one real card (id attr) and one mail-teaser (no id) yields exactly one stub."""
+    call_count = 0
+    responses = [
+        json.dumps({"jobs": _ONE_REAL_ONE_TEASER_HTML.decode()}).encode(),
+        _empty_envelope(),
+    ]
+    it = iter(responses)
+
+    def get(url: str, timeout: float) -> bytes:
+        nonlocal call_count
+        call_count += 1
+        return next(it)
+
+    with JobsBeimStaatParser(_http_get=get) as p:
+        stubs = list(p.discover(_query()))
+
+    assert len(stubs) == 1
+    assert isinstance(stubs[0], PositionStub)
+    assert stubs[0].title == "Real Job"

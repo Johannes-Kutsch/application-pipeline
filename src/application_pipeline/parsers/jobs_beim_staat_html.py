@@ -272,7 +272,9 @@ class JobsBeimStaatParser:
             envelope: dict[str, Any] = json.loads(raw)
             jobs_html = str(envelope.get("jobs", ""))
             soup = BeautifulSoup(jobs_html, "html.parser")
-            cards = soup.select("div.serp-jobcontet-cards-container-joblist.jobcard")
+            cards = soup.select(
+                "div.serp-jobcontet-cards-container-joblist.jobcard[id]"
+            )
 
             if not cards:
                 break

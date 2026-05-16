@@ -821,20 +821,6 @@ def test_interleaved_parsers_produce_independent_per_parser_totals():
     assert summary.external_redirects == 5
 
 
-def test_parser_accessor_methods_reflect_enriched_and_queries_done():
-    """parser_enriched and parser_queries_done return correct values."""
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
-
-    metrics.enriched("p")
-    metrics.enriched("p")
-    metrics.query_done("p")
-
-    assert metrics.parser_enriched("p") == 2
-    assert metrics.parser_queries_done("p") == 1
-    assert metrics.parser_discovered("p") == 0
-
-
 def test_parser_summary_unknown_parser_id_returns_zeros():
     """parser_summary for a never-seen parser_id returns all-zero counts."""
 

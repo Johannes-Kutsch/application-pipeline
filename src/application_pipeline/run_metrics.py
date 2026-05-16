@@ -12,6 +12,8 @@ from application_pipeline.status_display import StatusDisplay
 
 @dataclass
 class _ParserCounters:
+    total_queries: int = 0
+    lifecycle: str = ""  # "" | "done" | "dead"
     discovered: int = 0
     enrich_failed: int = 0
     external_redirects: int = 0
@@ -126,6 +128,15 @@ class RunMetrics:
         )
         self._display.register("judge_match", order=starting_order + 3, phase="running")
 
+    def register_parser(
+        self, parser_id: str, *, order: int, total_queries: int
+    ) -> None:
+        with self._lock:
+            entry = self._parser_entry(parser_id)
+            entry.total_queries = total_queries
+            body = self._parser_body(parser_id)
+        self._display.register(parser_id, order=order, phase="running", body=body)
+
     # -----------------------------------------------------------------------
     # Degraded reason
     # -----------------------------------------------------------------------
@@ -155,8 +166,11 @@ class RunMetrics:
             self._discovered += 1
             if parser_id:
                 self._parser_entry(parser_id).discovered += 1
-            body = self._pipeline_body()
-        self._display.update_body("pipeline", body=body)
+            pipeline_body = self._pipeline_body()
+            parser_body = self._parser_body(parser_id) if parser_id else None
+        self._display.update_body("pipeline", body=pipeline_body)
+        if parser_id and parser_body is not None:
+            self._display.update_body(parser_id, body=parser_body)
 
     def dedup_url_hit(self) -> None:
         with self._lock:
@@ -206,54 +220,63 @@ class RunMetrics:
             self._enrich_failed += 1
             if parser_id:
                 self._parser_entry(parser_id).enrich_failed += 1
-            body = self._pipeline_body()
-        self._display.update_body("pipeline", body=body)
+            pipeline_body = self._pipeline_body()
+            parser_body = self._parser_body(parser_id) if parser_id else None
+        self._display.update_body("pipeline", body=pipeline_body)
+        if parser_id and parser_body is not None:
+            self._display.update_body(parser_id, body=parser_body)
 
     def external_redirect(self, parser_id: str = "") -> None:
         with self._lock:
             self._external_redirects += 1
             if parser_id:
                 self._parser_entry(parser_id).external_redirects += 1
+            parser_body = self._parser_body(parser_id) if parser_id else None
+        if parser_id and parser_body is not None:
+            self._display.update_body(parser_id, body=parser_body)
 
     def parser_dead(self, parser_id: str = "") -> None:
         with self._lock:
             self._parsers_dead += 1
             if parser_id:
-                self._parser_entry(parser_id).parsers_dead += 1
-            body = self._pipeline_body()
-        self._display.update_body("pipeline", body=body)
+                entry = self._parser_entry(parser_id)
+                entry.parsers_dead += 1
+                entry.lifecycle = "dead"
+            pipeline_body = self._pipeline_body()
+            parser_body = self._parser_body(parser_id) if parser_id else None
+        self._display.update_body("pipeline", body=pipeline_body)
+        if parser_id and parser_body is not None:
+            self._display.update_body(parser_id, body=parser_body)
+
+    def parser_done(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).lifecycle = "done"
+            body = self._parser_body(parser_id)
+        self._display.update_body(parser_id, body=body)
 
     def not_served_query(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).not_served_queries += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body(parser_id, body=body)
 
     def unparseable_date(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).unparseable_dates += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body(parser_id, body=body)
 
     def query_done(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).queries_done += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body(parser_id, body=body)
 
     def enriched(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).enriched += 1
-
-    # -----------------------------------------------------------------------
-    # Per-parser query/display accessors
-    # -----------------------------------------------------------------------
-
-    def parser_discovered(self, parser_id: str) -> int:
-        with self._lock:
-            return self._per_parser.get(parser_id, _ParserCounters()).discovered
-
-    def parser_enriched(self, parser_id: str) -> int:
-        with self._lock:
-            return self._per_parser.get(parser_id, _ParserCounters()).enriched
-
-    def parser_queries_done(self, parser_id: str) -> int:
-        with self._lock:
-            return self._per_parser.get(parser_id, _ParserCounters()).queries_done
+            body = self._parser_body(parser_id)
+        self._display.update_body(parser_id, body=body)
 
     def parser_summary(
         self, parser_id: str, end_monotonic: float, started_monotonic: float
@@ -530,6 +553,19 @@ class RunMetrics:
     # -----------------------------------------------------------------------
     # Internal body formatters (called under lock)
     # -----------------------------------------------------------------------
+
+    def _parser_body(self, parser_id: str) -> str:
+        c = self._per_parser.get(parser_id, _ParserCounters())
+        body = (
+            f"{c.queries_done}/{c.total_queries} queries"
+            f" · {c.discovered} stubs"
+            f" · {c.enriched} enriched"
+        )
+        if c.lifecycle == "done":
+            body += " · done"
+        elif c.lifecycle == "dead":
+            body += " · dead"
+        return body
 
     def _pipeline_body(self) -> str:
         return (

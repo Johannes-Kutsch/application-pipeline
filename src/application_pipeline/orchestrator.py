@@ -437,7 +437,6 @@ def _discover_release_tag() -> str | None:
 class _ParserState:
     parser_id: str
     inbound: queue.Queue[object]
-    total_queries: int
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_monotonic: float = field(default_factory=time.monotonic)
     last_event_monotonic: float = field(default_factory=time.monotonic)
@@ -454,14 +453,6 @@ def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:
         )
         for idx, pos in enumerate(batch)
     ]
-
-
-def _make_parser_body(
-    queries_done: int, total_queries: int, stubs: int, enriched: int
-) -> str:
-    return (
-        f"{queries_done}/{total_queries} queries · {stubs} stubs · {enriched} enriched"
-    )
 
 
 def run(
@@ -587,7 +578,6 @@ def run(
                 parser_states[parser_id] = _ParserState(
                     parser_id=parser_id,
                     inbound=inbound,
-                    total_queries=len(worklist),
                 )
                 t = _ParserThread(parser_id, parser, worklist, outbound, inbound)
                 threads.append((parser_id, t))
@@ -600,11 +590,10 @@ def run(
                 state.last_event_monotonic = state.started_monotonic
                 _log.info("parser %s started", pid)
                 parser_log.record(pid, "parser started")
-                status_display.register(
+                metrics.register_parser(
                     pid,
                     order=2 + i,
-                    phase="running",
-                    body=_make_parser_body(0, state.total_queries, 0, 0),
+                    total_queries=len(t._worklist),
                 )
 
             status_display.remove("startup")
@@ -644,19 +633,6 @@ def run(
                 classify_buffer.clear()
 
             parsers_remaining: set[str] = set(parser_states.keys())
-
-            def _update_parser_row(pid: str, suffix: str = "") -> None:
-                s = parser_states[pid]
-                status_display.update_body(
-                    pid,
-                    body=_make_parser_body(
-                        metrics.parser_queries_done(pid),
-                        s.total_queries,
-                        metrics.parser_discovered(pid),
-                        metrics.parser_enriched(pid),
-                    )
-                    + suffix,
-                )
 
             poll_s = min(stall_threshold_s, 5.0)
             while parsers_remaining:
@@ -717,7 +693,6 @@ def run(
                         else:  # tuple_hit
                             metrics.dedup_tuple_hit()
                             state.inbound.put(_SKIP)
-                    _update_parser_row(pid)
 
                 elif isinstance(payload, Position):
                     for warning in payload._warnings:
@@ -735,7 +710,6 @@ def run(
                     else:
                         dedup_store.mark_off_domain(payload.stub)
                         metrics.prefilter_dropped(verdict)
-                    _update_parser_row(pid)
 
                 elif isinstance(payload, ParserError):
                     stub = state.pending_enrich
@@ -769,17 +743,15 @@ def run(
 
                 elif payload is _QUERY_DONE:
                     metrics.query_done(pid)
-                    _update_parser_row(pid)
 
                 elif payload is _PARSER_DONE:
                     parsers_remaining.discard(pid)
-                    _update_parser_row(pid, " · done")
+                    metrics.parser_done(pid)
 
                 elif isinstance(payload, _ParserDead):
                     parser_log.record_traceback(pid, payload.traceback_str)
                     metrics.parser_dead(pid)
                     parsers_remaining.discard(pid)
-                    _update_parser_row(pid, " · dead")
 
             for _, t in threads:
                 t.join()

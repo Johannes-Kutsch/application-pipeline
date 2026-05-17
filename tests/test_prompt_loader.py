@@ -204,7 +204,7 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     (user_info / "domain-fit.md").write_text("ML roles\n")
     (user_info / "match-criteria.md").write_text("Hamburg\n")
     path = tmp_path / "config.py"
-    path.write_text(REQUIRED_BODY)
+    path.write_text(REQUIRED_BODY + "\nLAYOUT = None\n")
 
     config = load(path)
     prompts = load_prompts(config)

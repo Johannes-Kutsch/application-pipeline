@@ -21,3 +21,6 @@ SOURCES = [
 LOCATIONS: list[str] = []
 
 INCLUDE_REMOTE = True
+
+# LAYOUT defaults to layout.py in the same directory as this file (required).
+# Set LAYOUT = None to skip and use the built-in minimal template instead.

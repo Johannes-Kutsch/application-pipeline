@@ -593,12 +593,12 @@ def test_classify_relevance_batch_passes_haiku_model_to_invoker() -> None:
     assert call_kwargs.get("effort", "") == ""
 
 
-def test_judge_match_passes_sonnet_model_and_medium_effort_to_invoker() -> None:
+def test_judge_match_passes_haiku_model_and_medium_effort_to_invoker() -> None:
     invoker = _fake_invoker(_judge_response())
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
     extractor.judge_match("desc")
     call_kwargs = invoker.call.call_args.kwargs
-    assert call_kwargs["model"] == "sonnet"
+    assert call_kwargs["model"] == "haiku"
     assert call_kwargs["effort"] == "medium"
 
 

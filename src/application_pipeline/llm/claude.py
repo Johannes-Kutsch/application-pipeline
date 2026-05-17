@@ -30,7 +30,7 @@ from .types import (
 _COMPONENT_ID = "claude_extractor"
 
 _CLASSIFY_MODEL = "haiku"
-_JUDGE_MODEL = "sonnet"
+_JUDGE_MODEL = "haiku"
 _JUDGE_EFFORT = "medium"
 
 

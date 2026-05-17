@@ -7,7 +7,7 @@ from datetime import datetime
 from application_pipeline import parser_log
 from application_pipeline.dedup import RunScopedSeenResult
 from application_pipeline.llm.types import CallUsage, MatchTier
-from application_pipeline.prefilter import PreFilterVerdict
+from application_pipeline.prefilter import PreFilterVerdict, TermMatch
 from application_pipeline.status_display import StatusDisplay
 from application_pipeline.text import normalize
 
@@ -71,6 +71,21 @@ def _format_keyword_hits(
 def _format_dead_list(terms: list[str], counts: dict[str, tuple[int, int, int]]) -> str:
     dead = [term for term in terms if counts[term][0] == 0]
     return f"[{', '.join(dead)}]"
+
+
+def _bump_keyword_counts(
+    counts: dict[str, tuple[int, int, int]],
+    matches: tuple[TermMatch, ...],
+) -> None:
+    for match in matches:
+        if match.term not in counts:
+            continue
+        n, t, b = counts[match.term]
+        counts[match.term] = (
+            n + 1,
+            t + ("title" in match.fields),
+            b + ("body" in match.fields),
+        )
 
 
 def _prefilter_summary_counts(
@@ -679,21 +694,5 @@ class RunMetrics:
             self._prefilter_blacklist_hits += 1
         if not verdict.whitelist_hit and not verdict.blacklist_hit:
             self._prefilter_no_hit_either += 1
-        for match in verdict.whitelist_matches:
-            if match.term in self._prefilter_wl_counts:
-                n, t, b = self._prefilter_wl_counts[match.term]
-                n += 1
-                if "title" in match.fields:
-                    t += 1
-                if "body" in match.fields:
-                    b += 1
-                self._prefilter_wl_counts[match.term] = (n, t, b)
-        for match in verdict.blacklist_matches:
-            if match.term in self._prefilter_bl_counts:
-                n, t, b = self._prefilter_bl_counts[match.term]
-                n += 1
-                if "title" in match.fields:
-                    t += 1
-                if "body" in match.fields:
-                    b += 1
-                self._prefilter_bl_counts[match.term] = (n, t, b)
+        _bump_keyword_counts(self._prefilter_wl_counts, verdict.whitelist_matches)
+        _bump_keyword_counts(self._prefilter_bl_counts, verdict.blacklist_matches)

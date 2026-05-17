@@ -14,7 +14,7 @@ def render(
     number: int,
     layout: Layout,
 ) -> str:
-    tier = verdict.tier
+    tier = verdict.tier.value
 
     placeholders: dict[str, Any] = {}
 
@@ -29,10 +29,10 @@ def render(
         placeholders[f.name] = getattr(position.stub, f.name)
 
     # Verdict and derived fields
-    placeholders["tier"] = tier.value
+    placeholders["tier"] = tier
     placeholders["summary"] = verdict.summary
-    placeholders["emoji"] = layout.tier_emoji[tier.value]
-    placeholders["color"] = layout.tier_color[tier.value]
+    placeholders["emoji"] = layout.tier_emoji[tier]
+    placeholders["color"] = layout.tier_color[tier]
     placeholders["number"] = number
 
     # List placeholders with empty fallback

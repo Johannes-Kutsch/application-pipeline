@@ -7,23 +7,10 @@ import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal
 
-import httpx
-
 import application_pipeline.parser_log as parser_log
-from application_pipeline.http import HttpRetryError
 
 from ._text import parse_iso_date, strip_html
-from .errors import ParserError
-from .http import (
-    HTTP_CONNECT_TIMEOUT,
-    HTTP_READ_TIMEOUT,
-    MAX_RETRIES,
-    USER_AGENT,
-    HttpGet,
-    Throttle,
-    check_response_status,
-    request_with_retry,
-)
+from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
 
@@ -82,16 +69,6 @@ def remote_wire() -> dict[str, str]:
     return {"arbeitszeit": "ho"}
 
 
-def _default_http_get(url: str, timeout: float) -> bytes:
-    with httpx.Client(
-        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
-        headers={"User-Agent": USER_AGENT, "X-API-Key": _API_KEY},
-    ) as client:
-        resp = client.get(url, timeout=timeout)
-        check_response_status(resp, url)
-        return resp.content
-
-
 def _contract_type(
     vertragsdauer: str | None,
 ) -> Literal["permanent", "fixed-term", "freelance"] | None:
@@ -117,20 +94,18 @@ class BundesagenturParser:
     def __init__(
         self,
         *,
-        _http_get: HttpGet | None = None,
-        _timeout: float = HTTP_READ_TIMEOUT,
-        _retries: int = MAX_RETRIES,
+        _http: ParserHttp | None = None,
     ) -> None:
-        self._http_get: HttpGet = _http_get or _default_http_get
-        self._timeout = _timeout
-        self._retries = _retries
-        self._throttle = Throttle()
+        self._http = (
+            _http if _http is not None else ParserHttp(headers={"X-API-Key": _API_KEY})
+        )
 
     def __enter__(self) -> "BundesagenturParser":
+        self._http.__enter__()
         return self
 
     def __exit__(self, *args: object) -> None:
-        pass
+        self._http.__exit__(*args)
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         extra_params: dict[str, object]
@@ -147,7 +122,6 @@ class BundesagenturParser:
         count = 0
         page = 1
         while True:
-            self._throttle.wait()
             params: dict[str, object] = {
                 "was": query.keyword,
                 "page": page,
@@ -162,15 +136,8 @@ class BundesagenturParser:
                 q=query.keyword,
                 page=page,
             )
-            try:
-                raw = request_with_retry(
-                    url, self._timeout, self._retries, self._http_get
-                )
-                data: dict[str, Any] = json.loads(raw)
-            except HttpRetryError as exc:
-                raise ParserError(
-                    f"Bundesagentur search failed: {exc}"
-                ) from exc.__cause__
+            raw = self._http.get(url, error_prefix="Bundesagentur search failed")
+            data: dict[str, Any] = json.loads(raw)
 
             items: list[dict[str, Any]] = data.get("ergebnisliste") or []
             if not items:
@@ -207,16 +174,10 @@ class BundesagenturParser:
             page += 1
 
     def enrich(self, stub: PositionStub) -> Position:
-        self._throttle.wait()
-        try:
-            raw = request_with_retry(
-                stub.url, self._timeout, self._retries, self._http_get
-            )
-            data: dict[str, Any] = json.loads(raw)
-        except HttpRetryError as exc:
-            raise ParserError(
-                f"Bundesagentur enrich failed for {stub.url}: {exc}"
-            ) from exc.__cause__
+        raw = self._http.get(
+            stub.url, error_prefix=f"Bundesagentur enrich failed for {stub.url}"
+        )
+        data: dict[str, Any] = json.loads(raw)
 
         raw_description = strip_html(data.get("stellenangebotsBeschreibung") or "")
         veroeffentlichung = data.get("veroeffentlichungszeitraum") or {}

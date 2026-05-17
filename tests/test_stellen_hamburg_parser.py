@@ -7,7 +7,9 @@ import pytest
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.types import City
-from application_pipeline.parsers.http import HttpGet, ParserHttp
+from collections.abc import Callable
+
+from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
@@ -80,7 +82,7 @@ def _detail_html(
     return f"<html><head>{script}</head><body></body></html>".encode()
 
 
-def _make_search_get(responses: list[bytes]) -> HttpGet:
+def _make_search_get(responses: list[bytes]) -> Callable[[str, float], bytes]:
     it = iter(responses)
 
     def http_get(url: str, timeout: float) -> bytes:
@@ -89,7 +91,7 @@ def _make_search_get(responses: list[bytes]) -> HttpGet:
     return http_get
 
 
-def _make_get(responses: list[bytes]) -> HttpGet:
+def _make_get(responses: list[bytes]) -> Callable[[str, float], bytes]:
     it = iter(responses)
 
     def http_get(url: str, timeout: float) -> bytes:

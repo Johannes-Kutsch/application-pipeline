@@ -15,7 +15,9 @@ from application_pipeline.parsers.types import (
     Position,
     Remote,
 )
-from application_pipeline.parsers.http import HttpGet, ParserHttp
+from collections.abc import Callable
+
+from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers import jobs_beim_staat_html as parser_module
 from application_pipeline.parsers.jobs_beim_staat_html import (
     JobsBeimStaatParser,
@@ -36,7 +38,7 @@ def _load(name: str) -> bytes:
     return (_FIXTURES / name).read_bytes()
 
 
-def _make_get(responses: list[bytes]) -> HttpGet:
+def _make_get(responses: list[bytes]) -> Callable[[str, float], bytes]:
     it = iter(responses)
 
     def http_get(url: str, timeout: float) -> bytes:

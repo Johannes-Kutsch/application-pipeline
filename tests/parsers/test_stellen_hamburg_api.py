@@ -11,7 +11,9 @@ import pytest
 import application_pipeline.parser_log as parser_log
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.types import City, NotServedQuery, Remote
-from application_pipeline.parsers.http import HttpGet, ParserHttp
+from collections.abc import Callable
+
+from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
@@ -29,7 +31,7 @@ def _load(name: str) -> bytes:
     return (_FIXTURES / name).read_bytes()
 
 
-def _make_get(responses: dict[str, bytes]) -> HttpGet:
+def _make_get(responses: dict[str, bytes]) -> Callable[[str, float], bytes]:
     def http_get(url: str, timeout: float) -> bytes:
         for key, body in responses.items():
             if key in url:

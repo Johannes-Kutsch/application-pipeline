@@ -12,7 +12,7 @@ from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.http import (
     USER_AGENT,
     ParserHttp,
-    Throttle,
+    _Throttle,
 )
 
 _NO_SLEEP = lambda _: None  # noqa: E731
@@ -173,7 +173,7 @@ def test_throttle_pacing_between_consecutive_get_calls():
     sleeps: list[float] = []
     now_calls = iter([0.0, 0.1, 0.1])  # first get at 0.0, second get at 0.1
 
-    throttle = Throttle(
+    throttle = _Throttle(
         interval=0.5, _now=lambda: next(now_calls), _sleep=sleeps.append
     )
 
@@ -197,7 +197,7 @@ def test_throttle_fires_once_per_get_across_multiple_retry_attempts():
     # A real Throttle whose `_now` iterator runs dry if `wait()` is called more
     # than once — proves throttle pacing is applied per get(), not per retry.
     now_values = iter([0.0])
-    throttle = Throttle(interval=0.5, _now=lambda: next(now_values), _sleep=_NO_SLEEP)
+    throttle = _Throttle(interval=0.5, _now=lambda: next(now_values), _sleep=_NO_SLEEP)
 
     attempt = 0
 

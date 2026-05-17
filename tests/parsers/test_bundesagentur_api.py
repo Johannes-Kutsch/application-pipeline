@@ -15,7 +15,9 @@ from application_pipeline.parsers.bundesagentur_api import (
     BundesagenturParser,
     parser_class,
 )
-from application_pipeline.parsers.http import HttpGet, ParserHttp
+from collections.abc import Callable
+
+from application_pipeline.parsers.http import ParserHttp
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "bundesagentur"
 
@@ -72,7 +74,7 @@ def _item(
     return result
 
 
-def _make_get(responses: list[bytes]) -> HttpGet:
+def _make_get(responses: list[bytes]) -> Callable[[str, float], bytes]:
     it = iter(responses)
 
     def http_get(url: str, timeout: float) -> bytes:

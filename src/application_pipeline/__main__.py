@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 load_dotenv(Path.home() / ".env")
 
 from application_pipeline import parser_log  # noqa: E402
+from application_pipeline.config import resolve_data_paths  # noqa: E402
 from application_pipeline.failure_report import write_failure  # noqa: E402
 from application_pipeline.orchestrator import current_stage, run  # noqa: E402
 from application_pipeline.status_display import PlainStatusDisplay, RichStatusDisplay  # noqa: E402
@@ -64,7 +65,7 @@ def main() -> None:
                 current_stage.get(),
                 exc,
                 _tail.tail(),
-                config_path.resolve().parent / "failures",
+                resolve_data_paths(config_path.resolve().parent).failures_path,
             )
         except Exception:
             pass

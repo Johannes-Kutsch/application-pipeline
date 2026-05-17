@@ -1,3 +1,3 @@
-from .prefilter import DomainPreFilter, PreFilterVerdict
+from .prefilter import DomainPreFilter, PreFilterVerdict, TermMatch
 
-__all__ = ["DomainPreFilter", "PreFilterVerdict"]
+__all__ = ["DomainPreFilter", "PreFilterVerdict", "TermMatch"]

@@ -866,6 +866,113 @@ def test_integration_prefilter_whitelist_rescue_counters(tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
+# Integration: prefilter.events.jsonl — one row per decision with reason field
+# ---------------------------------------------------------------------------
+
+_PF_EVENT_URLS = [f"https://stub.example/pfev/{i}" for i in range(4)]
+_PF_EVENT_NO_HIT_URL = _PF_EVENT_URLS[0]
+_PF_EVENT_WHITELIST_ONLY_URL = _PF_EVENT_URLS[1]
+_PF_EVENT_RESCUE_URL = _PF_EVENT_URLS[2]
+_PF_EVENT_DROP_URL = _PF_EVENT_URLS[3]
+
+
+class _PreFilterEventStubParser:
+    """4 stubs covering all four prefilter reason categories."""
+
+    def __enter__(self) -> "_PreFilterEventStubParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [
+            PositionStub(url=url, title=f"Job {i}", source="stub")
+            for i, url in enumerate(_PF_EVENT_URLS)
+        ]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        # SKILLS=["django"] is the whitelist; NEGATIVE_KEYWORDS=["pflegekraft"] is the blacklist
+        descriptions = {
+            _PF_EVENT_NO_HIT_URL: "Marketing manager position",
+            _PF_EVENT_WHITELIST_ONLY_URL: "Django developer role",
+            _PF_EVENT_RESCUE_URL: "Django pflegekraft gesucht",
+            _PF_EVENT_DROP_URL: "Pflegekraft gesucht",
+        }
+        return Position(stub=stub, raw_description=descriptions[stub.url])
+
+
+def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
+    """prefilter.events.jsonl gets one row per Position with reason and match fields."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "logs"
+    parser_log.configure(logs_dir)
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["pflegekraft"]',
+    )
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _PreFilterEventStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_manager=_stub_results_manager(),
+    )
+
+    events_file = logs_dir / "prefilter.events.jsonl"
+    assert events_file.exists(), "prefilter.events.jsonl must be created"
+
+    rows = [
+        json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 4, "one row per position evaluated"
+
+    by_url = {row["url"]: row for row in rows}
+
+    no_hit = by_url[_PF_EVENT_NO_HIT_URL]
+    assert no_hit["event"] == "decision"
+    assert no_hit["passes"] is True
+    assert no_hit["reason"] == "no_hit"
+    assert no_hit["whitelist_matches"] == []
+    assert no_hit["blacklist_matches"] == []
+
+    wl_only = by_url[_PF_EVENT_WHITELIST_ONLY_URL]
+    assert wl_only["passes"] is True
+    assert wl_only["reason"] == "whitelist_only"
+    assert len(wl_only["whitelist_matches"]) > 0
+    assert wl_only["blacklist_matches"] == []
+
+    rescue = by_url[_PF_EVENT_RESCUE_URL]
+    assert rescue["passes"] is True
+    assert rescue["reason"] == "whitelist_rescue"
+    assert len(rescue["whitelist_matches"]) > 0
+    assert len(rescue["blacklist_matches"]) > 0
+
+    drop = by_url[_PF_EVENT_DROP_URL]
+    assert drop["passes"] is False
+    assert drop["reason"] == "blacklist_drop"
+    assert drop["whitelist_matches"] == []
+    assert len(drop["blacklist_matches"]) > 0
+
+    # Check envelope fields present on all rows
+    for row in rows:
+        assert "ts" in row
+        assert "url" in row
+        assert "title" in row
+        assert "source" in row
+        assert "title_len" in row
+        assert "body_len" in row
+
+
+# ---------------------------------------------------------------------------
 # Integration: classify + judge + render + write + mark (slice 5 / issue #109)
 # ---------------------------------------------------------------------------
 

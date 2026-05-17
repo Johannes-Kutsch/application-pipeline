@@ -572,6 +572,33 @@ class _OutboundDispatcher:
             self._judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
         else:
             verdict = self._prefilter.classify(payload)
+            if verdict.whitelist_matches and verdict.blacklist_matches:
+                reason = "whitelist_rescue"
+            elif verdict.whitelist_matches:
+                reason = "whitelist_only"
+            elif verdict.blacklist_matches:
+                reason = "blacklist_drop"
+            else:
+                reason = "no_hit"
+            parser_log.record(
+                "prefilter",
+                "decision",
+                url=payload.stub.url,
+                title=payload.title,
+                source=payload.stub.source,
+                passes=verdict.passes,
+                reason=reason,
+                whitelist_matches=[
+                    {"term": m.term, "fields": sorted(m.fields)}
+                    for m in verdict.whitelist_matches
+                ],
+                blacklist_matches=[
+                    {"term": m.term, "fields": sorted(m.fields)}
+                    for m in verdict.blacklist_matches
+                ],
+                title_len=len(payload.title),
+                body_len=len(payload.raw_description),
+            )
             if verdict.passes:
                 self._metrics.prefilter_passed(verdict)
                 self._classify_buffer.append(payload)

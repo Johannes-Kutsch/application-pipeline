@@ -3257,6 +3257,46 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
         assert key in content, f"key {key!r} missing from run.log"
 
 
+def test_prefilter_trailer_schema(tmp_path: Path) -> None:
+    """prefilter SUMMARY block in run.log contains per-keyword hit and dead-list lines."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    run_log = logs_dir / "run.log"
+    assert run_log.exists(), "run.log must be created"
+    content = run_log.read_text(encoding="utf-8")
+
+    assert "SUMMARY OF SESSION" in content
+    for key in (
+        "whitelist_keyword_hits:",
+        "blacklist_keyword_hits:",
+        "whitelist_dead:",
+        "blacklist_dead:",
+    ):
+        assert key in content, f"key {key!r} missing from run.log"
+
+
 def test_main_run_complete_line_includes_new_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

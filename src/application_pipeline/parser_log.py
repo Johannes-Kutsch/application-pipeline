@@ -58,14 +58,16 @@ def record_traceback(component_id: str, traceback_str: str) -> None:
 
 def summarize(
     component_id: str,
-    counts: Mapping[str, int | float],
+    counts: Mapping[str, int | float | str],
     started_at: datetime,
 ) -> None:
     if _logs_dir is None:
         return
     ts = started_at.strftime("%Y-%m-%dT%H:%M:%SZ")
-    pairs = " ".join(f"{k}={v}" for k, v in counts.items())
+    lines = "\n".join(
+        f"{k}: {v}" if isinstance(v, str) else f"{k}={v}" for k, v in counts.items()
+    )
     run_log = _logs_dir / "run.log"
     with run_log.open("a", encoding="utf-8") as f:
         f.write(f"=== {component_id}  {ts}  summary ===\n")
-        f.write(f"\nSUMMARY OF SESSION {ts}\n{pairs}\n\n\n")
+        f.write(f"\nSUMMARY OF SESSION {ts}\n{lines}\n\n\n")

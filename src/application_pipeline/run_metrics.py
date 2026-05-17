@@ -9,6 +9,7 @@ from application_pipeline.dedup import RunScopedSeenResult
 from application_pipeline.llm.types import CallUsage, MatchTier
 from application_pipeline.prefilter import PreFilterVerdict
 from application_pipeline.status_display import StatusDisplay
+from application_pipeline.text import normalize
 
 
 @dataclass
@@ -55,6 +56,35 @@ class RunSummary:
     claude_cache_read_tokens: int = 0
     claude_cost_usd: float = 0.0
     duration_seconds: float = 0.0
+
+
+def _format_keyword_hits(
+    terms: list[str], counts: dict[str, tuple[int, int, int]]
+) -> str:
+    parts = []
+    for term in terms:
+        n, t, b = counts[term]
+        parts.append(f"{term}={n}(t={t},b={b})")
+    return " ".join(parts)
+
+
+def _format_dead_list(terms: list[str], counts: dict[str, tuple[int, int, int]]) -> str:
+    dead = [term for term in terms if counts[term][0] == 0]
+    return f"[{', '.join(dead)}]"
+
+
+def _prefilter_summary_counts(
+    wl_terms: list[str],
+    bl_terms: list[str],
+    wl_counts: dict[str, tuple[int, int, int]],
+    bl_counts: dict[str, tuple[int, int, int]],
+) -> dict[str, str]:
+    return {
+        "whitelist_keyword_hits": _format_keyword_hits(wl_terms, wl_counts),
+        "blacklist_keyword_hits": _format_keyword_hits(bl_terms, bl_counts),
+        "whitelist_dead": _format_dead_list(wl_terms, wl_counts),
+        "blacklist_dead": _format_dead_list(bl_terms, bl_counts),
+    }
 
 
 class RunMetrics:
@@ -117,6 +147,13 @@ class RunMetrics:
 
         self._degraded_reason: str | None = None
 
+        # Per-keyword prefilter counters (populated via register_prefilter_keywords)
+        self._prefilter_whitelist: list[str] = []
+        self._prefilter_blacklist: list[str] = []
+        # term -> (positions_matched, title_count, body_count)
+        self._prefilter_wl_counts: dict[str, tuple[int, int, int]] = {}
+        self._prefilter_bl_counts: dict[str, tuple[int, int, int]] = {}
+
         # Per-parser counters (lazily allocated on first event)
         self._per_parser: dict[str, _ParserCounters] = {}
 
@@ -148,6 +185,19 @@ class RunMetrics:
     def set_degraded_reason(self, reason: str) -> None:
         with self._lock:
             self._degraded_reason = reason
+
+    def register_prefilter_keywords(
+        self, whitelist: list[str], blacklist: list[str]
+    ) -> None:
+        with self._lock:
+            self._prefilter_whitelist = [n for k in whitelist if (n := normalize(k))]
+            self._prefilter_blacklist = [n for k in blacklist if (n := normalize(k))]
+            self._prefilter_wl_counts = {
+                t: (0, 0, 0) for t in self._prefilter_whitelist
+            }
+            self._prefilter_bl_counts = {
+                t: (0, 0, 0) for t in self._prefilter_blacklist
+            }
 
     # -----------------------------------------------------------------------
     # Internal per-parser helpers (called under lock)
@@ -516,7 +566,16 @@ class RunMetrics:
             judge_cache_read_tokens = self._judge_cache_read_tokens
             judge_cost_usd = self._judge_cost_usd
             judge_total_s = self._judge_total_s
+            wl_terms = list(self._prefilter_whitelist)
+            bl_terms = list(self._prefilter_blacklist)
+            wl_counts = dict(self._prefilter_wl_counts)
+            bl_counts = dict(self._prefilter_bl_counts)
 
+        parser_log.summarize(
+            "prefilter",
+            _prefilter_summary_counts(wl_terms, bl_terms, wl_counts, bl_counts),
+            started_at,
+        )
         parser_log.summarize(
             "classify_relevance",
             {
@@ -620,3 +679,21 @@ class RunMetrics:
             self._prefilter_blacklist_hits += 1
         if not verdict.whitelist_hit and not verdict.blacklist_hit:
             self._prefilter_no_hit_either += 1
+        for match in verdict.whitelist_matches:
+            if match.term in self._prefilter_wl_counts:
+                n, t, b = self._prefilter_wl_counts[match.term]
+                n += 1
+                if "title" in match.fields:
+                    t += 1
+                if "body" in match.fields:
+                    b += 1
+                self._prefilter_wl_counts[match.term] = (n, t, b)
+        for match in verdict.blacklist_matches:
+            if match.term in self._prefilter_bl_counts:
+                n, t, b = self._prefilter_bl_counts[match.term]
+                n += 1
+                if "title" in match.fields:
+                    t += 1
+                if "body" in match.fields:
+                    b += 1
+                self._prefilter_bl_counts[match.term] = (n, t, b)

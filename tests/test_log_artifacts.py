@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 import application_pipeline.parser_log as parser_log
+from application_pipeline.status_display import PlainStatusDisplay
 
 _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
@@ -87,8 +88,6 @@ def test_record_lifecycle_without_configure_is_noop(tmp_path: Path) -> None:
 def test_plain_status_display_register_writes_to_lifecycle_jsonl(
     tmp_path: Path,
 ) -> None:
-    from application_pipeline.status_display import PlainStatusDisplay
-
     parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
@@ -103,8 +102,6 @@ def test_plain_status_display_register_writes_to_lifecycle_jsonl(
 def test_plain_status_display_lifecycle_events_not_in_component_log(
     tmp_path: Path,
 ) -> None:
-    from application_pipeline.status_display import PlainStatusDisplay
-
     parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
@@ -196,8 +193,6 @@ def test_traceback_does_not_write_to_component_log(tmp_path: Path) -> None:
 def test_lifecycle_only_component_produces_no_per_component_log(
     tmp_path: Path,
 ) -> None:
-    from application_pipeline.status_display import PlainStatusDisplay
-
     parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("startup", order=0, phase="starting")

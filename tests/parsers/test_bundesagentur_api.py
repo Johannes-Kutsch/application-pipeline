@@ -260,10 +260,8 @@ def test_discover_emits_discover_page_heartbeat_per_page(
     http = _make_http([page1, page2, page3])
     with BundesagenturParser(_http=http) as p:
         list(p.discover(_query()))
-    import json as _json
-
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in (tmp_path / "bundesagentur_api.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
@@ -290,10 +288,8 @@ def test_discover_skips_item_with_missing_title_and_logs(
     assert len(stubs) == 1
     assert isinstance(stubs[0], PositionStub)
     assert stubs[0].title == "Backend Engineer"
-    import json as _json
-
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in (tmp_path / "bundesagentur_api.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()

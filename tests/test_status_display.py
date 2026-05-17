@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import unittest.mock
@@ -113,8 +114,6 @@ def test_plain_stop_is_silent(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_plain_register_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
-    import json
-
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
@@ -134,8 +133,6 @@ def test_plain_register_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
 def test_plain_update_phase_transition_writes_to_lifecycle_jsonl(
     tmp_path: Path,
 ) -> None:
-    import json
-
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
@@ -169,8 +166,6 @@ def test_plain_update_phase_no_transition_does_not_write_extra_lifecycle_row(
 
 
 def test_plain_remove_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
-    import json
-
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")

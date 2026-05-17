@@ -2375,12 +2375,10 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         results_manager=_stub_results_manager(),
     )
 
-    import json as _json
-
     events_file = logs_dir / "jobs_beim_staat_html.events.jsonl"
     assert events_file.exists()
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
     assert any(
@@ -2822,10 +2820,8 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         results_manager=_stub_results_manager(),
     )
 
-    import json as _json
-
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in (logs_dir / "classify_relevance.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
@@ -2860,10 +2856,8 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         results_manager=_stub_results_manager(),
     )
 
-    import json as _json
-
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in (logs_dir / "judge_match.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
@@ -3283,8 +3277,6 @@ def test_display_stop_called_on_crash(tmp_path: Path) -> None:
 
 def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
     """pipeline register() writes a lifecycle record to lifecycle.jsonl via parser_log."""
-    import json as _json
-
     _parser_log.configure(tmp_path / "logs")
     config_path = _write_config(tmp_path)
 
@@ -3300,7 +3292,7 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
     )
 
     lifecycle_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in (tmp_path / "logs" / "lifecycle.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
@@ -3908,11 +3900,9 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         stall_threshold_s=_THRESHOLD,
     )
 
-    import json as _json
-
     events_file = logs_dir / "bundesagentur_api.events.jsonl"
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
     stalled_count = sum(1 for row in events_rows if row.get("event") == "stalled")
@@ -3947,11 +3937,9 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         results_manager=_stub_results_manager(),
     )
 
-    import json as _json
-
     events_file = logs_dir / "bundesagentur_api.events.jsonl"
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
     # 2 keywords × 1 location = 2 queries
@@ -4002,11 +3990,9 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
 
     assert summary.parsers_dead == 1
 
-    import json as _json
-
     events_file = logs_dir / "bundesagentur_api.events.jsonl"
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
     assert any(row.get("event") == "query_started" for row in events_rows), (

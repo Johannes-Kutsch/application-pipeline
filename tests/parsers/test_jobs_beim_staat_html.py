@@ -386,10 +386,8 @@ def test_discover_emits_discover_page_heartbeat_per_page(
     get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
     with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         list(p.discover(_query()))
-    import json as _json
-
     events_rows = [
-        _json.loads(line)
+        json.loads(line)
         for line in (tmp_path / "jobs_beim_staat_html.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()

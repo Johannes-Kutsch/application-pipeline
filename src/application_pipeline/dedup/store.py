@@ -125,7 +125,7 @@ class DeduplicationStore:
         key: _SeenKey,
         status: SeenStatus,
         *,
-        overwrite_if: str | None = None,
+        overwrite_if: SeenStatus | None = None,
     ) -> None:
         """Write a new record for key. Caller must hold ``self._lock``.
 
@@ -133,9 +133,8 @@ class DeduplicationStore:
         the record is overwritten rather than skipped.
         """
         existing = self._records.get(key.url)
-        if existing is not None:
-            if overwrite_if is None or existing.get("status") != overwrite_if:
-                return
+        if existing is not None and existing.get("status") != overwrite_if:
+            return
 
         company_lc = normalize(key.company)
         title_lc = normalize(key.title)

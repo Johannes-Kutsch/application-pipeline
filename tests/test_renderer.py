@@ -13,7 +13,6 @@ def layout() -> Layout:
         tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
         tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
         placeholder_groups={"meta": (" · ", ["location", "url"])},
-        file_header="# Results\n\n",
         card_template="## {number}. {company} — {title}  {emoji}\n{meta}\n\n**Matched:** {matched}\n**Missing:** {missing}\n\n{summary}\n\n",
     )
 
@@ -76,7 +75,6 @@ def test_layout_has_no_headline_template() -> None:
             tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
             tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
             placeholder_groups={},
-            file_header="",
             card_template="{number}",
         ),
         "headline_template",
@@ -168,7 +166,7 @@ def test_empty_matched_list_renders_empty_list_placeholder(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        file_header=layout.file_header,
+        
         card_template="{matched}",
         empty_list_placeholder="—",
     )
@@ -193,7 +191,7 @@ def test_color_available_via_layout(layout: Layout, position: Position) -> None:
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        file_header=layout.file_header,
+        
         card_template="{color}",
     )
     verdict = MatchVerdict(tier=MatchTier.amber, matched=[], missing=[], summary="")
@@ -231,7 +229,7 @@ def test_placeholder_group_all_none_renders_empty(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={"meta": (" · ", ["location"])},
-        file_header=layout.file_header,
+        
         card_template="{meta}",
     )
     position_no_location = replace(position, stub=replace(position.stub, location=None))
@@ -250,7 +248,7 @@ def test_url_in_placeholder_group_is_autolinked(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={"link": (" ", ["url"])},
-        file_header=layout.file_header,
+        
         card_template="{link}",
     )
     result = render(position, green_verdict, 1, url_layout)
@@ -268,7 +266,7 @@ def test_matched_bullets_renders_bullet_list(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        file_header=layout.file_header,
+        
         card_template="{matched_bullets}",
     )
     result = render(position, green_verdict, 1, bullets_layout)
@@ -283,7 +281,7 @@ def test_missing_bullets_renders_bullet_list(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        file_header=layout.file_header,
+        
         card_template="{missing_bullets}",
     )
     result = render(position, green_verdict, 1, bullets_layout)
@@ -298,7 +296,7 @@ def test_empty_matched_bullets_renders_empty_list_placeholder(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        file_header=layout.file_header,
+        
         card_template="{matched_bullets}",
         empty_list_placeholder="—",
     )
@@ -317,7 +315,7 @@ def test_null_company_skipped_in_group(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={"meta": (" · ", ["company", "url"])},
-        file_header=layout.file_header,
+        
         card_template="{meta}",
     )
     stub_nulls = replace(position.stub, company=None)
@@ -349,7 +347,7 @@ def test_raw_description_not_available_as_template_placeholder(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        file_header=layout.file_header,
+        
         card_template="{raw_description}",
     )
     with pytest.raises(KeyError):

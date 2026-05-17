@@ -6,13 +6,19 @@ from pathlib import Path
 
 from .errors import ResultsFileError
 
+FILE_HEADER = """\
+# Job Pipeline Results
+<!-- schema-version: 1 -->
+<!-- Delete this file and re-run the pipeline to reset -->
+
+"""
+
 _POSITION_HEADER = re.compile(r"^## (\d+)\.", re.MULTILINE)
 
 
 class ResultsFileManager:
-    def __init__(self, path: Path, file_header: str) -> None:
+    def __init__(self, path: Path) -> None:
         self._path = path
-        self._file_header = file_header
         self._next_position: int | None = None
 
     def ensure_initialized(self) -> None:
@@ -23,7 +29,7 @@ class ResultsFileManager:
                 self._next_position = max(numbers) + 1 if numbers else 1
                 return
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(self._file_header, encoding="utf-8")
+            self._path.write_text(FILE_HEADER, encoding="utf-8")
         except OSError as exc:
             raise ResultsFileError(str(exc)) from exc
         self._next_position = 1
@@ -49,5 +55,5 @@ class ResultsFileManager:
             ) from exc
 
 
-def load(path: Path, file_header: str) -> ResultsFileManager:
-    return ResultsFileManager(path, file_header)
+def load(path: Path) -> ResultsFileManager:
+    return ResultsFileManager(path)

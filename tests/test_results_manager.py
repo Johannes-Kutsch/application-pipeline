@@ -4,9 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from application_pipeline.results import ResultsFileError, ResultsFileManager, load
-
-HEADER = "# Results\n\n"
+from application_pipeline.results import (
+    FILE_HEADER,
+    ResultsFileError,
+    ResultsFileManager,
+    load,
+)
 
 
 @pytest.fixture
@@ -16,7 +19,7 @@ def results_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def manager(results_path: Path) -> ResultsFileManager:
-    return ResultsFileManager(results_path, HEADER)
+    return ResultsFileManager(results_path)
 
 
 class TestEnsureInitialized:
@@ -24,7 +27,7 @@ class TestEnsureInitialized:
         self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         manager.ensure_initialized()
-        assert results_path.read_text(encoding="utf-8") == HEADER
+        assert results_path.read_text(encoding="utf-8") == FILE_HEADER
 
     def test_creates_parent_directories(
         self, manager: ResultsFileManager, results_path: Path
@@ -39,7 +42,7 @@ class TestEnsureInitialized:
         results_path.parent.mkdir(parents=True, exist_ok=True)
         results_path.write_bytes(b"")
         manager.ensure_initialized()
-        assert results_path.read_text(encoding="utf-8") == HEADER
+        assert results_path.read_text(encoding="utf-8") == FILE_HEADER
 
     def test_no_op_on_non_empty_file(
         self, manager: ResultsFileManager, results_path: Path
@@ -82,7 +85,9 @@ class TestNextPositionNumber:
         self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         results_path.parent.mkdir(parents=True, exist_ok=True)
-        results_path.write_text(HEADER + "## 47. Some Position\n", encoding="utf-8")
+        results_path.write_text(
+            FILE_HEADER + "## 47. Some Position\n", encoding="utf-8"
+        )
         manager.ensure_initialized()
         assert manager.next_position_number() == 48
 
@@ -91,7 +96,8 @@ class TestNextPositionNumber:
     ) -> None:
         results_path.parent.mkdir(parents=True, exist_ok=True)
         content = (
-            HEADER + "## 3. Position\n## 1. Position\n## 5. Position\n## 2. Position\n"
+            FILE_HEADER
+            + "## 3. Position\n## 1. Position\n## 5. Position\n## 2. Position\n"
         )
         results_path.write_text(content, encoding="utf-8")
         manager.ensure_initialized()
@@ -107,7 +113,7 @@ class TestNextPositionNumber:
         self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         results_path.parent.mkdir(parents=True, exist_ok=True)
-        results_path.write_text(HEADER, encoding="utf-8")
+        results_path.write_text(FILE_HEADER, encoding="utf-8")
         manager.ensure_initialized()
         assert manager.next_position_number() == 1
 
@@ -127,7 +133,7 @@ class TestAppend:
         manager.ensure_initialized()
         block = "## 1. Test Position\nSome content\n"
         manager.append(block)
-        assert results_path.read_text(encoding="utf-8") == HEADER + block
+        assert results_path.read_text(encoding="utf-8") == FILE_HEADER + block
 
     def test_two_appends_concatenate_without_normalization(
         self, manager: ResultsFileManager, results_path: Path
@@ -137,7 +143,7 @@ class TestAppend:
         block2 = "## 2. Second\n"
         manager.append(block1)
         manager.append(block2)
-        assert results_path.read_text(encoding="utf-8") == HEADER + block1 + block2
+        assert results_path.read_text(encoding="utf-8") == FILE_HEADER + block1 + block2
 
     def test_durable_after_append(
         self, manager: ResultsFileManager, results_path: Path
@@ -177,10 +183,10 @@ class TestNumberingSurvivesFileReplacement:
 
 class TestLoadFactory:
     def test_load_returns_manager(self, results_path: Path) -> None:
-        mgr = load(results_path, HEADER)
+        mgr = load(results_path)
         assert isinstance(mgr, ResultsFileManager)
 
     def test_load_produces_functional_manager(self, results_path: Path) -> None:
-        mgr = load(results_path, HEADER)
+        mgr = load(results_path)
         mgr.ensure_initialized()
-        assert results_path.read_text(encoding="utf-8") == HEADER
+        assert results_path.read_text(encoding="utf-8") == FILE_HEADER

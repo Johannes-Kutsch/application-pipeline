@@ -38,7 +38,11 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.types import City, Remote
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.prompts import PromptError
-from application_pipeline.results import ResultsFileError, ResultsFileManager
+from application_pipeline.results import (
+    FILE_HEADER,
+    ResultsFileError,
+    ResultsFileManager,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -122,11 +126,11 @@ def _stub_results_managers() -> dict[str, ResultsFileManager]:
 
 
 def _real_results_managers(
-    results_dir: Path, header: str = "# Results\n\n"
+    results_dir: Path,
 ) -> dict[str, ResultsFileManager]:
     results_dir.mkdir(parents=True, exist_ok=True)
     return {
-        tier: ResultsFileManager(results_dir / f"{tier}.md", header)
+        tier: ResultsFileManager(results_dir / f"{tier}.md")
         for tier in ("green", "amber", "red")
     }
 
@@ -4567,9 +4571,9 @@ def test_each_tier_routed_to_its_results_file(tmp_path: Path) -> None:
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_managers={
-            "green": ResultsFileManager(results_dir / "green.md", "# Header\n\n"),
-            "amber": ResultsFileManager(results_dir / "amber.md", "# Header\n\n"),
-            "red": ResultsFileManager(results_dir / "red.md", "# Header\n\n"),
+            "green": ResultsFileManager(results_dir / "green.md"),
+            "amber": ResultsFileManager(results_dir / "amber.md"),
+            "red": ResultsFileManager(results_dir / "red.md"),
         },
     )
 
@@ -4637,21 +4641,20 @@ def test_per_tier_numbering_restarts_at_one(tmp_path: Path) -> None:
 
 
 def test_file_header_written_to_each_tier_file(tmp_path: Path) -> None:
-    """The Layout FILE_HEADER appears at the top of every tier file after initialization."""
+    """The hardcoded FILE_HEADER appears at the top of every tier file after initialization."""
     results_dir = tmp_path / "results"
-    header = "# My Custom Header\n\n"
 
     run(
         _write_config(tmp_path),
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_managers=_real_results_managers(results_dir, header),
+        results_managers=_real_results_managers(results_dir),
     )
 
     for tier in ("green", "amber", "red"):
         content = (results_dir / f"{tier}.md").read_text(encoding="utf-8")
-        assert content.startswith(header), (
+        assert content.startswith(FILE_HEADER), (
             f"{tier}.md does not start with FILE_HEADER: {content[:80]!r}"
         )
 
@@ -4713,7 +4716,7 @@ def test_deleting_green_creates_fresh_file_amber_red_retain_content(
 
     assert (results_dir / "green.md").exists(), "green.md must be recreated"
     green_content = (results_dir / "green.md").read_text(encoding="utf-8")
-    assert green_content.startswith("# Results\n\n"), (
+    assert green_content.startswith(FILE_HEADER), (
         "fresh green.md must start with FILE_HEADER"
     )
 

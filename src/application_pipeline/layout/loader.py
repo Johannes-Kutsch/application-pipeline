@@ -13,7 +13,6 @@ _REQUIRED_FIELDS = (
     "TIER_EMOJI",
     "TIER_COLOR",
     "PLACEHOLDER_GROUPS",
-    "FILE_HEADER",
     "CARD_TEMPLATE",
 )
 
@@ -99,7 +98,6 @@ def load(path: pathlib.Path) -> Layout:
         tier_emoji=module.TIER_EMOJI,
         tier_color=module.TIER_COLOR,
         placeholder_groups=module.PLACEHOLDER_GROUPS,
-        file_header=module.FILE_HEADER,
         card_template=module.CARD_TEMPLATE,
         empty_list_placeholder=getattr(module, "EMPTY_LIST_PLACEHOLDER", "—"),
     )

@@ -18,13 +18,6 @@ PLACEHOLDER_GROUPS = {
 
 EMPTY_LIST_PLACEHOLDER = "—"
 
-FILE_HEADER = """\
-# Job Pipeline Results
-<!-- schema-version: 1 -->
-<!-- Delete this file and re-run the pipeline to reset -->
-
-"""
-
 CARD_TEMPLATE = """\
 ## <span style="color:{color}">{number}. {company} — {title}  {emoji}</span>
 {meta}

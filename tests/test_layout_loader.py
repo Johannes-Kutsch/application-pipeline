@@ -43,7 +43,6 @@ def test_load_returns_populated_layout(tmp_path: pathlib.Path) -> None:
         "red": "#da3633",
     }
     assert layout.placeholder_groups == {"meta": (" · ", ["location", "url"])}
-    assert layout.file_header == "# Results\n"
     assert layout.card_template == "## {number}. {company}\n"
 
 
@@ -55,7 +54,7 @@ def test_layout_is_frozen(tmp_path: pathlib.Path) -> None:
     layout = load_layout(path)
 
     with pytest.raises(dataclasses.FrozenInstanceError):
-        layout.file_header = "x"  # type: ignore[misc]
+        layout.card_template = "x"  # type: ignore[misc]
 
 
 # --- LayoutError hierarchy ---
@@ -74,7 +73,6 @@ def test_layout_error_is_user_settings_error() -> None:
         "TIER_EMOJI",
         "TIER_COLOR",
         "PLACEHOLDER_GROUPS",
-        "FILE_HEADER",
         "CARD_TEMPLATE",
     ],
 )
@@ -201,22 +199,21 @@ def test_load_wraps_syntax_error(tmp_path: pathlib.Path) -> None:
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:
     path = write_layout(tmp_path, _MINIMAL_BODY)
     first = load_layout(path)
-    assert first.file_header == "# Results\n"
+    assert first.card_template == "## {number}. {company}\n"
 
     second_body = textwrap.dedent(
         """
         TIER_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}
         TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}
         PLACEHOLDER_GROUPS = {}
-        FILE_HEADER = "# Changed Header for Second Run\\n"
-        CARD_TEMPLATE = "## {number}. {company}\\n"
+        CARD_TEMPLATE = "## {number}. {company} ({tier})\\n"
         HEADLINE_TEMPLATE = "## {number}. {company}\\n"
         """
     )
     path.write_text(second_body, encoding="utf-8")
     second = load_layout(path)
 
-    assert second.file_header == "# Changed Header for Second Run\n"
+    assert second.card_template == "## {number}. {company} ({tier})\n"
 
 
 # --- Unknown top-level names are ignored ---
@@ -227,7 +224,7 @@ def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:
 
     layout = load_layout(path)
 
-    assert layout.file_header == "# Results\n"
+    assert isinstance(layout, Layout)
 
 
 # --- HEADLINE_TEMPLATE is optional and silently ignored ---

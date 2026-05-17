@@ -22,6 +22,5 @@ class Layout:
     tier_emoji: dict[str, str]
     tier_color: dict[str, str]
     placeholder_groups: dict[str, tuple[str, list[str]]]
-    file_header: str
     card_template: str
     empty_list_placeholder: str = "—"

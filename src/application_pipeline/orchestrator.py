@@ -727,9 +727,7 @@ def run(
 
         if results_managers is None:
             results_managers = {
-                tier: ResultsFileManager(
-                    cfg.results_dir / f"{tier}.md", layout.file_header
-                )
+                tier: ResultsFileManager(cfg.results_dir / f"{tier}.md")
                 for tier in ("green", "amber", "red")
             }
         try:

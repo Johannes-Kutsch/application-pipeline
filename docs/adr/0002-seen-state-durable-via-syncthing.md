@@ -1,5 +1,7 @@
 # Deduplication state (`.seen.json`) is durable via Syncthing
 
+> **Amended by [ADR-0022](0022-output-paths-anchored-to-data-dir.md):** `.seen.json` lives at `data/.seen.json` — inside the synced folder, **sibling to** (not inside) `data/results/`. The durability-via-Syncthing rationale below is unchanged; only the literal "alongside the Results File" placement is clarified to mean "in the same synced folder," so dedup state survives a `mv data/results data/results.archive` reset gesture.
+
 The **Deduplication** store (`.seen.json`, holding seen URLs with `(company_lc, title_lc, location_lc, status, first_seen)`) lives in the Syncthing-synced `results/` folder alongside the **Results File**. The Pi is the single writer; the laptop holds a continuously-mirrored copy that serves as backup. The file is *not* tracked in git (it's listed in `.gitignore`).
 
 ## Why

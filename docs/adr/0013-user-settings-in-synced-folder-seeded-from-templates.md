@@ -1,5 +1,7 @@
 # User settings live in the synced folder, seeded from in-package templates
 
+> **Amended by [ADR-0022](0022-output-paths-anchored-to-data-dir.md):** the on-disk folder name reverts from `synched/` to `data/`. The settings-co-located-with-outputs decision and the `init` story below stand; only the directory name and the `data/synched/` paths in the Consequences section are superseded. Read every `data/synched/<x>` below as `data/<x>`.
+
 The two user-editable Python modules — **Config** (`config.py`) and **Layout** (`layout.py`) — live on the Pi at `~/application-pipeline/data/synched/{config,layout}.py`, inside the Syncthing-paired folder. Default contents ship inside the installed package at `src/application_pipeline/templates/{config,layout}.py` and are materialised onto the Pi by `python -m application_pipeline init <dir>`. The `settings/` directory at the repo root is removed; the Pi's synced folder is renamed `results/` → `synched/` to reflect that it now carries inputs as well as outputs.
 
 ## Why

@@ -1,9 +1,11 @@
-# Failures surface as files in the synced `synched/` folder
+# Failures surface as files in the synced `data/` folder
 
-Run failures and per-component failure-event streams are reported by writing files into the synced `synched/` folder on the Pi. Two artifact shapes share the same transport:
+> **Amended by [ADR-0022](0022-output-paths-anchored-to-data-dir.md):** the on-disk folder name is `data/`, not `synched/`. Paths below read `data/failures/<timestamp>.md` and `data/logs/<component>.log`.
 
-1. **One-off failure reports** at `synched/failures/<timestamp>.md` — written for fatal events that abort a run (deploy install errors, Ollama unreachable, parser crashes that exhaust retries, classify/judge exceptions, results-file write errors).
-2. **Per-component append-only event logs** at `synched/logs/<component>.log` — one file per configured parser plus `language.log`, written across runs with a `SUMMARY OF SESSION` trailer per session. Healthy sessions add only the trailer; sessions with attention-worthy events (`enrich_failed`, `external_redirect`, `unparseable_date`, `parser_dead`, language anomalies) add one event line per incident.
+Run failures and per-component failure-event streams are reported by writing files into the synced `data/` folder on the Pi. Two artifact shapes share the same transport:
+
+1. **One-off failure reports** at `data/failures/<timestamp>.md` — written for fatal events that abort a run (deploy install errors, Ollama unreachable, parser crashes that exhaust retries, classify/judge exceptions, results-file write errors).
+2. **Per-component append-only event logs** at `data/logs/<component>.log` — one file per configured parser plus `language.log`, written across runs with a `SUMMARY OF SESSION` trailer per session. Healthy sessions add only the trailer; sessions with attention-worthy events (`enrich_failed`, `external_redirect`, `unparseable_date`, `parser_dead`, language anomalies) add one event line per incident.
 
 Syncthing propagates both shapes to the laptop. The pipeline never makes outbound calls (GitHub Issues, email, webhook) to notify of failure.
 
@@ -26,8 +28,8 @@ Syncthing propagates both shapes to the laptop. The pipeline never makes outboun
 
 ## Consequences
 
-- **`synched/failures/`** holds one-off fatal-incident reports. Pi writes; laptop receives.
-- **`synched/logs/`** holds per-component append-only event logs. One file per parser configured in the source list, plus `language.log`. Pi writes; laptop receives.
+- **`data/failures/`** holds one-off fatal-incident reports. Pi writes; laptop receives.
+- **`data/logs/`** holds per-component append-only event logs. One file per parser configured in the source list, plus `language.log`. Pi writes; laptop receives.
 - **Failure file format** (markdown, per-incident, one-off):
   ```
   # Run failed at 2026-05-11 16:04 (tag v1.1.0)

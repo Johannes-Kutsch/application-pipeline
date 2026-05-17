@@ -1,6 +1,6 @@
 # Hardcoded prompts with externalized user-info; single-language pipeline
 
-LLM prompts are split into two parts. The **agent protocol** — task framing, output-tag instruction (`<verdicts>` / `<verdict>`), JSON shape, and the synthetic example — is **hardcoded** inside the package at `src/application_pipeline/templates/prompts/` and ships as part of the codebase. The **applicant-specific content** — candidate self-description, in/out-of-domain rules, hard match criteria — lives in `data/synched/user-info/` as three markdown files and is injected into the hardcoded prompt at runtime via a single `{USER_INFO}` slot wrapped in `<user-info>` tags. The **Prompt Loader** concatenates the appropriate files per call site:
+LLM prompts are split into two parts. The **agent protocol** — task framing, output-tag instruction (`<verdicts>` / `<verdict>`), JSON shape, and the synthetic example — is **hardcoded** inside the package at `src/application_pipeline/templates/prompts/` and ships as part of the codebase. The **applicant-specific content** — candidate self-description, in/out-of-domain rules, hard match criteria — lives in `data/user-info/` as three markdown files and is injected into the hardcoded prompt at runtime via a single `{USER_INFO}` slot wrapped in `<user-info>` tags. The **Prompt Loader** concatenates the appropriate files per call site:
 
 - **Relevance Classifier** receives: `self-description.md` + `domain-fit.md`.
 - **Match Judge** receives: `self-description.md` + `match-criteria.md`, plus the existing `{skills}` slot fed from `Config.SKILLS`.
@@ -29,13 +29,13 @@ In the same change, the pipeline drops per-language prompt files and all languag
 ## Consequences
 
 - `Config` gains `USER_INFO_DIR: pathlib.Path` (default `user-info/`); `PROMPTS_DIR` is removed (the prompts are now package-internal, not user-configurable).
-- The package ships templates for the three user-info files at `src/application_pipeline/templates/user-info/`, materialised into `data/synched/user-info/` by the existing `python -m application_pipeline init <dir>` command (per ADR-0013).
+- The package ships templates for the three user-info files at `src/application_pipeline/templates/user-info/`, materialised into `data/user-info/` by the existing `python -m application_pipeline init <dir>` command (per ADR-0013).
 - `Prompts` dataclass collapses from `dict[Literal["de", "en"], PromptTemplate]` to a single `PromptTemplate` per call site. `CLASSIFY_RELEVANCE_SLOTS` becomes `{ITEMS, USER_INFO}`; `JUDGE_MATCH_SLOTS` becomes `{skills, raw_description, USER_INFO}`.
 - The **Prompt Loader** reads the hardcoded prompt files from the package (via `importlib.resources`), reads the user-info files from `Config.USER_INFO_DIR`, concatenates per call site, and renders the `{USER_INFO}` slot with `<user-info>...</user-info>` wrapping. Missing or empty user-info files raise `PromptError` at startup.
 - `LLMExtractor.classify_relevance_batch` and `judge_match` lose their `language` parameter. Transcripts no longer carry a `language` field.
 - `langdetect` is removed from `pyproject.toml`. `src/application_pipeline/language.py` is deleted. `LanguageResolution`, `resolve_language`, the `language` field on **Position Stub**, and the per-language batching split in the orchestrator are removed.
 - The **Run Divider** loses any per-language counters (none currently exposed, but the segmentation hooks come out).
-- Existing prompts in `data/synched/prompts/` are deleted as part of migration; the applicant authors fresh `user-info/` content from the seeded templates.
+- Existing prompts in `data/prompts/` are deleted as part of migration; the applicant authors fresh `user-info/` content from the seeded templates.
 - The hardcoded prompts instruct Claude to "respond in German regardless of input language" so the **Match Verdict**'s `summary` field stays consistent for the **Renderer**.
 - Re-introducing language separation later (a third language, or a quality regression on English listings) means re-introducing the file split, the threading, and the buffer split. The risk is real but graded: the change is mechanical and reversible by reverting this ADR's commit set.
 - ADR-0006 (per-language prompts via file-naming) is deleted as part of this change — superseded in full.

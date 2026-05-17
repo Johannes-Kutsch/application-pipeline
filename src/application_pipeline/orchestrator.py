@@ -706,9 +706,7 @@ def run(
                 layout = layout_module.default()
 
         if results_manager is None:
-            results_manager = ResultsFileManager(
-                Path("results/current.md"), layout.file_header
-            )
+            results_manager = ResultsFileManager(cfg.results_path, layout.file_header)
         try:
             results_manager.ensure_initialized()
         except ResultsFileError as exc:

@@ -4437,3 +4437,72 @@ def test_degraded_run_preserves_degraded_reason_independent_of_abandoned_counter
     assert "degraded_reason=usage_limit" in last_line, (
         f"degraded_reason=usage_limit must be present: {last_line!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Config-derived paths (issue #300)
+# ---------------------------------------------------------------------------
+
+
+def test_results_file_written_under_config_dir(tmp_path: Path) -> None:
+    """Orchestrator writes current.md to cfg.results_path (config dir / results / current.md)."""
+    config_path = _write_config(tmp_path)
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        # no results_manager — orchestrator must derive path from cfg.results_path
+    )
+
+    assert (tmp_path / "results" / "current.md").exists(), (
+        "current.md must be written to <config_dir>/results/current.md"
+    )
+
+
+def test_no_hardcoded_results_path_in_src() -> None:
+    """No occurrence of Path("results/current.md") or Path(".seen.json") in orchestrator src."""
+    import ast
+    import pathlib
+
+    src_root = pathlib.Path(__file__).parent.parent / "src"
+    violations: list[str] = []
+    for py_file in src_root.rglob("orchestrator.py"):
+        tree = ast.parse(py_file.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and func.id == "Path":
+                    if node.args and isinstance(node.args[0], ast.Constant):
+                        val = node.args[0].value
+                        if val in ("results/current.md", ".seen.json"):
+                            violations.append(f"{py_file}:{node.lineno}: Path({val!r})")
+    assert not violations, "Hardcoded paths found:\n" + "\n".join(violations)
+
+
+def test_results_path_is_cwd_independent(tmp_path: Path) -> None:
+    """Same on-disk output regardless of process CWD."""
+    import os
+
+    config_path = _write_config(tmp_path)
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    orig_cwd = os.getcwd()
+    try:
+        os.chdir(other_dir)
+        run(
+            config_path,
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: None,
+            dedup_store=MagicMock(),
+        )
+    finally:
+        os.chdir(orig_cwd)
+
+    assert (tmp_path / "results" / "current.md").exists(), (
+        "current.md must land under config dir even when CWD differs"
+    )
+    assert not (other_dir / "results" / "current.md").exists(), (
+        "current.md must not be written relative to CWD"
+    )

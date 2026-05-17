@@ -4437,3 +4437,28 @@ def test_degraded_run_preserves_degraded_reason_independent_of_abandoned_counter
     assert "degraded_reason=usage_limit" in last_line, (
         f"degraded_reason=usage_limit must be present: {last_line!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Config-derived paths (issue #300)
+# ---------------------------------------------------------------------------
+
+
+def test_results_file_lands_under_config_dir_regardless_of_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """current.md is written under <config_dir>/results/, not relative to CWD."""
+    config_path = _write_config(tmp_path)
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    monkeypatch.chdir(other_dir)
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+    )
+
+    assert (tmp_path / "results" / "current.md").exists()
+    assert not (other_dir / "results" / "current.md").exists()

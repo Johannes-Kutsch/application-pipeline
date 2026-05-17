@@ -156,9 +156,6 @@ class _StubExtractor:
     def judge_match(self, raw_description: str) -> MatchVerdict:
         return MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok")
 
-    def prewarm(self) -> None:
-        pass
-
 
 def test_conforming_class_is_llm_extractor():
     assert isinstance(_StubExtractor(), LLMExtractor)

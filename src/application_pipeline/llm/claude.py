@@ -113,9 +113,6 @@ class ClaudeExtractor:
                 f"judge_match: failed to validate Claude response: {exc}"
             ) from exc
 
-    def prewarm(self) -> None:
-        pass  # Claude CLI is a stateless executable; no warm-up needed
-
     def _invoke(
         self,
         site: _CallSite,

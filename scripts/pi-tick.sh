@@ -19,8 +19,8 @@ BASE_DIR="${HOME}/application-pipeline"
 REPO_DIR="${BASE_DIR}/repo"
 RELEASES_DIR="${BASE_DIR}/releases"
 CURRENT_LINK="${BASE_DIR}/current"
-SYNCHED_DIR="${BASE_DIR}/data/synched"
-FAILURES_DIR="${SYNCHED_DIR}/failures"
+DATA_DIR="${BASE_DIR}/data"
+FAILURES_DIR="${DATA_DIR}/failures"
 KEEP_RELEASES=3
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ fi
 # self-heals when a new release introduces a seed file (e.g. v0.1.2's prompts/).
 
 log "Seeding settings (init)"
-if ! init_out="$("${CURRENT_LINK}/.venv/bin/python" -m application_pipeline init "${SYNCHED_DIR}" 2>&1)"; then
+if ! init_out="$("${CURRENT_LINK}/.venv/bin/python" -m application_pipeline init "${DATA_DIR}" 2>&1)"; then
     write_failure "init" "application_pipeline init failed" "${init_out}"
     exit 1
 fi
@@ -151,4 +151,4 @@ fi
 # ── step 5: exec pipeline ─────────────────────────────────────────────────────
 
 log "Exec'ing pipeline"
-exec "${CURRENT_LINK}/.venv/bin/python" -m application_pipeline "${SYNCHED_DIR}/config.py"
+exec "${CURRENT_LINK}/.venv/bin/python" -m application_pipeline "${DATA_DIR}/config.py"

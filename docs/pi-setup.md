@@ -93,7 +93,7 @@ Claude Code is the CLI used by the **Relevance Classifier** and **Match Judge** 
 
 ## 4. Syncthing installation + folder pairing
 
-Syncthing carries the **Results File** (`current.md`), **Seen State** (`.seen.json`), and **Failure Reports** (`data/synched/failures/`) from the Pi to your laptop (see [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md) and [ADR-0012](adr/0012-failures-as-syncthing-files.md)). Install on **both** machines, then pair them.
+Syncthing carries the **Results File** (`current.md`), **Seen State** (`.seen.json`), and **Failure Reports** (`data/failures/`) from the Pi to your laptop (see [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md) and [ADR-0012](adr/0012-failures-as-syncthing-files.md)). Install on **both** machines, then pair them.
 
 ### 4a. Install Syncthing on the Pi
 
@@ -157,13 +157,13 @@ Syncthing carries the **Results File** (`current.md`), **Seen State** (`.seen.js
 
 21. On the Pi's Syncthing UI:
     - Click **Add Folder**.
-    - **Folder Label**: `application-pipeline-synched`
-    - **Folder Path**: `/home/pi/application-pipeline/data/synched`
+    - **Folder Label**: `application-pipeline-data`
+    - **Folder Path**: `/home/pi/application-pipeline/data`
     - **Folder Type**: Send & Receive
     - Under **Sharing**, tick the laptop device.
     - Click **Save**.
 
-22. Accept the shared folder on the **laptop's** Syncthing UI, choosing a local path (e.g. `~/application-pipeline-synched` or `D:\application-pipeline-synched` on Windows).
+22. Accept the shared folder on the **laptop's** Syncthing UI, choosing a local path (e.g. `~/application-pipeline-data` or `D:\application-pipeline-data` on Windows).
 
 23. Confirm pairing is complete:
     ```bash
@@ -182,7 +182,7 @@ The Pi clones the public repo over HTTPS — no SSH key or token required (see [
 
 24. Create the top-level layout (see [ADR-0011](adr/0011-atomic-deploy-via-staging-symlink.md)):
     ```bash
-    mkdir -p ~/application-pipeline/{releases,data/synched/failures,data/synched/logs}
+    mkdir -p ~/application-pipeline/{releases,data/failures,data/logs}
     ```
 
 25. Clone the repo into `repo/` (bootstrap copy — used only for `git fetch --tags` by the wrapper):
@@ -263,17 +263,17 @@ This manually performs the first deploy that the cron wrapper (`scripts/pi-tick.
 
 ## 7. Initialise settings
 
-This step seeds `data/synched/` with the default `config.py`, `layout.py`, and the prompt templates required by ADR-0006. Each call site (`classify_relevance`, `judge_match`) materialises exactly **two** prompt files — `de` and `en`; there is no `other` or `unknown` variant. Run it once after the venv exists but before the crontab is installed.
+This step seeds `data/` with the default `config.py`, `layout.py`, and the prompt templates required by ADR-0006. Each call site (`classify_relevance`, `judge_match`) materialises exactly **two** prompt files — `de` and `en`; there is no `other` or `unknown` variant. Run it once after the venv exists but before the crontab is installed.
 
-33. Run `init` against the synched data directory:
+33. Run `init` against the data directory:
     ```bash
     ~/application-pipeline/current/.venv/bin/python \
         -m application_pipeline init \
-        ~/application-pipeline/data/synched
+        ~/application-pipeline/data
     ```
-    Expected: six lines printed — `wrote config.py`, `wrote layout.py`, and `wrote prompts/<name>` for each of the four prompt files (`classify_relevance.de.md`, `classify_relevance.en.md`, `judge_match.de.md`, `judge_match.en.md`). All six files are present under `~/application-pipeline/data/synched/`.
+    Expected: six lines printed — `wrote config.py`, `wrote layout.py`, and `wrote prompts/<name>` for each of the four prompt files (`classify_relevance.de.md`, `classify_relevance.en.md`, `judge_match.de.md`, `judge_match.en.md`). All six files are present under `~/application-pipeline/data/`.
 
-    The prompt files in `data/synched/prompts/` are working v0.1.1 defaults. The first cron tick will reach the LLM step without further manual intervention. Before the first tick fires you may open a prompt file on the laptop's paired Syncthing copy and tune it to your persona; Syncthing propagates changes back to the Pi automatically.
+    The prompt files in `data/prompts/` are working v0.1.1 defaults. The first cron tick will reach the LLM step without further manual intervention. Before the first tick fires you may open a prompt file on the laptop's paired Syncthing copy and tune it to your persona; Syncthing propagates changes back to the Pi automatically.
 
     **Optional:** Before the first cron tick fires, open `config.py` on the laptop's paired Syncthing copy and edit keywords, skills, and sources to match your search criteria. Syncthing will propagate the edits back to the Pi automatically.
 
@@ -327,20 +327,20 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
 
 39. Confirm the **Results File** was written:
     ```bash
-    ls -lh ~/application-pipeline/data/synched/current.md
-    grep -c "---" ~/application-pipeline/data/synched/current.md
+    ls -lh ~/application-pipeline/data/results/current.md
+    grep -c "---" ~/application-pipeline/data/results/current.md
     ```
     Expected: file exists, at least one **Run Divider** (`---`) present.
 
 40. Confirm the **Seen State** file was written:
     ```bash
-    ls -lh ~/application-pipeline/data/synched/.seen.json
+    ls -lh ~/application-pipeline/data/.seen.json
     ```
     Expected: file exists, non-zero size.
 
 41. Confirm no **Failure Reports** were created:
     ```bash
-    ls ~/application-pipeline/data/synched/failures/
+    ls ~/application-pipeline/data/failures/
     ```
     Expected: empty directory (no `*.md` files).
 
@@ -352,7 +352,7 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
 
 43. Review the cron log for any warnings:
     ```bash
-    tail -40 ~/application-pipeline/data/synched/logs/cron.log
+    tail -40 ~/application-pipeline/data/logs/cron.log
     ```
     Expected: timestamped log lines, no `ERROR` or `FAILURE` entries.
 
@@ -370,13 +370,13 @@ The **Seen State** file (`.seen.json`) tracks which **Position** URLs have alrea
     ```bash
     # Run on the Pi, substituting the laptop's IP and your Syncthing folder path:
     scp <laptop-user>@<laptop-ip>:<syncthing-folder>/.seen.json \
-        ~/application-pipeline/data/synched/.seen.json
+        ~/application-pipeline/data/.seen.json
     ```
     Or restore via the Syncthing UI: on the Pi, pause and then resume the shared folder — Syncthing will pull the laptop's copy.
 
 45. Verify the restored file is non-empty before triggering a run:
     ```bash
-    wc -c ~/application-pipeline/data/synched/.seen.json
+    wc -c ~/application-pipeline/data/.seen.json
     ```
     Expected: size > 0 bytes.
 

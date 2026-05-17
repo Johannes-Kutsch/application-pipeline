@@ -9,7 +9,7 @@ from .types import Config, ConfigError, SourceEntry, resolve_data_paths
 
 _REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
 
-_OLLAMA_FIELDS = (
+_REMOVED_FIELDS = (
     "OLLAMA_BASE_URL",
     "OLLAMA_CLASSIFY_MODEL",
     "OLLAMA_JUDGE_MODEL",
@@ -17,9 +17,8 @@ _OLLAMA_FIELDS = (
     "OLLAMA_JSON_RETRIES",
     "OLLAMA_HTTP_RETRIES",
     "OLLAMA_KEEP_ALIVE",
+    "SEEN_STORE_PATH",
 )
-
-_REMOVED_FIELDS = ("SEEN_STORE_PATH",)
 
 
 def load(path: pathlib.Path) -> Config:
@@ -28,12 +27,6 @@ def load(path: pathlib.Path) -> Config:
     for name in _REQUIRED_FIELDS:
         if not hasattr(module, name):
             raise ConfigError(f"Missing required field: {name}")
-
-    for name in _OLLAMA_FIELDS:
-        if hasattr(module, name):
-            raise ConfigError(
-                f"{name} is no longer supported; remove it from your config"
-            )
 
     for name in _REMOVED_FIELDS:
         if hasattr(module, name):

@@ -203,7 +203,7 @@ def test_main_logs_land_next_to_config_regardless_of_cwd(
     )
 
 
-def test_main_logs_dir_is_anchored_when_config_path_is_relative(
+def test_main_logs_land_next_to_config_when_path_is_relative(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from application_pipeline.orchestrator import RunSummary
@@ -228,8 +228,7 @@ def test_main_logs_dir_is_anchored_when_config_path_is_relative(
 
     main()
 
-    assert parser_log._logs_dir is not None
-    assert parser_log._logs_dir.is_absolute(), (
-        "logs_dir must be an absolute path regardless of how config path was specified"
+    assert (config_dir / "logs").is_dir()
+    assert not (other_cwd / "synched").exists(), (
+        "logs must not be created relative to cwd"
     )
-    assert parser_log._logs_dir == config_dir / "logs"

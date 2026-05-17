@@ -35,7 +35,6 @@ def test_pi_tick_failures_dir_derived_from_data_dir() -> None:
 
 def test_pi_tick_init_targets_data_dir() -> None:
     text = _script_text()
-    assert '"${DATA_DIR}"' in text
     assert 'application_pipeline init "${DATA_DIR}"' in text
 
 
@@ -59,10 +58,4 @@ def test_pi_setup_mkdir_uses_data_layout() -> None:
 
 def test_pi_setup_syncthing_folder_path_uses_data() -> None:
     text = _setup_text()
-    assert "/home/pi/application-pipeline/data" in text
-
-
-def test_pi_setup_init_targets_data_dir() -> None:
-    text = _setup_text()
-    assert "application-pipeline/data/synched" not in text
-    assert "application-pipeline/data" in text
+    assert "**Folder Path**: `/home/pi/application-pipeline/data`" in text

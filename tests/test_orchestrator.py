@@ -1087,7 +1087,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
 
 
 def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
-    """Second run on same tmp_path → all 6 skipped, current.md unchanged."""
+    """Second run on same tmp_path → all 6 skipped, tier files unchanged."""
     seen_path = tmp_path / ".seen.json"
     results_dir = tmp_path / "results"
     config_path = _write_config(
@@ -2630,7 +2630,7 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
     """_ClassifyThread happy path: 6 survivors, batch_size=2 → 3 batches total.
 
     All positions are in-domain and judged green.  Asserts set-equality on the
-    URLs that appear in current.md and on the 'kept' members of .seen.json.
+    URLs that appear in green.md and on the 'kept' members of .seen.json.
     """
     seen_path = tmp_path / ".seen.json"
     results_dir = tmp_path / "results"

@@ -7,24 +7,11 @@ import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal, NoReturn
 
-import httpx
-
 import application_pipeline.parser_log as parser_log
-from application_pipeline.http import HttpRetryError
 from application_pipeline.text import normalize
 
 from ._text import parse_iso_date, strip_html
-from .errors import ParserError
-from .http import (
-    HTTP_CONNECT_TIMEOUT,
-    HTTP_READ_TIMEOUT,
-    MAX_RETRIES,
-    USER_AGENT,
-    HttpGet,
-    Throttle,
-    check_response_status,
-    request_with_retry,
-)
+from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
 
@@ -47,16 +34,6 @@ serves_remote: bool = False
 
 def remote_wire() -> NoReturn:
     raise AssertionError("stellen_hamburg_api does not serve remote")
-
-
-def _default_http_get(url: str, timeout: float) -> bytes:
-    with httpx.Client(
-        timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
-        headers={"User-Agent": USER_AGENT},
-    ) as client:
-        resp = client.get(url, timeout=timeout)
-        check_response_status(resp, url)
-        return resp.content
 
 
 class _JsonLdExtractor(html.parser.HTMLParser):
@@ -134,20 +111,16 @@ class StellenHamburgParser:
     def __init__(
         self,
         *,
-        _http_get: HttpGet | None = None,
-        _timeout: float = HTTP_READ_TIMEOUT,
-        _retries: int = MAX_RETRIES,
+        _http: ParserHttp | None = None,
     ) -> None:
-        self._http_get: HttpGet = _http_get or _default_http_get
-        self._timeout = _timeout
-        self._retries = _retries
-        self._throttle = Throttle()
+        self._http = _http if _http is not None else ParserHttp()
 
     def __enter__(self) -> "StellenHamburgParser":
+        self._http.__enter__()
         return self
 
     def __exit__(self, *args: object) -> None:
-        pass
+        self._http.__exit__(*args)
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         match resolve(query.location, sys.modules[__name__]):
@@ -163,7 +136,6 @@ class StellenHamburgParser:
         count = 0
         page_number = 1
         while True:
-            self._throttle.wait()
             url = _search_url(query.keyword, page_number)
             parser_log.record(
                 _PARSER_TYPE,
@@ -171,15 +143,8 @@ class StellenHamburgParser:
                 q=query.keyword,
                 start=(page_number - 1) * _PAGE_SIZE,
             )
-            try:
-                raw = request_with_retry(
-                    url, self._timeout, self._retries, self._http_get
-                )
-                data: dict[str, Any] = json.loads(raw)
-            except HttpRetryError as exc:
-                raise ParserError(
-                    f"StellenHamburg search failed: {exc}"
-                ) from exc.__cause__
+            raw = self._http.get(url, error_prefix="StellenHamburg search failed")
+            data: dict[str, Any] = json.loads(raw)
 
             result: dict[str, Any] = data.get("SearchResult") or {}
             items: list[dict[str, Any]] = result.get("SearchResultItems") or []
@@ -224,15 +189,9 @@ class StellenHamburgParser:
         )
 
     def enrich(self, stub: PositionStub) -> Position:
-        self._throttle.wait()
-        try:
-            raw = request_with_retry(
-                stub.url, self._timeout, self._retries, self._http_get
-            )
-        except HttpRetryError as exc:
-            raise ParserError(
-                f"StellenHamburg enrich failed for {stub.url}: {exc}"
-            ) from exc.__cause__
+        raw = self._http.get(
+            stub.url, error_prefix=f"StellenHamburg enrich failed for {stub.url}"
+        )
 
         job_data = _extract_jsonld(raw)
         raw_description = strip_html(job_data.get("description") or "")

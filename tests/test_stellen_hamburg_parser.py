@@ -7,7 +7,7 @@ import pytest
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.types import City
-from application_pipeline.parsers.http import HttpGet
+from application_pipeline.parsers.http import HttpGet, ParserHttp
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
@@ -152,14 +152,14 @@ def test_discover_yields_one_stub_per_result() -> None:
             _search_body([_item("1", "Dev A"), _item("2", "Dev B")]),
         ]
     )
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 2
 
 
 def test_discover_stub_title_matches_descriptor_position_title() -> None:
     get = _make_search_get([_search_body([_item("1", "Data Scientist")])])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.title == "Data Scientist"
@@ -167,7 +167,7 @@ def test_discover_stub_title_matches_descriptor_position_title() -> None:
 
 def test_discover_stub_source_is_stellen_hamburg() -> None:
     get = _make_search_get([_search_body([_item()])])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.source == "stellen.hamburg"
@@ -175,7 +175,7 @@ def test_discover_stub_source_is_stellen_hamburg() -> None:
 
 def test_discover_stub_company_from_organization_name() -> None:
     get = _make_search_get([_search_body([_item(company="Finanzbehörde Hamburg")])])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company == "Finanzbehörde Hamburg"
@@ -183,7 +183,7 @@ def test_discover_stub_company_from_organization_name() -> None:
 
 def test_discover_stub_location_from_position_location() -> None:
     get = _make_search_get([_search_body([_item(location="Hamburg")])])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
@@ -191,7 +191,7 @@ def test_discover_stub_location_from_position_location() -> None:
 
 def test_discover_stub_url_contains_object_id() -> None:
     get = _make_search_get([_search_body([_item("99999")])])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert "99999" in stub.url
@@ -199,7 +199,7 @@ def test_discover_stub_url_contains_object_id() -> None:
 
 def test_discover_stub_company_none_when_organization_absent() -> None:
     get = _make_search_get([_search_body([_item(company=None)])])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company is None
@@ -207,7 +207,7 @@ def test_discover_stub_company_none_when_organization_absent() -> None:
 
 def test_discover_stub_location_none_when_position_location_absent() -> None:
     get = _make_search_get([_search_body([_item(location=None)])])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location is None
@@ -222,7 +222,7 @@ def test_discover_paginates_until_total_reached() -> None:
     page0 = _search_body([_item("1"), _item("2")], total=4)
     page1 = _search_body([_item("3"), _item("4")], total=4)
     get = _make_search_get([page0, page1])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 4
 
@@ -238,7 +238,7 @@ def test_discover_stops_on_empty_items() -> None:
         }
     ).encode()
     get = _make_search_get([body])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
     assert stubs == []
 
@@ -254,7 +254,7 @@ def test_discover_stops_on_null_search_result_items() -> None:
         }
     ).encode()
     get = _make_search_get([body])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
     assert stubs == []
 
@@ -269,7 +269,7 @@ def test_discover_deduplicates_same_object_id() -> None:
     page0 = _search_body([shared], total=2)
     page1 = _search_body([shared], total=2)
     get = _make_search_get([page0, page1])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 1
 
@@ -282,7 +282,7 @@ def test_discover_deduplicates_same_object_id() -> None:
 def test_discover_respects_max_results() -> None:
     items = [_item(str(i)) for i in range(10)]
     get = _make_search_get([_search_body(items, total=10)])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query(max_results=3)))
     assert len(stubs) == 3
 
@@ -298,7 +298,7 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("refused")
 
-    with StellenHamburgParser(_http_get=failing_get, _retries=1) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=failing_get, retries=1)) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
 
@@ -310,14 +310,14 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
 
 def test_enrich_returns_position_with_raw_description(stub: PositionStub) -> None:
     get = _make_get([_detail_html(description="We are hiring.")])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.raw_description == "We are hiring."
 
 
 def test_enrich_strips_html_tags_from_description(stub: PositionStub) -> None:
     get = _make_get([_detail_html(description="<p>Hello</p><p>World</p>")])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert "<p>" not in pos.raw_description
     assert "Hello" in pos.raw_description
@@ -326,7 +326,7 @@ def test_enrich_strips_html_tags_from_description(stub: PositionStub) -> None:
 
 def test_enrich_decodes_html_entities_in_description(stub: PositionStub) -> None:
     get = _make_get([_detail_html(description="Geh&auml;lter &amp; Benefits")])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert "Gehälter" in pos.raw_description
     assert "&amp;" not in pos.raw_description
@@ -334,7 +334,7 @@ def test_enrich_decodes_html_entities_in_description(stub: PositionStub) -> None
 
 def test_enrich_empty_description_when_no_jsonld(stub: PositionStub) -> None:
     get = _make_get([b"<html><body><p>No structured data</p></body></html>"])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.raw_description == ""
 
@@ -346,28 +346,28 @@ def test_enrich_empty_description_when_no_jsonld(stub: PositionStub) -> None:
 
 def test_enrich_parses_posted_date(stub: PositionStub) -> None:
     get = _make_get([_detail_html(date_posted="2026-03-15")])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.posted_date == date(2026, 3, 15)
 
 
 def test_enrich_parses_deadline(stub: PositionStub) -> None:
     get = _make_get([_detail_html(valid_through="2026-05-30")])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.deadline == date(2026, 5, 30)
 
 
 def test_enrich_posted_date_none_when_field_absent(stub: PositionStub) -> None:
     get = _make_get([b"<html><body></body></html>"])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.posted_date is None
 
 
 def test_enrich_deadline_none_when_field_absent(stub: PositionStub) -> None:
     get = _make_get([_detail_html()])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.deadline is None
 
@@ -379,21 +379,21 @@ def test_enrich_deadline_none_when_field_absent(stub: PositionStub) -> None:
 
 def test_enrich_maps_full_time_employment_type(stub: PositionStub) -> None:
     get = _make_get([_detail_html(employment_type="FULL_TIME")])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.employment_type == "full-time"
 
 
 def test_enrich_maps_part_time_employment_type(stub: PositionStub) -> None:
     get = _make_get([_detail_html(employment_type="PART_TIME")])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.employment_type == "part-time"
 
 
 def test_enrich_employment_type_none_when_absent(stub: PositionStub) -> None:
     get = _make_get([_detail_html()])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.employment_type is None
 
@@ -415,7 +415,7 @@ def test_enrich_raises_parser_error_on_http_failure() -> None:
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("refused")
 
-    with StellenHamburgParser(_http_get=failing_get, _retries=1) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=failing_get, retries=1)) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
 
@@ -427,6 +427,6 @@ def test_enrich_raises_parser_error_on_http_failure() -> None:
 
 def test_enrich_position_references_original_stub(stub: PositionStub) -> None:
     get = _make_get([_detail_html()])
-    with StellenHamburgParser(_http_get=get) as p:
+    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.stub is stub

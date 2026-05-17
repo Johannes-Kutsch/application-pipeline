@@ -525,3 +525,75 @@ def test_concurrent_marks_produce_valid_store(store_path: Path) -> None:
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     assert isinstance(on_disk, dict)
     assert len(on_disk) == n_threads * marks_per_thread
+
+
+def test_mark_classified_in_domain_then_is_seen_returns_judge_pending(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/cid")
+    store.mark_classified_in_domain(stub)
+    assert store.is_seen(stub) == "judge_pending"
+
+
+def test_mark_classified_in_domain_then_mark_kept_returns_url_hit(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/cid3")
+    store.mark_classified_in_domain(stub)
+    store.mark_kept(stub)
+
+    assert store.is_seen(stub) == "url_hit"
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk["https://example.com/cid3"]["status"] == "kept"
+
+
+def test_mark_classified_in_domain_persists_correct_record(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/cid2")
+    store.mark_classified_in_domain(stub)
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    record = on_disk["https://example.com/cid2"]
+    assert record["status"] == "classified_in_domain"
+    assert record["first_seen"] == date.today().isoformat()
+    assert record["company_lc"] == "acme"
+    assert record["title_lc"] == "engineer"
+    assert record["location_lc"] == "hamburg"
+
+
+def test_preexisting_statuses_still_return_url_hit(store_path: Path) -> None:
+    for status in ("off_domain", "kept", "enrich_failed", "external_redirect"):
+        store_path.write_text(
+            json.dumps(
+                {
+                    "https://example.com/legacy": {
+                        "company_lc": "acme",
+                        "title_lc": "engineer",
+                        "location_lc": "hamburg",
+                        "status": status,
+                        "first_seen": "2024-01-01",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        store = dedup_load(store_path)
+        assert store.is_seen(StubLike(url="https://example.com/legacy")) == "url_hit"
+
+
+def test_tuple_alias_of_classified_in_domain_returns_judge_pending(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    a = StubLike(url="https://example.com/original")
+    b = StubLike(url="https://example.com/alias")
+    store.mark_classified_in_domain(a)
+    # tuple hit writes alias with classified_in_domain status
+    assert store.is_seen(b) == "tuple_hit"
+    # next is_seen on b resolves via URL tier → judge_pending
+    assert store.is_seen(b) == "judge_pending"

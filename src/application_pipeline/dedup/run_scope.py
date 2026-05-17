@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from .store import DeduplicationStore, SeenResult, _SeenKey
 
-RunScopedSeenResult = Literal["url_hit", "tuple_hit", "run_hit", "miss"]
+RunScopedSeenResult = Literal[
+    "url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"
+]
 
 
 class RunScopedDedup:

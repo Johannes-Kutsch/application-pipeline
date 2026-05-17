@@ -24,8 +24,10 @@ from application_pipeline.text import normalize
 
 from .errors import DedupStoreError
 
-SeenStatus = Literal["off_domain", "kept", "enrich_failed", "external_redirect"]
-SeenResult = Literal["url_hit", "tuple_hit", "miss"]
+SeenStatus = Literal[
+    "off_domain", "kept", "enrich_failed", "external_redirect", "classified_in_domain"
+]
+SeenResult = Literal["url_hit", "tuple_hit", "judge_pending", "miss"]
 
 
 @runtime_checkable
@@ -107,6 +109,8 @@ class DeduplicationStore:
         """
         with self._lock:
             if key.url in self._records:
+                if self._records[key.url].get("status") == "classified_in_domain":
+                    return "judge_pending"
                 return "url_hit"
 
             canonical_url = self._tuple_lookup(key)
@@ -116,10 +120,22 @@ class DeduplicationStore:
 
             return "miss"
 
-    def _mark(self, key: _SeenKey, status: SeenStatus) -> None:
-        """Write a new record for key. Caller must hold ``self._lock``."""
-        if key.url in self._records:
-            return
+    def _mark(
+        self,
+        key: _SeenKey,
+        status: SeenStatus,
+        *,
+        overwrite_if: str | None = None,
+    ) -> None:
+        """Write a new record for key. Caller must hold ``self._lock``.
+
+        If ``overwrite_if`` is given and the existing record has that status,
+        the record is overwritten rather than skipped.
+        """
+        existing = self._records.get(key.url)
+        if existing is not None:
+            if overwrite_if is None or existing.get("status") != overwrite_if:
+                return
 
         company_lc = normalize(key.company)
         title_lc = normalize(key.title)
@@ -145,7 +161,7 @@ class DeduplicationStore:
 
     def mark_kept(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "kept")
+            self._mark(key, "kept", overwrite_if="classified_in_domain")
 
     def mark_enrich_failed(self, key: _SeenKey) -> None:
         with self._lock:
@@ -154,6 +170,10 @@ class DeduplicationStore:
     def mark_external_redirect(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "external_redirect")
+
+    def mark_classified_in_domain(self, key: _SeenKey) -> None:
+        with self._lock:
+            self._mark(key, "classified_in_domain")
 
     @contextmanager
     def run_scope(self) -> Generator[RunScopedDedup, None, None]:

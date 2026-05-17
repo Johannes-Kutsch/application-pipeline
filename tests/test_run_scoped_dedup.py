@@ -138,7 +138,7 @@ def test_run_scoped_seen_result_has_four_variants() -> None:
     from typing import get_args
 
     args = get_args(RunScopedSeenResult)
-    assert set(args) == {"url_hit", "tuple_hit", "run_hit", "miss"}
+    assert set(args) == {"url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"}
 
 
 # --- Behavior 9: thread safety of in-run set ---

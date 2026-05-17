@@ -1215,8 +1215,8 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
     assert _ERR_URLS[0] not in seen_data
 
 
-def test_extractor_error_on_judge_leaves_position_unseen(tmp_path: Path) -> None:
-    """ExtractorError on judge_match: position NOT marked seen, rendered block NOT in current.md, errored increments."""
+def test_extractor_error_on_judge_marks_classified_in_domain(tmp_path: Path) -> None:
+    """ExtractorError on judge_match: position marked classified_in_domain (not kept), rendered block NOT in current.md, errored increments."""
     seen_path = tmp_path / ".seen.json"
     results_path = tmp_path / "current.md"
 
@@ -1247,7 +1247,7 @@ def test_extractor_error_on_judge_leaves_position_unseen(tmp_path: Path) -> None
     assert summary.written == 1
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert _ERR_URLS[0] not in seen_data
+    assert seen_data[_ERR_URLS[0]]["status"] == "classified_in_domain"
 
     content = results_path.read_text(encoding="utf-8")
     assert "Job 0" not in content
@@ -1395,6 +1395,350 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
 
     assert summary.discovered == 3
     assert summary.written == 3
+
+
+# ---------------------------------------------------------------------------
+# judge_pending: classify→judge boundary idempotency (issue #289)
+# ---------------------------------------------------------------------------
+
+_RESUME_URL = "https://resume.example/job/0"
+
+
+class _OneStubParser:
+    """Single-stub parser used by the judge_pending tests."""
+
+    def __enter__(self) -> "_OneStubParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [PositionStub(url=_RESUME_URL, title="ML Engineer", source="stub")]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        return Position(stub=stub, raw_description="good ml job description")
+
+
+def _one_stub_config(tmp_path: Path) -> Path:
+    return _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+
+def test_judge_failure_marks_classified_in_domain(tmp_path: Path) -> None:
+    """After classify succeeds and judge raises ExtractorError, seen store has classified_in_domain."""
+    seen_path = tmp_path / ".seen.json"
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = lambda items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.side_effect = ExtractorError("judge boom")
+
+    run(
+        _one_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_RESUME_URL]["status"] == "classified_in_domain"
+
+
+def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
+    """On rerun, a classified_in_domain URL is enriched and judged without classify being called."""
+    seen_path = tmp_path / ".seen.json"
+    classify_calls: list[object] = []
+    enrich_calls: list[str] = []
+
+    class _TrackingParser:
+        def __enter__(self) -> "_TrackingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=_RESUME_URL, title="ML Engineer", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            enrich_calls.append(stub.url)
+            return Position(stub=stub, raw_description="fresh description from rerun")
+
+    class _TrackingExtractor:
+        def prewarm(self) -> None:
+            pass
+
+        def classify_relevance_batch(
+            self, items: list[ClassifyItem]
+        ) -> tuple[list[RelevanceVerdict], CallUsage]:
+            classify_calls.extend(items)
+            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+
+        def judge_match(
+            self, raw_description: str, *, stub_url: str = ""
+        ) -> tuple[MatchVerdict, CallUsage]:
+            return (
+                MatchVerdict(
+                    tier=MatchTier.green, matched=[], missing=[], summary="ok"
+                ),
+                _ZERO_USAGE,
+            )
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                _RESUME_URL: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "classified_in_domain",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = run(
+        _one_stub_config(tmp_path),
+        extractor=_TrackingExtractor(),
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert classify_calls == [], "classify must not be called for judge_pending stubs"
+    assert _RESUME_URL in enrich_calls, "enrich must be called for judge_pending stub"
+    assert summary.written == 1, "judge_pending stub must reach judge and be written"
+
+
+def test_judge_pending_success_transitions_to_kept(tmp_path: Path) -> None:
+    """On rerun, if judge succeeds the URL transitions from classified_in_domain to kept."""
+    seen_path = tmp_path / ".seen.json"
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                _RESUME_URL: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "classified_in_domain",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run(
+        _one_stub_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_RESUME_URL]["status"] == "kept"
+
+
+def test_judge_pending_failure_stays_classified_in_domain(tmp_path: Path) -> None:
+    """On rerun, if judge fails again the URL stays classified_in_domain for the next run."""
+    seen_path = tmp_path / ".seen.json"
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                _RESUME_URL: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "classified_in_domain",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = lambda items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.side_effect = ExtractorError("judge boom again")
+
+    run(
+        _one_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_RESUME_URL]["status"] == "classified_in_domain"
+
+
+def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
+    """The dedup store does not cache raw_description; enrich is called fresh on rerun."""
+    seen_path = tmp_path / ".seen.json"
+    enrich_descriptions: list[str] = []
+
+    class _FreshDescParser:
+        def __enter__(self) -> "_FreshDescParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=_RESUME_URL, title="ML Engineer", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            desc = "fresh description fetched on rerun"
+            enrich_descriptions.append(desc)
+            return Position(stub=stub, raw_description=desc)
+
+    judge_descriptions: list[str] = []
+
+    class _CapturingExtractor:
+        def prewarm(self) -> None:
+            pass
+
+        def classify_relevance_batch(
+            self, items: list[ClassifyItem]
+        ) -> tuple[list[RelevanceVerdict], CallUsage]:
+            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+
+        def judge_match(
+            self, raw_description: str, *, stub_url: str = ""
+        ) -> tuple[MatchVerdict, CallUsage]:
+            judge_descriptions.append(raw_description)
+            return (
+                MatchVerdict(
+                    tier=MatchTier.green, matched=[], missing=[], summary="ok"
+                ),
+                _ZERO_USAGE,
+            )
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                _RESUME_URL: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "classified_in_domain",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run(
+        _one_stub_config(tmp_path),
+        extractor=_CapturingExtractor(),
+        parser_registry=lambda _: _FreshDescParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert enrich_descriptions == ["fresh description fetched on rerun"]
+    assert judge_descriptions == ["fresh description fetched on rerun"]
+
+
+def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> None:
+    """If enrich fails on a judge_pending stub, it is marked enrich_failed."""
+    seen_path = tmp_path / ".seen.json"
+
+    class _EnrichFailParser:
+        def __enter__(self) -> "_EnrichFailParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=_RESUME_URL, title="ML Engineer", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            raise ParserError("enrich failed on resume")
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                _RESUME_URL: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "classified_in_domain",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = run(
+        _one_stub_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=_stub_results_manager(),
+    )
+
+    assert summary.enrich_failed == 1
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_RESUME_URL]["status"] == "enrich_failed"
+
+
+def test_judge_pending_appears_in_run_divider(tmp_path: Path) -> None:
+    """judge_resumed=N appears in Run Divider when stubs took the judge_pending path."""
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                _RESUME_URL: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "classified_in_domain",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run(
+        _one_stub_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "judge_resumed=1" in last_block, (
+        f"judge_resumed missing from divider: {last_block!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3647,8 +3991,8 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
     assert all(
         seen_data.get(_ERR_URLS[i], {}).get("status") == "kept" for i in range(3)
     )
-    # 4th item: judge raised ClaudeUsageLimitError → not marked
-    assert _ERR_URLS[3] not in seen_data
+    # 4th item: classify marked it classified_in_domain; judge raised ClaudeUsageLimitError → stays classified_in_domain
+    assert seen_data.get(_ERR_URLS[3], {}).get("status") == "classified_in_domain"
 
     content = results_path.read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]

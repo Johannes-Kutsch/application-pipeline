@@ -164,7 +164,7 @@ class DeduplicationStore:
 
     def mark_enrich_failed(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "enrich_failed")
+            self._mark(key, "enrich_failed", overwrite_if="classified_in_domain")
 
     def mark_external_redirect(self, key: _SeenKey) -> None:
         with self._lock:

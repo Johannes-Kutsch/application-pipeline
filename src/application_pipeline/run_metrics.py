@@ -39,6 +39,7 @@ class RunSummary:
     dedup_tuple_hits: int = 0
     dedup_run_hits: int = 0
     dedup_misses: int = 0
+    judge_resumed: int = 0
     classifier_dropped: int = 0
     written: int = 0
     green: int = 0
@@ -70,6 +71,7 @@ class RunMetrics:
         self._dedup_tuple_hits = 0
         self._dedup_run_hits = 0
         self._dedup_misses = 0
+        self._judge_resumed = 0
         self._prefilter_considered = 0
         self._prefilter_passed = 0
         self._prefilter_dropped = 0
@@ -184,6 +186,8 @@ class RunMetrics:
             elif result == "run_hit":
                 self._dedup_run_hits += 1
                 self._skipped += 1
+            elif result == "judge_pending":
+                self._judge_resumed += 1
             else:  # miss
                 self._dedup_misses += 1
             body = self._dedup_body()
@@ -387,6 +391,7 @@ class RunMetrics:
             dedup_tuple_hits = self._dedup_tuple_hits
             dedup_run_hits = self._dedup_run_hits
             dedup_misses = self._dedup_misses
+            judge_resumed = self._judge_resumed
             classify_calls = self._classify_calls
             classify_items = self._classify_items
             classify_total_s = self._classify_total_s
@@ -435,6 +440,8 @@ class RunMetrics:
                 f"elapsed_s={elapsed_s:.1f}",
             ]
         )
+        if judge_resumed > 0:
+            parts.append(f"judge_resumed={judge_resumed}")
         if degraded_reason is not None:
             parts.append(f"degraded_reason={degraded_reason}")
         if classify_batches_failed > 0:
@@ -469,6 +476,7 @@ class RunMetrics:
                 dedup_tuple_hits=self._dedup_tuple_hits,
                 dedup_run_hits=self._dedup_run_hits,
                 dedup_misses=self._dedup_misses,
+                judge_resumed=self._judge_resumed,
                 classifier_dropped=self._classifier_dropped,
                 written=self._written,
                 green=self._green,

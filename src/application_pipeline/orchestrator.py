@@ -345,6 +345,7 @@ class _ClassifyThread(_QueueWorker):
                 self._dedup_store.mark_off_domain(position.stub)
                 classifier_dropped += 1
             else:
+                self._dedup_store.mark_classified_in_domain(position.stub)
                 self._metrics.judge_enqueued()
                 self._judge_queue.put(
                     _JudgeJob(
@@ -442,6 +443,7 @@ class _ParserState:
     last_event_monotonic: float = field(default_factory=time.monotonic)
     stall_logged: bool = False
     pending_enrich: PositionStub | None = None
+    pending_judge_resume: bool = False
 
 
 def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:
@@ -680,6 +682,11 @@ def run(
                     metrics.record_dedup(result)
                     if result == "miss":
                         state.pending_enrich = payload
+                        state.pending_judge_resume = False
+                        state.inbound.put(_ENRICH)
+                    elif result == "judge_pending":
+                        state.pending_enrich = payload
+                        state.pending_judge_resume = True
                         state.inbound.put(_ENRICH)
                     else:
                         state.inbound.put(_SKIP)
@@ -690,20 +697,27 @@ def run(
                         if warning.startswith("unparseable_date"):
                             metrics.unparseable_date(pid)
                     metrics.enriched(pid)
-                    verdict = prefilter.classify(payload)
-                    if verdict.passes:
-                        metrics.prefilter_passed(verdict)
-                        classify_buffer.append(payload)
-                        metrics.classify_buffered(1)
-                        if len(classify_buffer) >= batch_size:
-                            _flush_classify_batch()
+                    if state.pending_judge_resume:
+                        state.pending_judge_resume = False
+                        state.pending_enrich = None
+                        metrics.judge_enqueued()
+                        judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
                     else:
-                        dedup_store.mark_off_domain(payload.stub)
-                        metrics.prefilter_dropped(verdict)
+                        verdict = prefilter.classify(payload)
+                        if verdict.passes:
+                            metrics.prefilter_passed(verdict)
+                            classify_buffer.append(payload)
+                            metrics.classify_buffered(1)
+                            if len(classify_buffer) >= batch_size:
+                                _flush_classify_batch()
+                        else:
+                            dedup_store.mark_off_domain(payload.stub)
+                            metrics.prefilter_dropped(verdict)
 
                 elif isinstance(payload, ParserError):
                     stub = state.pending_enrich
                     state.pending_enrich = None
+                    state.pending_judge_resume = False
                     if stub is not None:
                         parser_log.record(
                             pid,
@@ -718,6 +732,7 @@ def run(
                 elif isinstance(payload, ExternalRedirect):
                     stub = state.pending_enrich
                     state.pending_enrich = None
+                    state.pending_judge_resume = False
                     if stub is not None:
                         parser_log.record(
                             pid,

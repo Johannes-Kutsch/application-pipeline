@@ -20,23 +20,12 @@ from collections.abc import Iterator
 from datetime import date, timedelta
 from typing import Any, assert_never
 
-import httpx
 from bs4 import BeautifulSoup, Tag
 
 import application_pipeline.parser_log as parser_log
-from application_pipeline.http import HttpRetryError
 
 from .errors import ParserError
-from .http import (
-    HTTP_CONNECT_TIMEOUT,
-    HTTP_READ_TIMEOUT,
-    MAX_RETRIES,
-    USER_AGENT,
-    HttpGet,
-    Throttle,
-    check_response_status,
-    request_with_retry,
-)
+from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
     City,
@@ -185,36 +174,16 @@ class JobsBeimStaatParser:
     def __init__(
         self,
         *,
-        _http_get: HttpGet | None = None,
-        _timeout: float = HTTP_READ_TIMEOUT,
-        _retries: int = MAX_RETRIES,
+        _http: ParserHttp | None = None,
     ) -> None:
-        self._timeout = _timeout
-        self._retries = _retries
-        self._throttle = Throttle()
-        if _http_get is None:
-            self._client: httpx.Client | None = httpx.Client(
-                timeout=httpx.Timeout(HTTP_READ_TIMEOUT, connect=HTTP_CONNECT_TIMEOUT),
-                headers={"User-Agent": USER_AGENT},
-            )
-            _client = self._client
-
-            def _default_get(url: str, timeout: float) -> bytes:
-                resp = _client.get(url, timeout=timeout)
-                check_response_status(resp, url)
-                return resp.content
-
-            self._http_get: HttpGet = _default_get
-        else:
-            self._client = None
-            self._http_get = _http_get
+        self._http = _http if _http is not None else ParserHttp()
 
     def __enter__(self) -> "JobsBeimStaatParser":
+        self._http.__enter__()
         return self
 
     def __exit__(self, *args: object) -> None:
-        if self._client is not None:
-            self._client.close()
+        self._http.__exit__(*args)
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         place: str
@@ -258,15 +227,9 @@ class JobsBeimStaatParser:
                 start=start,
                 step=step,
             )
-            self._throttle.wait()
-            try:
-                raw = request_with_retry(
-                    url, self._timeout, self._retries, self._http_get
-                )
-            except HttpRetryError as exc:
-                raise ParserError(
-                    f"jobs-beim-staat discover failed for {url}: {exc}"
-                ) from exc.__cause__
+            raw = self._http.get(
+                url, error_prefix=f"jobs-beim-staat discover failed for {url}"
+            )
 
             envelope: dict[str, Any] = json.loads(raw)
             jobs_html = str(envelope.get("jobs", ""))
@@ -300,15 +263,9 @@ class JobsBeimStaatParser:
             start += step
 
     def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
-        self._throttle.wait()
-        try:
-            wrapper_raw = request_with_retry(
-                stub.url, self._timeout, self._retries, self._http_get
-            )
-        except HttpRetryError as exc:
-            raise ParserError(
-                f"jobs-beim-staat enrich failed for {stub.url}: {exc}"
-            ) from exc.__cause__
+        wrapper_raw = self._http.get(
+            stub.url, error_prefix=f"jobs-beim-staat enrich failed for {stub.url}"
+        )
 
         wrapper_soup = BeautifulSoup(wrapper_raw, "html.parser")
         job_id = _extract_job_id(wrapper_soup)
@@ -321,15 +278,9 @@ class JobsBeimStaatParser:
             )
 
         iframe_url = f"{_BASE_URL}/stellenanzeigen-details/?id={job_id}"
-        self._throttle.wait()
-        try:
-            iframe_raw = request_with_retry(
-                iframe_url, self._timeout, self._retries, self._http_get
-            )
-        except HttpRetryError as exc:
-            raise ParserError(
-                f"jobs-beim-staat enrich failed for {iframe_url}: {exc}"
-            ) from exc.__cause__
+        iframe_raw = self._http.get(
+            iframe_url, error_prefix=f"jobs-beim-staat enrich failed for {iframe_url}"
+        )
 
         iframe_soup = BeautifulSoup(iframe_raw, "html.parser")
         raw_description = _normalize_description(iframe_soup.get_text(separator="\n"))

@@ -15,7 +15,7 @@ from application_pipeline.parsers.types import (
     Position,
     Remote,
 )
-from application_pipeline.parsers.http import HttpGet
+from application_pipeline.parsers.http import HttpGet, ParserHttp
 from application_pipeline.parsers import jobs_beim_staat_html as parser_module
 from application_pipeline.parsers.jobs_beim_staat_html import (
     JobsBeimStaatParser,
@@ -226,7 +226,7 @@ def test_discover_url_contains_sort_radius_viewtype(list_html: bytes) -> None:
         fetched_urls.append(url)
         return next(responses)
 
-    with JobsBeimStaatParser(_http_get=capturing_get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=capturing_get)) as p:
         list(p.discover(_query()))
 
     first = fetched_urls[0]
@@ -243,7 +243,7 @@ def test_discover_url_q_is_empty_for_star_keyword(list_html: bytes) -> None:
         fetched_urls.append(url)
         return next(responses)
 
-    with JobsBeimStaatParser(_http_get=capturing_get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=capturing_get)) as p:
         list(p.discover(_query(keyword="*")))
 
     first = fetched_urls[0]
@@ -260,7 +260,7 @@ def test_discover_url_place_is_homeoffice_for_remote(list_html: bytes) -> None:
         fetched_urls.append(url)
         return next(responses)
 
-    with JobsBeimStaatParser(_http_get=capturing_get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=capturing_get)) as p:
         list(p.discover(_query(location=Remote())))
 
     assert any("place=homeoffice" in u for u in fetched_urls)
@@ -274,7 +274,7 @@ def test_discover_url_place_uses_normalized_city_name(list_html: bytes) -> None:
         fetched_urls.append(url)
         return next(responses)
 
-    with JobsBeimStaatParser(_http_get=capturing_get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=capturing_get)) as p:
         list(p.discover(_query(location=City("Hamburg"))))
 
     assert any("place=hamburg" in u for u in fetched_urls)
@@ -287,14 +287,14 @@ def test_discover_url_place_uses_normalized_city_name(list_html: bytes) -> None:
 
 def test_discover_yields_21_stubs_from_list_page(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 21
 
 
 def test_discover_stub_source_is_jobs_beim_staat(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.source == "jobs-beim-staat"
@@ -302,7 +302,7 @@ def test_discover_stub_source_is_jobs_beim_staat(list_html: bytes) -> None:
 
 def test_discover_stub_title_extracted(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.title == "Softwareentwickler/in (m/w/d)"
@@ -310,7 +310,7 @@ def test_discover_stub_title_extracted(list_html: bytes) -> None:
 
 def test_discover_stub_url_points_to_stellenangebote(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert "stellenangebote/1001" in stub.url
@@ -320,7 +320,7 @@ def test_discover_stub_company_extracted_from_data_attribute(
     list_html: bytes,
 ) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company == "Hamburger IT-Serviceteam GmbH"
@@ -328,7 +328,7 @@ def test_discover_stub_company_extracted_from_data_attribute(
 
 def test_discover_stub_location_extracted(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
@@ -341,7 +341,7 @@ def test_discover_stub_location_extracted(list_html: bytes) -> None:
 
 def test_discover_stops_when_jobs_fragment_has_no_cards(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 21
 
@@ -350,14 +350,14 @@ def test_discover_paginates_across_multiple_pages() -> None:
     page1 = _make_list_page(start_id=1, count=21)
     page2 = _make_list_page(start_id=22, count=21)
     get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 42
 
 
 def test_discover_respects_max_results(list_html: bytes) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query(max_results=5)))
     assert len(stubs) == 5
 
@@ -366,7 +366,7 @@ def test_discover_max_results_stops_mid_page() -> None:
     page1 = _make_list_page(start_id=1, count=21)
     page2 = _make_list_page(start_id=22, count=21)
     get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query(max_results=30)))
     assert len(stubs) == 30
 
@@ -383,7 +383,7 @@ def test_discover_emits_discover_page_heartbeat_per_page(
     page1 = _make_list_page(start_id=1, count=21)
     page2 = _make_list_page(start_id=22, count=21)
     get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         list(p.discover(_query()))
     log_content = (tmp_path / "jobs_beim_staat_html.log").read_text(encoding="utf-8")
     lines = [ln for ln in log_content.splitlines() if "discover_page" in ln]
@@ -402,7 +402,7 @@ def test_discover_not_served_for_empty_city_yields_sentinel() -> None:
     def never_called(url: str, timeout: float) -> bytes:
         raise AssertionError("should not fetch")
 
-    with JobsBeimStaatParser(_http_get=never_called) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=never_called)) as p:
         stubs = list(p.discover(_query(location=City(""))))
 
     assert stubs == [NotServedQuery()]
@@ -419,7 +419,7 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("connection refused")
 
-    with JobsBeimStaatParser(_http_get=failing_get, _retries=1) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=failing_get, retries=1)) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
 
@@ -439,7 +439,7 @@ def test_enrich_fetches_wrapper_then_on_domain_iframe_target(
         fetched_urls.append(url)
         return next(responses)
 
-    with JobsBeimStaatParser(_http_get=capturing_get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=capturing_get)) as p:
         p.enrich(stub)
 
     assert fetched_urls[0] == stub.url
@@ -454,7 +454,7 @@ def test_enrich_returns_position_with_raw_description(
     stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
     get = _make_get([wrapper_html, iframe_target_html])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert isinstance(pos, Position)
     assert pos.raw_description != ""
@@ -464,7 +464,7 @@ def test_enrich_description_contains_job_text(
     stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
     get = _make_get([wrapper_html, iframe_target_html])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert isinstance(pos, Position)
     assert (
@@ -477,7 +477,7 @@ def test_enrich_description_has_no_html_tags(
     stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
     get = _make_get([wrapper_html, iframe_target_html])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert isinstance(pos, Position)
     assert "<p>" not in pos.raw_description
@@ -488,7 +488,7 @@ def test_enrich_position_url_remains_wrapper_url(
     stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
     get = _make_get([wrapper_html, iframe_target_html])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.stub.url == stub.url
 
@@ -497,7 +497,7 @@ def test_enrich_position_references_original_stub(
     stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
     get = _make_get([wrapper_html, iframe_target_html])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         pos = p.enrich(stub)
     assert pos.stub is stub
 
@@ -513,7 +513,7 @@ def test_enrich_raises_parser_error_on_wrapper_http_failure(stub: PositionStub) 
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("timeout")
 
-    with JobsBeimStaatParser(_http_get=failing_get, _retries=1) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=failing_get, retries=1)) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
 
@@ -532,7 +532,7 @@ def test_enrich_raises_parser_error_on_iframe_target_http_failure(
             return wrapper_html
         raise OSError("timeout")
 
-    with JobsBeimStaatParser(_http_get=get, _retries=1) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get, retries=1)) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
 
@@ -544,7 +544,7 @@ def test_enrich_raises_parser_error_on_wrapper_with_no_iframe_target(
 
     empty_wrapper = b"<html><body><p>No iframe here</p></body></html>"
     get = _make_get([empty_wrapper])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
 
@@ -560,7 +560,7 @@ def test_enrich_posted_date_set_from_vor_2_tagen(
     get = _make_get(
         [_jobs_envelope(list_html), _empty_envelope(), wrapper_html, iframe_target_html]
     )
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         (first_stub, *_) = list(p.discover(_query()))
         assert isinstance(first_stub, PositionStub)
         pos = p.enrich(first_stub)
@@ -581,7 +581,7 @@ _OUTBOUND_WRAPPER = (
 
 def test_enrich_emits_external_redirect_for_outbound_link(stub: PositionStub) -> None:
     get = _make_get([_OUTBOUND_WRAPPER])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         result = p.enrich(stub)
     assert isinstance(result, ExternalRedirect)
     assert result.outbound_url == "https://go.opportuno.de/job/123"
@@ -595,7 +595,7 @@ def test_enrich_external_redirect_outbound_url_matches_href(stub: PositionStub) 
         b"</body></html>"
     )
     get = _make_get([wrapper])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         result = p.enrich(stub)
     assert isinstance(result, ExternalRedirect)
     assert result.outbound_url == "https://external.example.com/jobs/456"
@@ -608,7 +608,7 @@ def test_enrich_raises_parser_error_with_no_iframe_and_no_outbound(
 
     no_link_wrapper = b"<html><body><p>No links here</p></body></html>"
     get = _make_get([no_link_wrapper])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
 
@@ -623,7 +623,7 @@ def test_enrich_iframe_wins_over_stray_outbound_link(
         b"</body></html>"
     )
     get = _make_get([wrapper_with_both, iframe_target_html])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         result = p.enrich(stub)
     assert isinstance(result, Position)
 
@@ -632,7 +632,7 @@ def test_enrich_external_redirect_returns_external_redirect(
     stub: PositionStub,
 ) -> None:
     get = _make_get([_OUTBOUND_WRAPPER])
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         result = p.enrich(stub)
     assert isinstance(result, ExternalRedirect)
     assert "go.opportuno.de/job/123" in result.outbound_url
@@ -661,7 +661,7 @@ def test_discover_stops_when_second_page_urls_already_seen() -> None:
         call_count += 1
         return json.dumps({"jobs": _SMALL_LIST_HTML.decode()}).encode()
 
-    with JobsBeimStaatParser(_http_get=counting_get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=counting_get)) as p:
         stubs = list(p.discover(_query(max_results=1000)))
 
     assert len(stubs) == 2
@@ -677,7 +677,7 @@ def test_discover_at_most_one_extra_request_when_first_page_is_undersized() -> N
         call_count += 1
         return json.dumps({"jobs": _SMALL_LIST_HTML.decode()}).encode()
 
-    with JobsBeimStaatParser(_http_get=counting_get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=counting_get)) as p:
         list(p.discover(_query(max_results=1000)))
 
     assert call_count <= 2
@@ -712,7 +712,7 @@ def test_discover_terminates_after_one_request_when_only_mail_teaser_present() -
         call_count += 1
         return json.dumps({"jobs": _ONLY_TEASER_HTML.decode()}).encode()
 
-    with JobsBeimStaatParser(_http_get=counting_get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=counting_get)) as p:
         stubs = list(p.discover(_query()))
 
     assert stubs == []
@@ -733,7 +733,7 @@ def test_discover_filters_mail_teaser_yields_one_stub_from_mixed_page() -> None:
         call_count += 1
         return next(it)
 
-    with JobsBeimStaatParser(_http_get=get) as p:
+    with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         stubs = list(p.discover(_query()))
 
     assert len(stubs) == 1

@@ -539,6 +539,24 @@ def test_judge_items_abandoned_present_when_nonzero():
     assert "judge_items_abandoned=1" in result
 
 
+def test_judge_resumed_absent_when_zero():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+
+    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    assert "judge_resumed" not in result
+
+
+def test_judge_resumed_present_when_nonzero():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.record_dedup("judge_pending")
+    metrics.record_dedup("judge_pending")
+
+    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    assert "judge_resumed=2" in result
+
+
 # ---------------------------------------------------------------------------
 # to_run_summary
 # ---------------------------------------------------------------------------

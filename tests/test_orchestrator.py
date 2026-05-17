@@ -1741,6 +1741,51 @@ def test_judge_pending_appears_in_run_divider(tmp_path: Path) -> None:
     )
 
 
+def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
+    tmp_path: Path,
+) -> None:
+    """judge_resumed=1 appears in Run Divider even when judge fails on the resumed stub."""
+    seen_path = tmp_path / ".seen.json"
+    results_path = tmp_path / "current.md"
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                _RESUME_URL: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "classified_in_domain",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ext = MagicMock()
+    ext.prewarm.return_value = None
+    ext.classify_relevance_batch.side_effect = lambda items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.side_effect = ExtractorError("judge boom")
+
+    run(
+        _one_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+    )
+
+    content = results_path.read_text(encoding="utf-8")
+    last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "judge_resumed=1" in last_block, (
+        f"judge_resumed missing from divider when judge failed: {last_block!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Threading: PARSER_DEAD (issue #112)
 # ---------------------------------------------------------------------------

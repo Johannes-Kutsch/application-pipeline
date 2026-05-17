@@ -38,13 +38,12 @@ def write_failure(
     stage: str,
     error: BaseException,
     log_tail: str,
-    results_dir: Path,
+    failures_dir: Path,
 ) -> Path:
     now = datetime.now(UTC)
     timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     filename_ts = timestamp.replace(":", "-")
 
-    failures_dir = results_dir / "failures"
     failures_dir.mkdir(parents=True, exist_ok=True)
 
     target = failures_dir / f"{filename_ts}.md"

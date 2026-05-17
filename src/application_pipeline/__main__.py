@@ -60,7 +60,12 @@ def main() -> None:
         summary = run(config_path, status_display=display)
     except Exception as exc:
         try:
-            write_failure(current_stage.get(), exc, _tail.tail(), config_path.parent)
+            write_failure(
+                current_stage.get(),
+                exc,
+                _tail.tail(),
+                config_path.resolve().parent / "failures",
+            )
         except Exception:
             pass
         sys.exit(1)

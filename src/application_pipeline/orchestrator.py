@@ -20,7 +20,11 @@ from application_pipeline._context import current_stage
 from application_pipeline.run_metrics import RunMetrics, RunSummary
 from application_pipeline.status_display import PlainStatusDisplay, StatusDisplay
 from application_pipeline.config import ConfigError, SourceEntry
-from application_pipeline.dedup import DedupStoreError, DeduplicationStore
+from application_pipeline.dedup import (
+    DedupStoreError,
+    DeduplicationStore,
+    RunScopedDedup,
+)
 from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
     ClassifyItem,
@@ -457,6 +461,174 @@ def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Outbound dispatcher
+# ---------------------------------------------------------------------------
+
+
+class _OutboundDispatcher:
+    """Routes payloads from the outbound queue to the appropriate handlers."""
+
+    def __init__(
+        self,
+        *,
+        parser_states: dict[str, "_ParserState"],
+        dedup_run: RunScopedDedup,
+        dedup_store: DeduplicationStore,
+        prefilter: "DomainPreFilter",
+        metrics: "RunMetrics",
+        classify_queue: "queue.Queue[object]",
+        judge_queue: "queue.Queue[object]",
+        batch_size: int,
+        run_state: _RunState,
+    ) -> None:
+        self._parser_states = parser_states
+        self._dedup_run = dedup_run
+        self._dedup_store = dedup_store
+        self._prefilter = prefilter
+        self._metrics = metrics
+        self._classify_queue = classify_queue
+        self._judge_queue = judge_queue
+        self._batch_size = batch_size
+        self._run_state = run_state
+        self._classify_buffer: list[Position] = []
+        self._batch_id: int = 0
+
+    def dispatch(self, pid: str, payload: object) -> bool:
+        """Dispatch a payload to the appropriate handler.
+
+        Returns True if the parser has finished (PARSER_DONE or ParserDead).
+        """
+        state = self._parser_states[pid]
+        if isinstance(payload, PositionStub):
+            self._handle_stub(pid, state, payload)
+        elif isinstance(payload, Position):
+            self._handle_position(pid, state, payload)
+        elif isinstance(payload, ParserError):
+            self._handle_parser_error(pid, state, payload)
+        elif isinstance(payload, ExternalRedirect):
+            self._handle_external_redirect(pid, state, payload)
+        elif isinstance(payload, NotServedQuery):
+            self._handle_not_served(pid)
+        elif payload is _QUERY_DONE:
+            self._handle_query_done(pid)
+        elif payload is _PARSER_DONE:
+            self._handle_parser_done(pid)
+            return True
+        elif isinstance(payload, _ParserDead):
+            self._handle_parser_dead(pid, payload)
+            return True
+        return False
+
+    def flush_residual(self) -> None:
+        """Flush any remaining buffered positions and signal end of batches."""
+        if self._classify_buffer:
+            self._flush_classify_batch()
+        self._classify_queue.put(_NO_MORE_BATCHES)
+
+    def _flush_classify_batch(self) -> None:
+        self._classify_queue.put(
+            _ClassifyBatch(
+                positions=list(self._classify_buffer),
+                item_id=str(self._batch_id),
+            )
+        )
+        self._metrics.classify_batch_enqueued(len(self._classify_buffer))
+        self._batch_id += 1
+        self._classify_buffer.clear()
+
+    def _handle_stub(
+        self, pid: str, state: _ParserState, payload: PositionStub
+    ) -> None:
+        self._metrics.discovered(pid)
+        if self._run_state.is_aborted:
+            state.inbound.put(_SKIP_AND_END_QUERY)
+            return
+        result = self._dedup_run.is_seen(payload)
+        self._metrics.record_dedup(result)
+        if result == "miss":
+            state.pending_enrich = payload
+            state.pending_judge_resume = False
+            state.inbound.put(_ENRICH)
+        elif result == "judge_pending":
+            state.pending_enrich = payload
+            state.pending_judge_resume = True
+            state.inbound.put(_ENRICH)
+        else:
+            state.inbound.put(_SKIP)
+
+    def _handle_position(
+        self, pid: str, state: _ParserState, payload: Position
+    ) -> None:
+        for warning in payload._warnings:
+            parser_log.record(pid, warning)
+            if warning.startswith("unparseable_date"):
+                self._metrics.unparseable_date(pid)
+        self._metrics.enriched(pid)
+        if state.pending_judge_resume:
+            state.pending_judge_resume = False
+            state.pending_enrich = None
+            self._metrics.judge_enqueued()
+            self._judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
+        else:
+            verdict = self._prefilter.classify(payload)
+            if verdict.passes:
+                self._metrics.prefilter_passed(verdict)
+                self._classify_buffer.append(payload)
+                self._metrics.classify_buffered(1)
+                if len(self._classify_buffer) >= self._batch_size:
+                    self._flush_classify_batch()
+            else:
+                self._dedup_store.mark_off_domain(payload.stub)
+                self._metrics.prefilter_dropped(verdict)
+
+    def _handle_parser_error(
+        self, pid: str, state: _ParserState, payload: ParserError
+    ) -> None:
+        stub = state.pending_enrich
+        state.pending_enrich = None
+        state.pending_judge_resume = False
+        if stub is not None:
+            parser_log.record(
+                pid,
+                "enrich_failed",
+                stub_url=stub.url,
+                title=stub.title,
+                reason=str(payload),
+            )
+            self._dedup_store.mark_enrich_failed(stub)
+        self._metrics.enrich_failed(pid)
+
+    def _handle_external_redirect(
+        self, pid: str, state: _ParserState, payload: ExternalRedirect
+    ) -> None:
+        stub = state.pending_enrich
+        state.pending_enrich = None
+        state.pending_judge_resume = False
+        if stub is not None:
+            parser_log.record(
+                pid,
+                "external_redirect",
+                stub_url=stub.url,
+                outbound=payload.outbound_url,
+            )
+            self._dedup_store.mark_external_redirect(stub)
+        self._metrics.external_redirect(pid)
+
+    def _handle_not_served(self, pid: str) -> None:
+        self._metrics.not_served_query(pid)
+
+    def _handle_query_done(self, pid: str) -> None:
+        self._metrics.query_done(pid)
+
+    def _handle_parser_done(self, pid: str) -> None:
+        self._metrics.parser_done(pid)
+
+    def _handle_parser_dead(self, pid: str, payload: _ParserDead) -> None:
+        parser_log.record_traceback(pid, payload.traceback_str)
+        self._metrics.parser_dead(pid)
+
+
 def run(
     config_path: Path,
     *,
@@ -545,9 +717,6 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display)
-        classify_buffer: list[Position] = []
-        batch_size = cfg.claude_classify_batch_size
-        batch_id = 0
         classify_queue: queue.Queue[object] = queue.Queue()
         judge_queue: queue.Queue[object] = queue.Queue()
         _run_started_at = datetime.now(timezone.utc)
@@ -622,17 +791,17 @@ def run(
             classify_thread.start()
             judge_thread.start()
 
-            def _flush_classify_batch() -> None:
-                nonlocal batch_id
-                classify_queue.put(
-                    _ClassifyBatch(
-                        positions=list(classify_buffer),
-                        item_id=str(batch_id),
-                    )
-                )
-                metrics.classify_batch_enqueued(len(classify_buffer))
-                batch_id += 1
-                classify_buffer.clear()
+            dispatcher = _OutboundDispatcher(
+                parser_states=parser_states,
+                dedup_run=dedup_run,
+                dedup_store=dedup_store,
+                prefilter=prefilter,
+                metrics=metrics,
+                classify_queue=classify_queue,
+                judge_queue=judge_queue,
+                batch_size=cfg.claude_classify_batch_size,
+                run_state=run_state,
+            )
 
             parsers_remaining: set[str] = set(parser_states.keys())
 
@@ -671,91 +840,7 @@ def run(
                 state.last_event_monotonic = time.monotonic()
                 state.stall_logged = False
 
-                if isinstance(payload, PositionStub):
-                    metrics.discovered(pid)
-
-                    if run_state.is_aborted:
-                        state.inbound.put(_SKIP_AND_END_QUERY)
-                        continue
-
-                    result = dedup_run.is_seen(payload)
-                    metrics.record_dedup(result)
-                    if result == "miss":
-                        state.pending_enrich = payload
-                        state.pending_judge_resume = False
-                        state.inbound.put(_ENRICH)
-                    elif result == "judge_pending":
-                        state.pending_enrich = payload
-                        state.pending_judge_resume = True
-                        state.inbound.put(_ENRICH)
-                    else:
-                        state.inbound.put(_SKIP)
-
-                elif isinstance(payload, Position):
-                    for warning in payload._warnings:
-                        parser_log.record(pid, warning)
-                        if warning.startswith("unparseable_date"):
-                            metrics.unparseable_date(pid)
-                    metrics.enriched(pid)
-                    if state.pending_judge_resume:
-                        state.pending_judge_resume = False
-                        state.pending_enrich = None
-                        metrics.judge_enqueued()
-                        judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
-                    else:
-                        verdict = prefilter.classify(payload)
-                        if verdict.passes:
-                            metrics.prefilter_passed(verdict)
-                            classify_buffer.append(payload)
-                            metrics.classify_buffered(1)
-                            if len(classify_buffer) >= batch_size:
-                                _flush_classify_batch()
-                        else:
-                            dedup_store.mark_off_domain(payload.stub)
-                            metrics.prefilter_dropped(verdict)
-
-                elif isinstance(payload, ParserError):
-                    stub = state.pending_enrich
-                    state.pending_enrich = None
-                    state.pending_judge_resume = False
-                    if stub is not None:
-                        parser_log.record(
-                            pid,
-                            "enrich_failed",
-                            stub_url=stub.url,
-                            title=stub.title,
-                            reason=str(payload),
-                        )
-                        dedup_store.mark_enrich_failed(stub)
-                    metrics.enrich_failed(pid)
-
-                elif isinstance(payload, ExternalRedirect):
-                    stub = state.pending_enrich
-                    state.pending_enrich = None
-                    state.pending_judge_resume = False
-                    if stub is not None:
-                        parser_log.record(
-                            pid,
-                            "external_redirect",
-                            stub_url=stub.url,
-                            outbound=payload.outbound_url,
-                        )
-                        dedup_store.mark_external_redirect(stub)
-                    metrics.external_redirect(pid)
-
-                elif isinstance(payload, NotServedQuery):
-                    metrics.not_served_query(pid)
-
-                elif payload is _QUERY_DONE:
-                    metrics.query_done(pid)
-
-                elif payload is _PARSER_DONE:
-                    parsers_remaining.discard(pid)
-                    metrics.parser_done(pid)
-
-                elif isinstance(payload, _ParserDead):
-                    parser_log.record_traceback(pid, payload.traceback_str)
-                    metrics.parser_dead(pid)
+                if dispatcher.dispatch(pid, payload):
                     parsers_remaining.discard(pid)
 
             for _, t in threads:
@@ -771,10 +856,7 @@ def run(
                     pstate.started_at,
                 )
 
-            # Flush residual buffer (end-of-discovery undersized batch)
-            if classify_buffer:
-                _flush_classify_batch()
-            classify_queue.put(_NO_MORE_BATCHES)
+            dispatcher.flush_residual()
 
         # Sentinel cascade: classify drains → forwards _NO_MORE_JUDGES → judge drains → exits
         classify_thread.join()

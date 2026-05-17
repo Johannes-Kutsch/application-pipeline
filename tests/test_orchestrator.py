@@ -79,6 +79,7 @@ def _write_config(
             LOCATIONS = {locations}
             INCLUDE_REMOTE = {include_remote!r}
             NEGATIVE_KEYWORDS = {negative_keywords}
+            LAYOUT = None
         """),
         encoding="utf-8",
     )

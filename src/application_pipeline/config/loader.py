@@ -9,6 +9,8 @@ from .types import Config, ConfigError, SourceEntry, resolve_data_paths
 
 _REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
 
+_MISSING = object()
+
 _REMOVED_FIELDS = (
     "OLLAMA_BASE_URL",
     "OLLAMA_CLASSIFY_MODEL",
@@ -39,9 +41,7 @@ def load(path: pathlib.Path) -> Config:
 
     seen_store_path = data_paths.seen_store_path
 
-    layout = _resolve_optional_file(
-        "LAYOUT", config_dir, getattr(module, "LAYOUT", None)
-    )
+    layout = _resolve_layout("LAYOUT", config_dir, getattr(module, "LAYOUT", _MISSING))
 
     user_info_dir = _resolve_dir(
         "USER_INFO_DIR",
@@ -87,6 +87,22 @@ def load(path: pathlib.Path) -> Config:
     )
     _validate(config)
     return config
+
+
+def _resolve_layout(
+    name: str, config_dir: pathlib.Path, value: object
+) -> pathlib.Path | None:
+    if value is _MISSING:
+        path = config_dir / "layout.py"
+        if not path.is_file():
+            raise ConfigError(
+                f"{name}: {path} does not exist; add layout.py next to config.py"
+                " or set LAYOUT = None to use the built-in default"
+            )
+        return path
+    if value is None:
+        return None
+    return _resolve_optional_file(name, config_dir, value)
 
 
 def _resolve_dir(name: str, config_dir: pathlib.Path, value: object) -> pathlib.Path:

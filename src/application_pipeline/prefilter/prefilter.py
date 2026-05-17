@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol
 
 from application_pipeline.text import normalize
@@ -17,8 +17,8 @@ class PreFilterVerdict:
     passes: bool
     whitelist_hit: bool
     blacklist_hit: bool
-    whitelist_matches: tuple[TermMatch, ...] = field(default_factory=tuple)
-    blacklist_matches: tuple[TermMatch, ...] = field(default_factory=tuple)
+    whitelist_matches: tuple[TermMatch, ...] = ()
+    blacklist_matches: tuple[TermMatch, ...] = ()
 
 
 class _Position(Protocol):
@@ -31,17 +31,15 @@ class _Position(Protocol):
 
 def _find_matches(
     keywords: list[str], title_hay: str, body_hay: str
-) -> list[TermMatch]:
-    matches = []
+) -> tuple[TermMatch, ...]:
+    matches: list[TermMatch] = []
     for k in keywords:
-        in_title = k in title_hay
-        in_body = k in body_hay
-        if in_title or in_body:
-            fields: frozenset[str] = frozenset(
-                f for f, hit in (("title", in_title), ("body", in_body)) if hit
-            )
+        fields = frozenset(
+            f for f, hay in (("title", title_hay), ("body", body_hay)) if k in hay
+        )
+        if fields:
             matches.append(TermMatch(term=k, fields=fields))
-    return matches
+    return tuple(matches)
 
 
 class DomainPreFilter:
@@ -63,11 +61,10 @@ class DomainPreFilter:
         blacklist_matches = _find_matches(self._blacklist, title_hay, body_hay)
         whitelist_hit = bool(whitelist_matches)
         blacklist_hit = bool(blacklist_matches)
-        passes = whitelist_hit or not blacklist_hit
         return PreFilterVerdict(
-            passes=passes,
+            passes=whitelist_hit or not blacklist_hit,
             whitelist_hit=whitelist_hit,
             blacklist_hit=blacklist_hit,
-            whitelist_matches=tuple(whitelist_matches),
-            blacklist_matches=tuple(blacklist_matches),
+            whitelist_matches=whitelist_matches,
+            blacklist_matches=blacklist_matches,
         )

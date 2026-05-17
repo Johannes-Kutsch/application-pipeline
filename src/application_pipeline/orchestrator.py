@@ -45,7 +45,7 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.parsers.errors import ParserError
-from application_pipeline.prefilter import DomainPreFilter
+from application_pipeline.prefilter import DomainPreFilter, PreFilterVerdict, TermMatch
 from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.renderer import render
 from application_pipeline.results import ResultsFileError, ResultsFileManager
@@ -450,6 +450,20 @@ class _ParserState:
     pending_judge_resume: bool = False
 
 
+def _prefilter_reason(verdict: PreFilterVerdict) -> str:
+    if verdict.whitelist_matches and verdict.blacklist_matches:
+        return "whitelist_rescue"
+    if verdict.whitelist_matches:
+        return "whitelist_only"
+    if verdict.blacklist_matches:
+        return "blacklist_drop"
+    return "no_hit"
+
+
+def _serialize_matches(matches: tuple[TermMatch, ...]) -> list[dict[str, object]]:
+    return [{"term": m.term, "fields": sorted(m.fields)} for m in matches]
+
+
 def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:
     return [
         ClassifyItem(
@@ -572,14 +586,6 @@ class _OutboundDispatcher:
             self._judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
         else:
             verdict = self._prefilter.classify(payload)
-            if verdict.whitelist_matches and verdict.blacklist_matches:
-                reason = "whitelist_rescue"
-            elif verdict.whitelist_matches:
-                reason = "whitelist_only"
-            elif verdict.blacklist_matches:
-                reason = "blacklist_drop"
-            else:
-                reason = "no_hit"
             parser_log.record(
                 "prefilter",
                 "decision",
@@ -587,15 +593,9 @@ class _OutboundDispatcher:
                 title=payload.title,
                 source=payload.stub.source,
                 passes=verdict.passes,
-                reason=reason,
-                whitelist_matches=[
-                    {"term": m.term, "fields": sorted(m.fields)}
-                    for m in verdict.whitelist_matches
-                ],
-                blacklist_matches=[
-                    {"term": m.term, "fields": sorted(m.fields)}
-                    for m in verdict.blacklist_matches
-                ],
+                reason=_prefilter_reason(verdict),
+                whitelist_matches=_serialize_matches(verdict.whitelist_matches),
+                blacklist_matches=_serialize_matches(verdict.blacklist_matches),
                 title_len=len(payload.title),
                 body_len=len(payload.raw_description),
             )

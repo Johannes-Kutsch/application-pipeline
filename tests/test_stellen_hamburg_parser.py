@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import date
 
 import pytest
 
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.types import City
-from collections.abc import Callable
-
 from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
 )
+from application_pipeline.parsers.types import City
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -8,21 +9,19 @@ import pytest
 
 import application_pipeline.parser_log as parser_log
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
+from application_pipeline.parsers import jobs_beim_staat_html as parser_module
+from application_pipeline.parsers.http import ParserHttp
+from application_pipeline.parsers.jobs_beim_staat_html import (
+    JobsBeimStaatParser,
+    _parse_posted_date,
+    parser_class,
+)
 from application_pipeline.parsers.types import (
     City,
     ExternalRedirect,
     NotServedQuery,
     Position,
     Remote,
-)
-from collections.abc import Callable
-
-from application_pipeline.parsers.http import ParserHttp
-from application_pipeline.parsers import jobs_beim_staat_html as parser_module
-from application_pipeline.parsers.jobs_beim_staat_html import (
-    JobsBeimStaatParser,
-    _parse_posted_date,
-    parser_class,
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "jobs_beim_staat"

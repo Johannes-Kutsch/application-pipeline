@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -10,14 +11,12 @@ import pytest
 
 import application_pipeline.parser_log as parser_log
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.types import City, NotServedQuery, Remote
 from application_pipeline.parsers.bundesagentur_api import (
     BundesagenturParser,
     parser_class,
 )
-from collections.abc import Callable
-
 from application_pipeline.parsers.http import ParserHttp
+from application_pipeline.parsers.types import City, NotServedQuery, Remote
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "bundesagentur"
 

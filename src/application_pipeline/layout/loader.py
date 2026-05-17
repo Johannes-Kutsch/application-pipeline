@@ -15,7 +15,6 @@ _REQUIRED_FIELDS = (
     "PLACEHOLDER_GROUPS",
     "FILE_HEADER",
     "CARD_TEMPLATE",
-    "HEADLINE_TEMPLATE",
 )
 
 _TIERS = frozenset({"green", "amber", "red"})
@@ -102,7 +101,6 @@ def load(path: pathlib.Path) -> Layout:
         placeholder_groups=module.PLACEHOLDER_GROUPS,
         file_header=module.FILE_HEADER,
         card_template=module.CARD_TEMPLATE,
-        headline_template=module.HEADLINE_TEMPLATE,
         empty_list_placeholder=getattr(module, "EMPTY_LIST_PLACEHOLDER", "—"),
     )
     _validate(layout, resolved)

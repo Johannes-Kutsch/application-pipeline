@@ -12,5 +12,4 @@ def default() -> Layout:
         placeholder_groups={},
         file_header="# Results\n\n",
         card_template="## {number}. {title}  {emoji}\n\n",
-        headline_template="## {number}. {title}  {emoji}\n\n",
     )

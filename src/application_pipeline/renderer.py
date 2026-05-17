@@ -2,7 +2,7 @@ import dataclasses
 from typing import Any
 
 from .layout.types import Layout
-from .llm.types import MatchTier, MatchVerdict
+from .llm.types import MatchVerdict
 from .parsers.types import Position
 
 _EXCLUDED_POSITION_FIELDS = frozenset({"stub", "raw_description"})
@@ -59,8 +59,4 @@ def render(
             parts.append(s)
         placeholders[group_name] = separator.join(parts)
 
-    template = (
-        layout.card_template if tier == MatchTier.green else layout.headline_template
-    )
-
-    return template.format_map(placeholders)
+    return layout.card_template.format_map(placeholders)

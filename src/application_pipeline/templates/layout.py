@@ -25,8 +25,6 @@ FILE_HEADER = """\
 
 """
 
-HEADLINE_TEMPLATE = '## <span style="color:{color}">{number}. {company} — {title}  {emoji}</span>\n{meta}\n\n'
-
 CARD_TEMPLATE = """\
 ## <span style="color:{color}">{number}. {company} — {title}  {emoji}</span>
 {meta}

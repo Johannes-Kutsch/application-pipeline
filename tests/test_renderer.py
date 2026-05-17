@@ -15,7 +15,6 @@ def layout() -> Layout:
         placeholder_groups={"meta": (" · ", ["location", "url"])},
         file_header="# Results\n\n",
         card_template="## {number}. {company} — {title}  {emoji}\n{meta}\n\n**Matched:** {matched}\n**Missing:** {missing}\n\n{summary}\n\n",
-        headline_template="## {number}. {company} — {title}  {emoji}\n{meta}\n\n",
     )
 
 
@@ -68,6 +67,22 @@ def red_verdict() -> MatchVerdict:
     )
 
 
+# --- Layout has no headline_template attribute ---
+
+
+def test_layout_has_no_headline_template() -> None:
+    assert not hasattr(
+        Layout(
+            tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
+            tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
+            placeholder_groups={},
+            file_header="",
+            card_template="{number}",
+        ),
+        "headline_template",
+    )
+
+
 # --- tracer bullet: green tier renders card_template ---
 
 
@@ -81,24 +96,28 @@ def test_green_tier_renders_card(
     assert "Strong fit overall." in result
 
 
-# --- template selection ---
+# --- all tiers render full card ---
 
 
-def test_amber_tier_renders_headline(
+def test_amber_tier_renders_card(
     layout: Layout, position: Position, amber_verdict: MatchVerdict
 ) -> None:
     result = render(position, amber_verdict, 2, layout)
 
-    assert "**Matched:**" not in result
+    assert "**Matched:**" in result
+    assert "**Missing:**" in result
+    assert "Partial fit." in result
     assert "Acme GmbH" in result
 
 
-def test_red_tier_renders_headline(
+def test_red_tier_renders_card(
     layout: Layout, position: Position, red_verdict: MatchVerdict
 ) -> None:
     result = render(position, red_verdict, 3, layout)
 
-    assert "**Matched:**" not in result
+    assert "**Matched:**" in result
+    assert "**Missing:**" in result
+    assert "Poor fit." in result
     assert "Senior Engineer" in result
 
 
@@ -151,7 +170,6 @@ def test_empty_matched_list_renders_empty_list_placeholder(
         placeholder_groups={},
         file_header=layout.file_header,
         card_template="{matched}",
-        headline_template="{matched}",
         empty_list_placeholder="—",
     )
     result = render(position, red_verdict, 1, simple_layout)
@@ -177,7 +195,6 @@ def test_color_available_via_layout(layout: Layout, position: Position) -> None:
         placeholder_groups={},
         file_header=layout.file_header,
         card_template="{color}",
-        headline_template="{color}",
     )
     verdict = MatchVerdict(tier=MatchTier.amber, matched=[], missing=[], summary="")
     result = render(position, verdict, 1, color_layout)
@@ -216,7 +233,6 @@ def test_placeholder_group_all_none_renders_empty(
         placeholder_groups={"meta": (" · ", ["location"])},
         file_header=layout.file_header,
         card_template="{meta}",
-        headline_template="{meta}",
     )
     position_no_location = replace(position, stub=replace(position.stub, location=None))
     result = render(position_no_location, green_verdict, 1, simple_layout)
@@ -236,7 +252,6 @@ def test_url_in_placeholder_group_is_autolinked(
         placeholder_groups={"link": (" ", ["url"])},
         file_header=layout.file_header,
         card_template="{link}",
-        headline_template="{link}",
     )
     result = render(position, green_verdict, 1, url_layout)
 
@@ -255,7 +270,6 @@ def test_matched_bullets_renders_bullet_list(
         placeholder_groups={},
         file_header=layout.file_header,
         card_template="{matched_bullets}",
-        headline_template="{matched_bullets}",
     )
     result = render(position, green_verdict, 1, bullets_layout)
 
@@ -271,7 +285,6 @@ def test_missing_bullets_renders_bullet_list(
         placeholder_groups={},
         file_header=layout.file_header,
         card_template="{missing_bullets}",
-        headline_template="{missing_bullets}",
     )
     result = render(position, green_verdict, 1, bullets_layout)
 
@@ -287,7 +300,6 @@ def test_empty_matched_bullets_renders_empty_list_placeholder(
         placeholder_groups={},
         file_header=layout.file_header,
         card_template="{matched_bullets}",
-        headline_template="{matched_bullets}",
         empty_list_placeholder="—",
     )
     result = render(position, red_verdict, 1, bullets_layout)
@@ -307,7 +319,6 @@ def test_null_company_skipped_in_group(
         placeholder_groups={"meta": (" · ", ["company", "url"])},
         file_header=layout.file_header,
         card_template="{meta}",
-        headline_template="{meta}",
     )
     stub_nulls = replace(position.stub, company=None)
     position_nulls = replace(position, stub=stub_nulls)
@@ -340,7 +351,6 @@ def test_raw_description_not_available_as_template_placeholder(
         placeholder_groups={},
         file_header=layout.file_header,
         card_template="{raw_description}",
-        headline_template="{raw_description}",
     )
     with pytest.raises(KeyError):
         render(position, green_verdict, 1, raw_desc_layout)

@@ -24,5 +24,4 @@ class Layout:
     placeholder_groups: dict[str, tuple[str, list[str]]]
     file_header: str
     card_template: str
-    headline_template: str
     empty_list_placeholder: str = "—"

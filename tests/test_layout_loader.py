@@ -17,7 +17,6 @@ _MINIMAL_BODY = textwrap.dedent(
     PLACEHOLDER_GROUPS = {"meta": (" · ", ["location", "url"])}
     FILE_HEADER = "# Results\\n"
     CARD_TEMPLATE = "## {number}. {company}\\n"
-    HEADLINE_TEMPLATE = "## {number}. {company}\\n"
     """
 )
 
@@ -46,7 +45,6 @@ def test_load_returns_populated_layout(tmp_path: pathlib.Path) -> None:
     assert layout.placeholder_groups == {"meta": (" · ", ["location", "url"])}
     assert layout.file_header == "# Results\n"
     assert layout.card_template == "## {number}. {company}\n"
-    assert layout.headline_template == "## {number}. {company}\n"
 
 
 # --- Layout dataclass properties ---
@@ -78,7 +76,6 @@ def test_layout_error_is_user_settings_error() -> None:
         "PLACEHOLDER_GROUPS",
         "FILE_HEADER",
         "CARD_TEMPLATE",
-        "HEADLINE_TEMPLATE",
     ],
 )
 def test_load_raises_when_required_field_missing(
@@ -233,6 +230,29 @@ def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:
     assert layout.file_header == "# Results\n"
 
 
+# --- HEADLINE_TEMPLATE is optional and silently ignored ---
+
+
+def test_load_succeeds_when_headline_template_absent(tmp_path: pathlib.Path) -> None:
+    path = write_layout(tmp_path, _MINIMAL_BODY)
+
+    layout = load_layout(path)
+
+    assert isinstance(layout, Layout)
+    assert not hasattr(layout, "headline_template")
+
+
+def test_load_succeeds_when_headline_template_present(tmp_path: pathlib.Path) -> None:
+    path = write_layout(
+        tmp_path, _MINIMAL_BODY + '\nHEADLINE_TEMPLATE = "## {number}. {company}\\n"\n'
+    )
+
+    layout = load_layout(path)
+
+    assert isinstance(layout, Layout)
+    assert not hasattr(layout, "headline_template")
+
+
 # --- EMPTY_LIST_PLACEHOLDER optional field ---
 
 
@@ -375,17 +395,13 @@ def test_load_accepts_matched_bullets_in_placeholder_group(
 # --- Smoke-test helpers ---
 
 
-def _safe_layout_body(
-    card_template: str = "{number}",
-    headline_template: str = "{number}",
-) -> str:
+def _safe_layout_body(card_template: str = "{number}") -> str:
     return (
         'TIER_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}\n'
         'TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}\n'
         "PLACEHOLDER_GROUPS = {}\n"
         'FILE_HEADER = ""\n'
         f"CARD_TEMPLATE = {card_template!r}\n"
-        f"HEADLINE_TEMPLATE = {headline_template!r}\n"
     )
 
 

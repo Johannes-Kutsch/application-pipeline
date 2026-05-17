@@ -1,5 +1,8 @@
 # Domain Pre-Filter gates the LLM classify call
 
+> **Superseded by [ADR-0026](0026-prefilter-pure-title-only-blacklist.md)**: the whitelist mechanism (`SKILLS` + `INCLUSION_KEYWORDS`) and body-text matching have been removed. The Pre-Filter is now a pure title-only blacklist. The volume-reduction goal and "LLM stays the authority on in-domain" framing below carry forward; the rest is historical.
+
+
 A deterministic **Domain Pre-Filter** module runs before any LLM call. It examines each **Position**'s `title + raw_description` against two configured keyword lists — `Config.inclusion_keywords` (whitelist) and `Config.negative_keywords` (blacklist) — using case-insensitive substring match after a shared `normalize()` pass (whitespace collapse + `casefold`). **Whitelist hits override blacklist hits.** Any **Position** that survives (no blacklist hit, *or* any whitelist hit regardless of blacklist) is forwarded to `LLMExtractor.classify_relevance` for the holistic in-domain decision. The Pre-Filter never decides in-domain alone; it only drops obvious slop.
 
 ## Why

@@ -1,5 +1,8 @@
 # Claude CLI: pinned model and tag-wrapped output
 
+> **Judge model pin updated by [ADR-0027](0027-judge-pinned-to-haiku-medium.md)**: `_JUDGE_MODEL` moves from `sonnet` to `haiku` while keeping `_JUDGE_EFFORT = "medium"`. Classify (`_CLASSIFY_MODEL = "haiku"`, no `--effort`) is unchanged. Everything else in this ADR — the tag-anchored output protocol, fence-strip recovery, agent output protocol module, prompt example structure, prompt-cache contract, transcripts forensics taxonomy, invoker/extractor boundary — stands.
+
+
 The **LLM Extractor**'s only production implementation (`ClaudeExtractor`) pins `--model` (and `--effort` where applicable) per call site, and treats every `claude -p` response as agent prose with a structured payload wrapped in a semantic XML tag — `<verdicts>` for the **Relevance Classifier**, `<verdict>` for the **Match Judge** — rather than treating the envelope's `result` field as raw JSON. A small project-agnostic **Agent Output Protocol** module extracts the payload via tag-anchored walk-back and regex fence-strip, then `json.loads`. Model and effort live as `ClaudeExtractor` module-level constants — `haiku` for classify (no `--effort`), `sonnet` with `--effort medium` for judge — not as fields on the user-editable `Config`. This ADR tightens ADR-0016's "fresh subprocess per call" line (which left model selection implicit) without invalidating it.
 
 ## Why

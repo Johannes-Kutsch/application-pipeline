@@ -300,12 +300,12 @@ class RunMetrics:
 
     def classify_batch_enqueued(self, n: int) -> None:
         with self._lock:
-            self._total_batches += 1
             body = self._classify_body()
         self._display.update_body("classify_relevance", body=body)
 
     def classify_batch_dequeued(self, n: int) -> None:
         with self._lock:
+            self._total_batches += 1
             self._pending_classify -= n
             body = self._classify_body()
         self._display.update_body("classify_relevance", body=body)
@@ -590,14 +590,15 @@ class RunMetrics:
         )
 
     def _classify_body(self) -> str:
+        numerator = self._classify_calls + self._classify_failed
         result = (
-            f"{self._classify_calls}/{self._total_batches} batches done"
+            f"{numerator}/{self._total_batches} calls"
             f" · {self._pending_classify} items in queue"
         )
-        if self._classify_failed > 0:
+        if self._classify_failed > 0 or self._classify_items_errored > 0:
             result += (
-                f" · batches_failed={self._classify_failed}"
-                f" items_errored={self._classify_items_errored}"
+                f" · calls_failed={self._classify_failed}"
+                f" items_failed={self._classify_items_errored}"
             )
         return result
 

@@ -4118,7 +4118,7 @@ def test_non_quota_worker_exception_writes_failure_report(
 
 
 def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
-    """ExtractorError on classify: classify_relevance row body is refreshed with batches_failed=N items_errored=M."""
+    """ExtractorError on classify: classify_relevance row body is refreshed with calls_failed=N items_failed=M."""
     ext = MagicMock()
     ext.prewarm.return_value = None
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
@@ -4141,8 +4141,8 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     classify_bodies = display.body_updates_for("classify_relevance")
     assert classify_bodies, "expected at least one classify_relevance body update"
     last_body = classify_bodies[-1]
-    assert "batches_failed=1" in last_body
-    assert "items_errored=2" in last_body
+    assert "calls_failed=1" in last_body
+    assert "items_failed=2" in last_body
 
 
 def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
@@ -4192,8 +4192,8 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
     )
 
     for body in display.body_updates_for("classify_relevance"):
-        assert "batches_failed=" not in body
-        assert "items_errored=" not in body
+        assert "calls_failed=" not in body
+        assert "items_failed=" not in body
 
     for body in display.body_updates_for("judge_match"):
         assert "calls_failed=" not in body

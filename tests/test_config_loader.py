@@ -163,7 +163,7 @@ def test_load_anchors_data_paths_to_config_dir(tmp_path: pathlib.Path) -> None:
 
     config = load(path)
 
-    assert config.results_path == tmp_path / "results" / "current.md"
+    assert config.results_dir == tmp_path / "results"
     assert config.failures_path == tmp_path / "failures"
     assert config.logs_path == tmp_path / "logs"
 
@@ -172,7 +172,7 @@ def test_resolve_data_paths_anchors_to_data_dir() -> None:
     paths = resolve_data_paths(pathlib.Path("/some/data"))
 
     assert paths.seen_store_path == pathlib.Path("/some/data/.seen.json")
-    assert paths.results_path == pathlib.Path("/some/data/results/current.md")
+    assert paths.results_dir == pathlib.Path("/some/data/results")
     assert paths.failures_path == pathlib.Path("/some/data/failures")
     assert paths.logs_path == pathlib.Path("/some/data/logs")
 

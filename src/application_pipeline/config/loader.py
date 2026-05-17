@@ -75,7 +75,7 @@ def load(path: pathlib.Path) -> Config:
         inclusion_keywords=getattr(module, "INCLUSION_KEYWORDS", []),
         negative_keywords=getattr(module, "NEGATIVE_KEYWORDS", []),
         seen_store_path=seen_store_path,
-        results_path=data_paths.results_path,
+        results_dir=data_paths.results_dir,
         failures_path=data_paths.failures_path,
         logs_path=data_paths.logs_path,
         layout=layout,

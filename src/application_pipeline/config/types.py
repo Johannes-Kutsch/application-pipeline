@@ -11,7 +11,7 @@ class ConfigError(UserSettingsError):
 @dataclass(frozen=True)
 class DataPaths:
     seen_store_path: pathlib.Path
-    results_path: pathlib.Path
+    results_dir: pathlib.Path
     failures_path: pathlib.Path
     logs_path: pathlib.Path
 
@@ -19,7 +19,7 @@ class DataPaths:
 def resolve_data_paths(data_dir: pathlib.Path) -> DataPaths:
     return DataPaths(
         seen_store_path=data_dir / ".seen.json",
-        results_path=data_dir / "results" / "current.md",
+        results_dir=data_dir / "results",
         failures_path=data_dir / "failures",
         logs_path=data_dir / "logs",
     )
@@ -53,9 +53,7 @@ class Config:
     seen_store_path: pathlib.Path = field(
         default_factory=lambda: pathlib.Path(".seen.json")
     )
-    results_path: pathlib.Path = field(
-        default_factory=lambda: pathlib.Path("results/current.md")
-    )
+    results_dir: pathlib.Path = field(default_factory=lambda: pathlib.Path("results"))
     failures_path: pathlib.Path = field(
         default_factory=lambda: pathlib.Path("failures")
     )

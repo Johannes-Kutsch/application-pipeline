@@ -117,6 +117,30 @@ def _stub_results_manager() -> MagicMock:
     return rm
 
 
+def _stub_results_managers() -> dict[str, ResultsFileManager]:
+    return {tier: _stub_results_manager() for tier in ("green", "amber", "red")}  # type: ignore[return-value]
+
+
+def _real_results_managers(
+    results_dir: Path, header: str = "# Results\n\n"
+) -> dict[str, ResultsFileManager]:
+    results_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        tier: ResultsFileManager(results_dir / f"{tier}.md", header)
+        for tier in ("green", "amber", "red")
+    }
+
+
+def _read_all_results(results_dir: Path) -> str:
+    """Concatenate content from all three tier result files."""
+    parts = []
+    for tier in ("green", "amber", "red"):
+        f = results_dir / f"{tier}.md"
+        if f.exists():
+            parts.append(f.read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
 def _wire_run_scope(dedup: MagicMock) -> None:
     """Configure a MagicMock dedup store so run_scope() yields a real RunScopedDedup.
 
@@ -150,7 +174,7 @@ def test_zero_summary_on_empty_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert isinstance(summary, RunSummary)
@@ -184,7 +208,7 @@ def test_prompt_error_propagates(tmp_path: Path) -> None:
             config_path,
             # extractor=None so load_prompts() is called
             dedup_store=MagicMock(),
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
 
@@ -197,7 +221,7 @@ def test_dedup_store_error_propagates(tmp_path: Path) -> None:
             config_path,
             extractor=_stub_extractor(),
             # dedup_store=None so the store is loaded from seen_store_path
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
 
@@ -211,7 +235,11 @@ def test_results_file_error_propagates(tmp_path: Path) -> None:
             config_path,
             extractor=_stub_extractor(),
             dedup_store=MagicMock(),
-            results_manager=rm,
+            results_managers={  # type: ignore[arg-type]
+                "green": rm,
+                "amber": _stub_results_manager(),
+                "red": _stub_results_manager(),
+            },
         )
 
 
@@ -228,7 +256,7 @@ def test_unknown_parser_type_run_continues(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert isinstance(summary, RunSummary)
@@ -283,7 +311,7 @@ def test_integration_discover_and_enrich(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.discovered == 6
@@ -319,7 +347,7 @@ def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.discovered == 6
@@ -358,7 +386,7 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert len(queries_received) == 2
@@ -423,7 +451,7 @@ def test_integration_dedup_counter_breakdown(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _SevenStubParser,  # type: ignore[return-value]
             dedup_store=dedup,
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
     assert summary.dedup_url_hits == 2
@@ -478,7 +506,7 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.dedup_run_hits == 1
@@ -528,7 +556,7 @@ def test_consecutive_url_hits_never_trigger_skip_and_end_query(tmp_path: Path) -
         extractor=_stub_extractor(),
         parser_registry=lambda _: _HitOnlyParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert consumed[0] == 100
@@ -583,7 +611,7 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TrailingParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert unseen_url in enrich_calls, "trailing unseen stub must be enriched"
@@ -629,7 +657,7 @@ def test_in_run_dedup_run_hits_in_log_line(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
             dedup_store=dedup,
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
     run_complete = next(
@@ -673,14 +701,14 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
     summary2 = run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     # Each run sees the URL as a miss (in-run set starts fresh); no run_hits in either run
@@ -737,7 +765,7 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _PreFilterStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.discovered == 6
@@ -806,7 +834,7 @@ def test_integration_prefilter_whitelist_rescue_counters(tmp_path: Path) -> None
         extractor=_stub_extractor(),
         parser_registry=lambda _: _WhitelistRescueStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.prefilter_considered == 3
@@ -875,7 +903,7 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _PreFilterEventStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     events_file = logs_dir / "prefilter.events.jsonl"
@@ -1014,7 +1042,7 @@ class _FakeExtractor:
 def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     """Happy path: 6 stubs, 1 prefilter-dropped, 1 classifier-dropped, 4 written."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -1029,7 +1057,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
     assert summary.discovered == 6
@@ -1052,8 +1080,8 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     assert _PF_REJECTED_LLM_URL in off_domain
     assert _CLS_REJECTED_LLM_URL in off_domain
 
-    # current.md: 4 numbered entries
-    content = results_path.read_text(encoding="utf-8")
+    # 4 numbered entries across the three tier files
+    content = _read_all_results(results_dir)
     numbers = re.findall(r"^## (\d+)\.", content, re.MULTILINE)
     assert len(numbers) == 4
 
@@ -1061,7 +1089,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
 def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     """Second run on same tmp_path → all 6 skipped, current.md unchanged."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -1077,14 +1105,14 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
             extractor=_FakeExtractor(),
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(seen_path),
-            results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+            results_managers=_real_results_managers(results_dir),
         )
 
     first = _make_run()
     assert first.written == 4
 
     numbers_after_first = re.findall(
-        r"^## (\d+)\.", results_path.read_text(encoding="utf-8"), re.MULTILINE
+        r"^## (\d+)\.", _read_all_results(results_dir), re.MULTILINE
     )
 
     second = _make_run()
@@ -1099,7 +1127,7 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
 
     # No new position entries added; second run only appends its own Run Divider
     numbers_after_second = re.findall(
-        r"^## (\d+)\.", results_path.read_text(encoding="utf-8"), re.MULTILINE
+        r"^## (\d+)\.", _read_all_results(results_dir), re.MULTILINE
     )
     assert numbers_after_second == numbers_after_first
 
@@ -1161,7 +1189,7 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
         extractor=_InstrumentedExtractor(),
         parser_registry=lambda _: _MultiStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert call_log.count("classify") == 5
@@ -1250,7 +1278,7 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     # First batch errored (1 position), second batch succeeded (1 position written)
@@ -1263,9 +1291,9 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
 
 
 def test_extractor_error_on_judge_marks_classified_in_domain(tmp_path: Path) -> None:
-    """ExtractorError on judge_match: position marked classified_in_domain (not kept), rendered block NOT in current.md, errored increments."""
+    """ExtractorError on judge_match: position marked classified_in_domain (not kept), rendered block NOT in green.md, errored increments."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
@@ -1286,7 +1314,7 @@ def test_extractor_error_on_judge_marks_classified_in_domain(tmp_path: Path) -> 
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
     assert summary.errored == 1
@@ -1295,7 +1323,7 @@ def test_extractor_error_on_judge_marks_classified_in_domain(tmp_path: Path) -> 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data[_ERR_URLS[0]]["status"] == "classified_in_domain"
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     assert "Job 0" not in content
 
 
@@ -1332,7 +1360,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.enrich_failed == 1
@@ -1387,7 +1415,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
             dedup_store=dedup_module.load(seen_path),
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
     assert summary.external_redirects == 1
@@ -1438,7 +1466,7 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
         extractor=_stub_extractor(),
         parser_registry=lambda _: _MidDiscoverFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.discovered == 3
@@ -1494,7 +1522,7 @@ def test_judge_failure_marks_classified_in_domain(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1558,7 +1586,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
         extractor=_TrackingExtractor(),
         parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert classify_calls == [], "classify must not be called for judge_pending stubs"
@@ -1590,7 +1618,7 @@ def test_judge_pending_success_transitions_to_kept(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1628,7 +1656,7 @@ def test_judge_pending_failure_stays_classified_in_domain(tmp_path: Path) -> Non
         extractor=ext,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1694,7 +1722,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
         extractor=_CapturingExtractor(),
         parser_registry=lambda _: _FreshDescParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert enrich_descriptions == ["fresh description fetched on rerun"]
@@ -1738,7 +1766,7 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.enrich_failed == 1
@@ -1749,7 +1777,7 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
 def test_judge_pending_appears_in_run_divider(tmp_path: Path) -> None:
     """judge_resumed=N appears in Run Divider when stubs took the judge_pending path."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     seen_path.write_text(
         json.dumps(
@@ -1771,10 +1799,10 @@ def test_judge_pending_appears_in_run_divider(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "judge_resumed=1" in last_block, (
         f"judge_resumed missing from divider: {last_block!r}"
@@ -1786,7 +1814,7 @@ def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
 ) -> None:
     """judge_resumed=1 appears in Run Divider even when judge fails on the resumed stub."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     seen_path.write_text(
         json.dumps(
@@ -1815,10 +1843,10 @@ def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
         extractor=ext,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "judge_resumed=1" in last_block, (
         f"judge_resumed missing from divider when judge failed: {last_block!r}"
@@ -1858,7 +1886,7 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DeadParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.parsers_dead == 1
@@ -1922,7 +1950,7 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=_registry,
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.parsers_dead == 1
@@ -1945,7 +1973,11 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(tmp_path: Path) -
             extractor=_stub_extractor(),
             parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(seen_path),
-            results_manager=rm,
+            results_managers={  # type: ignore[arg-type]
+                "green": rm,
+                "amber": _stub_results_manager(),
+                "red": _stub_results_manager(),
+            },
         )
 
     seen_data = (
@@ -1964,7 +1996,7 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(tmp_path: Path) -
 def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
     """Successful run appends a Run Divider HTML comment with all expected metric keys."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -1979,10 +2011,10 @@ def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     # File ends with a Run Divider (strip trailing newline before split)
     last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert last_block.startswith("<!-- run "), (
@@ -2017,7 +2049,7 @@ def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
 
 def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
     """Run Divider includes dedup_run_hits=N when in-run dupes are present."""
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
     dup_url = "https://divider.example/dup"
 
     class _DupParser:
@@ -2048,10 +2080,10 @@ def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "dedup_run_hits=1" in last_block, (
         f"dedup_run_hits missing from divider: {last_block!r}"
@@ -2060,7 +2092,7 @@ def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
 
 def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
     """An exception escaping the main run path does not produce a Run Divider."""
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -2086,10 +2118,10 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
             extractor=_CrashingExtractor(),
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+            results_managers=_real_results_managers(results_dir),
         )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     assert "<!-- run " not in content, (
         "run divider must not be written when run crashes"
     )
@@ -2153,7 +2185,11 @@ def test_results_write_error_propagates_from_run(tmp_path: Path) -> None:
             extractor=_FakeExtractor(),
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_manager=crashing_rm,
+            results_managers={  # type: ignore[arg-type]
+                "green": crashing_rm,
+                "amber": _stub_results_manager(),
+                "red": _stub_results_manager(),
+            },
         )
 
 
@@ -2188,7 +2224,7 @@ def test_parser_log_integration(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
     events_file = logs_dir / "bundesagentur_api.events.jsonl"
@@ -2248,7 +2284,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _NotServedParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
     # Events file must not contain not_served events
@@ -2315,7 +2351,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _ThreeEventParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
     assert summary.enrich_failed == 1
@@ -2410,7 +2446,7 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     events_file = logs_dir / "jobs_beim_staat_html.events.jsonl"
@@ -2454,7 +2490,7 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_manager=_stub_results_manager(),
+            results_managers=_stub_results_managers(),
         )
 
     assert not any("unparseable_date" in record.message for record in caplog.records), (
@@ -2523,7 +2559,7 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.written == 4
@@ -2569,7 +2605,7 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SlowTwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -2597,7 +2633,7 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
     URLs that appear in current.md and on the 'kept' members of .seen.json.
     """
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     _URLS_A = [f"https://ct3b.example/a/{i}" for i in range(2)]
     _URLS_B = [f"https://ct3b.example/b/{i}" for i in range(4)]
@@ -2626,7 +2662,7 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SixStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
     # 6 positions → 3 batches of 2
@@ -2639,8 +2675,8 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
     kept_urls = {url for url, rec in seen_data.items() if rec["status"] == "kept"}
     assert kept_urls == _ALL_URLS
 
-    # current.md: all 6 URLs appear in rendered content
-    content = results_path.read_text(encoding="utf-8")
+    # green.md: all 6 URLs appear in rendered content (stub_extractor always returns green)
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     urls_in_content = {url for url in _ALL_URLS if url in content}
     assert urls_in_content == _ALL_URLS
 
@@ -2685,7 +2721,7 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.written == 4
@@ -2736,7 +2772,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoLangParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.classifier_dropped == 1
@@ -2784,7 +2820,7 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     # First batch failed (1 item), second succeeded (1 item written)
@@ -2818,7 +2854,7 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     events_file = logs_dir / "classify_relevance.events.jsonl"
@@ -2848,7 +2884,7 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     events_rows = [
@@ -2882,7 +2918,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     events_rows = [
@@ -2898,7 +2934,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
     """ClaudeUsageLimitError during classify → run completes, degraded_reason in divider, items unmarked."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         raise ClaudeUsageLimitError(
@@ -2917,7 +2953,7 @@ def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
     # Run completes successfully with zero written
@@ -2930,7 +2966,7 @@ def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
     assert all(url not in seen_data for url in _ERR_URLS[:2])
 
     # Run Divider records degraded_reason=usage_limit
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "degraded_reason=usage_limit" in last_line, (
         f"expected degraded_reason in divider: {last_line!r}"
@@ -3056,7 +3092,6 @@ def test_init_materialises_user_info_files(
 def test_run_summary_carries_token_and_cost_totals(tmp_path: Path) -> None:
     """RunSummary accumulates classify + judge token/cost totals from _FakeExtractor."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3071,7 +3106,7 @@ def test_run_summary_carries_token_and_cost_totals(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(tmp_path / "results"),
     )
 
     # 5 items pass prefilter → 1 classify batch
@@ -3091,7 +3126,6 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
     parser_log.configure(logs_dir)
 
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3106,7 +3140,7 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(tmp_path / "results"),
     )
 
     run_log = logs_dir / "run.log"
@@ -3137,7 +3171,6 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
     parser_log.configure(logs_dir)
 
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3152,7 +3185,7 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(tmp_path / "results"),
     )
 
     run_log = logs_dir / "run.log"
@@ -3183,7 +3216,6 @@ def test_prefilter_trailer_schema(tmp_path: Path) -> None:
     parser_log.configure(logs_dir)
 
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3198,7 +3230,7 @@ def test_prefilter_trailer_schema(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(tmp_path / "results"),
     )
 
     run_log = logs_dir / "run.log"
@@ -3269,7 +3301,7 @@ def test_display_pipeline_row_registered_on_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3295,7 +3327,7 @@ def test_display_body_updated_with_discovered_during_run(tmp_path: Path) -> None
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3315,7 +3347,7 @@ def test_display_stop_called_on_success(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3334,7 +3366,7 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=PlainStatusDisplay(),
     )
 
@@ -3374,7 +3406,7 @@ def test_startup_row_ordering(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3418,7 +3450,7 @@ def test_parser_row_registered_per_parser(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3447,7 +3479,7 @@ def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3477,7 +3509,7 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3507,7 +3539,7 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3552,7 +3584,7 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DeadParserForRow,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3597,7 +3629,7 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EmptyParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3641,7 +3673,7 @@ def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3684,7 +3716,7 @@ def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3714,7 +3746,7 @@ def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3772,7 +3804,7 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3815,7 +3847,7 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -3870,7 +3902,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SleepyParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         stall_threshold_s=_THRESHOLD,
     )
 
@@ -3922,7 +3954,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _LongSleepParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         stall_threshold_s=_THRESHOLD,
     )
 
@@ -3960,7 +3992,7 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     events_file = logs_dir / "bundesagentur_api.events.jsonl"
@@ -4011,7 +4043,7 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _RaisingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
     )
 
     assert summary.parsers_dead == 1
@@ -4039,7 +4071,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
 ) -> None:
     """ClaudeUsageLimitError on 4th judge_match → exit 0, degraded_reason in divider, 4th item unmarked."""
     seen_path = tmp_path / ".seen.json"
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     judge_call_count = [0]
 
@@ -4083,7 +4115,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(tmp_path / "results"),
     )
 
     assert summary.written == 3
@@ -4098,7 +4130,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
     # 4th item: classify marked it classified_in_domain; judge raised ClaudeUsageLimitError → stays classified_in_domain
     assert seen_data.get(_ERR_URLS[3], {}).get("status") == "classified_in_domain"
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "degraded_reason=usage_limit" in last_line, (
         f"expected degraded_reason in divider: {last_line!r}"
@@ -4189,7 +4221,7 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -4222,7 +4254,7 @@ def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -4241,7 +4273,7 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -4276,7 +4308,7 @@ def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> Non
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -4287,9 +4319,9 @@ def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> Non
     assert "2/2 calls" in last_body
     assert "calls_failed=1" in last_body
 
-    results_path = tmp_path / "results" / "current.md"
-    if results_path.exists():
-        content = results_path.read_text(encoding="utf-8")
+    results_dir = tmp_path / "results"
+    if (results_dir / "green.md").exists():
+        content = (results_dir / "green.md").read_text(encoding="utf-8")
         assert "<!-- run " not in content, (
             "Run Divider must not be written on worker abort"
         )
@@ -4309,7 +4341,7 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -4342,7 +4374,7 @@ def test_pending_drains_to_zero_on_classify_usage_limit(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=_stub_results_manager(),
+        results_managers=_stub_results_managers(),
         status_display=display,
     )
 
@@ -4363,7 +4395,7 @@ def test_run_divider_includes_classify_abandoned_counters_on_batch_failure(
     tmp_path: Path,
 ) -> None:
     """A run with one failing classify batch writes classify_batches_failed and classify_items_abandoned in the Run Divider."""
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
@@ -4373,10 +4405,10 @@ def test_run_divider_includes_classify_abandoned_counters_on_batch_failure(
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "classify_batches_failed=1" in last_line, (
         f"classify_batches_failed missing from divider: {last_line!r}"
@@ -4390,7 +4422,7 @@ def test_run_divider_includes_judge_items_abandoned_on_judge_failure(
     tmp_path: Path,
 ) -> None:
     """A run with one failing judge_match call writes judge_items_abandoned=1 in the Run Divider."""
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
@@ -4404,10 +4436,10 @@ def test_run_divider_includes_judge_items_abandoned_on_judge_failure(
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "judge_items_abandoned=2" in last_line, (
         f"judge_items_abandoned missing from divider: {last_line!r}"
@@ -4416,17 +4448,17 @@ def test_run_divider_includes_judge_items_abandoned_on_judge_failure(
 
 def test_run_divider_omits_abandoned_counters_on_clean_run(tmp_path: Path) -> None:
     """A clean run (no LLM failures) writes a Run Divider without any abandoned-counter fields."""
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     run(
         _two_stub_config(tmp_path),
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "classify_batches_failed" not in last_line, (
         f"classify_batches_failed should be absent on clean run: {last_line!r}"
@@ -4441,7 +4473,7 @@ def test_run_divider_omits_abandoned_counters_on_clean_run(tmp_path: Path) -> No
 
 def test_abandoned_classify_batch_does_not_set_degraded_reason(tmp_path: Path) -> None:
     """An abandoned classify batch does not cause degraded_reason to appear in the Run Divider."""
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
@@ -4451,10 +4483,10 @@ def test_abandoned_classify_batch_does_not_set_degraded_reason(tmp_path: Path) -
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "degraded_reason" not in last_line, (
         f"degraded_reason must be absent when only classify batch abandoned: {last_line!r}"
@@ -4465,7 +4497,7 @@ def test_degraded_run_preserves_degraded_reason_independent_of_abandoned_counter
     tmp_path: Path,
 ) -> None:
     """A degraded run still writes degraded_reason=usage_limit; abandoned counters are orthogonal."""
-    results_path = tmp_path / "current.md"
+    results_dir = tmp_path / "results"
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError(
@@ -4477,10 +4509,10 @@ def test_degraded_run_preserves_degraded_reason_independent_of_abandoned_counter
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_manager=ResultsFileManager(results_path, "# Results\n\n"),
+        results_managers=_real_results_managers(results_dir),
     )
 
-    content = results_path.read_text(encoding="utf-8")
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "degraded_reason=usage_limit" in last_line, (
         f"degraded_reason=usage_limit must be present: {last_line!r}"
@@ -4495,7 +4527,7 @@ def test_degraded_run_preserves_degraded_reason_independent_of_abandoned_counter
 def test_results_file_lands_under_config_dir_regardless_of_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """current.md is written under <config_dir>/results/, not relative to CWD."""
+    """Tier files are written under <config_dir>/results/, not relative to CWD."""
     config_path = _write_config(tmp_path)
     other_dir = tmp_path / "other"
     other_dir.mkdir()
@@ -4508,5 +4540,255 @@ def test_results_file_lands_under_config_dir_regardless_of_cwd(
         dedup_store=MagicMock(),
     )
 
-    assert (tmp_path / "results" / "current.md").exists()
-    assert not (other_dir / "results" / "current.md").exists()
+    assert (tmp_path / "results" / "green.md").exists()
+    assert not (other_dir / "results" / "green.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Per-tier results files (issue #314)
+# ---------------------------------------------------------------------------
+
+
+def test_each_tier_routed_to_its_results_file(tmp_path: Path) -> None:
+    """Green/amber/red verdicts are written to green.md/amber.md/red.md respectively."""
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            negative_keywords='["excluded"]',
+        ),
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_managers={
+            "green": ResultsFileManager(results_dir / "green.md", "# Header\n\n"),
+            "amber": ResultsFileManager(results_dir / "amber.md", "# Header\n\n"),
+            "red": ResultsFileManager(results_dir / "red.md", "# Header\n\n"),
+        },
+    )
+
+    # _FakeExtractor: 1 green, 2 amber, 1 red (of 6 stubs: 1 prefilter-dropped, 1 classify-dropped)
+    green_numbers = re.findall(
+        r"^## (\d+)\.",
+        (results_dir / "green.md").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    amber_numbers = re.findall(
+        r"^## (\d+)\.",
+        (results_dir / "amber.md").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    red_numbers = re.findall(
+        r"^## (\d+)\.",
+        (results_dir / "red.md").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+
+    assert len(green_numbers) == 1
+    assert len(amber_numbers) == 2
+    assert len(red_numbers) == 1
+
+
+def test_per_tier_numbering_restarts_at_one(tmp_path: Path) -> None:
+    """Each tier file's position counter starts at 1 and increments independently."""
+    results_dir = tmp_path / "results"
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            negative_keywords='["excluded"]',
+        ),
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_managers=_real_results_managers(results_dir),
+    )
+
+    # _FakeExtractor: 1 green, 2 amber, 1 red
+    green_numbers = re.findall(
+        r"^## (\d+)\.",
+        (results_dir / "green.md").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    amber_numbers = re.findall(
+        r"^## (\d+)\.",
+        (results_dir / "amber.md").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    red_numbers = re.findall(
+        r"^## (\d+)\.",
+        (results_dir / "red.md").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+
+    assert green_numbers == ["1"]
+    assert amber_numbers == ["1", "2"]
+    assert red_numbers == ["1"]
+
+
+def test_file_header_written_to_each_tier_file(tmp_path: Path) -> None:
+    """The Layout FILE_HEADER appears at the top of every tier file after initialization."""
+    results_dir = tmp_path / "results"
+    header = "# My Custom Header\n\n"
+
+    run(
+        _write_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        results_managers=_real_results_managers(results_dir, header),
+    )
+
+    for tier in ("green", "amber", "red"):
+        content = (results_dir / f"{tier}.md").read_text(encoding="utf-8")
+        assert content.startswith(header), (
+            f"{tier}.md does not start with FILE_HEADER: {content[:80]!r}"
+        )
+
+
+def test_run_divider_appended_to_all_three_tier_files(tmp_path: Path) -> None:
+    """Run Divider is appended to green.md, amber.md, and red.md after every run."""
+    results_dir = tmp_path / "results"
+
+    run(
+        _write_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        results_managers=_real_results_managers(results_dir),
+    )
+
+    for tier in ("green", "amber", "red"):
+        content = (results_dir / f"{tier}.md").read_text(encoding="utf-8")
+        last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+        assert last_line.startswith("<!-- run "), (
+            f"{tier}.md missing Run Divider: {last_line!r}"
+        )
+
+
+def test_deleting_green_creates_fresh_file_amber_red_retain_content(
+    tmp_path: Path,
+) -> None:
+    """Deleting green.md triggers fresh header+numbering; amber.md and red.md keep their content."""
+    results_dir = tmp_path / "results"
+    seen_path = tmp_path / ".seen.json"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    def _do_run() -> None:
+        run(
+            config_path,
+            extractor=_FakeExtractor(),
+            parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(seen_path),
+            results_managers=_real_results_managers(results_dir),
+        )
+
+    _do_run()
+
+    amber_after_first = (results_dir / "amber.md").read_text(encoding="utf-8")
+    red_after_first = (results_dir / "red.md").read_text(encoding="utf-8")
+    amber_numbers_first = re.findall(r"^## (\d+)\.", amber_after_first, re.MULTILINE)
+
+    (results_dir / "green.md").unlink()
+
+    # Second run: all URLs seen → 0 new positions, but green.md recreated
+    _do_run()
+
+    assert (results_dir / "green.md").exists(), "green.md must be recreated"
+    green_content = (results_dir / "green.md").read_text(encoding="utf-8")
+    assert green_content.startswith("# Results\n\n"), (
+        "fresh green.md must start with FILE_HEADER"
+    )
+
+    # amber.md and red.md retain their content from the first run
+    amber_after_second = (results_dir / "amber.md").read_text(encoding="utf-8")
+    red_after_second = (results_dir / "red.md").read_text(encoding="utf-8")
+    amber_numbers_second = re.findall(r"^## (\d+)\.", amber_after_second, re.MULTILINE)
+
+    assert amber_numbers_second[: len(amber_numbers_first)] == amber_numbers_first, (
+        "amber.md must retain positions from first run"
+    )
+    assert red_after_second.startswith(red_after_first[: len(red_after_first) // 2]), (
+        "red.md must retain content from first run"
+    )
+
+
+def test_deleting_green_does_not_affect_seen_json(tmp_path: Path) -> None:
+    """Deleting green.md leaves .seen.json intact; no URLs are re-evaluated."""
+    results_dir = tmp_path / "results"
+    seen_path = tmp_path / ".seen.json"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+
+    first = run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_managers=_real_results_managers(results_dir),
+    )
+
+    seen_after_first = json.loads(seen_path.read_text(encoding="utf-8"))
+    (results_dir / "green.md").unlink()
+
+    second = run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_managers=_real_results_managers(results_dir),
+    )
+
+    seen_after_second = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_after_first == seen_after_second, (
+        "Deleting green.md must not change .seen.json"
+    )
+    assert second.skipped == first.discovered, (
+        "All URLs from first run must be skipped on second run"
+    )
+    assert second.written == 0
+
+
+def test_current_md_ignored_if_present(tmp_path: Path) -> None:
+    """If data/results/current.md exists, it is neither read nor written; tier files are independent."""
+    results_dir = tmp_path / "results"
+    results_dir.mkdir(parents=True)
+    current_md = results_dir / "current.md"
+    current_md.write_text("old content", encoding="utf-8")
+
+    run(
+        _write_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        results_managers=_real_results_managers(results_dir),
+    )
+
+    # current.md must be untouched
+    assert current_md.read_text(encoding="utf-8") == "old content"
+    # Tier files must exist
+    for tier in ("green", "amber", "red"):
+        assert (results_dir / f"{tier}.md").exists(), f"{tier}.md must be created"

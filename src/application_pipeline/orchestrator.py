@@ -372,7 +372,7 @@ class _JudgeThread(_QueueWorker):
         *,
         judge_queue: queue.Queue[object],
         extractor: LLMExtractor,
-        results_manager: "ResultsFileManager",
+        results_managers: "dict[str, ResultsFileManager]",
         dedup_store: DeduplicationStore,
         layout: "Layout",
         metrics: "RunMetrics",
@@ -386,7 +386,7 @@ class _JudgeThread(_QueueWorker):
         )
         self.name = "judge-worker"
         self._extractor = extractor
-        self._results_manager = results_manager
+        self._results_managers = results_managers
         self._dedup_store = dedup_store
         self._layout = layout
         self._metrics = metrics
@@ -402,9 +402,10 @@ class _JudgeThread(_QueueWorker):
                 job.position.raw_description,
                 stub_url=job.position.stub.url,
             )
-            number = self._results_manager.next_position_number()
+            manager = self._results_managers[match_verdict.tier.value]
+            number = manager.next_position_number()
             rendered = render(job.position, match_verdict, number, self._layout)
-            self._results_manager.append(rendered)
+            manager.append(rendered)
             self._dedup_store.mark_kept(job.position.stub)
             self._metrics.judge_complete(
                 judge_usage, match_verdict.tier, job.position.stub.source
@@ -662,7 +663,7 @@ def run(
     prefilter: DomainPreFilter | None = None,
     parser_registry: Callable[[str], type[Parser] | None] | None = None,
     dedup_store: DeduplicationStore | None = None,
-    results_manager: ResultsFileManager | None = None,
+    results_managers: dict[str, ResultsFileManager] | None = None,
     layout: Layout | None = None,
     status_display: StatusDisplay | None = None,
     stall_threshold_s: float = _STALL_THRESHOLD_S,
@@ -724,10 +725,16 @@ def run(
             else:
                 layout = layout_module.default()
 
-        if results_manager is None:
-            results_manager = ResultsFileManager(cfg.results_path, layout.file_header)
+        if results_managers is None:
+            results_managers = {
+                tier: ResultsFileManager(
+                    cfg.results_dir / f"{tier}.md", layout.file_header
+                )
+                for tier in ("green", "amber", "red")
+            }
         try:
-            results_manager.ensure_initialized()
+            for manager in results_managers.values():
+                manager.ensure_initialized()
         except ResultsFileError as exc:
             _log.error("startup failed — results file: %s", exc)
             raise
@@ -803,7 +810,7 @@ def run(
             judge_thread = _JudgeThread(
                 judge_queue=judge_queue,
                 extractor=extractor,
-                results_manager=results_manager,
+                results_managers=results_managers,
                 dedup_store=dedup_store,
                 layout=layout,
                 metrics=metrics,
@@ -901,7 +908,8 @@ def run(
             elapsed_s=elapsed_s,
         )
         try:
-            results_manager.append(divider)
+            for manager in results_managers.values():
+                manager.append(divider)
         except ResultsFileError as exc:
             _log.error("run divider append failed: %s", exc)
             raise

@@ -18,8 +18,11 @@ Bewertung:
   Out-of-Scope-Domänen oder Jobfamilie, in der sich der Kandidat realistisch nicht bewerben
   kann).
 - matched: Liste der Kenntnisse des Kandidaten, die in der Stelle explizit gefordert oder
-  genannt werden.
-- missing: Liste der Anforderungen der Stelle, die der Kandidat nicht erfüllt.
+  genannt werden — maximal 10 Einträge, sortiert nach Gewicht für das vergebene Tier
+  (die Treffer, die das Urteil am stärksten in Richtung "green" gezogen haben, zuerst).
+- missing: Liste der Anforderungen der Stelle, die der Kandidat nicht erfüllt —
+  maximal 10 Einträge, sortiert nach Gewicht für das vergebene Tier (die Lücken, die
+  das Urteil am stärksten in Richtung "amber" / "red" gezogen haben, zuerst).
 - summary: ein bis zwei Sätze zur Begründung des Urteils, mit Nennung der tragenden Faktoren
   (Standort, Seniorität, Domain-Passung, Spielraum zum Bauen eigener Tools).
 

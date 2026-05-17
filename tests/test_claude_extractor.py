@@ -471,6 +471,82 @@ def test_judge_summary_over_600_chars_raises_schema_error() -> None:
 
 
 # ---------------------------------------------------------------------------
+# judge_match: silent truncation of over-cap lists
+# ---------------------------------------------------------------------------
+
+
+def test_judge_matched_over_10_silently_truncates_to_first_10() -> None:
+    over_cap = [f"skill-{i}" for i in range(15)]
+    verdict = {"tier": "green", "matched": over_cap, "missing": [], "summary": "ok"}
+    response = ClaudeResponse(
+        raw_response=_judge_raw(verdict),
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    result, _ = extractor.judge_match("desc")
+    assert result.matched == over_cap[:10]
+    assert result.missing == []
+
+
+def test_judge_missing_over_10_silently_truncates_to_first_10() -> None:
+    over_cap = [f"req-{i}" for i in range(12)]
+    verdict = {"tier": "red", "matched": [], "missing": over_cap, "summary": "ok"}
+    response = ClaudeResponse(
+        raw_response=_judge_raw(verdict),
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    result, _ = extractor.judge_match("desc")
+    assert result.missing == over_cap[:10]
+    assert result.matched == []
+
+
+def test_judge_lists_at_or_under_10_are_unchanged() -> None:
+    matched = [f"a-{i}" for i in range(10)]
+    missing = [f"b-{i}" for i in range(5)]
+    verdict = {"tier": "amber", "matched": matched, "missing": missing, "summary": "ok"}
+    response = ClaudeResponse(
+        raw_response=_judge_raw(verdict),
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    result, _ = extractor.judge_match("desc")
+    assert result.matched == matched
+    assert result.missing == missing
+
+
+def test_judge_truncation_leaves_no_truncation_field_in_transcript(
+    tmp_path: Path,
+) -> None:
+    parser_log.configure(tmp_path)
+    over_cap = [f"skill-{i}" for i in range(15)]
+    verdict = {"tier": "green", "matched": over_cap, "missing": [], "summary": "ok"}
+    response = ClaudeResponse(
+        raw_response=_judge_raw(verdict),
+        usage=_usage(),
+        cost_usd=0.0,
+        duration_s=0.1,
+        session_id="s",
+    )
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    extractor.judge_match("desc")
+
+    transcript_file = tmp_path / "claude_extractor.transcripts.jsonl"
+    entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
+    assert "truncated" not in entry
+    assert "truncation" not in entry
+
+
+# ---------------------------------------------------------------------------
 # Failure-path: does not pollute the success transcript file
 # ---------------------------------------------------------------------------
 

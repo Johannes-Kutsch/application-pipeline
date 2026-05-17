@@ -102,8 +102,8 @@ class ClaudeExtractor:
             return (
                 MatchVerdict(
                     tier=MatchTier(data["tier"]),
-                    matched=list(data["matched"]),
-                    missing=list(data["missing"]),
+                    matched=list(data["matched"])[:10],
+                    missing=list(data["missing"])[:10],
                     summary=str(data["summary"]),
                 ),
                 usage,

@@ -261,8 +261,8 @@ def test_judge_body_no_errors():
     metrics.judge_complete(usage, tier=MatchTier.amber, source="indeed")
 
     body = _last_body(display, "judge_match")
-    assert body == "2/2 judgments · green=1 amber=1 red=0 · pending=0"
-    assert "errored" not in body
+    assert body == "2/2 calls · green=1 amber=1 red=0 · 0 items in queue"
+    assert "calls_failed" not in body
 
 
 def test_judge_body_with_errors():
@@ -275,7 +275,7 @@ def test_judge_body_with_errors():
     metrics.judge_failed()
 
     body = _last_body(display, "judge_match")
-    assert "errored=1" in body
+    assert "calls_failed=1" in body
 
 
 def test_judge_body_pending_count():
@@ -287,7 +287,61 @@ def test_judge_body_pending_count():
     metrics.judge_enqueued()
 
     body = _last_body(display, "judge_match")
-    assert "pending=2" in body
+    assert "2 items in queue" in body
+
+
+def test_judge_body_idle_steady_state_uses_calls_and_items_in_queue():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    usage = _make_usage()
+    metrics.judge_enqueued()
+    metrics.judge_dequeued()
+    metrics.judge_complete(usage, tier=MatchTier.green, source="linkedin")
+
+    body = _last_body(display, "judge_match")
+    assert body == "1/1 calls · green=1 amber=0 red=0 · 0 items in queue"
+
+
+def test_judge_body_denominator_unchanged_before_dequeue():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    metrics.judge_enqueued()
+
+    body = _last_body(display, "judge_match")
+    # denominator stays at 0 until the worker dequeues; queue increments to 1
+    assert body == "0/0 calls · green=0 amber=0 red=0 · 1 items in queue"
+
+
+def test_judge_body_dequeue_increments_denominator_and_decrements_queue():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    metrics.judge_enqueued()
+    metrics.judge_dequeued()
+
+    body = _last_body(display, "judge_match")
+    # denominator=1 (started), queue=0 (dequeued), numerator still 0 (in flight)
+    assert body == "0/1 calls · green=0 amber=0 red=0 · 0 items in queue"
+
+
+def test_judge_body_failure_increments_numerator_and_shows_calls_failed():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    metrics.judge_enqueued()
+    metrics.judge_dequeued()
+    metrics.judge_failed()
+
+    body = _last_body(display, "judge_match")
+    assert (
+        body == "1/1 calls · green=0 amber=0 red=0 · 0 items in queue · calls_failed=1"
+    )
 
 
 # ---------------------------------------------------------------------------

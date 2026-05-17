@@ -100,6 +100,7 @@ class RunMetrics:
         self._pending_judge = 0
 
         # Judge-stage counters
+        self._judge_started = 0
         self._judge_calls = 0
         self._judge_failed = 0
         self._judge_total_s = 0.0
@@ -344,6 +345,7 @@ class RunMetrics:
     def judge_dequeued(self) -> None:
         with self._lock:
             self._pending_judge -= 1
+            self._judge_started += 1
             body = self._judge_body()
         self._display.update_body("judge_match", body=body)
 
@@ -600,13 +602,14 @@ class RunMetrics:
         return result
 
     def _judge_body(self) -> str:
+        finished = self._judge_calls + self._judge_failed
         result = (
-            f"{self._judge_calls}/{self._judge_calls} judgments"
+            f"{finished}/{self._judge_started} calls"
             f" · green={self._green} amber={self._amber} red={self._red}"
+            f" · {self._pending_judge} items in queue"
         )
-        if self._judge_errored > 0:
-            result += f" · errored={self._judge_errored}"
-        result += f" · pending={self._pending_judge}"
+        if self._judge_failed > 0:
+            result += f" · calls_failed={self._judge_failed}"
         return result
 
     def _tally_prefilter_verdict(self, verdict: PreFilterVerdict) -> None:

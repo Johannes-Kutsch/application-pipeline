@@ -198,8 +198,7 @@ def test_layout_errors_when_omitted_and_sibling_missing(tmp_path: pathlib.Path) 
 
 
 def test_layout_none_explicit_opts_out(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY, layout_none=False)
-    path.write_text(path.read_text() + "\nLAYOUT = None\n")
+    path = write_config(tmp_path, REQUIRED_BODY)
 
     config = load(path)
 

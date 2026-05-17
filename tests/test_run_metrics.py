@@ -184,6 +184,22 @@ def test_prefilter_body_no_hit_either_not_shown_in_body():
 # ---------------------------------------------------------------------------
 
 
+def test_classify_body_uses_calls_wording():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    usage = _make_usage()
+    metrics.classify_buffered(5)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
+    metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
+
+    body = _last_body(display, "classify_relevance")
+    assert body == "1/1 calls · 0 items in queue"
+    assert "batches_failed" not in body
+
+
 def test_classify_body_no_failures():
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
@@ -196,9 +212,8 @@ def test_classify_body_no_failures():
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
 
     body = _last_body(display, "classify_relevance")
-    # 1 batch done out of 1 total, 0 pending
-    assert body == "1/1 batches done · 0 items in queue"
-    assert "batches_failed" not in body
+    assert body == "1/1 calls · 0 items in queue"
+    assert "calls_failed" not in body
 
 
 def test_classify_body_with_failures():
@@ -212,7 +227,9 @@ def test_classify_body_with_failures():
     metrics.classify_batch_failed(items=3)
 
     body = _last_body(display, "classify_relevance")
-    assert "batches_failed=1 items_errored=3" in body
+    assert "calls_failed=1 items_failed=3" in body
+    assert "batches_failed" not in body
+    assert "items_errored" not in body
 
 
 def test_classify_body_pending_count():
@@ -226,6 +243,56 @@ def test_classify_body_pending_count():
 
     body = _last_body(display, "classify_relevance")
     assert "6 items in queue" in body
+
+
+def test_classify_denominator_increments_at_dequeue_not_enqueue():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    metrics.classify_buffered(5)
+    metrics.classify_batch_enqueued(5)
+
+    # After enqueue but before dequeue, denominator should still be 0
+    body_after_enqueue = _last_body(display, "classify_relevance")
+    assert body_after_enqueue.startswith("0/0 calls")
+
+    metrics.classify_batch_dequeued(5)
+
+    # After dequeue, denominator increments to 1
+    body_after_dequeue = _last_body(display, "classify_relevance")
+    assert body_after_dequeue.startswith("0/1 calls")
+
+
+def test_classify_numerator_increments_on_failure():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    metrics.classify_buffered(3)
+    metrics.classify_batch_enqueued(3)
+    metrics.classify_batch_dequeued(3)
+    metrics.classify_batch_failed(items=3)
+
+    body = _last_body(display, "classify_relevance")
+    # Numerator includes failed batch, denominator was set at dequeue
+    assert body.startswith("1/1 calls")
+
+
+def test_classify_idle_state_shows_n_over_n():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_rows(0)
+
+    usage = _make_usage()
+    for _ in range(2):
+        metrics.classify_buffered(5)
+        metrics.classify_batch_enqueued(5)
+        metrics.classify_batch_dequeued(5)
+        metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+
+    body = _last_body(display, "classify_relevance")
+    assert body == "2/2 calls · 0 items in queue"
 
 
 def test_classify_body_updates_per_item_without_batch_flush():

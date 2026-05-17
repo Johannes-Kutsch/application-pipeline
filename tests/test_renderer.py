@@ -166,7 +166,6 @@ def test_empty_matched_list_renders_empty_list_placeholder(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        
         card_template="{matched}",
         empty_list_placeholder="—",
     )
@@ -191,7 +190,6 @@ def test_color_available_via_layout(layout: Layout, position: Position) -> None:
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        
         card_template="{color}",
     )
     verdict = MatchVerdict(tier=MatchTier.amber, matched=[], missing=[], summary="")
@@ -229,7 +227,6 @@ def test_placeholder_group_all_none_renders_empty(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={"meta": (" · ", ["location"])},
-        
         card_template="{meta}",
     )
     position_no_location = replace(position, stub=replace(position.stub, location=None))
@@ -248,7 +245,6 @@ def test_url_in_placeholder_group_is_autolinked(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={"link": (" ", ["url"])},
-        
         card_template="{link}",
     )
     result = render(position, green_verdict, 1, url_layout)
@@ -266,7 +262,6 @@ def test_matched_bullets_renders_bullet_list(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        
         card_template="{matched_bullets}",
     )
     result = render(position, green_verdict, 1, bullets_layout)
@@ -281,7 +276,6 @@ def test_missing_bullets_renders_bullet_list(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        
         card_template="{missing_bullets}",
     )
     result = render(position, green_verdict, 1, bullets_layout)
@@ -296,7 +290,6 @@ def test_empty_matched_bullets_renders_empty_list_placeholder(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        
         card_template="{matched_bullets}",
         empty_list_placeholder="—",
     )
@@ -315,7 +308,6 @@ def test_null_company_skipped_in_group(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={"meta": (" · ", ["company", "url"])},
-        
         card_template="{meta}",
     )
     stub_nulls = replace(position.stub, company=None)
@@ -347,7 +339,6 @@ def test_raw_description_not_available_as_template_placeholder(
         tier_emoji=layout.tier_emoji,
         tier_color=layout.tier_color,
         placeholder_groups={},
-        
         card_template="{raw_description}",
     )
     with pytest.raises(KeyError):

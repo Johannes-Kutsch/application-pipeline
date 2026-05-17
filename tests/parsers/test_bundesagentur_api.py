@@ -188,6 +188,16 @@ def test_discover_stub_url_contains_base64_encoded_referenznummer() -> None:
     assert ref_b64 in stub.url
 
 
+def test_discover_stub_url_is_public_job_page_url() -> None:
+    ref = "myhash"
+    ref_b64 = base64.b64encode(ref.encode()).decode()
+    http = _make_http([_search_body([_item(ref)]), _search_body([])])
+    with BundesagenturParser(_http=http) as p:
+        (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
+    assert stub.url == f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{ref_b64}"
+
+
 def test_discover_stub_company_none_when_firma_absent() -> None:
     http = _make_http([_search_body([_item(company=None)]), _search_body([])])
     with BundesagenturParser(_http=http) as p:

@@ -1,5 +1,4 @@
 import importlib
-import os
 import pathlib
 
 from application_pipeline.parsers.location import LocationCoverage, validate_coverage
@@ -20,6 +19,8 @@ _OLLAMA_FIELDS = (
     "OLLAMA_KEEP_ALIVE",
 )
 
+_REMOVED_FIELDS = ("SEEN_STORE_PATH",)
+
 
 def load(path: pathlib.Path) -> Config:
     module = load_user_module(path, ConfigError)
@@ -34,16 +35,16 @@ def load(path: pathlib.Path) -> Config:
                 f"{name} is no longer supported; remove it from your config"
             )
 
+    for name in _REMOVED_FIELDS:
+        if hasattr(module, name):
+            raise ConfigError(
+                f"{name} is no longer supported; remove it from your config"
+            )
+
     config_dir = path.resolve().parent
     data_paths = resolve_data_paths(config_dir)
 
-    seen_store_env = os.environ.get("SEEN_STORE_PATH")
-    if seen_store_env:
-        seen_store_path = pathlib.Path(seen_store_env)
-    elif hasattr(module, "SEEN_STORE_PATH"):
-        seen_store_path = pathlib.Path(module.SEEN_STORE_PATH)
-    else:
-        seen_store_path = data_paths.seen_store_path
+    seen_store_path = data_paths.seen_store_path
 
     layout = _resolve_optional_file(
         "LAYOUT", config_dir, getattr(module, "LAYOUT", None)

@@ -1084,10 +1084,10 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     assert _PF_REJECTED_LLM_URL in off_domain
     assert _CLS_REJECTED_LLM_URL in off_domain
 
-    # 4 numbered entries across the three tier files
+    # 4 card H1s across the three tier files
     content = _read_all_results(results_dir)
-    numbers = re.findall(r"^## (\d+)\.", content, re.MULTILINE)
-    assert len(numbers) == 4
+    cards = re.findall(r"^# .+ · .+", content, re.MULTILINE)
+    assert len(cards) == 4
 
 
 def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
@@ -4578,25 +4578,25 @@ def test_each_tier_routed_to_its_results_file(tmp_path: Path) -> None:
     )
 
     # _FakeExtractor: 1 green, 2 amber, 1 red (of 6 stubs: 1 prefilter-dropped, 1 classify-dropped)
-    green_numbers = re.findall(
-        r"^## (\d+)\.",
+    green_cards = re.findall(
+        r"^# .+ · .+",
         (results_dir / "green.md").read_text(encoding="utf-8"),
         re.MULTILINE,
     )
-    amber_numbers = re.findall(
-        r"^## (\d+)\.",
+    amber_cards = re.findall(
+        r"^# .+ · .+",
         (results_dir / "amber.md").read_text(encoding="utf-8"),
         re.MULTILINE,
     )
-    red_numbers = re.findall(
-        r"^## (\d+)\.",
+    red_cards = re.findall(
+        r"^# .+ · .+",
         (results_dir / "red.md").read_text(encoding="utf-8"),
         re.MULTILINE,
     )
 
-    assert len(green_numbers) == 1
-    assert len(amber_numbers) == 2
-    assert len(red_numbers) == 1
+    assert len(green_cards) == 1
+    assert len(amber_cards) == 2
+    assert len(red_cards) == 1
 
 
 def test_per_tier_numbering_restarts_at_one(tmp_path: Path) -> None:
@@ -4619,25 +4619,25 @@ def test_per_tier_numbering_restarts_at_one(tmp_path: Path) -> None:
     )
 
     # _FakeExtractor: 1 green, 2 amber, 1 red
-    green_numbers = re.findall(
-        r"^## (\d+)\.",
+    green_cards = re.findall(
+        r"^# .+ · .+",
         (results_dir / "green.md").read_text(encoding="utf-8"),
         re.MULTILINE,
     )
-    amber_numbers = re.findall(
-        r"^## (\d+)\.",
+    amber_cards = re.findall(
+        r"^# .+ · .+",
         (results_dir / "amber.md").read_text(encoding="utf-8"),
         re.MULTILINE,
     )
-    red_numbers = re.findall(
-        r"^## (\d+)\.",
+    red_cards = re.findall(
+        r"^# .+ · .+",
         (results_dir / "red.md").read_text(encoding="utf-8"),
         re.MULTILINE,
     )
 
-    assert green_numbers == ["1"]
-    assert amber_numbers == ["1", "2"]
-    assert red_numbers == ["1"]
+    assert len(green_cards) == 1
+    assert len(amber_cards) == 2
+    assert len(red_cards) == 1
 
 
 def test_file_header_written_to_each_tier_file(tmp_path: Path) -> None:

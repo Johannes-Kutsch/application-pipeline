@@ -1,62 +1,78 @@
-import dataclasses
-from typing import Any
-
 from .layout.types import Layout
 from .llm.types import MatchVerdict
 from .parsers.types import Position
 
-_EXCLUDED_POSITION_FIELDS = frozenset({"stub", "raw_description"})
+
+def _location_segment(location: str | None, work_model: str | None) -> str:
+    suffix = {
+        "hybrid": " (Hybrid)",
+        "remote": " (Remote)",
+    }.get(work_model or "", "")
+    base = location if location is not None else "Unknown Location"
+    return base + suffix
 
 
 def render(
     position: Position,
     verdict: MatchVerdict,
-    number: int,
     layout: Layout,
 ) -> str:
-    tier = verdict.tier.value
+    stub = position.stub
+    loc_seg = _location_segment(stub.location, position.work_model)
 
-    placeholders: dict[str, Any] = {}
+    parts = []
 
-    # Flatten Position fields (excluding stub and raw_description)
-    for f in dataclasses.fields(position):
-        if f.name in _EXCLUDED_POSITION_FIELDS:
-            continue
-        placeholders[f.name] = getattr(position, f.name)
+    # H1
+    company_prefix = f"{stub.company} · " if stub.company is not None else ""
+    parts.append(f"# {company_prefix}{stub.title} · {loc_seg}")
+    parts.append("")
 
-    # Flatten PositionStub fields
-    for f in dataclasses.fields(position.stub):
-        placeholders[f.name] = getattr(position.stub, f.name)
+    # Meta line: posted_date · contract_type · employment_type
+    meta_fields = [
+        position.posted_date,
+        position.contract_type,
+        position.employment_type,
+    ]
+    meta_parts = [str(f) for f in meta_fields if f is not None]
+    if meta_parts:
+        parts.append(" · ".join(meta_parts))
+        parts.append("")
 
-    # Verdict and derived fields
-    placeholders["tier"] = tier
-    placeholders["summary"] = verdict.summary
-    placeholders["emoji"] = layout.tier_emoji[tier]
-    placeholders["color"] = layout.tier_color[tier]
-    placeholders["number"] = number
+    # Salary
+    if position.salary is not None:
+        parts.append(f"**Salary:** {position.salary}")
+        parts.append("")
 
-    # List placeholders with empty fallback
-    empty = layout.empty_list_placeholder
-    placeholders["matched"] = ", ".join(verdict.matched) if verdict.matched else empty
-    placeholders["missing"] = ", ".join(verdict.missing) if verdict.missing else empty
-    placeholders["matched_bullets"] = (
-        "\n".join(f"- {item}" for item in verdict.matched) if verdict.matched else empty
-    )
-    placeholders["missing_bullets"] = (
-        "\n".join(f"- {item}" for item in verdict.missing) if verdict.missing else empty
-    )
+    # AI Assessment
+    parts.append("## AI Assessment")
+    parts.append("")
+    parts.append(verdict.summary)
+    parts.append("")
 
-    # Placeholder groups — wrap URL values in autolink form
-    for group_name, (separator, fields) in layout.placeholder_groups.items():
-        parts = []
-        for field in fields:
-            val = placeholders.get(field)
-            if val is None:
-                continue
-            s = str(val)
-            if s.startswith("http://") or s.startswith("https://"):
-                s = f"<{s}>"
-            parts.append(s)
-        placeholders[group_name] = separator.join(parts)
+    # Matched
+    if verdict.matched:
+        parts.append("**Matched:**")
+        for item in verdict.matched:
+            parts.append(f"- {item}")
+        parts.append("")
 
-    return layout.card_template.format_map(placeholders)
+    # Missing
+    if verdict.missing:
+        parts.append("**Missing:**")
+        for item in verdict.missing:
+            parts.append(f"- {item}")
+        parts.append("")
+
+    # Job Description
+    if position.raw_description:
+        parts.append("## Job Description")
+        parts.append("")
+        parts.append(position.raw_description)
+        parts.append("")
+
+    # Footer
+    parts.append("---")
+    parts.append(f"<{stub.url}>")
+    parts.append("")
+
+    return "\n".join(parts)

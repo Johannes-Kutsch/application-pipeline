@@ -403,8 +403,7 @@ class _JudgeThread(_QueueWorker):
                 stub_url=job.position.stub.url,
             )
             manager = self._results_managers[match_verdict.tier.value]
-            number = manager.next_position_number()
-            rendered = render(job.position, match_verdict, number, self._layout)
+            rendered = render(job.position, match_verdict, self._layout)
             manager.append(rendered)
             self._dedup_store.mark_kept(job.position.stub)
             self._metrics.judge_complete(

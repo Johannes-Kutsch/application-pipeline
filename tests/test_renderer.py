@@ -12,8 +12,8 @@ def layout() -> Layout:
     return Layout(
         tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
         tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
-        placeholder_groups={"meta": (" · ", ["location", "url"])},
-        card_template="## {number}. {company} — {title}  {emoji}\n{meta}\n\n**Matched:** {matched}\n**Missing:** {missing}\n\n{summary}\n\n",
+        placeholder_groups={},
+        card_template="",
     )
 
 
@@ -75,35 +75,407 @@ def test_layout_has_no_headline_template() -> None:
             tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
             tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
             placeholder_groups={},
-            card_template="{number}",
+            card_template="",
         ),
         "headline_template",
     )
 
 
-# --- tracer bullet: green tier renders card_template ---
+# --- H1: location-led, no number, no emoji/span ---
+
+
+def test_card_h1_is_location_led(
+    position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(
+        position,
+        green_verdict,
+        Layout(
+            tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
+            tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
+            placeholder_groups={},
+            card_template="",
+        ),
+    )
+    first_line = result.splitlines()[0]
+    assert first_line == "# Acme GmbH · Senior Engineer · Berlin"
+    assert "<span" not in first_line
+    assert "🟢" not in first_line
+
+
+def test_card_h1_contains_no_number_prefix(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    first_line = result.splitlines()[0]
+    import re
+
+    assert not re.match(r".*\d+\.", first_line)
+
+
+# --- location_segment rules ---
+
+
+def test_location_segment_location_only_when_work_model_none(
+    layout: Layout, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=PositionStub(
+            url="https://example.com/job/1", title="Dev", source="s", location="Munich"
+        ),
+        raw_description="",
+        work_model=None,
+    )
+    result = render(pos, green_verdict, layout)
+    assert result.startswith("# Dev · Munich")
+
+
+def test_location_segment_location_only_when_work_model_on_site(
+    layout: Layout, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=PositionStub(
+            url="https://example.com/job/1", title="Dev", source="s", location="Munich"
+        ),
+        raw_description="",
+        work_model="on-site",
+    )
+    result = render(pos, green_verdict, layout)
+    assert result.startswith("# Dev · Munich")
+    assert "Hybrid" not in result.splitlines()[0]
+    assert "Remote" not in result.splitlines()[0]
+
+
+def test_location_segment_hybrid_appended(
+    layout: Layout, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=PositionStub(
+            url="https://example.com/job/1", title="Dev", source="s", location="Munich"
+        ),
+        raw_description="",
+        work_model="hybrid",
+    )
+    result = render(pos, green_verdict, layout)
+    assert result.startswith("# Dev · Munich (Hybrid)")
+
+
+def test_location_segment_remote_appended(
+    layout: Layout, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=PositionStub(
+            url="https://example.com/job/1", title="Dev", source="s", location="Munich"
+        ),
+        raw_description="",
+        work_model="remote",
+    )
+    result = render(pos, green_verdict, layout)
+    assert result.startswith("# Dev · Munich (Remote)")
+
+
+def test_location_segment_unknown_when_location_none_work_model_none(
+    layout: Layout, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=PositionStub(
+            url="https://example.com/job/1", title="Dev", source="s", location=None
+        ),
+        raw_description="",
+        work_model=None,
+    )
+    result = render(pos, green_verdict, layout)
+    assert result.startswith("# Dev · Unknown Location")
+    assert "(Hybrid)" not in result.splitlines()[0]
+    assert "(Remote)" not in result.splitlines()[0]
+
+
+def test_location_segment_unknown_hybrid_when_location_none(
+    layout: Layout, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=PositionStub(
+            url="https://example.com/job/1", title="Dev", source="s", location=None
+        ),
+        raw_description="",
+        work_model="hybrid",
+    )
+    result = render(pos, green_verdict, layout)
+    assert result.startswith("# Dev · Unknown Location (Hybrid)")
+
+
+# --- meta line: hide-if-empty ---
+
+
+def test_meta_line_absent_when_all_three_none(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=stub,
+        raw_description="",
+        posted_date=None,
+        contract_type=None,
+        employment_type=None,
+    )
+    result = render(pos, green_verdict, layout)
+    lines = result.splitlines()
+    assert lines[0].startswith("# ")
+    assert lines[1] == ""
+    assert lines[2] == "## AI Assessment"
+
+
+def test_meta_line_present_when_posted_date_set(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    from datetime import date
+
+    pos = Position(stub=stub, raw_description="", posted_date=date(2026, 1, 15))
+    result = render(pos, green_verdict, layout)
+    assert "2026-01-15" in result
+
+
+def test_meta_line_joins_set_fields_only(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=stub,
+        raw_description="",
+        contract_type="permanent",
+        employment_type=None,
+    )
+    result = render(pos, green_verdict, layout)
+    assert "permanent" in result
+    assert "None" not in result
+
+
+def test_meta_line_all_three_present(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    from datetime import date
+
+    pos = Position(
+        stub=stub,
+        raw_description="",
+        posted_date=date(2026, 3, 1),
+        contract_type="freelance",
+        employment_type="part-time",
+    )
+    result = render(pos, green_verdict, layout)
+    assert "2026-03-01 · freelance · part-time" in result
+
+
+# --- salary: hide-if-empty ---
+
+
+def test_salary_line_absent_when_none(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    pos = replace(position, salary=None)
+    result = render(pos, green_verdict, layout)
+    assert "**Salary:**" not in result
+
+
+def test_salary_line_present_when_set(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(stub=stub, raw_description="", salary="€80 000")
+    result = render(pos, green_verdict, layout)
+    assert "**Salary:** €80 000" in result
+
+
+# --- AI Assessment section ---
+
+
+def test_ai_assessment_heading_present(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    assert "## AI Assessment" in result
+
+
+def test_summary_follows_ai_assessment_heading(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    lines = result.splitlines()
+    ai_idx = lines.index("## AI Assessment")
+    assert lines[ai_idx + 1] == ""
+    assert lines[ai_idx + 2] == "Strong fit overall."
+
+
+# --- matched / missing: bullet lists, hide-if-empty ---
+
+
+def test_matched_rendered_as_bullet_list(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    assert "- Python\n- Data Engineering" in result
+
+
+def test_missing_rendered_as_bullet_list(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    assert "- Rust" in result
+
+
+def test_matched_label_and_bullets_absent_when_list_empty(
+    layout: Layout, position: Position, red_verdict: MatchVerdict
+) -> None:
+    result = render(position, red_verdict, layout)
+    assert "**Matched:**" not in result
+
+
+def test_missing_label_and_bullets_absent_when_list_empty(
+    layout: Layout, green_verdict: MatchVerdict
+) -> None:
+    verdict = replace(green_verdict, missing=[])
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
+        raw_description="",
+    )
+    result = render(pos, verdict, layout)
+    assert "**Missing:**" not in result
+
+
+def test_matched_label_present_with_non_empty_list(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    assert "**Matched:**" in result
+
+
+def test_missing_label_present_with_non_empty_list(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    assert "**Missing:**" in result
+
+
+# --- job description: hide-if-empty ---
+
+
+def test_job_description_section_absent_when_raw_description_empty(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(stub=stub, raw_description="")
+    result = render(pos, green_verdict, layout)
+    assert "## Job Description" not in result
+
+
+def test_job_description_section_present_when_raw_description_set(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    assert "## Job Description" in result
+    assert "Some description here." in result
+
+
+def test_raw_description_rendered_verbatim(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    raw = "Line one.\n\nLine two with **bold**."
+    pos = Position(stub=stub, raw_description=raw)
+    result = render(pos, green_verdict, layout)
+    assert raw in result
+
+
+# --- URL footer ---
+
+
+def test_card_ends_with_horizontal_rule_and_url(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    lines = result.splitlines()
+    assert lines[-2] == "---"
+    assert lines[-1] == "<https://example.com/job/1>"
+
+
+def test_url_autolinked_in_footer(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(stub=stub, raw_description="")
+    result = render(pos, green_verdict, layout)
+    assert "<https://example.com/job/1>" in result
+
+
+# --- full card integration: all fields present ---
+
+
+def test_dense_card_structure(
+    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+) -> None:
+    from datetime import date
+
+    pos = Position(
+        stub=stub,
+        raw_description="Full description.",
+        salary="€90 000",
+        contract_type="permanent",
+        employment_type="full-time",
+        work_model="hybrid",
+        posted_date=date(2026, 2, 1),
+    )
+    result = render(pos, green_verdict, layout)
+
+    assert result.startswith("# Acme GmbH · Senior Engineer · Berlin (Hybrid)")
+    assert "2026-02-01 · permanent · full-time" in result
+    assert "**Salary:** €90 000" in result
+    assert "## AI Assessment" in result
+    assert "**Matched:**" in result
+    assert "**Missing:**" in result
+    assert "## Job Description" in result
+    assert "Full description." in result
+    assert result.endswith("---\n<https://example.com/job/1>\n")
+
+
+# --- sparse card integration: minimal fields ---
+
+
+def test_sparse_card_omits_optional_sections(
+    layout: Layout, green_verdict: MatchVerdict
+) -> None:
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/2", title="Dev", source="s"),
+        raw_description="",
+    )
+    result = render(pos, green_verdict, layout)
+
+    assert "## Job Description" not in result
+    assert "**Salary:**" not in result
+    assert "Unknown Location" in result
+    assert result.endswith("---\n<https://example.com/job/2>\n")
+
+
+# --- render() takes no number parameter ---
+
+
+def test_render_signature_has_no_number_parameter() -> None:
+    import inspect
+
+    sig = inspect.signature(render)
+    assert "number" not in sig.parameters
+    assert list(sig.parameters.keys()) == ["position", "verdict", "layout"]
+
+
+# --- all three tiers produce a card ---
 
 
 def test_green_tier_renders_card(
     layout: Layout, position: Position, green_verdict: MatchVerdict
 ) -> None:
-    result = render(position, green_verdict, 1, layout)
-
-    assert "**Matched:**" in result
-    assert "**Missing:**" in result
+    result = render(position, green_verdict, layout)
+    assert "## AI Assessment" in result
     assert "Strong fit overall." in result
-
-
-# --- all tiers render full card ---
 
 
 def test_amber_tier_renders_card(
     layout: Layout, position: Position, amber_verdict: MatchVerdict
 ) -> None:
-    result = render(position, amber_verdict, 2, layout)
-
-    assert "**Matched:**" in result
-    assert "**Missing:**" in result
+    result = render(position, amber_verdict, layout)
+    assert "## AI Assessment" in result
     assert "Partial fit." in result
     assert "Acme GmbH" in result
 
@@ -111,235 +483,7 @@ def test_amber_tier_renders_card(
 def test_red_tier_renders_card(
     layout: Layout, position: Position, red_verdict: MatchVerdict
 ) -> None:
-    result = render(position, red_verdict, 3, layout)
-
-    assert "**Matched:**" in result
-    assert "**Missing:**" in result
+    result = render(position, red_verdict, layout)
+    assert "## AI Assessment" in result
     assert "Poor fit." in result
     assert "Senior Engineer" in result
-
-
-# --- stub fields flattened into placeholders ---
-
-
-def test_stub_fields_available_as_top_level_placeholders(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, 42, layout)
-
-    assert "Acme GmbH" in result
-    assert "Senior Engineer" in result
-    assert "42" in result
-
-
-def test_stub_url_available_in_placeholder_group(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, 1, layout)
-
-    assert "https://example.com/job/1" in result
-
-
-# --- verdict fields substituted ---
-
-
-def test_matched_list_joined_in_output(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, 1, layout)
-
-    assert "Python, Data Engineering" in result
-
-
-def test_missing_list_joined_in_output(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, 1, layout)
-
-    assert "Rust" in result
-
-
-def test_empty_matched_list_renders_empty_list_placeholder(
-    layout: Layout, position: Position, red_verdict: MatchVerdict
-) -> None:
-    simple_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={},
-        card_template="{matched}",
-        empty_list_placeholder="—",
-    )
-    result = render(position, red_verdict, 1, simple_layout)
-
-    assert result == "—"
-
-
-# --- tier-derived fields ---
-
-
-def test_emoji_derived_from_tier(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, 1, layout)
-
-    assert "🟢" in result
-
-
-def test_color_available_via_layout(layout: Layout, position: Position) -> None:
-    color_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={},
-        card_template="{color}",
-    )
-    verdict = MatchVerdict(tier=MatchTier.amber, matched=[], missing=[], summary="")
-    result = render(position, verdict, 1, color_layout)
-
-    assert result == "#d29922"
-
-
-# --- placeholder groups ---
-
-
-def test_placeholder_group_collapses_with_separator(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, 1, layout)
-
-    assert "Berlin · <https://example.com/job/1>" in result
-
-
-def test_placeholder_group_omits_none_values(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    position = replace(position, stub=replace(position.stub, location=None))
-    result = render(position, green_verdict, 1, layout)
-
-    assert "<https://example.com/job/1>" in result
-    assert "None" not in result
-    assert "Berlin" not in result
-
-
-def test_placeholder_group_all_none_renders_empty(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    simple_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={"meta": (" · ", ["location"])},
-        card_template="{meta}",
-    )
-    position_no_location = replace(position, stub=replace(position.stub, location=None))
-    result = render(position_no_location, green_verdict, 1, simple_layout)
-
-    assert result == ""
-
-
-# --- URL autolink in placeholder groups ---
-
-
-def test_url_in_placeholder_group_is_autolinked(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    url_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={"link": (" ", ["url"])},
-        card_template="{link}",
-    )
-    result = render(position, green_verdict, 1, url_layout)
-
-    assert result == "<https://example.com/job/1>"
-
-
-# --- matched_bullets and missing_bullets placeholders ---
-
-
-def test_matched_bullets_renders_bullet_list(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    bullets_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={},
-        card_template="{matched_bullets}",
-    )
-    result = render(position, green_verdict, 1, bullets_layout)
-
-    assert result == "- Python\n- Data Engineering"
-
-
-def test_missing_bullets_renders_bullet_list(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    bullets_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={},
-        card_template="{missing_bullets}",
-    )
-    result = render(position, green_verdict, 1, bullets_layout)
-
-    assert result == "- Rust"
-
-
-def test_empty_matched_bullets_renders_empty_list_placeholder(
-    layout: Layout, position: Position, red_verdict: MatchVerdict
-) -> None:
-    bullets_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={},
-        card_template="{matched_bullets}",
-        empty_list_placeholder="—",
-    )
-    result = render(position, red_verdict, 1, bullets_layout)
-
-    assert result == "—"
-
-
-# --- null company skipped in group ---
-
-
-def test_null_company_skipped_in_group(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    group_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={"meta": (" · ", ["company", "url"])},
-        card_template="{meta}",
-    )
-    stub_nulls = replace(position.stub, company=None)
-    position_nulls = replace(position, stub=stub_nulls)
-    result = render(position_nulls, green_verdict, 1, group_layout)
-
-    assert "None" not in result
-    assert "<https://example.com/job/1>" in result
-
-
-# --- number substitution ---
-
-
-def test_number_substituted_correctly(
-    layout: Layout, position: Position, amber_verdict: MatchVerdict
-) -> None:
-    result = render(position, amber_verdict, 99, layout)
-
-    assert "99." in result
-
-
-# --- raw_description excluded from placeholders ---
-
-
-def test_raw_description_not_available_as_template_placeholder(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    raw_desc_layout = Layout(
-        tier_emoji=layout.tier_emoji,
-        tier_color=layout.tier_color,
-        placeholder_groups={},
-        card_template="{raw_description}",
-    )
-    with pytest.raises(KeyError):
-        render(position, green_verdict, 1, raw_desc_layout)

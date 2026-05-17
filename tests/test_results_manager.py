@@ -48,7 +48,7 @@ class TestEnsureInitialized:
         self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         results_path.parent.mkdir(parents=True, exist_ok=True)
-        existing = "# Results\n\n## 1. Some Position\n"
+        existing = "<!-- schema-version: 1 -->\n\n# Some Position\n"
         results_path.write_text(existing, encoding="utf-8")
         manager.ensure_initialized()
         assert results_path.read_text(encoding="utf-8") == existing
@@ -74,64 +74,12 @@ class TestEnsureInitialized:
             os.chmod(results_path.parent, stat.S_IRWXU)
 
 
-class TestNextPositionNumber:
-    def test_returns_one_on_fresh_initialized_file(
-        self, manager: ResultsFileManager
-    ) -> None:
-        manager.ensure_initialized()
-        assert manager.next_position_number() == 1
-
-    def test_returns_max_plus_one(
-        self, manager: ResultsFileManager, results_path: Path
-    ) -> None:
-        results_path.parent.mkdir(parents=True, exist_ok=True)
-        results_path.write_text(
-            FILE_HEADER + "## 47. Some Position\n", encoding="utf-8"
-        )
-        manager.ensure_initialized()
-        assert manager.next_position_number() == 48
-
-    def test_uses_max_not_last_when_multiple_headers(
-        self, manager: ResultsFileManager, results_path: Path
-    ) -> None:
-        results_path.parent.mkdir(parents=True, exist_ok=True)
-        content = (
-            FILE_HEADER
-            + "## 3. Position\n## 1. Position\n## 5. Position\n## 2. Position\n"
-        )
-        results_path.write_text(content, encoding="utf-8")
-        manager.ensure_initialized()
-        assert manager.next_position_number() == 6
-
-    def test_raises_before_ensure_initialized(
-        self, manager: ResultsFileManager
-    ) -> None:
-        with pytest.raises(ResultsFileError):
-            manager.next_position_number()
-
-    def test_non_empty_file_with_no_position_headers_returns_one(
-        self, manager: ResultsFileManager, results_path: Path
-    ) -> None:
-        results_path.parent.mkdir(parents=True, exist_ok=True)
-        results_path.write_text(FILE_HEADER, encoding="utf-8")
-        manager.ensure_initialized()
-        assert manager.next_position_number() == 1
-
-    def test_increments_in_memory_on_each_call(
-        self, manager: ResultsFileManager
-    ) -> None:
-        manager.ensure_initialized()
-        assert manager.next_position_number() == 1
-        assert manager.next_position_number() == 2
-        assert manager.next_position_number() == 3
-
-
 class TestAppend:
     def test_writes_block_verbatim(
         self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         manager.ensure_initialized()
-        block = "## 1. Test Position\nSome content\n"
+        block = "# Acme · Dev · Berlin\n\n## AI Assessment\n\nGreat fit.\n\n---\n<https://example.com/1>\n"
         manager.append(block)
         assert results_path.read_text(encoding="utf-8") == FILE_HEADER + block
 
@@ -139,8 +87,8 @@ class TestAppend:
         self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         manager.ensure_initialized()
-        block1 = "## 1. First\n"
-        block2 = "## 2. Second\n"
+        block1 = "# Card One\n"
+        block2 = "# Card Two\n"
         manager.append(block1)
         manager.append(block2)
         assert results_path.read_text(encoding="utf-8") == FILE_HEADER + block1 + block2
@@ -149,7 +97,7 @@ class TestAppend:
         self, manager: ResultsFileManager, results_path: Path
     ) -> None:
         manager.ensure_initialized()
-        block = "## 1. Durable Position\n"
+        block = "# Durable Position\n"
         manager.append(block)
         content = results_path.read_text(encoding="utf-8")
         assert block in content
@@ -161,24 +109,32 @@ class TestAppend:
         os.chmod(results_path, stat.S_IRUSR)
         try:
             with pytest.raises(ResultsFileError):
-                manager.append("## 2. Should fail\n")
+                manager.append("# Should fail\n")
         finally:
             os.chmod(results_path, stat.S_IRUSR | stat.S_IWUSR)
 
 
-class TestNumberingSurvivesFileReplacement:
-    def test_numbering_restarts_after_file_moved(
-        self, manager: ResultsFileManager, results_path: Path, tmp_path: Path
+class TestFileHeader:
+    def test_file_header_contains_schema_version_comment(self) -> None:
+        assert "<!-- schema-version: 1 -->" in FILE_HEADER
+
+    def test_file_header_contains_reset_hint_comment(self) -> None:
+        assert (
+            "<!-- Delete this file and re-run the pipeline to reset -->" in FILE_HEADER
+        )
+
+    def test_file_header_has_no_h1(self) -> None:
+        assert not any(line.startswith("# ") for line in FILE_HEADER.splitlines())
+
+    def test_file_header_ends_with_blank_line(self) -> None:
+        assert FILE_HEADER.endswith("\n\n")
+
+
+class TestNextPositionNumberAbsent:
+    def test_next_position_number_is_not_a_method(
+        self, manager: ResultsFileManager
     ) -> None:
-        manager.ensure_initialized()
-        manager.append("## 1. First\n")
-        manager.append("## 2. Second\n")
-        manager.append("## 3. Third\n")
-
-        results_path.rename(tmp_path / "old_current.md")
-
-        manager.ensure_initialized()
-        assert manager.next_position_number() == 1
+        assert not hasattr(manager, "next_position_number")
 
 
 class TestLoadFactory:

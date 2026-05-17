@@ -250,27 +250,6 @@ def test_load_succeeds_when_headline_template_present(tmp_path: pathlib.Path) ->
     assert not hasattr(layout, "headline_template")
 
 
-# --- EMPTY_LIST_PLACEHOLDER optional field ---
-
-
-def test_load_reads_empty_list_placeholder_from_module(tmp_path: pathlib.Path) -> None:
-    path = write_layout(tmp_path, _MINIMAL_BODY + '\nEMPTY_LIST_PLACEHOLDER = "n/a"\n')
-
-    layout = load_layout(path)
-
-    assert layout.empty_list_placeholder == "n/a"
-
-
-def test_load_defaults_empty_list_placeholder_when_absent(
-    tmp_path: pathlib.Path,
-) -> None:
-    path = write_layout(tmp_path, _MINIMAL_BODY)
-
-    layout = load_layout(path)
-
-    assert layout.empty_list_placeholder == "—"
-
-
 # --- TIER_EMOJI / TIER_COLOR must not contain unknown tiers ---
 
 
@@ -389,70 +368,7 @@ def test_load_accepts_matched_bullets_in_placeholder_group(
     assert "skills" in layout.placeholder_groups
 
 
-# --- Smoke-test helpers ---
-
-
-def _safe_layout_body(card_template: str = "{number}") -> str:
-    return (
-        'TIER_EMOJI = {"green": "🟢", "amber": "🟡", "red": "🔴"}\n'
-        'TIER_COLOR = {"green": "#2ea043", "amber": "#d29922", "red": "#da3633"}\n'
-        "PLACEHOLDER_GROUPS = {}\n"
-        'FILE_HEADER = ""\n'
-        f"CARD_TEMPLATE = {card_template!r}\n"
-    )
-
-
-# --- Smoke-test failure shapes ---
-
-
-def test_smoke_test_raises_for_unknown_placeholder(tmp_path: pathlib.Path) -> None:
-    path = write_layout(
-        tmp_path, _safe_layout_body(card_template="{nonexistent_field}")
-    )
-
-    with pytest.raises(LayoutError, match="nonexistent_field"):
-        load_layout(path)
-
-
-def test_smoke_test_raises_for_excluded_field_raw_description(
-    tmp_path: pathlib.Path,
-) -> None:
-    path = write_layout(tmp_path, _safe_layout_body(card_template="{raw_description}"))
-
-    with pytest.raises(LayoutError):
-        load_layout(path)
-
-
-def test_smoke_test_raises_for_excluded_field_stub(tmp_path: pathlib.Path) -> None:
-    path = write_layout(tmp_path, _safe_layout_body(card_template="{stub}"))
-
-    with pytest.raises(LayoutError):
-        load_layout(path)
-
-
-def test_smoke_test_raises_for_none_intolerant_format_spec(
-    tmp_path: pathlib.Path,
-) -> None:
-    # sparse fixture has posted_date=None; {posted_date:%Y-%m-%d} raises TypeError
-    path = write_layout(
-        tmp_path, _safe_layout_body(card_template="{posted_date:%Y-%m-%d}")
-    )
-
-    with pytest.raises(LayoutError):
-        load_layout(path)
-
-
-def test_smoke_test_error_names_density_and_carries_resolved_path(
-    tmp_path: pathlib.Path,
-) -> None:
-    path = write_layout(tmp_path, _safe_layout_body(card_template="{typo_field}"))
-
-    with pytest.raises(LayoutError) as exc_info:
-        load_layout(path)
-
-    err = exc_info.value
-    assert "dense" in str(err)
-    assert err.resolved_path == path.resolve()
+# --- Smoke-test: valid layout passes ---
 
 
 def test_valid_layout_passes_smoke_test(tmp_path: pathlib.Path) -> None:

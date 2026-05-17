@@ -13,18 +13,30 @@ TIER_COLOR = {
 # Each group collapses its fields with the separator, omitting None values.
 # The result replaces the group name as a placeholder in the templates below.
 PLACEHOLDER_GROUPS = {
-    "meta": (" · ", ["location", "url"]),
+    "meta_line": (" · ", ["posted_date", "contract_type", "employment_type"]),
 }
 
-EMPTY_LIST_PLACEHOLDER = "—"
-
 CARD_TEMPLATE = """\
-## <span style="color:{color}">{number}. {company} — {title}  {emoji}</span>
-{meta}
+# {company} · {title} · {location_segment}
 
-**Matched:** {matched}
-**Missing:** {missing}
+{posted_date} · {contract_type} · {employment_type}
+
+**Salary:** {salary}
+
+## AI Assessment
 
 {summary}
 
+**Matched:**
+- ...
+
+**Missing:**
+- ...
+
+## Job Description
+
+{raw_description}
+
+---
+<{url}>
 """

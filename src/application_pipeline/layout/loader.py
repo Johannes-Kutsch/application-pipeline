@@ -99,7 +99,6 @@ def load(path: pathlib.Path) -> Layout:
         tier_color=module.TIER_COLOR,
         placeholder_groups=module.PLACEHOLDER_GROUPS,
         card_template=module.CARD_TEMPLATE,
-        empty_list_placeholder=getattr(module, "EMPTY_LIST_PLACEHOLDER", "—"),
     )
     _validate(layout, resolved)
     _smoke_test(layout, resolved)
@@ -158,7 +157,7 @@ def _smoke_test(layout: Layout, resolved_path: pathlib.Path) -> None:
         for tier in MatchTier:
             verdict = dataclasses.replace(_SMOKE_VERDICT, tier=tier)
             try:
-                render(position, verdict, 1, layout)
+                render(position, verdict, layout)
             except Exception as exc:
                 raise LayoutError(
                     f"smoke-test failed for {density} × {tier.value} at {resolved_path}: {exc}",

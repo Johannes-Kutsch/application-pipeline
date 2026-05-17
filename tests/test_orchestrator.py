@@ -4175,7 +4175,7 @@ def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
     judge_bodies = display.body_updates_for("judge_match")
     assert judge_bodies, "expected at least one judge_match body update"
     last_body = judge_bodies[-1]
-    assert "errored=1" in last_body
+    assert "calls_failed=1" in last_body
 
 
 def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
@@ -4196,11 +4196,11 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
         assert "items_errored=" not in body
 
     for body in display.body_updates_for("judge_match"):
-        assert "errored=" not in body
+        assert "calls_failed=" not in body
 
 
-def test_judge_body_denominator_counts_successes_only(tmp_path: Path) -> None:
-    """judge_match body success ratio denominator counts successes only, not successes+failed."""
+def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> None:
+    """judge_match body counts both failures and successes in numerator and denominator."""
     ext = MagicMock()
     ext.prewarm.return_value = None
     ext.classify_relevance_batch.side_effect = lambda items: (
@@ -4230,8 +4230,9 @@ def test_judge_body_denominator_counts_successes_only(tmp_path: Path) -> None:
     judge_bodies = display.body_updates_for("judge_match")
     assert judge_bodies, "expected judge_match body updates"
     last_body = judge_bodies[-1]
-    # 1 success out of 1 success (not 1 out of 2)
-    assert "1/1 judgments" in last_body
+    # 2 finished (1 fail + 1 success) out of 2 started, with calls_failed segment
+    assert "2/2 calls" in last_body
+    assert "calls_failed=1" in last_body
 
     results_path = tmp_path / "results" / "current.md"
     if results_path.exists():
@@ -4265,7 +4266,7 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
     )
 
     judge_bodies = display.body_updates_for("judge_match")
-    assert "pending=0" in judge_bodies[-1], (
+    assert "0 items in queue" in judge_bodies[-1], (
         f"Judge pending should be 0 at end-of-run: {judge_bodies[-1]!r}"
     )
 

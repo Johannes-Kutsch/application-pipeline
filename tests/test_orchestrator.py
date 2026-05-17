@@ -1225,7 +1225,6 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
         return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = _batch_side_effect
     ext.judge_match.return_value = (
         MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
@@ -1269,7 +1268,6 @@ def test_extractor_error_on_judge_marks_classified_in_domain(tmp_path: Path) -> 
     results_path = tmp_path / "current.md"
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -1485,7 +1483,6 @@ def test_judge_failure_marks_classified_in_domain(tmp_path: Path) -> None:
     seen_path = tmp_path / ".seen.json"
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -1620,7 +1617,6 @@ def test_judge_pending_failure_stays_classified_in_domain(tmp_path: Path) -> Non
     )
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -1808,7 +1804,6 @@ def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
     )
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -2497,7 +2492,6 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
         return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = _batch
     ext.judge_match.return_value = (
         MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
@@ -2660,7 +2654,6 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
         return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = _batch
     ext.judge_match.return_value = (
         MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
@@ -2714,7 +2707,6 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         ], _ZERO_USAGE
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = _batch
     ext.judge_match.return_value = (
         MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
@@ -2769,7 +2761,6 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
         return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = _batch
     ext.judge_match.return_value = (
         MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
@@ -2820,7 +2811,6 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
         raise ExtractorBatchMalformedError("id mismatch")
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = _batch
 
     run(
@@ -2851,7 +2841,6 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         raise ExtractorUnreachableError("cli gone", returncode=1, stderr="no such file")
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = _batch
 
     run(
@@ -2880,7 +2869,6 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     pl.configure(logs_dir)
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -2922,7 +2910,6 @@ def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
         )
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = _batch
 
     summary = run(
@@ -4069,7 +4056,6 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
         ), _ZERO_USAGE
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -4190,7 +4176,6 @@ def test_non_quota_worker_exception_writes_failure_report(
 def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     """ExtractorError on classify: classify_relevance row body is refreshed with calls_failed=N items_failed=M."""
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
     ext.judge_match.return_value = (
         MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
@@ -4218,7 +4203,6 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
 def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
     """ExtractorError on judge_match: judge_match row body is refreshed with errored=N."""
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -4272,7 +4256,6 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
 def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> None:
     """judge_match body counts both failures and successes in numerator and denominator."""
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -4344,7 +4327,6 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
 def test_pending_drains_to_zero_on_classify_usage_limit(tmp_path: Path) -> None:
     """On classify ClaudeUsageLimitError, workers drain queues and pending returns to zero."""
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError(
         "quota", returncode=1, stdout="", stderr="quota", envelope=None
     )
@@ -4384,7 +4366,6 @@ def test_run_divider_includes_classify_abandoned_counters_on_batch_failure(
     results_path = tmp_path / "current.md"
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
 
     run(
@@ -4412,7 +4393,6 @@ def test_run_divider_includes_judge_items_abandoned_on_judge_failure(
     results_path = tmp_path / "current.md"
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True) for _ in items],
         _ZERO_USAGE,
@@ -4464,7 +4444,6 @@ def test_abandoned_classify_batch_does_not_set_degraded_reason(tmp_path: Path) -
     results_path = tmp_path / "current.md"
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
 
     run(
@@ -4489,7 +4468,6 @@ def test_degraded_run_preserves_degraded_reason_independent_of_abandoned_counter
     results_path = tmp_path / "current.md"
 
     ext = MagicMock()
-
     ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError(
         "cap", returncode=1, stdout="", stderr="cap", envelope=None
     )

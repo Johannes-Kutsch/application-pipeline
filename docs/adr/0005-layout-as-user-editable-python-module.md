@@ -1,5 +1,7 @@
 # Layout as a user-editable Python module in `settings/`
 
+> **Amended by [ADR-0023](0023-layout-auto-discovered-from-config-sibling.md):** `LAYOUT` defaults to `"layout.py"` next to `config.py` and errors if missing, instead of falling back silently to `layout.default()` when unset. An explicit `LAYOUT = None` selects the stub.
+
 The cosmetic and structural choices for the **Results File** — tier emoji, tier color, named placeholder groups, the file header written on init, and the full `CARD_TEMPLATE` / `HEADLINE_TEMPLATE` — live in a `settings/layout.py` alongside `settings/config.py`. Loaded at runtime by the same machinery as **Config**, validated into a frozen typed `Layout` dataclass, consumed by a pure **Renderer** that substitutes placeholders via `str.format_map`.
 
 ## Why

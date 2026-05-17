@@ -62,7 +62,6 @@ def _write_config(
     tmp_path: Path,
     *,
     sources: str = '[SourceEntry(parser_type="bundesagentur_api")]',
-    seen_store_path: str | None = None,
     with_user_info_files: bool = True,
     keywords: str = '["python"]',
     locations: str = '["Hamburg"]',
@@ -70,9 +69,6 @@ def _write_config(
     negative_keywords: str = "[]",
 ) -> Path:
     """Write a minimal valid config.py and a user-info dir into tmp_path."""
-    seen_line = (
-        f"SEEN_STORE_PATH = {seen_store_path!r}" if seen_store_path is not None else ""
-    )
     config_path = tmp_path / "config.py"
     config_path.write_text(
         textwrap.dedent(f"""
@@ -83,7 +79,6 @@ def _write_config(
             LOCATIONS = {locations}
             INCLUDE_REMOTE = {include_remote!r}
             NEGATIVE_KEYWORDS = {negative_keywords}
-            {seen_line}
         """),
         encoding="utf-8",
     )
@@ -241,9 +236,8 @@ def test_prewarm_failure_no_parsers_instantiated(tmp_path: Path) -> None:
 
 
 def test_dedup_store_error_propagates(tmp_path: Path) -> None:
-    bad_json = tmp_path / "bad.json"
-    bad_json.write_text("not-valid-json", encoding="utf-8")
-    config_path = _write_config(tmp_path, seen_store_path=str(bad_json))
+    (tmp_path / ".seen.json").write_text("not-valid-json", encoding="utf-8")
+    config_path = _write_config(tmp_path)
 
     with pytest.raises(DedupStoreError):
         run(

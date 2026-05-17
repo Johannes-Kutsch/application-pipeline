@@ -128,40 +128,26 @@ def test_seen_store_path_defaults_to_seen_json(tmp_path: pathlib.Path) -> None:
     assert config.seen_store_path == tmp_path / ".seen.json"
 
 
-def test_seen_store_path_read_from_env(
+def test_seen_store_path_env_var_has_no_effect(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    custom = tmp_path / "custom.json"
-    monkeypatch.setenv("SEEN_STORE_PATH", str(custom))
+    monkeypatch.setenv("SEEN_STORE_PATH", "/tmp/ignored.json")
     path = write_config(tmp_path, REQUIRED_BODY)
 
     config = load(path)
 
-    assert config.seen_store_path == custom
+    assert config.seen_store_path == tmp_path / ".seen.json"
 
 
-def test_seen_store_path_coerces_string_from_env(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+def test_load_raises_when_seen_store_path_defined_in_config(
+    tmp_path: pathlib.Path,
 ) -> None:
-    monkeypatch.setenv("SEEN_STORE_PATH", "/tmp/store.json")
-    path = write_config(tmp_path, REQUIRED_BODY)
+    path = write_config(
+        tmp_path, REQUIRED_BODY + '\nSEEN_STORE_PATH = "/tmp/store.json"\n'
+    )
 
-    config = load(path)
-
-    assert isinstance(config.seen_store_path, pathlib.Path)
-    assert config.seen_store_path == pathlib.Path("/tmp/store.json")
-
-
-def test_seen_store_path_no_existence_check(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    nonexistent = tmp_path / "does_not_exist.json"
-    monkeypatch.setenv("SEEN_STORE_PATH", str(nonexistent))
-    path = write_config(tmp_path, REQUIRED_BODY)
-
-    config = load(path)  # must not raise
-
-    assert config.seen_store_path == nonexistent
+    with pytest.raises(ConfigError, match="SEEN_STORE_PATH"):
+        load(path)
 
 
 # --- data-anchored paths ---

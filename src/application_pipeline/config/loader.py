@@ -1,5 +1,4 @@
 import importlib
-import os
 import pathlib
 
 from application_pipeline.parsers.location import LocationCoverage, validate_coverage
@@ -10,7 +9,7 @@ from .types import Config, ConfigError, SourceEntry, resolve_data_paths
 
 _REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
 
-_OLLAMA_FIELDS = (
+_REMOVED_FIELDS = (
     "OLLAMA_BASE_URL",
     "OLLAMA_CLASSIFY_MODEL",
     "OLLAMA_JUDGE_MODEL",
@@ -18,6 +17,7 @@ _OLLAMA_FIELDS = (
     "OLLAMA_JSON_RETRIES",
     "OLLAMA_HTTP_RETRIES",
     "OLLAMA_KEEP_ALIVE",
+    "SEEN_STORE_PATH",
 )
 
 
@@ -28,7 +28,7 @@ def load(path: pathlib.Path) -> Config:
         if not hasattr(module, name):
             raise ConfigError(f"Missing required field: {name}")
 
-    for name in _OLLAMA_FIELDS:
+    for name in _REMOVED_FIELDS:
         if hasattr(module, name):
             raise ConfigError(
                 f"{name} is no longer supported; remove it from your config"
@@ -37,13 +37,7 @@ def load(path: pathlib.Path) -> Config:
     config_dir = path.resolve().parent
     data_paths = resolve_data_paths(config_dir)
 
-    seen_store_env = os.environ.get("SEEN_STORE_PATH")
-    if seen_store_env:
-        seen_store_path = pathlib.Path(seen_store_env)
-    elif hasattr(module, "SEEN_STORE_PATH"):
-        seen_store_path = pathlib.Path(module.SEEN_STORE_PATH)
-    else:
-        seen_store_path = data_paths.seen_store_path
+    seen_store_path = data_paths.seen_store_path
 
     layout = _resolve_optional_file(
         "LAYOUT", config_dir, getattr(module, "LAYOUT", None)

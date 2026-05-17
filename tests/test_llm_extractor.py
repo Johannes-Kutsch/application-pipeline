@@ -111,6 +111,39 @@ def test_match_verdict_is_frozen():
         v.tier = MatchTier.red  # type: ignore[misc]
 
 
+def test_match_verdict_matched_entry_over_80_chars_succeeds():
+    long_entry = "a" * 81
+    v = MatchVerdict(
+        tier=MatchTier.green,
+        matched=[long_entry],
+        missing=[],
+        summary="ok",
+    )
+    assert v.matched == [long_entry]
+
+
+def test_match_verdict_missing_entry_over_80_chars_succeeds():
+    long_entry = "b" * 81
+    v = MatchVerdict(
+        tier=MatchTier.red,
+        matched=[],
+        missing=[long_entry],
+        summary="ok",
+    )
+    assert v.missing == [long_entry]
+
+
+def test_match_verdict_summary_over_600_chars_succeeds():
+    long_summary = "s" * 601
+    v = MatchVerdict(
+        tier=MatchTier.amber,
+        matched=[],
+        missing=[],
+        summary=long_summary,
+    )
+    assert v.summary == long_summary
+
+
 # --- LLMExtractor Protocol ---
 
 

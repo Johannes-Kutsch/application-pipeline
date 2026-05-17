@@ -456,18 +456,19 @@ def test_judge_invalid_tier_value_raises_schema_error() -> None:
         extractor.judge_match("desc")
 
 
-def test_judge_summary_over_600_chars_raises_schema_error() -> None:
-    bad_verdict = {"tier": "green", "matched": [], "missing": [], "summary": "x" * 601}
-    bad = ClaudeResponse(
-        raw_response=_judge_raw(bad_verdict),
+def test_judge_summary_over_600_chars_succeeds() -> None:
+    long_summary = "x" * 601
+    verdict = {"tier": "green", "matched": [], "missing": [], "summary": long_summary}
+    response = ClaudeResponse(
+        raw_response=_judge_raw(verdict),
         usage=_usage(),
         cost_usd=0.0,
         duration_s=0.1,
         session_id="s",
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(bad))
-    with pytest.raises(ExtractorSchemaError):
-        extractor.judge_match("desc")
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
+    result, _ = extractor.judge_match("desc")
+    assert result.summary == long_summary
 
 
 # ---------------------------------------------------------------------------

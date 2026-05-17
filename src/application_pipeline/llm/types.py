@@ -71,13 +71,6 @@ class MatchVerdict:
             raise ExtractorSchemaError(
                 "matched/missing must have at most 10 entries each"
             )
-        for item in (*self.matched, *self.missing):
-            if len(item) > 80:
-                raise ExtractorSchemaError(f"entry exceeds 80 chars: {item!r}")
-        if len(self.summary) > 600:
-            raise ExtractorSchemaError(
-                f"summary exceeds 600 chars (got {len(self.summary)})"
-            )
 
 
 @dataclass(frozen=True)

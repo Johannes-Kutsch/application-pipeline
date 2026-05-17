@@ -124,7 +124,7 @@ def test_seen_store_path_defaults_to_seen_json(tmp_path: pathlib.Path) -> None:
 
     config = load(path)
 
-    assert config.seen_store_path == pathlib.Path(".seen.json")
+    assert config.seen_store_path == tmp_path / ".seen.json"
 
 
 def test_seen_store_path_read_from_env(

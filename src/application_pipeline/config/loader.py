@@ -6,7 +6,7 @@ from application_pipeline.parsers.location import LocationCoverage, validate_cov
 from application_pipeline.text.normalize import normalize
 from application_pipeline.user_settings import load_user_module
 
-from .types import Config, ConfigError, SourceEntry
+from .types import Config, ConfigError, SourceEntry, resolve_data_paths
 
 _REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
 
@@ -35,13 +35,15 @@ def load(path: pathlib.Path) -> Config:
             )
 
     config_dir = path.resolve().parent
+    data_paths = resolve_data_paths(config_dir)
 
     seen_store_env = os.environ.get("SEEN_STORE_PATH")
-    seen_store_path = (
-        pathlib.Path(seen_store_env)
-        if seen_store_env
-        else pathlib.Path(getattr(module, "SEEN_STORE_PATH", ".seen.json"))
-    )
+    if seen_store_env:
+        seen_store_path = pathlib.Path(seen_store_env)
+    elif hasattr(module, "SEEN_STORE_PATH"):
+        seen_store_path = pathlib.Path(module.SEEN_STORE_PATH)
+    else:
+        seen_store_path = data_paths.seen_store_path
 
     layout = _resolve_optional_file(
         "LAYOUT", config_dir, getattr(module, "LAYOUT", None)
@@ -79,6 +81,9 @@ def load(path: pathlib.Path) -> Config:
         inclusion_keywords=getattr(module, "INCLUSION_KEYWORDS", []),
         negative_keywords=getattr(module, "NEGATIVE_KEYWORDS", []),
         seen_store_path=seen_store_path,
+        results_path=data_paths.results_path,
+        failures_path=data_paths.failures_path,
+        logs_path=data_paths.logs_path,
         layout=layout,
         user_info_dir=user_info_dir,
         classify_relevance_prompt=classify_relevance_prompt,

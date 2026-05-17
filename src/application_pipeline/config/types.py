@@ -9,6 +9,23 @@ class ConfigError(UserSettingsError):
 
 
 @dataclass(frozen=True)
+class DataPaths:
+    seen_store_path: pathlib.Path
+    results_path: pathlib.Path
+    failures_path: pathlib.Path
+    logs_path: pathlib.Path
+
+
+def resolve_data_paths(data_dir: pathlib.Path) -> DataPaths:
+    return DataPaths(
+        seen_store_path=data_dir / ".seen.json",
+        results_path=data_dir / "results" / "current.md",
+        failures_path=data_dir / "failures",
+        logs_path=data_dir / "logs",
+    )
+
+
+@dataclass(frozen=True)
 class SourceEntry:
     parser_type: str
     max_results: int = 1000
@@ -36,6 +53,13 @@ class Config:
     seen_store_path: pathlib.Path = field(
         default_factory=lambda: pathlib.Path(".seen.json")
     )
+    results_path: pathlib.Path = field(
+        default_factory=lambda: pathlib.Path("results/current.md")
+    )
+    failures_path: pathlib.Path = field(
+        default_factory=lambda: pathlib.Path("failures")
+    )
+    logs_path: pathlib.Path = field(default_factory=lambda: pathlib.Path("logs"))
     layout: pathlib.Path | None = None
     user_info_dir: pathlib.Path = field(
         default_factory=lambda: pathlib.Path("user-info")

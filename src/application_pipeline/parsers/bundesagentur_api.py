@@ -16,6 +16,7 @@ from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
 
 _BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6"
 _DETAIL_BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
+_PUBLIC_JOB_URL = "https://www.arbeitsagentur.de/jobsuche/jobdetail"
 _API_KEY = "jobboerse-jobsuche"
 _PAGE_SIZE = 25
 _DISPLAY_NAME = "Bundesagentur"
@@ -163,7 +164,7 @@ class BundesagenturParser:
                 city: str | None = first_address.get("ort") or None
                 ref_b64 = base64.b64encode(ref.encode()).decode()
                 yield PositionStub(
-                    url=f"{_DETAIL_BASE_URL}/jobdetails/{ref_b64}",
+                    url=f"{_PUBLIC_JOB_URL}/{ref_b64}",
                     title=title,
                     source=_DISPLAY_NAME,
                     company=item.get("firma") or None,
@@ -174,8 +175,10 @@ class BundesagenturParser:
             page += 1
 
     def enrich(self, stub: PositionStub) -> Position:
+        ref_b64 = stub.url.rsplit("/", 1)[-1]
+        rest_url = f"{_DETAIL_BASE_URL}/jobdetails/{ref_b64}"
         raw = self._http.get(
-            stub.url, error_prefix=f"Bundesagentur enrich failed for {stub.url}"
+            rest_url, error_prefix=f"Bundesagentur enrich failed for {stub.url}"
         )
         data: dict[str, Any] = json.loads(raw)
 

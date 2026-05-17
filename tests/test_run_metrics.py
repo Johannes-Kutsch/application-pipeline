@@ -184,22 +184,6 @@ def test_prefilter_body_no_hit_either_not_shown_in_body():
 # ---------------------------------------------------------------------------
 
 
-def test_classify_body_uses_calls_wording():
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
-    metrics.register_rows(0)
-
-    usage = _make_usage()
-    metrics.classify_buffered(5)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
-    metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
-
-    body = _last_body(display, "classify_relevance")
-    assert body == "1/1 calls · 0 items in queue"
-    assert "batches_failed" not in body
-
-
 def test_classify_body_no_failures():
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
@@ -214,6 +198,7 @@ def test_classify_body_no_failures():
     body = _last_body(display, "classify_relevance")
     assert body == "1/1 calls · 0 items in queue"
     assert "calls_failed" not in body
+    assert "batches_failed" not in body
 
 
 def test_classify_body_with_failures():
@@ -253,13 +238,11 @@ def test_classify_denominator_increments_at_dequeue_not_enqueue():
     metrics.classify_buffered(5)
     metrics.classify_batch_enqueued(5)
 
-    # After enqueue but before dequeue, denominator should still be 0
     body_after_enqueue = _last_body(display, "classify_relevance")
     assert body_after_enqueue.startswith("0/0 calls")
 
     metrics.classify_batch_dequeued(5)
 
-    # After dequeue, denominator increments to 1
     body_after_dequeue = _last_body(display, "classify_relevance")
     assert body_after_dequeue.startswith("0/1 calls")
 
@@ -275,7 +258,6 @@ def test_classify_numerator_increments_on_failure():
     metrics.classify_batch_failed(items=3)
 
     body = _last_body(display, "classify_relevance")
-    # Numerator includes failed batch, denominator was set at dequeue
     assert body.startswith("1/1 calls")
 
 

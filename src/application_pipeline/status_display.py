@@ -42,7 +42,7 @@ class PlainStatusDisplay:
     ) -> None:
         with self._lock:
             self._phases[name] = phase
-            parser_log.record(name, "registered", order=order, phase=phase)
+            parser_log.record_lifecycle(name, "registered", order=order, phase=phase)
             print(f"{name}: registered order={order} phase={phase}")
 
     def update_phase(self, name: str, *, phase: str) -> None:
@@ -50,7 +50,7 @@ class PlainStatusDisplay:
             if self._phases.get(name) == phase:
                 return
             self._phases[name] = phase
-            parser_log.record(name, "phase_changed", phase=phase)
+            parser_log.record_lifecycle(name, "phase_changed", phase=phase)
             print(f"{name}: phase={phase}")
 
     def update_body(self, name: str, *, body: str) -> None:
@@ -59,7 +59,7 @@ class PlainStatusDisplay:
     def remove(self, name: str) -> None:
         with self._lock:
             self._phases.pop(name, None)
-            parser_log.record(name, "removed")
+            parser_log.record_lifecycle(name, "removed")
             print(f"{name}: removed")
 
     def print(self, *, caller: str, message: str) -> None:
@@ -114,7 +114,7 @@ class RichStatusDisplay:
     ) -> None:
         with self._lock:
             self._rows[name] = _RowState(name=name, order=order, phase=phase, body=body)
-        parser_log.record(name, "registered", order=order, phase=phase)
+        parser_log.record_lifecycle(name, "registered", order=order, phase=phase)
 
     def update_phase(self, name: str, *, phase: str) -> None:
         with self._lock:
@@ -122,7 +122,7 @@ class RichStatusDisplay:
             if row is None or row.phase == phase:
                 return
             row.phase = phase
-        parser_log.record(name, "phase_changed", phase=phase)
+        parser_log.record_lifecycle(name, "phase_changed", phase=phase)
 
     def update_body(self, name: str, *, body: str) -> None:
         with self._lock:
@@ -133,7 +133,7 @@ class RichStatusDisplay:
     def remove(self, name: str) -> None:
         with self._lock:
             self._rows.pop(name, None)
-        parser_log.record(name, "removed")
+        parser_log.record_lifecycle(name, "removed")
 
     def print(self, *, caller: str, message: str) -> None:
         self._live.console.print(message)

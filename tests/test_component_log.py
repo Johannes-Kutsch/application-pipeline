@@ -34,11 +34,11 @@ def test_record_creates_timestamped_event_line(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     parser_log.record("classify_relevance", "batch_sent")
 
-    log_file = tmp_path / "classify_relevance.log"
-    assert log_file.exists()
-    line = log_file.read_text(encoding="utf-8").strip()
-    assert _ISO8601_RE.match(line)
-    assert line.endswith("batch_sent")
+    events_file = tmp_path / "classify_relevance.events.jsonl"
+    assert events_file.exists()
+    row = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert _ISO8601_RE.match(row["ts"])
+    assert row["event"] == "batch_sent"
 
 
 def test_record_appends_key_value_fields(tmp_path: Path) -> None:
@@ -47,15 +47,19 @@ def test_record_appends_key_value_fields(tmp_path: Path) -> None:
         "classify_relevance", "batch_malformed", batch_id="b42", reason="bad_json"
     )
 
-    content = (tmp_path / "classify_relevance.log").read_text(encoding="utf-8")
-    assert "batch_malformed" in content
-    assert "batch_id=b42" in content
-    assert "reason=bad_json" in content
+    row = json.loads(
+        (tmp_path / "classify_relevance.events.jsonl")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    assert row["event"] == "batch_malformed"
+    assert row["batch_id"] == "b42"
+    assert row["reason"] == "bad_json"
 
 
 def test_record_without_configure_is_noop(tmp_path: Path) -> None:
     parser_log.record("classify_relevance", "batch_sent")
-    assert not (tmp_path / "classify_relevance.log").exists()
+    assert not (tmp_path / "classify_relevance.events.jsonl").exists()
 
 
 def test_record_multiple_calls_append_in_order(tmp_path: Path) -> None:
@@ -63,10 +67,12 @@ def test_record_multiple_calls_append_in_order(tmp_path: Path) -> None:
     parser_log.record("judge_match", "session_start")
     parser_log.record("judge_match", "cli_error", exit_code="1")
 
-    lines = (tmp_path / "judge_match.log").read_text(encoding="utf-8").splitlines()
+    lines = (
+        (tmp_path / "judge_match.events.jsonl").read_text(encoding="utf-8").splitlines()
+    )
     assert len(lines) == 2
-    assert "session_start" in lines[0]
-    assert "cli_error" in lines[1]
+    assert json.loads(lines[0])["event"] == "session_start"
+    assert json.loads(lines[1])["event"] == "cli_error"
 
 
 def test_record_each_line_has_iso8601_timestamp(tmp_path: Path) -> None:
@@ -75,9 +81,11 @@ def test_record_each_line_has_iso8601_timestamp(tmp_path: Path) -> None:
         parser_log.record("classify_relevance", event)
 
     lines = (
-        (tmp_path / "classify_relevance.log").read_text(encoding="utf-8").splitlines()
+        (tmp_path / "classify_relevance.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     )
-    assert all(_ISO8601_RE.match(line) for line in lines)
+    assert all(_ISO8601_RE.match(json.loads(line)["ts"]) for line in lines)
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +190,7 @@ def test_summarize_with_caller_supplied_counts(tmp_path: Path) -> None:
     }
     parser_log.summarize("classify_relevance", counts, started)
 
-    content = (tmp_path / "classify_relevance.log").read_text(encoding="utf-8")
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
     assert "SUMMARY OF SESSION 2026-05-12T15:30:00Z" in content
     for key, value in counts.items():
         assert f"{key}={value}" in content
@@ -193,7 +201,7 @@ def test_summarize_with_zero_events_produces_valid_trailer(tmp_path: Path) -> No
     started = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
     parser_log.summarize("judge_match", {"calls": 0, "duration_s": 0.0}, started)
 
-    content = (tmp_path / "judge_match.log").read_text(encoding="utf-8")
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
     assert "SUMMARY OF SESSION" in content
     assert "calls=0" in content
     assert "duration_s=0.0" in content
@@ -218,7 +226,7 @@ def test_two_sessions_produce_two_summary_blocks_separated_by_blank_line(
         "classify_relevance", {"batches_sent": 1, "items_classified": 3}, started2
     )
 
-    content = (tmp_path / "classify_relevance.log").read_text(encoding="utf-8")
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
     assert content.count("SUMMARY OF SESSION") == 2
     assert "2026-05-12T08:00:00Z" in content
     assert "2026-05-12T16:00:00Z" in content
@@ -238,7 +246,7 @@ def test_event_log_and_transcript_are_independent_files(tmp_path: Path) -> None:
         "classify_relevance", {"ts": "2026-05-12T10:00:00Z", "status": "ok"}
     )
 
-    assert (tmp_path / "classify_relevance.log").exists()
+    assert (tmp_path / "classify_relevance.events.jsonl").exists()
     assert (tmp_path / "classify_relevance.transcripts.jsonl").exists()
 
 
@@ -247,7 +255,7 @@ def test_different_component_ids_write_separate_files(tmp_path: Path) -> None:
     parser_log.record("classify_relevance", "batch_sent")
     parser_log.record_transcript("judge_match", {"ts": "2026-05-12T10:00:00Z"})
 
-    assert (tmp_path / "classify_relevance.log").exists()
+    assert (tmp_path / "classify_relevance.events.jsonl").exists()
     assert (tmp_path / "judge_match.transcripts.jsonl").exists()
-    assert not (tmp_path / "judge_match.log").exists()
+    assert not (tmp_path / "judge_match.events.jsonl").exists()
     assert not (tmp_path / "classify_relevance.transcripts.jsonl").exists()

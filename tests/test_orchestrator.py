@@ -1349,9 +1349,11 @@ def test_external_redirect_marks_seen_and_increments_counter(
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records == [], f"unexpected WARNING(s): {warning_records}"
 
-    log_content = (logs_dir / "bundesagentur_api.log").read_text(encoding="utf-8")
-    assert "external_redirect" in log_content
-    assert "https://external.example/job" in log_content
+    events_content = (logs_dir / "bundesagentur_api.events.jsonl").read_text(
+        encoding="utf-8"
+    )
+    assert "external_redirect" in events_content
+    assert "https://external.example/job" in events_content
 
 
 def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> None:
@@ -2151,14 +2153,15 @@ def test_parser_log_integration(
             results_manager=_stub_results_manager(),
         )
 
-    log_file = logs_dir / "bundesagentur_api.log"
-    assert log_file.exists(), "parser log file must be created"
+    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    assert events_file.exists(), "events log file must be created"
+    events_content = events_file.read_text(encoding="utf-8")
+    assert "parser started" in events_content
 
-    content = log_file.read_text(encoding="utf-8")
-    assert "parser started" in content
-    assert "SUMMARY OF SESSION" in content
-    assert "discovered=" in content
-    assert "duration=" in content
+    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "SUMMARY OF SESSION" in run_log_content
+    assert "discovered=" in run_log_content
+    assert "duration=" in run_log_content
 
     assert any(
         "parser bundesagentur_api started" in record.message
@@ -2210,17 +2213,15 @@ def test_not_served_queries_counted_in_parser_log_summary(
             results_manager=_stub_results_manager(),
         )
 
-    log_file = logs_dir / "bundesagentur_api.log"
-    assert log_file.exists()
-    content = log_file.read_text(encoding="utf-8")
+    # Events file must not contain not_served events
+    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    if events_file.exists():
+        assert "not_served" not in events_file.read_text(encoding="utf-8")
 
-    # Body (before SUMMARY) must have no not_served text
-    body = content.split("SUMMARY OF SESSION")[0]
-    assert "not_served" not in body
-
-    # SUMMARY must contain not_served_queries=3
-    assert "SUMMARY OF SESSION" in content
-    assert "not_served_queries=3" in content
+    # SUMMARY in run.log must contain not_served_queries=3
+    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "SUMMARY OF SESSION" in run_log_content
+    assert "not_served_queries=3" in run_log_content
 
     # No stderr log records mentioning not_served
     assert not any("not_served" in record.message for record in caplog.records), (
@@ -2286,17 +2287,17 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records == [], f"unexpected WARNING/ERROR(s): {warning_records}"
 
-    log_file = logs_dir / "bundesagentur_api.log"
-    assert log_file.exists(), "parser log file must be created"
-    content = log_file.read_text(encoding="utf-8")
+    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    assert events_file.exists(), "events log file must be created"
+    events_content = events_file.read_text(encoding="utf-8")
+    assert "enrich_failed" in events_content
+    assert "external_redirect" in events_content
 
-    assert "enrich_failed" in content
-    assert "external_redirect" in content
-    assert "traceback" in content
-
-    assert "enrich_failed=1" in content
-    assert "external_redirects=1" in content
-    assert "parsers_dead=1" in content
+    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "traceback" in run_log_content
+    assert "enrich_failed=1" in run_log_content
+    assert "external_redirects=1" in run_log_content
+    assert "parsers_dead=1" in run_log_content
 
 
 # ---------------------------------------------------------------------------
@@ -2374,11 +2375,21 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         results_manager=_stub_results_manager(),
     )
 
-    log_file = logs_dir / "jobs_beim_staat_html.log"
-    assert log_file.exists()
-    content = log_file.read_text(encoding="utf-8")
-    assert "unparseable_date raw=INVALID_DATE" in content
-    assert "unparseable_dates=1" in content
+    import json as _json
+
+    events_file = logs_dir / "jobs_beim_staat_html.events.jsonl"
+    assert events_file.exists()
+    events_rows = [
+        _json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(
+        "unparseable_date" in str(row.get("event", ""))
+        and "INVALID_DATE" in str(row.get("event", ""))
+        for row in events_rows
+    ), "unparseable_date event with raw=INVALID_DATE must appear in events log"
+    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "unparseable_dates=1" in run_log_content
     assert summary.written == 1
 
 
@@ -2779,9 +2790,11 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
         results_manager=_stub_results_manager(),
     )
 
-    log_file = logs_dir / "classify_relevance.log"
-    assert log_file.exists(), "classify_relevance.log must be created on batch error"
-    content = log_file.read_text(encoding="utf-8")
+    events_file = logs_dir / "classify_relevance.events.jsonl"
+    assert events_file.exists(), (
+        "classify_relevance.events.jsonl must be created on batch error"
+    )
+    content = events_file.read_text(encoding="utf-8")
     assert "batch_abandoned" in content
     assert "batch_error" not in content
 
@@ -2809,9 +2822,16 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         results_manager=_stub_results_manager(),
     )
 
-    content = (logs_dir / "classify_relevance.log").read_text(encoding="utf-8")
-    assert "returncode=1" in content
-    assert "stderr_excerpt=no such file" in content
+    import json as _json
+
+    events_rows = [
+        _json.loads(line)
+        for line in (logs_dir / "classify_relevance.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(row.get("returncode") == 1 for row in events_rows)
+    assert any(row.get("stderr_excerpt") == "no such file" for row in events_rows)
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
@@ -2840,9 +2860,16 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         results_manager=_stub_results_manager(),
     )
 
-    content = (logs_dir / "judge_match.log").read_text(encoding="utf-8")
-    assert "returncode=2" in content
-    assert "stderr_excerpt=timeout on judge" in content
+    import json as _json
+
+    events_rows = [
+        _json.loads(line)
+        for line in (logs_dir / "judge_match.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(row.get("returncode") == 2 for row in events_rows)
+    assert any(row.get("stderr_excerpt") == "timeout on judge" for row in events_rows)
 
 
 def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
@@ -3063,9 +3090,9 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
         results_manager=ResultsFileManager(results_path, "# Results\n\n"),
     )
 
-    log_file = logs_dir / "classify_relevance.log"
-    assert log_file.exists(), "classify_relevance.log must be created"
-    content = log_file.read_text(encoding="utf-8")
+    run_log = logs_dir / "run.log"
+    assert run_log.exists(), "run.log must be created"
+    content = run_log.read_text(encoding="utf-8")
 
     assert "SUMMARY OF SESSION" in content
     for key in (
@@ -3080,7 +3107,7 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
         "cost_usd=",
         "duration_s=",
     ):
-        assert key in content, f"key {key!r} missing from classify_relevance.log"
+        assert key in content, f"key {key!r} missing from run.log"
 
 
 def test_judge_match_trailer_schema(tmp_path: Path) -> None:
@@ -3109,9 +3136,9 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
         results_manager=ResultsFileManager(results_path, "# Results\n\n"),
     )
 
-    log_file = logs_dir / "judge_match.log"
-    assert log_file.exists(), "judge_match.log must be created"
-    content = log_file.read_text(encoding="utf-8")
+    run_log = logs_dir / "run.log"
+    assert run_log.exists(), "run.log must be created"
+    content = run_log.read_text(encoding="utf-8")
 
     assert "SUMMARY OF SESSION" in content
     for key in (
@@ -3126,7 +3153,7 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
         "cost_usd=",
         "duration_s=",
     ):
-        assert key in content, f"key {key!r} missing from judge_match.log"
+        assert key in content, f"key {key!r} missing from run.log"
 
 
 def test_main_run_complete_line_includes_new_fields(
@@ -3255,7 +3282,9 @@ def test_display_stop_called_on_crash(tmp_path: Path) -> None:
 
 
 def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
-    """pipeline register() writes a record to pipeline.log via parser_log."""
+    """pipeline register() writes a lifecycle record to lifecycle.jsonl via parser_log."""
+    import json as _json
+
     _parser_log.configure(tmp_path / "logs")
     config_path = _write_config(tmp_path)
 
@@ -3270,9 +3299,18 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
         status_display=PlainStatusDisplay(),
     )
 
-    log_content = (tmp_path / "logs" / "pipeline.log").read_text(encoding="utf-8")
-    assert "registered" in log_content
-    assert "order=0" in log_content
+    lifecycle_rows = [
+        _json.loads(line)
+        for line in (tmp_path / "logs" / "lifecycle.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(
+        row.get("event") == "registered"
+        and row.get("component") == "pipeline"
+        and row.get("order") == 0
+        for row in lifecycle_rows
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3818,13 +3856,14 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
         stall_threshold_s=_THRESHOLD,
     )
 
-    log_file = logs_dir / "bundesagentur_api.log"
-    assert log_file.exists(), "parser log file must be created"
-    content = log_file.read_text(encoding="utf-8")
+    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    assert events_file.exists(), "events log file must be created"
+    events_content = events_file.read_text(encoding="utf-8")
+    assert "stalled" in events_content, "stalled event must appear in events log"
 
-    assert "stalled" in content, "stalled event must appear in parser log"
-    assert "traceback" in content, "stack trace header must appear in parser log"
-    assert "File " in content, "stack frame lines must appear in parser log"
+    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "traceback" in run_log_content, "stack trace header must appear in run.log"
+    assert "File " in run_log_content, "stack frame lines must appear in run.log"
 
 
 def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
@@ -3869,10 +3908,14 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         stall_threshold_s=_THRESHOLD,
     )
 
-    log_file = logs_dir / "bundesagentur_api.log"
-    content = log_file.read_text(encoding="utf-8")
+    import json as _json
 
-    stalled_count = content.count(" stalled ")
+    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_rows = [
+        _json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    stalled_count = sum(1 for row in events_rows if row.get("event") == "stalled")
     assert stalled_count == 1, f"expected exactly 1 stalled entry, got {stalled_count}"
 
 
@@ -3904,12 +3947,16 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         results_manager=_stub_results_manager(),
     )
 
-    log_file = logs_dir / "bundesagentur_api.log"
-    content = log_file.read_text(encoding="utf-8")
+    import json as _json
 
+    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_rows = [
+        _json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
     # 2 keywords × 1 location = 2 queries
-    started_count = content.count(" query_started ")
-    ended_count = content.count(" query_ended ")
+    started_count = sum(1 for row in events_rows if row.get("event") == "query_started")
+    ended_count = sum(1 for row in events_rows if row.get("event") == "query_ended")
     assert started_count == 2, f"expected 2 query_started lines, got {started_count}"
     assert ended_count == 2, f"expected 2 query_ended lines, got {ended_count}"
 
@@ -3955,11 +4002,17 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
 
     assert summary.parsers_dead == 1
 
-    log_file = logs_dir / "bundesagentur_api.log"
-    content = log_file.read_text(encoding="utf-8")
+    import json as _json
 
-    assert " query_started " in content, "query_started must be logged before the crash"
-    assert " query_ended " in content, (
+    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_rows = [
+        _json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(row.get("event") == "query_started" for row in events_rows), (
+        "query_started must be logged before the crash"
+    )
+    assert any(row.get("event") == "query_ended" for row in events_rows), (
         "query_ended must fire even when discover() raises"
     )
 

@@ -386,10 +386,17 @@ def test_discover_emits_discover_page_heartbeat_per_page(
     get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
     with JobsBeimStaatParser(_http=ParserHttp(_http_get=get)) as p:
         list(p.discover(_query()))
-    log_content = (tmp_path / "jobs_beim_staat_html.log").read_text(encoding="utf-8")
-    lines = [ln for ln in log_content.splitlines() if "discover_page" in ln]
-    assert len(lines) == 3
-    starts = [int(ln.split("start=")[1].split()[0]) for ln in lines]
+    import json as _json
+
+    events_rows = [
+        _json.loads(line)
+        for line in (tmp_path / "jobs_beim_staat_html.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    page_rows = [row for row in events_rows if row.get("event") == "discover_page"]
+    assert len(page_rows) == 3
+    starts = [row["start"] for row in page_rows]
     assert starts == sorted(starts)
     assert starts[0] < starts[-1]
 

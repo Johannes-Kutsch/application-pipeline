@@ -112,50 +112,77 @@ def test_plain_stop_is_silent(capsys: pytest.CaptureFixture[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_plain_register_writes_to_parser_log(tmp_path: Path) -> None:
+def test_plain_register_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
+    import json
+
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
 
-    log_content = (tmp_path / "pipeline.log").read_text(encoding="utf-8")
-    assert "registered" in log_content
-    assert "order=0" in log_content
-    assert "phase=running" in log_content
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "lifecycle.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(
+        r["event"] == "registered" and r["component"] == "pipeline" and r["order"] == 0
+        for r in rows
+    )
 
 
-def test_plain_update_phase_transition_writes_to_parser_log(tmp_path: Path) -> None:
+def test_plain_update_phase_transition_writes_to_lifecycle_jsonl(
+    tmp_path: Path,
+) -> None:
+    import json
+
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
     display.update_phase("pipeline", phase="done")
 
-    log_content = (tmp_path / "pipeline.log").read_text(encoding="utf-8")
-    assert "phase_changed" in log_content
-    assert "phase=done" in log_content
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "lifecycle.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(r["event"] == "phase_changed" and r["phase"] == "done" for r in rows)
 
 
-def test_plain_update_phase_no_transition_does_not_write_parser_log(
+def test_plain_update_phase_no_transition_does_not_write_extra_lifecycle_row(
     tmp_path: Path,
 ) -> None:
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
 
-    log_before = (tmp_path / "pipeline.log").read_text(encoding="utf-8")
+    lines_before = (
+        (tmp_path / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    )
     display.update_phase("pipeline", phase="running")
-    log_after = (tmp_path / "pipeline.log").read_text(encoding="utf-8")
+    lines_after = (
+        (tmp_path / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+    )
 
-    assert log_before == log_after
+    assert len(lines_before) == len(lines_after)
 
 
-def test_plain_remove_writes_to_parser_log(tmp_path: Path) -> None:
+def test_plain_remove_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
+    import json
+
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
     display.remove("pipeline")
 
-    log_content = (tmp_path / "pipeline.log").read_text(encoding="utf-8")
-    assert "removed" in log_content
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "lifecycle.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(r["event"] == "removed" and r["component"] == "pipeline" for r in rows)
 
 
 # ---------------------------------------------------------------------------

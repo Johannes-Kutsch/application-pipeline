@@ -722,18 +722,14 @@ def test_summarize_to_parser_log_writes_classify_and_judge_summaries(
 
     metrics.summarize_to_parser_log(started_at)
 
-    classify_log = (tmp_path / "classify_relevance.log").read_text()
-    judge_log = (tmp_path / "judge_match.log").read_text()
-
-    assert "SUMMARY OF SESSION" in classify_log
-    assert "batches_sent=1" in classify_log
-    assert "items_classified=2" in classify_log
-    assert "in_domain=1" in classify_log
-    assert "off_domain=1" in classify_log
-
-    assert "SUMMARY OF SESSION" in judge_log
-    assert "judges_sent=1" in judge_log
-    assert "green=1" in judge_log
+    run_log = (tmp_path / "run.log").read_text()
+    assert "SUMMARY OF SESSION" in run_log
+    assert "batches_sent=1" in run_log
+    assert "items_classified=2" in run_log
+    assert "in_domain=1" in run_log
+    assert "off_domain=1" in run_log
+    assert "judges_sent=1" in run_log
+    assert "green=1" in run_log
 
 
 def test_summarize_to_parser_log_uses_started_at_timestamp(tmp_path: Path) -> None:
@@ -744,8 +740,8 @@ def test_summarize_to_parser_log_uses_started_at_timestamp(tmp_path: Path) -> No
 
     metrics.summarize_to_parser_log(started_at)
 
-    classify_log = (tmp_path / "classify_relevance.log").read_text()
-    assert "2025-06-15T08:30:00Z" in classify_log
+    run_log = (tmp_path / "run.log").read_text()
+    assert "2025-06-15T08:30:00Z" in run_log
 
 
 def test_summarize_to_parser_log_noop_when_logs_dir_not_configured() -> None:

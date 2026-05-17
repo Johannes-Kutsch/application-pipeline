@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from datetime import datetime, timezone
@@ -26,13 +27,13 @@ def reset_logs():
 
 def test_record_creates_timestamped_event_line(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record("myparser", "parser started")
+    parser_log.record("myparser", "parser_started")
 
-    log_file = tmp_path / "myparser.log"
-    assert log_file.exists()
-    line = log_file.read_text(encoding="utf-8").strip()
-    assert _ISO8601_RE.match(line)
-    assert line.endswith("parser started")
+    events_file = tmp_path / "myparser.events.jsonl"
+    assert events_file.exists()
+    row = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert _ISO8601_RE.match(row["ts"])
+    assert row["event"] == "parser_started"
 
 
 def test_record_appends_key_value_fields(tmp_path: Path) -> None:
@@ -41,26 +42,26 @@ def test_record_appends_key_value_fields(tmp_path: Path) -> None:
         "p", "enrich_failed", stub_url="https://example.com", reason="timeout"
     )
 
-    content = (tmp_path / "p.log").read_text(encoding="utf-8")
-    assert "enrich_failed" in content
-    assert "stub_url=https://example.com" in content
-    assert "reason=timeout" in content
+    row = json.loads((tmp_path / "p.events.jsonl").read_text(encoding="utf-8").strip())
+    assert row["event"] == "enrich_failed"
+    assert row["stub_url"] == "https://example.com"
+    assert row["reason"] == "timeout"
 
 
 def test_record_without_configure_is_noop(tmp_path: Path) -> None:
-    parser_log.record("p", "parser started")
-    assert not (tmp_path / "p.log").exists()
+    parser_log.record("p", "parser_started")
+    assert not (tmp_path / "p.events.jsonl").exists()
 
 
 def test_record_multiple_calls_append(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record("p", "parser started")
+    parser_log.record("p", "parser_started")
     parser_log.record("p", "enrich_failed", stub_url="https://a.com")
 
-    lines = (tmp_path / "p.log").read_text(encoding="utf-8").splitlines()
+    lines = (tmp_path / "p.events.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
-    assert "parser started" in lines[0]
-    assert "enrich_failed" in lines[1]
+    assert json.loads(lines[0])["event"] == "parser_started"
+    assert json.loads(lines[1])["event"] == "enrich_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -68,23 +69,22 @@ def test_record_multiple_calls_append(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_record_traceback_writes_timestamped_first_line(tmp_path: Path) -> None:
+def test_record_traceback_writes_to_run_log_with_header(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     parser_log.record_traceback(
         "p", "Traceback (most recent call last):\n  File ...\nValueError: oops\n"
     )
 
-    content = (tmp_path / "p.log").read_text(encoding="utf-8")
-    lines = content.splitlines()
-    assert _ISO8601_RE.match(lines[0])
-    assert "traceback" in lines[0]
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
+    assert "=== p" in content
+    assert "traceback" in content
     assert "Traceback (most recent call last):" in content
     assert "ValueError: oops" in content
 
 
 def test_record_traceback_without_configure_is_noop(tmp_path: Path) -> None:
     parser_log.record_traceback("p", "some traceback")
-    assert not (tmp_path / "p.log").exists()
+    assert not (tmp_path / "run.log").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ def test_summarize_writes_summary_trailer(tmp_path: Path) -> None:
     started = datetime(2026, 5, 12, 15, 30, 0, tzinfo=timezone.utc)
     parser_log.summarize("p", {"discovered": 12, "duration": 47.3}, started)
 
-    content = (tmp_path / "p.log").read_text(encoding="utf-8")
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
     assert "SUMMARY OF SESSION 2026-05-12T15:30:00Z" in content
     assert "discovered=12" in content
     assert "duration=47.3" in content
@@ -108,7 +108,7 @@ def test_summarize_without_events_produces_valid_trailer(tmp_path: Path) -> None
     started = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
     parser_log.summarize("p", {"discovered": 0, "duration": 0.0}, started)
 
-    content = (tmp_path / "p.log").read_text(encoding="utf-8")
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
     assert "SUMMARY OF SESSION" in content
     assert "discovered=0" in content
 
@@ -116,7 +116,7 @@ def test_summarize_without_events_produces_valid_trailer(tmp_path: Path) -> None
 def test_summarize_without_configure_is_noop(tmp_path: Path) -> None:
     started = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
     parser_log.summarize("p", {"discovered": 0}, started)
-    assert not (tmp_path / "p.log").exists()
+    assert not (tmp_path / "run.log").exists()
 
 
 def test_two_sessions_produce_two_summary_blocks(tmp_path: Path) -> None:
@@ -132,7 +132,7 @@ def test_two_sessions_produce_two_summary_blocks(tmp_path: Path) -> None:
     parser_log.record("p", "parser started")
     parser_log.summarize("p", {"discovered": 3, "duration": 20.0}, started2)
 
-    content = (tmp_path / "p.log").read_text(encoding="utf-8")
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
     assert content.count("SUMMARY OF SESSION") == 2
     assert "2026-05-12T10:00:00Z" in content
     assert "2026-05-12T14:00:00Z" in content

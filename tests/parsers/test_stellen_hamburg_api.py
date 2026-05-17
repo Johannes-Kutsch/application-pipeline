@@ -305,10 +305,17 @@ def test_discover_emits_discover_page_heartbeat_per_page(
         stubs = list(p.discover(_query()))
 
     assert len(stubs) == 2
-    log_content = (tmp_path / "stellen_hamburg_api.log").read_text(encoding="utf-8")
-    lines = [ln for ln in log_content.splitlines() if "discover_page" in ln]
-    assert len(lines) == 2
-    starts = [int(ln.split("start=")[1].split()[0]) for ln in lines]
+    import json as _json
+
+    events_rows = [
+        _json.loads(line)
+        for line in (tmp_path / "stellen_hamburg_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    page_rows = [row for row in events_rows if row.get("event") == "discover_page"]
+    assert len(page_rows) == 2
+    starts = [row["start"] for row in page_rows]
     assert starts == sorted(starts)
     assert starts[0] < starts[1]
 

@@ -260,10 +260,17 @@ def test_discover_emits_discover_page_heartbeat_per_page(
     http = _make_http([page1, page2, page3])
     with BundesagenturParser(_http=http) as p:
         list(p.discover(_query()))
-    log_content = (tmp_path / "bundesagentur_api.log").read_text(encoding="utf-8")
-    lines = [ln for ln in log_content.splitlines() if "discover_page" in ln]
-    assert len(lines) == 3
-    pages = [int(ln.split("page=")[1].split()[0]) for ln in lines]
+    import json as _json
+
+    events_rows = [
+        _json.loads(line)
+        for line in (tmp_path / "bundesagentur_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    page_rows = [row for row in events_rows if row.get("event") == "discover_page"]
+    assert len(page_rows) == 3
+    pages = [row["page"] for row in page_rows]
     assert pages == sorted(pages)
     assert pages[0] < pages[-1]
 
@@ -283,9 +290,16 @@ def test_discover_skips_item_with_missing_title_and_logs(
     assert len(stubs) == 1
     assert isinstance(stubs[0], PositionStub)
     assert stubs[0].title == "Backend Engineer"
-    log_content = (tmp_path / "bundesagentur_api.log").read_text(encoding="utf-8")
-    assert "missing_title" in log_content
-    assert "notitle1" in log_content
+    import json as _json
+
+    events_rows = [
+        _json.loads(line)
+        for line in (tmp_path / "bundesagentur_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(row.get("event") == "missing_title" for row in events_rows)
+    assert any("notitle1" in str(row) for row in events_rows)
 
 
 # ---------------------------------------------------------------------------

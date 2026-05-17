@@ -30,7 +30,6 @@ from application_pipeline.llm import (
     ClassifyItem,
     ClaudeExtractor,
     ExtractorError,
-    ExtractorUnreachableError,
     LLMExtractor,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
@@ -683,7 +682,7 @@ def run(
             _log.error("startup failed — config: %s", exc)
             raise
 
-        # Steps 2-4: Load prompts, build extractor, prewarm
+        # Steps 2-3: Load prompts, build extractor
         if extractor is None:
             try:
                 prompts = load_prompts(cfg)
@@ -692,14 +691,7 @@ def run(
                 raise
             extractor = ClaudeExtractor(cfg, prompts)
 
-        status_display.update_body("startup", body="prewarming claude cli")
-        try:
-            extractor.prewarm()
-        except ExtractorUnreachableError as exc:
-            _log.error("startup failed — extractor unreachable: %s", exc)
-            raise
-
-        # Step 5: Domain Pre-Filter
+        # Step 4: Domain Pre-Filter
         if prefilter is None:
             prefilter = DomainPreFilter(
                 inclusion_keywords=cfg.inclusion_keywords,

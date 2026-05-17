@@ -574,18 +574,6 @@ def test_classify_failure_transcript_does_not_write_to_extractor_file(
 
 
 # ---------------------------------------------------------------------------
-# prewarm
-# ---------------------------------------------------------------------------
-
-
-def test_prewarm_is_noop() -> None:
-    invoker = MagicMock(spec=ClaudeCliInvoker)
-    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
-    extractor.prewarm()  # must not raise
-    invoker.call.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
 # Protocol conformance
 # ---------------------------------------------------------------------------
 

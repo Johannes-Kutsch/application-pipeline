@@ -56,7 +56,7 @@ def main() -> None:
     config_path = Path(args[0])
     display = RichStatusDisplay() if sys.stdout.isatty() else PlainStatusDisplay()
     try:
-        parser_log.configure(config_path.parent / "logs")
+        parser_log.configure(config_path.resolve().parent / "logs")
         summary = run(config_path, status_display=display)
     except Exception as exc:
         try:

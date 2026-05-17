@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -200,3 +201,35 @@ def test_main_logs_land_next_to_config_regardless_of_cwd(
     assert not (other_cwd / "synched").exists(), (
         "logs must not be created relative to cwd"
     )
+
+
+def test_main_logs_dir_is_anchored_when_config_path_is_relative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from application_pipeline.orchestrator import RunSummary
+
+    config_dir = tmp_path / "synched"
+    config_dir.mkdir()
+    config_path = config_dir / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+
+    other_cwd = tmp_path / "workdir"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+
+    rel_path = os.path.relpath(str(config_path), str(other_cwd))
+    monkeypatch.setattr("sys.argv", ["app", rel_path])
+    monkeypatch.setattr(
+        "application_pipeline.__main__.run",
+        lambda *_a, **_kw: RunSummary(),
+    )
+
+    from application_pipeline.__main__ import main
+
+    main()
+
+    assert parser_log._logs_dir is not None
+    assert parser_log._logs_dir.is_absolute(), (
+        "logs_dir must be an absolute path regardless of how config path was specified"
+    )
+    assert parser_log._logs_dir == config_dir / "logs"

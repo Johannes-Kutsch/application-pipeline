@@ -88,7 +88,7 @@ def test_verdict_is_frozen() -> None:
         verdict.passes = False  # type: ignore[misc]
 
 
-def test_blacklist_match_carries_term_and_title_field() -> None:
+def test_blacklist_match_carries_term_only() -> None:
     bl = precompute_blacklist(["pfleg"])
     pos = StubPosition(
         title="Pflegekraft Stelle",
@@ -99,7 +99,7 @@ def test_blacklist_match_carries_term_and_title_field() -> None:
     match = verdict.blacklist_matches[0]
     assert isinstance(match, TermMatch)
     assert match.term == "pfleg"
-    assert match.fields == frozenset({"title"})
+    assert not hasattr(match, "fields")
 
 
 def test_verdict_has_no_whitelist_attributes() -> None:

@@ -56,39 +56,27 @@ class RunSummary:
     duration_seconds: float = 0.0
 
 
-def _format_keyword_hits(
-    terms: list[str], counts: dict[str, tuple[int, int, int]]
-) -> str:
-    parts = []
-    for term in terms:
-        n, t, b = counts[term]
-        parts.append(f"{term}={n}(t={t},b={b})")
-    return " ".join(parts)
+def _format_keyword_hits(terms: list[str], counts: dict[str, int]) -> str:
+    return " ".join(f"{term}={counts[term]}" for term in terms)
 
 
-def _format_dead_list(terms: list[str], counts: dict[str, tuple[int, int, int]]) -> str:
-    dead = [term for term in terms if counts[term][0] == 0]
+def _format_dead_list(terms: list[str], counts: dict[str, int]) -> str:
+    dead = [term for term in terms if counts[term] == 0]
     return f"[{', '.join(dead)}]"
 
 
 def _bump_keyword_counts(
-    counts: dict[str, tuple[int, int, int]],
+    counts: dict[str, int],
     matches: tuple[TermMatch, ...],
 ) -> None:
     for match in matches:
-        if match.term not in counts:
-            continue
-        n, t, b = counts[match.term]
-        counts[match.term] = (
-            n + 1,
-            t + ("title" in match.fields),
-            b + ("body" in match.fields),
-        )
+        if match.term in counts:
+            counts[match.term] += 1
 
 
 def _prefilter_summary_counts(
     bl_terms: list[str],
-    bl_counts: dict[str, tuple[int, int, int]],
+    bl_counts: dict[str, int],
 ) -> dict[str, str]:
     return {
         "blacklist_keyword_hits": _format_keyword_hits(bl_terms, bl_counts),
@@ -156,8 +144,7 @@ class RunMetrics:
 
         # Per-keyword prefilter counters (populated via register_prefilter_keywords)
         self._prefilter_blacklist: list[str] = []
-        # term -> (positions_matched, title_count, body_count)
-        self._prefilter_bl_counts: dict[str, tuple[int, int, int]] = {}
+        self._prefilter_bl_counts: dict[str, int] = {}
 
         # Per-parser counters (lazily allocated on first event)
         self._per_parser: dict[str, _ParserCounters] = {}
@@ -200,9 +187,7 @@ class RunMetrics:
     def register_prefilter_keywords(self, blacklist: list[str]) -> None:
         with self._lock:
             self._prefilter_blacklist = [n for k in blacklist if (n := normalize(k))]
-            self._prefilter_bl_counts = {
-                t: (0, 0, 0) for t in self._prefilter_blacklist
-            }
+            self._prefilter_bl_counts = {t: 0 for t in self._prefilter_blacklist}
 
     # -----------------------------------------------------------------------
     # Internal per-parser helpers (called under lock)

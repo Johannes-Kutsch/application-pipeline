@@ -903,6 +903,9 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
     assert drop["passes"] is False
     assert drop["reason"] == "blacklist_drop"
     assert len(drop["blacklist_matches"]) > 0
+    for entry in drop["blacklist_matches"]:
+        assert "term" in entry
+        assert "fields" not in entry
 
     # Check envelope fields present on all rows; body_len and whitelist_matches must not appear
     for row in rows:

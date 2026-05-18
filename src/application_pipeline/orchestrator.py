@@ -477,7 +477,7 @@ def _prefilter_reason(verdict: PreFilterVerdict) -> str:
 
 
 def _serialize_matches(matches: tuple[TermMatch, ...]) -> list[dict[str, object]]:
-    return [{"term": m.term, "fields": sorted(m.fields)} for m in matches]
+    return [{"term": m.term} for m in matches]
 
 
 def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:

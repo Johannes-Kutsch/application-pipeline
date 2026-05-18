@@ -155,7 +155,7 @@ def test_prefilter_body_matches_main_stats_format():
     metrics = RunMetrics(display)
     metrics.register_rows(0)
 
-    bl_match = (TermMatch(term="pfleg", fields=frozenset({"title"})),)
+    bl_match = (TermMatch(term="pfleg"),)
     # blacklist hit → dropped
     metrics.prefilter_dropped(_verdict(passes=False, blacklist_matches=bl_match))
     # no blacklist hit → passes
@@ -468,7 +468,7 @@ def _build_populated_metrics(display: FakeStatusDisplay) -> RunMetrics:
     metrics.record_dedup("run_hit")
     metrics.record_dedup("miss")
     metrics.record_dedup("miss")
-    bl_match = (TermMatch(term="pfleg", fields=frozenset({"title"})),)
+    bl_match = (TermMatch(term="pfleg"),)
     metrics.prefilter_passed(_verdict(passes=True))
     metrics.prefilter_passed(_verdict(passes=True))
     metrics.prefilter_dropped(_verdict(passes=False, blacklist_matches=bl_match))
@@ -818,7 +818,7 @@ def test_concurrent_events_produce_correct_final_counts():
         cost_usd=0.001,
         duration_s=0.1,
     )
-    bl_match = (TermMatch(term="pfleg", fields=frozenset({"title"})),)
+    bl_match = (TermMatch(term="pfleg"),)
     verdict_pass = _verdict(passes=True)
     verdict_drop = _verdict(passes=False, blacklist_matches=bl_match)
 
@@ -1021,9 +1021,7 @@ def test_summarize_to_parser_log_prefilter_blacklist_keyword_hits(
     metrics.prefilter_dropped(
         PreFilterVerdict(
             passes=False,
-            blacklist_matches=(
-                TermMatch(term="excluded", fields=frozenset({"title"})),
-            ),
+            blacklist_matches=(TermMatch(term="excluded"),),
         )
     )
 
@@ -1031,8 +1029,8 @@ def test_summarize_to_parser_log_prefilter_blacklist_keyword_hits(
 
     run_log = (tmp_path / "run.log").read_text()
     assert "blacklist_keyword_hits:" in run_log
-    assert "excluded=1(t=1,b=0)" in run_log
-    assert "banned=0(t=0,b=0)" in run_log
+    assert "excluded=1" in run_log
+    assert "banned=0" in run_log
 
 
 def test_prefilter_blacklist_count_is_one_per_position_not_per_occurrence(
@@ -1047,14 +1045,14 @@ def test_prefilter_blacklist_count_is_one_per_position_not_per_occurrence(
     metrics.prefilter_dropped(
         PreFilterVerdict(
             passes=False,
-            blacklist_matches=(TermMatch(term="pfleg", fields=frozenset({"title"})),),
+            blacklist_matches=(TermMatch(term="pfleg"),),
         )
     )
 
     metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
 
     run_log = (tmp_path / "run.log").read_text()
-    assert "pfleg=1(t=1,b=0)" in run_log
+    assert "pfleg=1" in run_log
 
 
 def test_summarize_to_parser_log_negative_keywords_dead_list(
@@ -1070,9 +1068,7 @@ def test_summarize_to_parser_log_negative_keywords_dead_list(
     metrics.prefilter_dropped(
         PreFilterVerdict(
             passes=False,
-            blacklist_matches=(
-                TermMatch(term="excluded", fields=frozenset({"title"})),
-            ),
+            blacklist_matches=(TermMatch(term="excluded"),),
         )
     )
 
@@ -1096,9 +1092,7 @@ def test_summarize_to_parser_log_negative_keywords_dead_empty_when_all_match(
     metrics.prefilter_dropped(
         PreFilterVerdict(
             passes=False,
-            blacklist_matches=(
-                TermMatch(term="excluded", fields=frozenset({"title"})),
-            ),
+            blacklist_matches=(TermMatch(term="excluded"),),
         )
     )
 

@@ -272,7 +272,7 @@ def test_discover_emits_discover_page_heartbeat_per_page(
         list(p.discover(_query()))
     events_rows = [
         json.loads(line)
-        for line in (tmp_path / "bundesagentur_api.events.jsonl")
+        for line in (tmp_path / "parser_bundesagentur_api.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]
@@ -300,7 +300,7 @@ def test_discover_skips_item_with_missing_title_and_logs(
     assert stubs[0].title == "Backend Engineer"
     events_rows = [
         json.loads(line)
-        for line in (tmp_path / "bundesagentur_api.events.jsonl")
+        for line in (tmp_path / "parser_bundesagentur_api.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]

@@ -1394,7 +1394,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records == [], f"unexpected WARNING(s): {warning_records}"
 
-    events_content = (logs_dir / "bundesagentur_api.events.jsonl").read_text(
+    events_content = (logs_dir / "parser_bundesagentur_api.events.jsonl").read_text(
         encoding="utf-8"
     )
     assert "external_redirect" in events_content
@@ -2191,7 +2191,7 @@ def test_parser_log_integration(
             results_managers=_stub_results_managers(),
         )
 
-    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
     assert events_file.exists(), "events log file must be created"
     events_content = events_file.read_text(encoding="utf-8")
     assert "parser started" in events_content
@@ -2252,7 +2252,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
         )
 
     # Events file must not contain not_served events
-    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
     if events_file.exists():
         assert "not_served" not in events_file.read_text(encoding="utf-8")
 
@@ -2325,7 +2325,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records == [], f"unexpected WARNING/ERROR(s): {warning_records}"
 
-    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
     assert events_file.exists(), "events log file must be created"
     events_content = events_file.read_text(encoding="utf-8")
     assert "enrich_failed" in events_content
@@ -2413,7 +2413,7 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         results_managers=_stub_results_managers(),
     )
 
-    events_file = logs_dir / "jobs_beim_staat_html.events.jsonl"
+    events_file = logs_dir / "parser_jobs_beim_staat_html.events.jsonl"
     assert events_file.exists()
     events_rows = [
         json.loads(line)
@@ -3420,11 +3420,11 @@ def test_parser_row_registered_per_parser(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    assert "bundesagentur_api" in display.registered_names()
+    assert "parser_bundesagentur_api" in display.registered_names()
     reg = next(
         c
         for c in display.calls
-        if c.method == "register" and c.name == "bundesagentur_api"
+        if c.method == "register" and c.name == "parser_bundesagentur_api"
     )
     assert reg.kwargs["order"] >= 2
 
@@ -3454,7 +3454,7 @@ def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
         i for i, m, n in indexed if m == "register" and n == "startup"
     )
     parser_reg_idx = next(
-        i for i, m, n in indexed if m == "register" and n == "bundesagentur_api"
+        i for i, m, n in indexed if m == "register" and n == "parser_bundesagentur_api"
     )
     assert parser_reg_idx > startup_reg_idx
 
@@ -3479,13 +3479,13 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("bundesagentur_api")
+    bodies = display.body_updates_for("parser_bundesagentur_api")
     assert bodies, "expected at least one body update for parser row"
     assert bodies[-1].endswith("· done"), (
         f"last body {bodies[-1]!r} must end with '· done'"
     )
     assert not any(
-        c.method == "remove" and c.name == "bundesagentur_api" for c in display.calls
+        c.method == "remove" and c.name == "parser_bundesagentur_api" for c in display.calls
     ), "parser row must not be removed during run"
 
 
@@ -3509,7 +3509,7 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("bundesagentur_api")
+    bodies = display.body_updates_for("parser_bundesagentur_api")
     # Last body before "done" should have format: "X/Y queries · N stubs · M enriched · done"
     final = bodies[-1]
     assert "queries" in final
@@ -3554,13 +3554,13 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("bundesagentur_api")
+    bodies = display.body_updates_for("parser_bundesagentur_api")
     assert bodies, "expected at least one body update for dead parser row"
     assert bodies[-1].endswith("· dead"), (
         f"last body {bodies[-1]!r} must end with '· dead'"
     )
     assert not any(
-        c.method == "remove" and c.name == "bundesagentur_api" for c in display.calls
+        c.method == "remove" and c.name == "parser_bundesagentur_api" for c in display.calls
     ), "dead parser row must not be removed"
 
 
@@ -3600,18 +3600,18 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
     )
 
     registered = display.registered_names()
-    assert "bundesagentur_api" in registered
-    assert "stellen_hamburg_api" in registered
+    assert "parser_bundesagentur_api" in registered
+    assert "parser_stellen_hamburg_api" in registered
 
     order_a = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "bundesagentur_api"
+        if c.method == "register" and c.name == "parser_bundesagentur_api"
     )
     order_b = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "stellen_hamburg_api"
+        if c.method == "register" and c.name == "parser_stellen_hamburg_api"
     )
     assert order_a >= 2
     assert order_b >= 2
@@ -3660,7 +3660,7 @@ def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
     parser_order = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "bundesagentur_api"
+        if c.method == "register" and c.name == "parser_bundesagentur_api"
     )
     assert dedup_order > parser_order
     assert prefilter_order == dedup_order + 1
@@ -3873,7 +3873,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
         stall_threshold_s=_THRESHOLD,
     )
 
-    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
     assert events_file.exists(), "events log file must be created"
     events_content = events_file.read_text(encoding="utf-8")
     assert "stalled" in events_content, "stalled event must appear in events log"
@@ -3925,7 +3925,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         stall_threshold_s=_THRESHOLD,
     )
 
-    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
     events_rows = [
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
@@ -3962,7 +3962,7 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         results_managers=_stub_results_managers(),
     )
 
-    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
     events_rows = [
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
@@ -4015,7 +4015,7 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
 
     assert summary.parsers_dead == 1
 
-    events_file = logs_dir / "bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
     events_rows = [
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()

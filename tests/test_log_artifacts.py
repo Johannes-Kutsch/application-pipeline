@@ -120,13 +120,13 @@ def test_summarize_writes_to_run_log_with_header(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     started = datetime(2026, 5, 12, 15, 30, 0, tzinfo=timezone.utc)
     parser_log.summarize(
-        "bundesagentur_api", {"discovered": 12, "duration_s": 47.3}, started
+        "parser_bundesagentur_api", {"discovered": 12, "duration_s": 47.3}, started
     )
 
     run_log = tmp_path / "run.log"
     assert run_log.exists()
     content = run_log.read_text(encoding="utf-8")
-    assert "=== bundesagentur_api" in content
+    assert "=== parser_bundesagentur_api" in content
     assert "2026-05-12T15:30:00Z" in content
     assert "summary" in content
     assert "SUMMARY OF SESSION" in content
@@ -140,9 +140,9 @@ def test_summarize_writes_to_run_log_with_header(tmp_path: Path) -> None:
 
 def test_record_writes_jsonl_row_to_events_file(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record("bundesagentur_api", "discover_page", q="Python", page=1)
+    parser_log.record("parser_bundesagentur_api", "discover_page", q="Python", page=1)
 
-    events_file = tmp_path / "bundesagentur_api.events.jsonl"
+    events_file = tmp_path / "parser_bundesagentur_api.events.jsonl"
     assert events_file.exists()
     row = json.loads(events_file.read_text(encoding="utf-8").strip())
     assert _ISO8601_RE.match(row["ts"])
@@ -153,8 +153,8 @@ def test_record_writes_jsonl_row_to_events_file(tmp_path: Path) -> None:
 
 
 def test_record_without_configure_is_noop(tmp_path: Path) -> None:
-    parser_log.record("bundesagentur_api", "discover_page")
-    assert not (tmp_path / "bundesagentur_api.events.jsonl").exists()
+    parser_log.record("parser_bundesagentur_api", "discover_page")
+    assert not (tmp_path / "parser_bundesagentur_api.events.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -165,14 +165,14 @@ def test_record_without_configure_is_noop(tmp_path: Path) -> None:
 def test_traceback_writes_to_run_log_with_header(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     parser_log.record_traceback(
-        "bundesagentur_api",
+        "parser_bundesagentur_api",
         "Traceback (most recent call last):\n  File ...\nValueError: oops\n",
     )
 
     run_log = tmp_path / "run.log"
     assert run_log.exists()
     content = run_log.read_text(encoding="utf-8")
-    assert "=== bundesagentur_api" in content
+    assert "=== parser_bundesagentur_api" in content
     assert "traceback" in content
     assert "Traceback (most recent call last):" in content
     assert "ValueError: oops" in content
@@ -180,9 +180,11 @@ def test_traceback_writes_to_run_log_with_header(tmp_path: Path) -> None:
 
 def test_traceback_does_not_write_to_component_log(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record_traceback("bundesagentur_api", "Traceback...\nValueError\n")
+    parser_log.record_traceback(
+        "parser_bundesagentur_api", "Traceback...\nValueError\n"
+    )
 
-    assert not (tmp_path / "bundesagentur_api.log").exists()
+    assert not (tmp_path / "parser_bundesagentur_api.log").exists()
 
 
 # ---------------------------------------------------------------------------

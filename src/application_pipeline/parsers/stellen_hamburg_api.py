@@ -138,7 +138,7 @@ class StellenHamburgParser:
         while True:
             url = _search_url(query.keyword, page_number)
             parser_log.record(
-                _PARSER_TYPE,
+                "parser_" + _PARSER_TYPE,
                 "discover_page",
                 q=query.keyword,
                 start=(page_number - 1) * _PAGE_SIZE,

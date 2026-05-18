@@ -220,7 +220,7 @@ class JobsBeimStaatParser:
             url = f"{_BASE_URL}{_REST_PATH}?{urllib.parse.urlencode(params)}"
 
             parser_log.record(
-                "jobs_beim_staat_html",
+                "parser_jobs_beim_staat_html",
                 "discover_page",
                 q=q,
                 place=place,

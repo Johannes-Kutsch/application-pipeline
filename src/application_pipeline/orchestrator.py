@@ -249,7 +249,7 @@ class _ParserThread(threading.Thread):
                     else "Remote"
                 )
                 parser_log.record(
-                    self._parser_id,
+                    "parser_" + self._parser_id,
                     "query_started",
                     keyword=query.keyword,
                     location=location_str,
@@ -290,7 +290,7 @@ class _ParserThread(threading.Thread):
                     self._outbound.put((self._parser_id, _QUERY_DONE))
                 finally:
                     parser_log.record(
-                        self._parser_id,
+                        "parser_" + self._parser_id,
                         "query_ended",
                         keyword=query.keyword,
                         location=location_str,
@@ -577,7 +577,7 @@ class _OutboundDispatcher:
         payload = wrapper.payload
         if isinstance(payload, Position):
             for warning in payload._warnings:
-                parser_log.record(pid, warning)
+                parser_log.record("parser_" + pid, warning)
                 if warning.startswith("unparseable_date"):
                     self._metrics.unparseable_date(pid)
             self._metrics.enriched(pid)
@@ -608,7 +608,7 @@ class _OutboundDispatcher:
                     self._metrics.prefilter_dropped(verdict)
         elif isinstance(payload, ParserError):
             parser_log.record(
-                pid,
+                "parser_" + pid,
                 "enrich_failed",
                 stub_url=stub.url,
                 title=stub.title,
@@ -618,7 +618,7 @@ class _OutboundDispatcher:
             self._metrics.enrich_failed(pid)
         elif isinstance(payload, ExternalRedirect):
             parser_log.record(
-                pid,
+                "parser_" + pid,
                 "external_redirect",
                 stub_url=stub.url,
                 outbound=payload.outbound_url,
@@ -636,7 +636,7 @@ class _OutboundDispatcher:
         self._metrics.parser_done(pid)
 
     def _handle_parser_dead(self, pid: str, payload: _ParserDead) -> None:
-        parser_log.record_traceback(pid, payload.traceback_str)
+        parser_log.record_traceback("parser_" + pid, payload.traceback_str)
         self._metrics.parser_dead(pid)
 
 
@@ -765,7 +765,7 @@ def run(
                 state.started_monotonic = time.monotonic()
                 state.last_event_monotonic = state.started_monotonic
                 _log.info("parser %s started", pid)
-                parser_log.record(pid, "parser started")
+                parser_log.record("parser_" + pid, "parser started")
                 metrics.register_parser(
                     pid,
                     order=2 + i,
@@ -825,7 +825,9 @@ def run(
                         if age < stall_threshold_s or stall_state.stall_logged:
                             continue
                         parser_log.record(
-                            stall_pid, "stalled", last_event_age_s=round(age, 1)
+                            "parser_" + stall_pid,
+                            "stalled",
+                            last_event_age_s=round(age, 1),
                         )
                         thread = threads_by_name.get(f"parser-{stall_pid}")
                         frame = (
@@ -835,7 +837,8 @@ def run(
                         )
                         if frame is not None:
                             parser_log.record_traceback(
-                                stall_pid, "".join(traceback.format_stack(frame))
+                                "parser_" + stall_pid,
+                                "".join(traceback.format_stack(frame)),
                             )
                         stall_state.stall_logged = True
                     continue
@@ -853,7 +856,7 @@ def run(
             parsers_done_monotonic = time.monotonic()
             for pid, pstate in parser_states.items():
                 parser_log.summarize(
-                    pid,
+                    "parser_" + pid,
                     metrics.parser_summary(
                         pid, parsers_done_monotonic, pstate.started_monotonic
                     ),

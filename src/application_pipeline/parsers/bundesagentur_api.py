@@ -132,7 +132,7 @@ class BundesagenturParser:
             }
             url = f"{_BASE_URL}/jobs?{urllib.parse.urlencode(params)}"
             parser_log.record(
-                "bundesagentur_api",
+                "parser_bundesagentur_api",
                 "discover_page",
                 q=query.keyword,
                 page=page,
@@ -154,7 +154,7 @@ class BundesagenturParser:
                 title: str = item.get("stellenangebotsTitel") or ""
                 if not title:
                     parser_log.record(
-                        "bundesagentur_api",
+                        "parser_bundesagentur_api",
                         "missing_title",
                         item=item,
                     )

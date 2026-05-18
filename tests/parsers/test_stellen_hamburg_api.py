@@ -307,7 +307,7 @@ def test_discover_emits_discover_page_heartbeat_per_page(
     assert len(stubs) == 2
     events_rows = [
         json.loads(line)
-        for line in (tmp_path / "stellen_hamburg_api.events.jsonl")
+        for line in (tmp_path / "parser_stellen_hamburg_api.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]

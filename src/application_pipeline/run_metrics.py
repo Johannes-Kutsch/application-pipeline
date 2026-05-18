@@ -185,7 +185,9 @@ class RunMetrics:
             entry = self._parser_entry(parser_id)
             entry.total_queries = total_queries
             body = self._parser_body(parser_id)
-        self._display.register(parser_id, order=order, phase="running", body=body)
+        self._display.register(
+            "parser_" + parser_id, order=order, phase="running", body=body
+        )
 
     # -----------------------------------------------------------------------
     # Degraded reason
@@ -227,7 +229,7 @@ class RunMetrics:
             parser_body = self._parser_body(parser_id) if parser_id else None
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
-            self._display.update_body(parser_id, body=parser_body)
+            self._display.update_body("parser_" + parser_id, body=parser_body)
 
     def record_dedup(self, result: RunScopedSeenResult) -> None:
         with self._lock:
@@ -272,7 +274,7 @@ class RunMetrics:
             parser_body = self._parser_body(parser_id) if parser_id else None
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
-            self._display.update_body(parser_id, body=parser_body)
+            self._display.update_body("parser_" + parser_id, body=parser_body)
 
     def external_redirect(self, parser_id: str = "") -> None:
         with self._lock:
@@ -281,7 +283,7 @@ class RunMetrics:
                 self._parser_entry(parser_id).external_redirects += 1
             parser_body = self._parser_body(parser_id) if parser_id else None
         if parser_id and parser_body is not None:
-            self._display.update_body(parser_id, body=parser_body)
+            self._display.update_body("parser_" + parser_id, body=parser_body)
 
     def parser_dead(self, parser_id: str = "") -> None:
         with self._lock:
@@ -294,37 +296,37 @@ class RunMetrics:
             parser_body = self._parser_body(parser_id) if parser_id else None
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
-            self._display.update_body(parser_id, body=parser_body)
+            self._display.update_body("parser_" + parser_id, body=parser_body)
 
     def parser_done(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).lifecycle = "done"
             body = self._parser_body(parser_id)
-        self._display.update_body(parser_id, body=body)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def not_served_query(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).not_served_queries += 1
             body = self._parser_body(parser_id)
-        self._display.update_body(parser_id, body=body)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def unparseable_date(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).unparseable_dates += 1
             body = self._parser_body(parser_id)
-        self._display.update_body(parser_id, body=body)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def query_done(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).queries_done += 1
             body = self._parser_body(parser_id)
-        self._display.update_body(parser_id, body=body)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def enriched(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).enriched += 1
             body = self._parser_body(parser_id)
-        self._display.update_body(parser_id, body=body)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def parser_summary(
         self, parser_id: str, end_monotonic: float, started_monotonic: float

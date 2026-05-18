@@ -6,7 +6,6 @@ from collections.abc import Callable, Mapping
 import httpx
 
 from application_pipeline import parser_log
-from application_pipeline._context import current_stage
 from application_pipeline.http import HttpNotRetryableError, HttpRetryError
 from application_pipeline.parsers.errors import ParserError
 
@@ -90,8 +89,7 @@ class ParserHttp:
         return resp.content
 
     def _get_with_retry(self, url: str) -> bytes:
-        stage = current_stage.get()
-        component_id = stage.removeprefix("parser:")
+        component_id = "parser_http"
 
         if self._retries <= 0:
             raise HttpRetryError("HTTP request failed after 0 retries: None")

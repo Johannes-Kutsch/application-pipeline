@@ -81,7 +81,7 @@ class _CallSite:
 
 _CLASSIFY_SITE = _CallSite(
     call="classify_relevance_batch",
-    component_id="classify_relevance",
+    component_id="llm_classify_relevance",
     tag="verdicts",
     model=_CLASSIFY_MODEL,
     effort="",
@@ -90,7 +90,7 @@ _CLASSIFY_SITE = _CallSite(
 
 _JUDGE_SITE = _CallSite(
     call="judge_match",
-    component_id="judge_match",
+    component_id="llm_judge_match",
     tag="verdict",
     model=_JUDGE_MODEL,
     effort=_JUDGE_EFFORT,

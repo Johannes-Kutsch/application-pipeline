@@ -350,7 +350,7 @@ class _ClassifyThread(_QueueWorker):
         except ExtractorError as exc:
             _log.warning("classify_relevance_batch failed: %s", exc)
             parser_log.record(
-                "classify_relevance",
+                "llm_classify_relevance",
                 "batch_abandoned",
                 batch_size=len(batch.positions),
                 returncode=getattr(exc, "returncode", None),
@@ -433,7 +433,7 @@ class _JudgeThread(_QueueWorker):
         except ExtractorError as exc:
             _log.warning("judge_match failed: %s", exc)
             parser_log.record(
-                "judge_match",
+                "llm_judge_match",
                 "error",
                 stub_url=job.position.stub.url,
                 returncode=getattr(exc, "returncode", None),

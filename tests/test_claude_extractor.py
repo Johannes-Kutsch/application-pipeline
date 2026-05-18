@@ -227,7 +227,7 @@ def test_classify_relevance_batch_records_events_row_to_call_site_file(
 
     extractor.classify_relevance_batch(items)
 
-    events_file = tmp_path / "classify_relevance.events.jsonl"
+    events_file = tmp_path / "llm_classify_relevance.events.jsonl"
     assert events_file.exists()
     entry = json.loads(events_file.read_text(encoding="utf-8").strip())
     assert entry["event"] == "classify_relevance_batch"
@@ -244,7 +244,7 @@ def test_classify_relevance_batch_records_transcript(tmp_path: Path) -> None:
 
     extractor.classify_relevance_batch(items)
 
-    transcript_file = tmp_path / "classify_relevance.transcripts.jsonl"
+    transcript_file = tmp_path / "llm_classify_relevance.transcripts.jsonl"
     assert transcript_file.exists()
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert entry["call"] == "classify_relevance_batch"
@@ -495,7 +495,7 @@ def test_judge_match_records_events_row_to_call_site_file(tmp_path: Path) -> Non
 
     extractor.judge_match("Looking for Python dev")
 
-    events_file = tmp_path / "judge_match.events.jsonl"
+    events_file = tmp_path / "llm_judge_match.events.jsonl"
     assert events_file.exists()
     entry = json.loads(events_file.read_text(encoding="utf-8").strip())
     assert entry["event"] == "judge_match"
@@ -511,7 +511,7 @@ def test_judge_match_records_transcript(tmp_path: Path) -> None:
 
     extractor.judge_match("Looking for Python dev")
 
-    transcript_file = tmp_path / "judge_match.transcripts.jsonl"
+    transcript_file = tmp_path / "llm_judge_match.transcripts.jsonl"
     assert transcript_file.exists()
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert entry["call"] == "judge_match"
@@ -537,12 +537,14 @@ def test_classify_and_judge_route_to_separate_transcript_files(tmp_path: Path) -
     extractor.judge_match("desc")
 
     classify_entry = json.loads(
-        (tmp_path / "classify_relevance.transcripts.jsonl").read_text(encoding="utf-8")
+        (tmp_path / "llm_classify_relevance.transcripts.jsonl").read_text(
+            encoding="utf-8"
+        )
     )
     assert classify_entry["call"] == "classify_relevance_batch"
 
     judge_entry = json.loads(
-        (tmp_path / "judge_match.transcripts.jsonl").read_text(encoding="utf-8")
+        (tmp_path / "llm_judge_match.transcripts.jsonl").read_text(encoding="utf-8")
     )
     assert judge_entry["call"] == "judge_match"
 
@@ -677,7 +679,7 @@ def test_judge_truncation_leaves_no_truncation_field_in_transcript(
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
     extractor.judge_match("desc")
 
-    transcript_file = tmp_path / "judge_match.transcripts.jsonl"
+    transcript_file = tmp_path / "llm_judge_match.transcripts.jsonl"
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert "truncated" not in entry
     assert "truncation" not in entry
@@ -820,14 +822,14 @@ def test_judge_slots_match_inventory() -> None:
     [
         pytest.param(
             lambda e: e.classify_relevance_batch(_items(2)),
-            "classify_relevance.transcripts.jsonl",
+            "llm_classify_relevance.transcripts.jsonl",
             "some stderr",
             {"stdout": '{"type":"result","result":"","is_error":false}'},
             id="classify",
         ),
         pytest.param(
             lambda e: e.judge_match("desc", stub_url="https://example.com/job/1"),
-            "judge_match.transcripts.jsonl",
+            "llm_judge_match.transcripts.jsonl",
             "judge stderr",
             {"stub_url": "https://example.com/job/1"},
             id="judge",
@@ -874,13 +876,13 @@ def test_cli_error(
     [
         pytest.param(
             lambda e: e.classify_relevance_batch(_items(1)),
-            "classify_relevance.transcripts.jsonl",
+            "llm_classify_relevance.transcripts.jsonl",
             {},
             id="classify",
         ),
         pytest.param(
             lambda e: e.judge_match("desc", stub_url="https://example.com/job/2"),
-            "judge_match.transcripts.jsonl",
+            "llm_judge_match.transcripts.jsonl",
             {"stub_url": "https://example.com/job/2"},
             id="judge",
         ),
@@ -919,13 +921,13 @@ def test_malformed_envelope(
     [
         pytest.param(
             lambda e: e.classify_relevance_batch(_items(1)),
-            "classify_relevance.transcripts.jsonl",
+            "llm_classify_relevance.transcripts.jsonl",
             ExtractorBatchMalformedError,
             id="classify",
         ),
         pytest.param(
             lambda e: e.judge_match("desc"),
-            "judge_match.transcripts.jsonl",
+            "llm_judge_match.transcripts.jsonl",
             ExtractorMalformedJSONError,
             id="judge",
         ),
@@ -957,14 +959,14 @@ def test_tag_missing(
     [
         pytest.param(
             lambda e: e.classify_relevance_batch(_items(1)),
-            "classify_relevance.transcripts.jsonl",
+            "llm_classify_relevance.transcripts.jsonl",
             ExtractorBatchMalformedError,
             "<verdicts>bad json</verdicts>",
             id="classify",
         ),
         pytest.param(
             lambda e: e.judge_match("desc"),
-            "judge_match.transcripts.jsonl",
+            "llm_judge_match.transcripts.jsonl",
             ExtractorMalformedJSONError,
             "<verdict>bad json</verdict>",
             id="judge",

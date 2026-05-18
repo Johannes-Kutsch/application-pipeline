@@ -2576,7 +2576,7 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
     first_classify_idx = next(
         i
         for i, c in enumerate(display.calls)
-        if c.method == "update_body" and c.name == "classify_relevance"
+        if c.method == "update_body" and c.name == "llm_classify_relevance"
     )
     parser_done_idx = next(
         i
@@ -2821,7 +2821,7 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
         results_managers=_stub_results_managers(),
     )
 
-    events_file = logs_dir / "classify_relevance.events.jsonl"
+    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
     assert events_file.exists(), (
         "classify_relevance.events.jsonl must be created on batch error"
     )
@@ -2853,7 +2853,7 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
     events_rows = [
         json.loads(line)
-        for line in (logs_dir / "classify_relevance.events.jsonl")
+        for line in (logs_dir / "llm_classify_relevance.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]
@@ -2887,7 +2887,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
     events_rows = [
         json.loads(line)
-        for line in (logs_dir / "judge_match.events.jsonl")
+        for line in (logs_dir / "llm_judge_match.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]
@@ -3774,8 +3774,8 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    assert "classify_relevance" in display.registered_names()
-    assert "judge_match" in display.registered_names()
+    assert "llm_classify_relevance" in display.registered_names()
+    assert "llm_judge_match" in display.registered_names()
 
     prefilter_order = next(
         c.kwargs["order"]
@@ -3785,12 +3785,12 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
     classify_order = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "classify_relevance"
+        if c.method == "register" and c.name == "llm_classify_relevance"
     )
     judge_order = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "judge_match"
+        if c.method == "register" and c.name == "llm_judge_match"
     )
 
     assert classify_order > prefilter_order
@@ -3818,10 +3818,11 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
     )
 
     assert not any(
-        c.method == "remove" and c.name == "classify_relevance" for c in display.calls
+        c.method == "remove" and c.name == "llm_classify_relevance"
+        for c in display.calls
     ), "classify_relevance row must not be removed during run"
     assert not any(
-        c.method == "remove" and c.name == "judge_match" for c in display.calls
+        c.method == "remove" and c.name == "llm_judge_match" for c in display.calls
     ), "judge_match row must not be removed during run"
 
 
@@ -4191,7 +4192,7 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    classify_bodies = display.body_updates_for("classify_relevance")
+    classify_bodies = display.body_updates_for("llm_classify_relevance")
     assert classify_bodies, "expected at least one classify_relevance body update"
     last_body = classify_bodies[-1]
     assert "calls_failed=1" in last_body
@@ -4224,7 +4225,7 @@ def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    judge_bodies = display.body_updates_for("judge_match")
+    judge_bodies = display.body_updates_for("llm_judge_match")
     assert judge_bodies, "expected at least one judge_match body update"
     last_body = judge_bodies[-1]
     assert "calls_failed=1" in last_body
@@ -4243,11 +4244,11 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    for body in display.body_updates_for("classify_relevance"):
+    for body in display.body_updates_for("llm_classify_relevance"):
         assert "calls_failed=" not in body
         assert "items_failed=" not in body
 
-    for body in display.body_updates_for("judge_match"):
+    for body in display.body_updates_for("llm_judge_match"):
         assert "calls_failed=" not in body
 
 
@@ -4278,7 +4279,7 @@ def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> Non
         status_display=display,
     )
 
-    judge_bodies = display.body_updates_for("judge_match")
+    judge_bodies = display.body_updates_for("llm_judge_match")
     assert judge_bodies, "expected judge_match body updates"
     last_body = judge_bodies[-1]
     # 2 finished (1 fail + 1 success) out of 2 started, with calls_failed segment
@@ -4311,12 +4312,12 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    classify_bodies = display.body_updates_for("classify_relevance")
+    classify_bodies = display.body_updates_for("llm_classify_relevance")
     assert "0 items in queue" in classify_bodies[-1], (
         f"Classify pending should be 0 at end-of-run: {classify_bodies[-1]!r}"
     )
 
-    judge_bodies = display.body_updates_for("judge_match")
+    judge_bodies = display.body_updates_for("llm_judge_match")
     assert "0 items in queue" in judge_bodies[-1], (
         f"Judge pending should be 0 at end-of-run: {judge_bodies[-1]!r}"
     )
@@ -4345,7 +4346,7 @@ def test_pending_drains_to_zero_on_classify_usage_limit(tmp_path: Path) -> None:
     )
 
     # After degraded drain, classify pending should be 0 in final body
-    classify_bodies = display.body_updates_for("classify_relevance")
+    classify_bodies = display.body_updates_for("llm_classify_relevance")
     assert classify_bodies, "expected classify_relevance body updates"
     assert "0 items in queue" in classify_bodies[-1], (
         f"Classify pending should drain to 0 after usage limit: {classify_bodies[-1]!r}"

@@ -172,9 +172,11 @@ class RunMetrics:
             "pipeline_prefilter", order=starting_order + 1, phase="running"
         )
         self._display.register(
-            "classify_relevance", order=starting_order + 2, phase="running"
+            "llm_classify_relevance", order=starting_order + 2, phase="running"
         )
-        self._display.register("judge_match", order=starting_order + 3, phase="running")
+        self._display.register(
+            "llm_judge_match", order=starting_order + 3, phase="running"
+        )
 
     def register_parser(
         self, parser_id: str, *, order: int, total_queries: int
@@ -347,19 +349,19 @@ class RunMetrics:
         with self._lock:
             self._pending_classify += n
             body = self._classify_body()
-        self._display.update_body("classify_relevance", body=body)
+        self._display.update_body("llm_classify_relevance", body=body)
 
     def classify_batch_enqueued(self, n: int) -> None:
         with self._lock:
             body = self._classify_body()
-        self._display.update_body("classify_relevance", body=body)
+        self._display.update_body("llm_classify_relevance", body=body)
 
     def classify_batch_dequeued(self, n: int) -> None:
         with self._lock:
             self._total_batches += 1
             self._pending_classify -= n
             body = self._classify_body()
-        self._display.update_body("classify_relevance", body=body)
+        self._display.update_body("llm_classify_relevance", body=body)
 
     def classify_batch_complete(
         self, usage: CallUsage, items: int, classifier_dropped: int
@@ -374,14 +376,14 @@ class RunMetrics:
             self._classify_total_s += usage.duration_s
             self._classifier_dropped += classifier_dropped
             body = self._classify_body()
-        self._display.update_body("classify_relevance", body=body)
+        self._display.update_body("llm_classify_relevance", body=body)
 
     def classify_batch_failed(self, items: int) -> None:
         with self._lock:
             self._classify_failed += 1
             self._classify_items_errored += items
             body = self._classify_body()
-        self._display.update_body("classify_relevance", body=body)
+        self._display.update_body("llm_classify_relevance", body=body)
 
     # -----------------------------------------------------------------------
     # Judge-stage events
@@ -391,14 +393,14 @@ class RunMetrics:
         with self._lock:
             self._pending_judge += 1
             body = self._judge_body()
-        self._display.update_body("judge_match", body=body)
+        self._display.update_body("llm_judge_match", body=body)
 
     def judge_dequeued(self) -> None:
         with self._lock:
             self._pending_judge -= 1
             self._judge_started += 1
             body = self._judge_body()
-        self._display.update_body("judge_match", body=body)
+        self._display.update_body("llm_judge_match", body=body)
 
     def judge_complete(self, usage: CallUsage, tier: MatchTier, source: str) -> None:
         with self._lock:
@@ -419,7 +421,7 @@ class RunMetrics:
             else:
                 self._red += 1
             body = self._judge_body()
-        self._display.update_body("judge_match", body=body)
+        self._display.update_body("llm_judge_match", body=body)
 
     def judge_failed(self) -> None:
         with self._lock:
@@ -427,7 +429,7 @@ class RunMetrics:
             self._judge_errored += 1
             judge_body = self._judge_body()
             pipeline_body = self._pipeline_body()
-        self._display.update_body("judge_match", body=judge_body)
+        self._display.update_body("llm_judge_match", body=judge_body)
         self._display.update_body("pipeline", body=pipeline_body)
 
     # -----------------------------------------------------------------------
@@ -578,7 +580,7 @@ class RunMetrics:
             started_at,
         )
         parser_log.summarize(
-            "classify_relevance",
+            "llm_classify_relevance",
             {
                 "batches_sent": classify_calls,
                 "items_classified": classify_items,
@@ -594,7 +596,7 @@ class RunMetrics:
             started_at,
         )
         parser_log.summarize(
-            "judge_match",
+            "llm_judge_match",
             {
                 "judges_sent": judge_calls,
                 "judges_failed": judge_failed,

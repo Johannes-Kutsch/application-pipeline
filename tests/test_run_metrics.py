@@ -79,8 +79,8 @@ def test_register_rows_creates_four_rows_with_correct_order_and_phase():
     assert _registers(display) == [
         ("pipeline_dedup", 10, "running"),
         ("pipeline_prefilter", 11, "running"),
-        ("classify_relevance", 12, "running"),
-        ("judge_match", 13, "running"),
+        ("llm_classify_relevance", 12, "running"),
+        ("llm_judge_match", 13, "running"),
     ]
 
 
@@ -194,7 +194,7 @@ def test_classify_body_no_failures():
     metrics.classify_batch_dequeued(5)
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
 
-    body = _last_body(display, "classify_relevance")
+    body = _last_body(display, "llm_classify_relevance")
     assert body == "1/1 calls · 0 items in queue"
     assert "calls_failed" not in body
     assert "batches_failed" not in body
@@ -210,7 +210,7 @@ def test_classify_body_with_failures():
     metrics.classify_batch_dequeued(3)
     metrics.classify_batch_failed(items=3)
 
-    body = _last_body(display, "classify_relevance")
+    body = _last_body(display, "llm_classify_relevance")
     assert "calls_failed=1 items_failed=3" in body
     assert "batches_failed" not in body
     assert "items_errored" not in body
@@ -225,7 +225,7 @@ def test_classify_body_pending_count():
     metrics.classify_buffered(2)
     metrics.classify_batch_enqueued(4)
 
-    body = _last_body(display, "classify_relevance")
+    body = _last_body(display, "llm_classify_relevance")
     assert "6 items in queue" in body
 
 
@@ -237,12 +237,12 @@ def test_classify_denominator_increments_at_dequeue_not_enqueue():
     metrics.classify_buffered(5)
     metrics.classify_batch_enqueued(5)
 
-    body_after_enqueue = _last_body(display, "classify_relevance")
+    body_after_enqueue = _last_body(display, "llm_classify_relevance")
     assert body_after_enqueue.startswith("0/0 calls")
 
     metrics.classify_batch_dequeued(5)
 
-    body_after_dequeue = _last_body(display, "classify_relevance")
+    body_after_dequeue = _last_body(display, "llm_classify_relevance")
     assert body_after_dequeue.startswith("0/1 calls")
 
 
@@ -256,7 +256,7 @@ def test_classify_numerator_increments_on_failure():
     metrics.classify_batch_dequeued(3)
     metrics.classify_batch_failed(items=3)
 
-    body = _last_body(display, "classify_relevance")
+    body = _last_body(display, "llm_classify_relevance")
     assert body.startswith("1/1 calls")
 
 
@@ -272,7 +272,7 @@ def test_classify_idle_state_shows_n_over_n():
         metrics.classify_batch_dequeued(5)
         metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
-    body = _last_body(display, "classify_relevance")
+    body = _last_body(display, "llm_classify_relevance")
     assert body == "2/2 calls · 0 items in queue"
 
 
@@ -282,11 +282,11 @@ def test_classify_body_updates_per_item_without_batch_flush():
     metrics.register_rows(0)
 
     metrics.classify_buffered(1)
-    body_after_first = _last_body(display, "classify_relevance")
+    body_after_first = _last_body(display, "llm_classify_relevance")
     assert "1 items in queue" in body_after_first
 
     metrics.classify_buffered(1)
-    body_after_second = _last_body(display, "classify_relevance")
+    body_after_second = _last_body(display, "llm_classify_relevance")
     assert "2 items in queue" in body_after_second
 
 
@@ -308,7 +308,7 @@ def test_judge_body_no_errors():
     metrics.judge_dequeued()
     metrics.judge_complete(usage, tier=MatchTier.amber, source="indeed")
 
-    body = _last_body(display, "judge_match")
+    body = _last_body(display, "llm_judge_match")
     assert body == "2/2 calls · green=1 amber=1 red=0 · 0 items in queue"
     assert "calls_failed" not in body
 
@@ -322,7 +322,7 @@ def test_judge_body_with_errors():
     metrics.judge_dequeued()
     metrics.judge_failed()
 
-    body = _last_body(display, "judge_match")
+    body = _last_body(display, "llm_judge_match")
     assert "calls_failed=1" in body
 
 
@@ -334,7 +334,7 @@ def test_judge_body_pending_count():
     metrics.judge_enqueued()
     metrics.judge_enqueued()
 
-    body = _last_body(display, "judge_match")
+    body = _last_body(display, "llm_judge_match")
     assert "2 items in queue" in body
 
 
@@ -348,7 +348,7 @@ def test_judge_body_idle_steady_state_uses_calls_and_items_in_queue():
     metrics.judge_dequeued()
     metrics.judge_complete(usage, tier=MatchTier.green, source="linkedin")
 
-    body = _last_body(display, "judge_match")
+    body = _last_body(display, "llm_judge_match")
     assert body == "1/1 calls · green=1 amber=0 red=0 · 0 items in queue"
 
 
@@ -359,7 +359,7 @@ def test_judge_body_denominator_unchanged_before_dequeue():
 
     metrics.judge_enqueued()
 
-    body = _last_body(display, "judge_match")
+    body = _last_body(display, "llm_judge_match")
     # denominator stays at 0 until the worker dequeues; queue increments to 1
     assert body == "0/0 calls · green=0 amber=0 red=0 · 1 items in queue"
 
@@ -372,7 +372,7 @@ def test_judge_body_dequeue_increments_denominator_and_decrements_queue():
     metrics.judge_enqueued()
     metrics.judge_dequeued()
 
-    body = _last_body(display, "judge_match")
+    body = _last_body(display, "llm_judge_match")
     # denominator=1 (started), queue=0 (dequeued), numerator still 0 (in flight)
     assert body == "0/1 calls · green=0 amber=0 red=0 · 0 items in queue"
 
@@ -386,7 +386,7 @@ def test_judge_body_failure_increments_numerator_and_shows_calls_failed():
     metrics.judge_dequeued()
     metrics.judge_failed()
 
-    body = _last_body(display, "judge_match")
+    body = _last_body(display, "llm_judge_match")
     assert (
         body == "1/1 calls · green=0 amber=0 red=0 · 0 items in queue · calls_failed=1"
     )

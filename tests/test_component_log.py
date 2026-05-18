@@ -32,9 +32,9 @@ def reset_logs():
 
 def test_record_creates_timestamped_event_line(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record("classify_relevance", "batch_sent")
+    parser_log.record("llm_classify_relevance", "batch_sent")
 
-    events_file = tmp_path / "classify_relevance.events.jsonl"
+    events_file = tmp_path / "llm_classify_relevance.events.jsonl"
     assert events_file.exists()
     row = json.loads(events_file.read_text(encoding="utf-8").strip())
     assert _ISO8601_RE.match(row["ts"])
@@ -44,11 +44,11 @@ def test_record_creates_timestamped_event_line(tmp_path: Path) -> None:
 def test_record_appends_key_value_fields(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     parser_log.record(
-        "classify_relevance", "batch_malformed", batch_id="b42", reason="bad_json"
+        "llm_classify_relevance", "batch_malformed", batch_id="b42", reason="bad_json"
     )
 
     row = json.loads(
-        (tmp_path / "classify_relevance.events.jsonl")
+        (tmp_path / "llm_classify_relevance.events.jsonl")
         .read_text(encoding="utf-8")
         .strip()
     )
@@ -58,17 +58,19 @@ def test_record_appends_key_value_fields(tmp_path: Path) -> None:
 
 
 def test_record_without_configure_is_noop(tmp_path: Path) -> None:
-    parser_log.record("classify_relevance", "batch_sent")
-    assert not (tmp_path / "classify_relevance.events.jsonl").exists()
+    parser_log.record("llm_classify_relevance", "batch_sent")
+    assert not (tmp_path / "llm_classify_relevance.events.jsonl").exists()
 
 
 def test_record_multiple_calls_append_in_order(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record("judge_match", "session_start")
-    parser_log.record("judge_match", "cli_error", exit_code="1")
+    parser_log.record("llm_judge_match", "session_start")
+    parser_log.record("llm_judge_match", "cli_error", exit_code="1")
 
     lines = (
-        (tmp_path / "judge_match.events.jsonl").read_text(encoding="utf-8").splitlines()
+        (tmp_path / "llm_judge_match.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     )
     assert len(lines) == 2
     assert json.loads(lines[0])["event"] == "session_start"
@@ -78,10 +80,10 @@ def test_record_multiple_calls_append_in_order(tmp_path: Path) -> None:
 def test_record_each_line_has_iso8601_timestamp(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     for event in ("e1", "e2", "e3"):
-        parser_log.record("classify_relevance", event)
+        parser_log.record("llm_classify_relevance", event)
 
     lines = (
-        (tmp_path / "classify_relevance.events.jsonl")
+        (tmp_path / "llm_classify_relevance.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     )
@@ -101,9 +103,9 @@ def test_record_transcript_appends_valid_json_object(tmp_path: Path) -> None:
         "status": "ok",
         "cost_usd": 0.001,
     }
-    parser_log.record_transcript("classify_relevance", entry)
+    parser_log.record_transcript("llm_classify_relevance", entry)
 
-    transcript_file = tmp_path / "classify_relevance.transcripts.jsonl"
+    transcript_file = tmp_path / "llm_classify_relevance.transcripts.jsonl"
     assert transcript_file.exists()
     lines = transcript_file.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
@@ -119,10 +121,10 @@ def test_record_transcript_multiple_calls_one_json_per_line(tmp_path: Path) -> N
         {"ts": "2026-05-12T10:02:00Z", "status": "ok", "item_ids": [3]},
     ]
     for e in entries:
-        parser_log.record_transcript("classify_relevance", e)
+        parser_log.record_transcript("llm_classify_relevance", e)
 
     lines = (
-        (tmp_path / "classify_relevance.transcripts.jsonl")
+        (tmp_path / "llm_classify_relevance.transcripts.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     )
@@ -132,8 +134,10 @@ def test_record_transcript_multiple_calls_one_json_per_line(tmp_path: Path) -> N
 
 
 def test_record_transcript_without_configure_is_noop(tmp_path: Path) -> None:
-    parser_log.record_transcript("classify_relevance", {"ts": "2026-05-12T10:00:00Z"})
-    assert not (tmp_path / "classify_relevance.transcripts.jsonl").exists()
+    parser_log.record_transcript(
+        "llm_classify_relevance", {"ts": "2026-05-12T10:00:00Z"}
+    )
+    assert not (tmp_path / "llm_classify_relevance.transcripts.jsonl").exists()
 
 
 def test_record_transcript_preserves_all_entry_fields(tmp_path: Path) -> None:
@@ -151,9 +155,9 @@ def test_record_transcript_preserves_all_entry_fields(tmp_path: Path) -> None:
         "item_ids": [10, 20],
         "stub_urls": ["https://example.com/a", "https://example.com/b"],
     }
-    parser_log.record_transcript("classify_relevance", entry)
+    parser_log.record_transcript("llm_classify_relevance", entry)
 
-    raw = (tmp_path / "classify_relevance.transcripts.jsonl").read_text(
+    raw = (tmp_path / "llm_classify_relevance.transcripts.jsonl").read_text(
         encoding="utf-8"
     )
     assert json.loads(raw.strip()) == entry
@@ -162,9 +166,9 @@ def test_record_transcript_preserves_all_entry_fields(tmp_path: Path) -> None:
 def test_record_transcript_null_parsed_field_survives_roundtrip(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     entry = {"ts": "2026-05-12T10:00:00Z", "parsed": None, "status": "error"}
-    parser_log.record_transcript("judge_match", entry)
+    parser_log.record_transcript("llm_judge_match", entry)
 
-    raw = (tmp_path / "judge_match.transcripts.jsonl").read_text(encoding="utf-8")
+    raw = (tmp_path / "llm_judge_match.transcripts.jsonl").read_text(encoding="utf-8")
     assert json.loads(raw.strip())["parsed"] is None
 
 
@@ -188,7 +192,7 @@ def test_summarize_with_caller_supplied_counts(tmp_path: Path) -> None:
         "cost_usd": 0.05,
         "duration_s": 42.7,
     }
-    parser_log.summarize("classify_relevance", counts, started)
+    parser_log.summarize("llm_classify_relevance", counts, started)
 
     content = (tmp_path / "run.log").read_text(encoding="utf-8")
     assert "SUMMARY OF SESSION 2026-05-12T15:30:00Z" in content
@@ -199,7 +203,7 @@ def test_summarize_with_caller_supplied_counts(tmp_path: Path) -> None:
 def test_summarize_with_zero_events_produces_valid_trailer(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     started = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
-    parser_log.summarize("judge_match", {"calls": 0, "duration_s": 0.0}, started)
+    parser_log.summarize("llm_judge_match", {"calls": 0, "duration_s": 0.0}, started)
 
     content = (tmp_path / "run.log").read_text(encoding="utf-8")
     assert "SUMMARY OF SESSION" in content
@@ -215,15 +219,15 @@ def test_two_sessions_produce_two_summary_blocks_separated_by_blank_line(
     started2 = datetime(2026, 5, 12, 16, 0, 0, tzinfo=timezone.utc)
 
     # Session 1
-    parser_log.record("classify_relevance", "batch_sent", batch_id="b1")
+    parser_log.record("llm_classify_relevance", "batch_sent", batch_id="b1")
     parser_log.summarize(
-        "classify_relevance", {"batches_sent": 1, "items_classified": 5}, started1
+        "llm_classify_relevance", {"batches_sent": 1, "items_classified": 5}, started1
     )
 
     # Session 2
-    parser_log.record("classify_relevance", "batch_sent", batch_id="b2")
+    parser_log.record("llm_classify_relevance", "batch_sent", batch_id="b2")
     parser_log.summarize(
-        "classify_relevance", {"batches_sent": 1, "items_classified": 3}, started2
+        "llm_classify_relevance", {"batches_sent": 1, "items_classified": 3}, started2
     )
 
     content = (tmp_path / "run.log").read_text(encoding="utf-8")
@@ -241,21 +245,21 @@ def test_two_sessions_produce_two_summary_blocks_separated_by_blank_line(
 
 def test_event_log_and_transcript_are_independent_files(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record("classify_relevance", "batch_sent")
+    parser_log.record("llm_classify_relevance", "batch_sent")
     parser_log.record_transcript(
-        "classify_relevance", {"ts": "2026-05-12T10:00:00Z", "status": "ok"}
+        "llm_classify_relevance", {"ts": "2026-05-12T10:00:00Z", "status": "ok"}
     )
 
-    assert (tmp_path / "classify_relevance.events.jsonl").exists()
-    assert (tmp_path / "classify_relevance.transcripts.jsonl").exists()
+    assert (tmp_path / "llm_classify_relevance.events.jsonl").exists()
+    assert (tmp_path / "llm_classify_relevance.transcripts.jsonl").exists()
 
 
 def test_different_component_ids_write_separate_files(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
-    parser_log.record("classify_relevance", "batch_sent")
-    parser_log.record_transcript("judge_match", {"ts": "2026-05-12T10:00:00Z"})
+    parser_log.record("llm_classify_relevance", "batch_sent")
+    parser_log.record_transcript("llm_judge_match", {"ts": "2026-05-12T10:00:00Z"})
 
-    assert (tmp_path / "classify_relevance.events.jsonl").exists()
-    assert (tmp_path / "judge_match.transcripts.jsonl").exists()
-    assert not (tmp_path / "judge_match.events.jsonl").exists()
-    assert not (tmp_path / "classify_relevance.transcripts.jsonl").exists()
+    assert (tmp_path / "llm_classify_relevance.events.jsonl").exists()
+    assert (tmp_path / "llm_judge_match.transcripts.jsonl").exists()
+    assert not (tmp_path / "llm_judge_match.events.jsonl").exists()
+    assert not (tmp_path / "llm_classify_relevance.transcripts.jsonl").exists()

@@ -110,6 +110,13 @@ class _EnrichDecision:
     judge_resume: bool
 
 
+@dataclass
+class _EnrichResult:
+    stub: PositionStub
+    payload: "Position | ParserError | ExternalRedirect"
+    judge_resume: bool
+
+
 class _Skip:
     __slots__ = ()
 
@@ -257,12 +264,32 @@ class _ParserThread(threading.Thread):
                                 continue  # fire-and-forget; orchestrator counts, no reply
                             decision = self._inbound.get()
                             if isinstance(decision, _EnrichDecision):
-                                judge_resume = decision.judge_resume  # noqa: F841 — held for outbound propagation
                                 try:
-                                    position = self._parser.enrich(item)
-                                    self._outbound.put((self._parser_id, position))
+                                    enrich_payload: Position | ExternalRedirect = (
+                                        self._parser.enrich(item)
+                                    )
                                 except ParserError as exc:
-                                    self._outbound.put((self._parser_id, exc))
+                                    self._outbound.put(
+                                        (
+                                            self._parser_id,
+                                            _EnrichResult(
+                                                stub=item,
+                                                payload=exc,
+                                                judge_resume=decision.judge_resume,
+                                            ),
+                                        )
+                                    )
+                                else:
+                                    self._outbound.put(
+                                        (
+                                            self._parser_id,
+                                            _EnrichResult(
+                                                stub=item,
+                                                payload=enrich_payload,
+                                                judge_resume=decision.judge_resume,
+                                            ),
+                                        )
+                                    )
                             elif decision is _SKIP_AND_END_QUERY:
                                 break
                             # else: _SKIP — continue to next stub
@@ -446,8 +473,6 @@ class _ParserState:
     started_monotonic: float = field(default_factory=time.monotonic)
     last_event_monotonic: float = field(default_factory=time.monotonic)
     stall_logged: bool = False
-    pending_enrich: PositionStub | None = None
-    pending_judge_resume: bool = False
 
 
 def _prefilter_reason(verdict: PreFilterVerdict) -> str:
@@ -512,12 +537,8 @@ class _OutboundDispatcher:
         state = self._parser_states[pid]
         if isinstance(payload, PositionStub):
             self._handle_stub(pid, state, payload)
-        elif isinstance(payload, Position):
-            self._handle_position(pid, state, payload)
-        elif isinstance(payload, ParserError):
-            self._handle_parser_error(pid, state, payload)
-        elif isinstance(payload, ExternalRedirect):
-            self._handle_external_redirect(pid, state, payload)
+        elif isinstance(payload, _EnrichResult):
+            self._handle_enrich_result(pid, payload)
         elif isinstance(payload, NotServedQuery):
             self._handle_not_served(pid)
         elif payload is _QUERY_DONE:
@@ -557,59 +578,47 @@ class _OutboundDispatcher:
         result = self._dedup_run.is_seen(payload)
         self._metrics.record_dedup(result)
         if result == "miss":
-            state.pending_enrich = payload
-            state.pending_judge_resume = False
             state.inbound.put(_EnrichDecision(judge_resume=False))
         elif result == "judge_pending":
-            state.pending_enrich = payload
-            state.pending_judge_resume = True
             state.inbound.put(_EnrichDecision(judge_resume=True))
         else:
             state.inbound.put(_SKIP)
 
-    def _handle_position(
-        self, pid: str, state: _ParserState, payload: Position
-    ) -> None:
-        for warning in payload._warnings:
-            parser_log.record(pid, warning)
-            if warning.startswith("unparseable_date"):
-                self._metrics.unparseable_date(pid)
-        self._metrics.enriched(pid)
-        if state.pending_judge_resume:
-            state.pending_judge_resume = False
-            state.pending_enrich = None
-            self._metrics.judge_enqueued()
-            self._judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
-        else:
-            verdict = self._prefilter.classify(payload)
-            parser_log.record(
-                "prefilter",
-                "decision",
-                url=payload.stub.url,
-                title=payload.title,
-                source=payload.stub.source,
-                passes=verdict.passes,
-                reason=_prefilter_reason(verdict),
-                blacklist_matches=_serialize_matches(verdict.blacklist_matches),
-                title_len=len(payload.title),
-            )
-            if verdict.passes:
-                self._metrics.prefilter_passed(verdict)
-                self._classify_buffer.append(payload)
-                self._metrics.classify_buffered(1)
-                if len(self._classify_buffer) >= self._batch_size:
-                    self._flush_classify_batch()
+    def _handle_enrich_result(self, pid: str, wrapper: _EnrichResult) -> None:
+        stub = wrapper.stub
+        payload = wrapper.payload
+        if isinstance(payload, Position):
+            for warning in payload._warnings:
+                parser_log.record(pid, warning)
+                if warning.startswith("unparseable_date"):
+                    self._metrics.unparseable_date(pid)
+            self._metrics.enriched(pid)
+            if wrapper.judge_resume:
+                self._metrics.judge_enqueued()
+                self._judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
             else:
-                self._dedup_store.mark_off_domain(payload.stub)
-                self._metrics.prefilter_dropped(verdict)
-
-    def _handle_parser_error(
-        self, pid: str, state: _ParserState, payload: ParserError
-    ) -> None:
-        stub = state.pending_enrich
-        state.pending_enrich = None
-        state.pending_judge_resume = False
-        if stub is not None:
+                verdict = self._prefilter.classify(payload)
+                parser_log.record(
+                    "prefilter",
+                    "decision",
+                    url=payload.stub.url,
+                    title=payload.title,
+                    source=payload.stub.source,
+                    passes=verdict.passes,
+                    reason=_prefilter_reason(verdict),
+                    blacklist_matches=_serialize_matches(verdict.blacklist_matches),
+                    title_len=len(payload.title),
+                )
+                if verdict.passes:
+                    self._metrics.prefilter_passed(verdict)
+                    self._classify_buffer.append(payload)
+                    self._metrics.classify_buffered(1)
+                    if len(self._classify_buffer) >= self._batch_size:
+                        self._flush_classify_batch()
+                else:
+                    self._dedup_store.mark_off_domain(payload.stub)
+                    self._metrics.prefilter_dropped(verdict)
+        elif isinstance(payload, ParserError):
             parser_log.record(
                 pid,
                 "enrich_failed",
@@ -618,15 +627,8 @@ class _OutboundDispatcher:
                 reason=str(payload),
             )
             self._dedup_store.mark_enrich_failed(stub)
-        self._metrics.enrich_failed(pid)
-
-    def _handle_external_redirect(
-        self, pid: str, state: _ParserState, payload: ExternalRedirect
-    ) -> None:
-        stub = state.pending_enrich
-        state.pending_enrich = None
-        state.pending_judge_resume = False
-        if stub is not None:
+            self._metrics.enrich_failed(pid)
+        elif isinstance(payload, ExternalRedirect):
             parser_log.record(
                 pid,
                 "external_redirect",
@@ -634,7 +636,7 @@ class _OutboundDispatcher:
                 outbound=payload.outbound_url,
             )
             self._dedup_store.mark_external_redirect(stub)
-        self._metrics.external_redirect(pid)
+            self._metrics.external_redirect(pid)
 
     def _handle_not_served(self, pid: str) -> None:
         self._metrics.not_served_query(pid)

@@ -8,6 +8,7 @@ from application_pipeline.config import Config
 from application_pipeline.prompts import Prompts
 
 from .agent_output import AgentOutputProtocolError, extract_json_block
+from .boilerplate import strip_boilerplate
 from .claude_cli import (
     ClaudeCliError,
     ClaudeCliInvoker,
@@ -92,7 +93,8 @@ class ClaudeExtractor:
         self, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]:
         prompt = self._prompts.judge_match.render(
-            skills=self._skills_block, raw_description=raw_description
+            skills=self._skills_block,
+            raw_description=strip_boilerplate(raw_description),
         )
         data, response = self._invoke(_JUDGE_SITE, prompt, {"stub_url": stub_url})
         usage = self._usage_from(response)

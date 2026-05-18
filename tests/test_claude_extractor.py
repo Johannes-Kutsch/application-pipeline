@@ -385,6 +385,105 @@ def test_judge_match_skills_bound_at_construction() -> None:
 
 
 # ---------------------------------------------------------------------------
+# judge_match: boilerplate stripping
+# ---------------------------------------------------------------------------
+
+
+def test_judge_match_strips_wir_bieten_section_from_prompt() -> None:
+    """raw_description with 'Wir bieten:' has the benefits section removed from prompt."""
+    invoker = _fake_invoker(_judge_response())
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(judge="job: {raw_description}"),
+        _invoker=invoker,
+    )
+    raw = (
+        "Python Developer gesucht.\n\n"
+        "Anforderungen: 3 Jahre Python-Erfahrung.\n\n"
+        "Wir bieten:\n\n"
+        "Flexible Arbeitszeiten und 30 Tage Urlaub."
+    )
+    extractor.judge_match(raw)
+    prompt_sent = invoker.call.call_args.args[0]
+    assert "Python Developer gesucht" in prompt_sent
+    assert "Flexible Arbeitszeiten" not in prompt_sent
+
+
+def test_judge_match_strips_ueber_uns_section_from_prompt() -> None:
+    """raw_description with 'Über uns:' has the company-marketing prose removed from prompt."""
+    invoker = _fake_invoker(_judge_response())
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(judge="job: {raw_description}"),
+        _invoker=invoker,
+    )
+    raw = (
+        "Softwareentwickler (m/w/d) gesucht.\n\n"
+        "Über uns:\n\n"
+        "Wir sind ein führendes Technologieunternehmen mit 500 Mitarbeitern."
+    )
+    extractor.judge_match(raw)
+    prompt_sent = invoker.call.call_args.args[0]
+    assert "Softwareentwickler" in prompt_sent
+    assert "führendes Technologieunternehmen" not in prompt_sent
+
+
+def test_judge_match_strips_application_instructions_from_prompt() -> None:
+    """raw_description with application-instructions has those paragraphs removed."""
+    invoker = _fake_invoker(_judge_response())
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(judge="job: {raw_description}"),
+        _invoker=invoker,
+    )
+    raw = (
+        "Data Engineer (m/w/d) ab sofort gesucht.\n\n"
+        "Kenntnisse in SQL und Python erforderlich.\n\n"
+        "Bewerben Sie sich bis zum 31. Mai per E-Mail an jobs@firma.de.\n\n"
+        "Vollständige Unterlagen einreichen."
+    )
+    extractor.judge_match(raw)
+    prompt_sent = invoker.call.call_args.args[0]
+    assert "Data Engineer" in prompt_sent
+    assert "jobs@firma.de" not in prompt_sent
+
+
+def test_judge_match_no_sentinel_passes_text_unchanged() -> None:
+    """raw_description without sentinel phrases is sent byte-identical to the prompt."""
+    invoker = _fake_invoker(_judge_response())
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(judge="{raw_description}"),
+        _invoker=invoker,
+    )
+    raw = "Machine Learning Engineer.\n\nPython und TensorFlow erforderlich."
+    extractor.judge_match(raw)
+    prompt_sent = invoker.call.call_args.args[0]
+    assert prompt_sent == raw
+
+
+def test_judge_match_static_prompt_prefix_is_identical_across_calls() -> None:
+    """The rendered prompt prefix (before raw_description) is bit-identical across two calls."""
+    invoker = MagicMock(spec=ClaudeCliInvoker)
+    invoker.call.return_value = _judge_response()
+    extractor = ClaudeExtractor(
+        _config(skills=["python"]),
+        _prompts(judge="PREFIX: {skills} DESC: {raw_description} SUFFIX"),
+        _invoker=invoker,
+    )
+    extractor.judge_match("first raw description")
+    extractor.judge_match("second raw description with Wir bieten:\n\nbenefits text")
+
+    prompt_1 = invoker.call.call_args_list[0].args[0]
+    prompt_2 = invoker.call.call_args_list[1].args[0]
+
+    # Extract the prefix up to DESC:
+    prefix_1 = prompt_1[: prompt_1.index("DESC:")]
+    prefix_2 = prompt_2[: prompt_2.index("DESC:")]
+    assert prefix_1 == prefix_2
+
+
+# ---------------------------------------------------------------------------
 # judge_match: events and transcript recording
 # ---------------------------------------------------------------------------
 

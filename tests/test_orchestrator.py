@@ -3485,7 +3485,8 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
         f"last body {bodies[-1]!r} must end with '· done'"
     )
     assert not any(
-        c.method == "remove" and c.name == "parser_bundesagentur_api" for c in display.calls
+        c.method == "remove" and c.name == "parser_bundesagentur_api"
+        for c in display.calls
     ), "parser row must not be removed during run"
 
 
@@ -3560,7 +3561,8 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
         f"last body {bodies[-1]!r} must end with '· dead'"
     )
     assert not any(
-        c.method == "remove" and c.name == "parser_bundesagentur_api" for c in display.calls
+        c.method == "remove" and c.name == "parser_bundesagentur_api"
+        for c in display.calls
     ), "dead parser row must not be removed"
 
 

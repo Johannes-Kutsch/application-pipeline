@@ -1,3 +1,15 @@
-from .prefilter import DomainPreFilter, PreFilterVerdict, TermMatch
+from .prefilter import (
+    DomainPreFilter,
+    PreFilterVerdict,
+    TermMatch,
+    classify_position,
+    precompute_blacklist,
+)
 
-__all__ = ["DomainPreFilter", "PreFilterVerdict", "TermMatch"]
+__all__ = [
+    "DomainPreFilter",
+    "PreFilterVerdict",
+    "TermMatch",
+    "classify_position",
+    "precompute_blacklist",
+]

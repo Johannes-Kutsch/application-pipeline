@@ -257,7 +257,7 @@ class _ParserThread(threading.Thread):
                                 continue  # fire-and-forget; orchestrator counts, no reply
                             decision = self._inbound.get()
                             if isinstance(decision, _EnrichDecision):
-                                judge_resume = decision.judge_resume  # noqa: F841 — used in slice 2
+                                judge_resume = decision.judge_resume  # noqa: F841 — held for outbound propagation
                                 try:
                                     position = self._parser.enrich(item)
                                     self._outbound.put((self._parser_id, position))

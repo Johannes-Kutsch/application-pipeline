@@ -109,11 +109,11 @@ def test_plain_stop_is_silent(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# parser_log integration
+# parser_log integration (renderer-agnostic — lifecycle logic lives in _StatusDisplay)
 # ---------------------------------------------------------------------------
 
 
-def test_plain_register_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
+def test_register_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
@@ -130,9 +130,7 @@ def test_plain_register_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
     )
 
 
-def test_plain_update_phase_transition_writes_to_lifecycle_jsonl(
-    tmp_path: Path,
-) -> None:
+def test_update_phase_transition_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")
@@ -147,7 +145,7 @@ def test_plain_update_phase_transition_writes_to_lifecycle_jsonl(
     assert any(r["event"] == "phase_changed" and r["phase"] == "done" for r in rows)
 
 
-def test_plain_update_phase_no_transition_does_not_write_extra_lifecycle_row(
+def test_update_phase_no_transition_does_not_write_extra_lifecycle_row(
     tmp_path: Path,
 ) -> None:
     _parser_log.configure(tmp_path)
@@ -165,7 +163,7 @@ def test_plain_update_phase_no_transition_does_not_write_extra_lifecycle_row(
     assert len(lines_before) == len(lines_after)
 
 
-def test_plain_remove_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
+def test_remove_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
     _parser_log.configure(tmp_path)
     display = PlainStatusDisplay()
     display.register("pipeline", order=0, phase="running")

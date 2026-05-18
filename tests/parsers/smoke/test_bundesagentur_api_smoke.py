@@ -5,6 +5,7 @@ import pytest
 from application_pipeline.parsers.bundesagentur_api import BundesagenturParser
 from application_pipeline.parsers.types import (
     City,
+    ExternalRedirect,
     ParserQuery,
     Position,
     PositionStub,
@@ -36,8 +37,7 @@ def test_at_least_one_externe_url_exists_in_broad_search() -> None:
     externe_url_found = False
     with BundesagenturParser() as p:
         for stub in stubs[:25]:
-            result = p.enrich(stub)
-            if hasattr(result, "outbound_url"):
+            if isinstance(p.enrich(stub), ExternalRedirect):
                 externe_url_found = True
                 break
     assert externe_url_found, (

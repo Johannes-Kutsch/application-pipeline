@@ -12,29 +12,37 @@ FILE_HEADER = """\
 """
 
 
+def ensure_initialized(path: Path) -> None:
+    try:
+        if path.exists() and path.stat().st_size > 0:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(FILE_HEADER, encoding="utf-8")
+    except OSError as exc:
+        raise ResultsFileError(str(exc)) from exc
+
+
+def append(path: Path, text: str) -> None:
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError as exc:
+        raise ResultsFileError(
+            f"append failed — results file may be corrupt, manual intervention may be required: {path}"
+        ) from exc
+
+
 class ResultsFileManager:
     def __init__(self, path: Path) -> None:
         self._path = path
 
     def ensure_initialized(self) -> None:
-        try:
-            if self._path.exists() and self._path.stat().st_size > 0:
-                return
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(FILE_HEADER, encoding="utf-8")
-        except OSError as exc:
-            raise ResultsFileError(str(exc)) from exc
+        ensure_initialized(self._path)
 
     def append(self, rendered_block: str) -> None:
-        try:
-            with open(self._path, "a", encoding="utf-8") as f:
-                f.write(rendered_block)
-                f.flush()
-                os.fsync(f.fileno())
-        except OSError as exc:
-            raise ResultsFileError(
-                f"append failed — results file may be corrupt, manual intervention may be required: {self._path}"
-            ) from exc
+        append(self._path, rendered_block)
 
 
 def load(path: Path) -> ResultsFileManager:

@@ -16,7 +16,13 @@ from application_pipeline.parsers.bundesagentur_api import (
     parser_class,
 )
 from application_pipeline.parsers.http import ParserHttp
-from application_pipeline.parsers.types import City, NotServedQuery, Remote
+from application_pipeline.parsers.types import (
+    City,
+    ExternalRedirect,
+    NotServedQuery,
+    Position,
+    Remote,
+)
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "bundesagentur"
 
@@ -506,6 +512,7 @@ def test_enrich_parses_detail_fixture(stub: PositionStub) -> None:
     http = _make_http([_load("detail.json")])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "Software Engineer" in pos.raw_description or pos.raw_description != ""
     assert pos.contract_type == "permanent"
     assert pos.employment_type == "full-time"
@@ -521,6 +528,7 @@ def test_enrich_returns_position_with_raw_description(stub: PositionStub) -> Non
     http = _make_http([_detail_body(description="We are hiring.")])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.raw_description == "We are hiring."
 
 
@@ -528,6 +536,7 @@ def test_enrich_strips_html_tags_from_description(stub: PositionStub) -> None:
     http = _make_http([_detail_body(description="<p>Hello</p><p>World</p>")])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "<p>" not in pos.raw_description
     assert "Hello" in pos.raw_description
     assert "World" in pos.raw_description
@@ -537,6 +546,7 @@ def test_enrich_decodes_html_entities_in_description(stub: PositionStub) -> None
     http = _make_http([_detail_body(description="Geh&auml;lter &amp; Benefits")])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "Gehälter" in pos.raw_description
     assert "&amp;" not in pos.raw_description
 
@@ -546,6 +556,7 @@ def test_enrich_empty_description_when_field_absent(stub: PositionStub) -> None:
     http = _make_http([body])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.raw_description == ""
 
 
@@ -558,6 +569,7 @@ def test_enrich_maps_unbefristet_to_permanent(stub: PositionStub) -> None:
     http = _make_http([_detail_body(vertragsdauer="UNBEFRISTET")])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.contract_type == "permanent"
 
 
@@ -565,6 +577,7 @@ def test_enrich_maps_befristet_to_fixed_term(stub: PositionStub) -> None:
     http = _make_http([_detail_body(vertragsdauer="BEFRISTET")])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.contract_type == "fixed-term"
 
 
@@ -574,6 +587,7 @@ def test_enrich_contract_type_none_when_vertragsdauer_absent(
     http = _make_http([_detail_body()])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.contract_type is None
 
 
@@ -583,6 +597,7 @@ def test_enrich_contract_type_none_for_unknown_vertragsdauer(
     http = _make_http([_detail_body(vertragsdauer="KEINE_ANGABE")])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.contract_type is None
 
 
@@ -595,6 +610,7 @@ def test_enrich_arbeitszeitvollzeit_true_maps_to_full_time(stub: PositionStub) -
     http = _make_http([_detail_body(arbeitszeitVollzeit=True)])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type == "full-time"
 
 
@@ -604,6 +620,7 @@ def test_enrich_vollzeit_wins_over_teilzeit_flags(stub: PositionStub) -> None:
     )
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type == "full-time"
 
 
@@ -613,6 +630,7 @@ def test_enrich_teilzeit_flag_maps_to_part_time(stub: PositionStub) -> None:
     )
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type == "part-time"
 
 
@@ -622,6 +640,7 @@ def test_enrich_employment_type_none_when_all_flags_false(stub: PositionStub) ->
     )
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type is None
 
 
@@ -631,6 +650,7 @@ def test_enrich_employment_type_none_when_flags_absent(
     http = _make_http([_detail_body()])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type is None
 
 
@@ -645,6 +665,7 @@ def test_enrich_parses_posted_date_from_veroeffentlichungszeitraum(
     http = _make_http([_detail_body(veroeffentlichungszeitraum={"von": "2024-03-15"})])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.posted_date == date(2024, 3, 15)
 
 
@@ -652,6 +673,7 @@ def test_enrich_parses_deadline(stub: PositionStub) -> None:
     http = _make_http([_detail_body(bewerbungsschluss="2024-04-30")])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.deadline == date(2024, 4, 30)
 
 
@@ -659,6 +681,7 @@ def test_enrich_posted_date_none_when_field_absent(stub: PositionStub) -> None:
     http = _make_http([_detail_body()])
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.posted_date is None
 
 
@@ -694,3 +717,131 @@ def test_enrich_position_references_original_stub(stub: PositionStub) -> None:
     with BundesagenturParser(_http=http) as p:
         pos = p.enrich(stub)
     assert pos.stub is stub
+
+
+# ---------------------------------------------------------------------------
+# enrich — externeURL detection (external_redirect event)
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_externe_url_empty_body_returns_external_redirect(
+    stub: PositionStub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+    http = _make_http([_detail_body(externeURL="https://jobs.example.com/123")])
+    with BundesagenturParser(_http=http) as p:
+        result = p.enrich(stub)
+    assert isinstance(result, ExternalRedirect)
+    assert result.stub is stub
+    assert result.outbound_url == "https://jobs.example.com/123"
+
+
+def test_enrich_externe_url_empty_body_emits_external_redirect_event_skipped_true(
+    stub: PositionStub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+    http = _make_http([_detail_body(externeURL="https://jobs.example.com/123")])
+    with BundesagenturParser(_http=http) as p:
+        p.enrich(stub)
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "parser_bundesagentur_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    redirect_events = [e for e in events if e.get("event") == "external_redirect"]
+    assert len(redirect_events) == 1
+    assert redirect_events[0]["stub_url"] == stub.url
+    assert redirect_events[0]["outbound"] == "https://jobs.example.com/123"
+    assert redirect_events[0]["skipped"] is True
+
+
+def test_enrich_externe_url_html_only_body_treated_as_empty(
+    stub: PositionStub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+    http = _make_http(
+        [
+            _detail_body(
+                description="<p>  </p>", externeURL="https://jobs.example.com/456"
+            )
+        ]
+    )
+    with BundesagenturParser(_http=http) as p:
+        result = p.enrich(stub)
+    assert isinstance(result, ExternalRedirect)
+    assert result.outbound_url == "https://jobs.example.com/456"
+
+
+def test_enrich_externe_url_nonempty_body_returns_position(
+    stub: PositionStub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+    http = _make_http(
+        [
+            _detail_body(
+                description="Wir bieten tolle Jobs.",
+                externeURL="https://jobs.example.com/789",
+            )
+        ]
+    )
+    with BundesagenturParser(_http=http) as p:
+        result = p.enrich(stub)
+    assert isinstance(result, Position)
+    assert result.raw_description == "Wir bieten tolle Jobs."
+
+
+def test_enrich_externe_url_nonempty_body_emits_external_redirect_event_skipped_false(
+    stub: PositionStub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+    http = _make_http(
+        [
+            _detail_body(
+                description="Wir bieten tolle Jobs.",
+                externeURL="https://jobs.example.com/789",
+            )
+        ]
+    )
+    with BundesagenturParser(_http=http) as p:
+        p.enrich(stub)
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "parser_bundesagentur_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    redirect_events = [e for e in events if e.get("event") == "external_redirect"]
+    assert len(redirect_events) == 1
+    assert redirect_events[0]["stub_url"] == stub.url
+    assert redirect_events[0]["outbound"] == "https://jobs.example.com/789"
+    assert redirect_events[0]["skipped"] is False
+
+
+def test_enrich_no_externe_url_emits_no_external_redirect_event(
+    stub: PositionStub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+    http = _make_http([_detail_body(description="Normal description.")])
+    with BundesagenturParser(_http=http) as p:
+        result = p.enrich(stub)
+    assert isinstance(result, Position)
+    events_file = tmp_path / "parser_bundesagentur_api.events.jsonl"
+    if events_file.exists():
+        events = [
+            json.loads(line)
+            for line in events_file.read_text(encoding="utf-8").splitlines()
+        ]
+        assert not any(e.get("event") == "external_redirect" for e in events)

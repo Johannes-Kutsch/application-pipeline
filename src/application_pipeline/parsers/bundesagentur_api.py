@@ -12,7 +12,14 @@ import application_pipeline.parser_log as parser_log
 from ._text import parse_iso_date, strip_html
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
-from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
+from .types import (
+    City,
+    ExternalRedirect,
+    NotServedQuery,
+    ParserQuery,
+    Position,
+    PositionStub,
+)
 
 _BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6"
 _DETAIL_BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
@@ -174,7 +181,7 @@ class BundesagenturParser:
 
             page += 1
 
-    def enrich(self, stub: PositionStub) -> Position:
+    def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
         ref_b64 = stub.url.rsplit("/", 1)[-1]
         rest_url = f"{_DETAIL_BASE_URL}/jobdetails/{ref_b64}"
         raw = self._http.get(
@@ -182,7 +189,22 @@ class BundesagenturParser:
         )
         data: dict[str, Any] = json.loads(raw)
 
+        outbound: str | None = data.get("externeURL") or None
         raw_description = strip_html(data.get("stellenangebotsBeschreibung") or "")
+        body = raw_description.strip()
+
+        if outbound:
+            skipped = body == ""
+            parser_log.record(
+                "parser_bundesagentur_api",
+                "external_redirect",
+                stub_url=stub.url,
+                outbound=outbound,
+                skipped=skipped,
+            )
+            if skipped:
+                return ExternalRedirect(stub, outbound)
+
         veroeffentlichung = data.get("veroeffentlichungszeitraum") or {}
         vollzeit = bool(data.get("arbeitszeitVollzeit"))
         teilzeit = any(

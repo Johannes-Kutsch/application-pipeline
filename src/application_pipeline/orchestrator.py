@@ -587,7 +587,7 @@ class _OutboundDispatcher:
             else:
                 verdict = self._prefilter.classify(payload)
                 parser_log.record(
-                    "prefilter",
+                    "pipeline_prefilter",
                     "decision",
                     url=payload.stub.url,
                     title=payload.title,

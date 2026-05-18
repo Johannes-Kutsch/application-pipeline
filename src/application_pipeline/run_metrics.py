@@ -167,8 +167,10 @@ class RunMetrics:
     # -----------------------------------------------------------------------
 
     def register_rows(self, starting_order: int) -> None:
-        self._display.register("dedup", order=starting_order, phase="running")
-        self._display.register("prefilter", order=starting_order + 1, phase="running")
+        self._display.register("pipeline_dedup", order=starting_order, phase="running")
+        self._display.register(
+            "pipeline_prefilter", order=starting_order + 1, phase="running"
+        )
         self._display.register(
             "classify_relevance", order=starting_order + 2, phase="running"
         )
@@ -241,7 +243,7 @@ class RunMetrics:
             else:  # miss
                 self._dedup_misses += 1
             body = self._dedup_body()
-        self._display.update_body("dedup", body=body)
+        self._display.update_body("pipeline_dedup", body=body)
 
     def prefilter_passed(self, verdict: PreFilterVerdict) -> None:
         with self._lock:
@@ -249,7 +251,7 @@ class RunMetrics:
             self._prefilter_passed += 1
             self._tally_prefilter_verdict(verdict)
             body = self._prefilter_body()
-        self._display.update_body("prefilter", body=body)
+        self._display.update_body("pipeline_prefilter", body=body)
 
     def prefilter_dropped(self, verdict: PreFilterVerdict) -> None:
         with self._lock:
@@ -257,7 +259,7 @@ class RunMetrics:
             self._prefilter_dropped += 1
             self._tally_prefilter_verdict(verdict)
             body = self._prefilter_body()
-        self._display.update_body("prefilter", body=body)
+        self._display.update_body("pipeline_prefilter", body=body)
 
     def enrich_failed(self, parser_id: str = "") -> None:
         with self._lock:
@@ -571,7 +573,7 @@ class RunMetrics:
             bl_counts = dict(self._prefilter_bl_counts)
 
         parser_log.summarize(
-            "prefilter",
+            "pipeline_prefilter",
             _prefilter_summary_counts(bl_terms, bl_counts),
             started_at,
         )

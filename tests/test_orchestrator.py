@@ -884,8 +884,8 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
         results_managers=_stub_results_managers(),
     )
 
-    events_file = logs_dir / "prefilter.events.jsonl"
-    assert events_file.exists(), "prefilter.events.jsonl must be created"
+    events_file = logs_dir / "pipeline_prefilter.events.jsonl"
+    assert events_file.exists(), "pipeline_prefilter.events.jsonl must be created"
 
     rows = [
         json.loads(line)
@@ -3644,18 +3644,18 @@ def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
     )
 
     registered = display.registered_names()
-    assert "dedup" in registered
-    assert "prefilter" in registered
+    assert "pipeline_dedup" in registered
+    assert "pipeline_prefilter" in registered
 
     dedup_order = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "dedup"
+        if c.method == "register" and c.name == "pipeline_dedup"
     )
     prefilter_order = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "prefilter"
+        if c.method == "register" and c.name == "pipeline_prefilter"
     )
     parser_order = next(
         c.kwargs["order"]
@@ -3686,8 +3686,8 @@ def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("prefilter")
-    assert bodies, "expected at least one body update for prefilter row"
+    bodies = display.body_updates_for("pipeline_prefilter")
+    assert bodies, "expected at least one body update for pipeline_prefilter row"
     final = bodies[-1]
     assert "considered=" in final
     assert "passed=" in final
@@ -3716,12 +3716,12 @@ def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    assert not any(c.method == "remove" and c.name == "dedup" for c in display.calls), (
-        "dedup row must not be removed during run"
-    )
     assert not any(
-        c.method == "remove" and c.name == "prefilter" for c in display.calls
-    ), "prefilter row must not be removed during run"
+        c.method == "remove" and c.name == "pipeline_dedup" for c in display.calls
+    ), "pipeline_dedup row must not be removed during run"
+    assert not any(
+        c.method == "remove" and c.name == "pipeline_prefilter" for c in display.calls
+    ), "pipeline_prefilter row must not be removed during run"
 
 
 # ---------------------------------------------------------------------------
@@ -3780,7 +3780,7 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
     prefilter_order = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "prefilter"
+        if c.method == "register" and c.name == "pipeline_prefilter"
     )
     classify_order = next(
         c.kwargs["order"]

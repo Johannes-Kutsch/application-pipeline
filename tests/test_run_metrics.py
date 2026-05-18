@@ -77,8 +77,8 @@ def test_register_rows_creates_four_rows_with_correct_order_and_phase():
     metrics.register_rows(starting_order=10)
 
     assert _registers(display) == [
-        ("dedup", 10, "running"),
-        ("prefilter", 11, "running"),
+        ("pipeline_dedup", 10, "running"),
+        ("pipeline_prefilter", 11, "running"),
         ("classify_relevance", 12, "running"),
         ("judge_match", 13, "running"),
     ]
@@ -141,7 +141,7 @@ def test_dedup_body_matches_main_stats_format():
     metrics.record_dedup("run_hit")
     metrics.record_dedup("miss")
 
-    body = _last_body(display, "dedup")
+    body = _last_body(display, "pipeline_dedup")
     assert body == "url_hits=2 tuple_hits=1 run_hits=2 misses=1"
 
 
@@ -163,7 +163,7 @@ def test_prefilter_body_matches_main_stats_format():
     # another pass
     metrics.prefilter_passed(_verdict(passes=True))
 
-    body = _last_body(display, "prefilter")
+    body = _last_body(display, "pipeline_prefilter")
     assert body == "considered=3 passed=2 dropped=1 (bl=1)"
 
 
@@ -173,7 +173,7 @@ def test_prefilter_body_clean_pass_shows_zero_blacklist_hits():
     metrics.register_rows(0)
 
     metrics.prefilter_passed(_verdict(passes=True))
-    body = _last_body(display, "prefilter")
+    body = _last_body(display, "pipeline_prefilter")
     assert "bl=0" in body
     assert "wl=" not in body
 

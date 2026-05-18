@@ -28,7 +28,7 @@ from .types import (
 )
 
 _CLASSIFY_MODEL = "haiku"
-_JUDGE_MODEL = "sonnet"
+_JUDGE_MODEL = "haiku"
 _JUDGE_EFFORT = "medium"
 
 

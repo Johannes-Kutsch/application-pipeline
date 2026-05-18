@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import Callable
@@ -676,6 +677,28 @@ def test_enrich_posted_date_none_when_field_absent(stub: PositionStub) -> None:
 # ---------------------------------------------------------------------------
 # enrich — error handling
 # ---------------------------------------------------------------------------
+
+
+def test_enrich_requests_rest_endpoint_with_base64_encoded_ref() -> None:
+    ref = "myhash"
+    s = PositionStub(
+        url=f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{ref}",
+        title="Dev",
+        source="Bundesagentur",
+    )
+    captured: list[str] = []
+
+    def capturing_get(url: str, timeout: float) -> bytes:
+        captured.append(url)
+        return _detail_body()
+
+    with BundesagenturParser(_http=ParserHttp(_http_get=capturing_get)) as p:
+        p.enrich(s)
+
+    ref_b64 = base64.b64encode(ref.encode()).decode()
+    assert captured == [
+        f"https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails/{ref_b64}"
+    ]
 
 
 def test_enrich_raises_parser_error_on_http_failure() -> None:

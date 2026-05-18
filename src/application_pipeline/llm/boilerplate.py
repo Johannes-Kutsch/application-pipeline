@@ -28,8 +28,8 @@ def strip_boilerplate(text: str) -> str:
     paragraphs = text.split("\n\n")
     result: list[str] = []
     for paragraph in paragraphs:
-        first_line = paragraph.strip().lower()
-        if any(first_line.startswith(sentinel) for sentinel in _SENTINELS):
+        normalized = paragraph.strip().lower()
+        if any(normalized.startswith(sentinel) for sentinel in _SENTINELS):
             break
         result.append(paragraph)
     return "\n\n".join(result).rstrip()

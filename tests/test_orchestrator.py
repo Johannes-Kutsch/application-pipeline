@@ -113,10 +113,9 @@ def _stub_extractor() -> MagicMock:
     return ext
 
 
-def _stub_results_paths() -> dict[str, Path]:
-    import tempfile
-
-    d = Path(tempfile.mkdtemp())
+def _stub_results_paths(tmp_path: Path) -> dict[str, Path]:
+    d = tmp_path / "_stub_results"
+    d.mkdir(exist_ok=True)
     return {tier: d / f"{tier}.md" for tier in ("green", "amber", "red")}
 
 
@@ -160,7 +159,7 @@ def test_zero_summary_on_empty_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert isinstance(summary, RunSummary)
@@ -194,7 +193,7 @@ def test_prompt_error_propagates(tmp_path: Path) -> None:
             config_path,
             # extractor=None so load_prompts() is called
             dedup_store=MagicMock(),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
 
@@ -207,7 +206,7 @@ def test_dedup_store_error_propagates(tmp_path: Path) -> None:
             config_path,
             extractor=_stub_extractor(),
             # dedup_store=None so the store is loaded from seen_store_path
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
 
@@ -226,7 +225,7 @@ def test_results_file_error_propagates(
             config_path,
             extractor=_stub_extractor(),
             dedup_store=MagicMock(),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
 
@@ -243,7 +242,7 @@ def test_unknown_parser_type_run_continues(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert isinstance(summary, RunSummary)
@@ -298,7 +297,7 @@ def test_integration_discover_and_enrich(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.discovered == 6
@@ -334,7 +333,7 @@ def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.discovered == 6
@@ -373,7 +372,7 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert len(queries_received) == 2
@@ -438,7 +437,7 @@ def test_integration_dedup_counter_breakdown(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _SevenStubParser,  # type: ignore[return-value]
             dedup_store=dedup,
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
     assert summary.dedup_url_hits == 2
@@ -489,7 +488,7 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.dedup_run_hits == 1
@@ -539,7 +538,7 @@ def test_consecutive_url_hits_never_trigger_skip_and_end_query(tmp_path: Path) -
         extractor=_stub_extractor(),
         parser_registry=lambda _: _HitOnlyParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert consumed[0] == 100
@@ -594,7 +593,7 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TrailingParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert unseen_url in enrich_calls, "trailing unseen stub must be enriched"
@@ -636,7 +635,7 @@ def test_in_run_dedup_run_hits_in_log_line(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
     run_complete = next(
@@ -680,14 +679,14 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
     summary2 = run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     # Each run sees the URL as a miss (in-run set starts fresh); no run_hits in either run
@@ -742,7 +741,7 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _PreFilterStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.discovered == 6
@@ -810,7 +809,7 @@ def test_integration_prefilter_title_only_blacklist_counters(tmp_path: Path) -> 
         extractor=_stub_extractor(),
         parser_registry=lambda _: _BlacklistStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.prefilter_considered == 3
@@ -875,7 +874,7 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _PreFilterEventStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     events_file = logs_dir / "pipeline_prefilter.events.jsonl"
@@ -1149,7 +1148,7 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
         extractor=_InstrumentedExtractor(),
         parser_registry=lambda _: _MultiStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert call_log.count("classify") == 5
@@ -1238,7 +1237,7 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     # First batch errored (1 position), second batch succeeded (1 position written)
@@ -1320,7 +1319,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.enrich_failed == 1
@@ -1375,7 +1374,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
             dedup_store=dedup_module.load(seen_path),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
     assert summary.external_redirects == 1
@@ -1432,7 +1431,7 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
         extractor=_stub_extractor(),
         parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     events = [
@@ -1478,7 +1477,7 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
         extractor=_stub_extractor(),
         parser_registry=lambda _: _MidDiscoverFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.discovered == 3
@@ -1534,7 +1533,7 @@ def test_judge_failure_marks_classified_in_domain(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1598,7 +1597,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
         extractor=_TrackingExtractor(),
         parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert classify_calls == [], "classify must not be called for judge_pending stubs"
@@ -1630,7 +1629,7 @@ def test_judge_pending_success_transitions_to_kept(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1668,7 +1667,7 @@ def test_judge_pending_failure_stays_classified_in_domain(tmp_path: Path) -> Non
         extractor=ext,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1734,7 +1733,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
         extractor=_CapturingExtractor(),
         parser_registry=lambda _: _FreshDescParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert enrich_descriptions == ["fresh description fetched on rerun"]
@@ -1778,7 +1777,7 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.enrich_failed == 1
@@ -1898,7 +1897,7 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DeadParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.parsers_dead == 1
@@ -1962,7 +1961,7 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=_registry,
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.parsers_dead == 1
@@ -1987,7 +1986,7 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(seen_path),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
     seen_data = (
@@ -2198,7 +2197,7 @@ def test_results_write_error_propagates_from_run(
             extractor=_FakeExtractor(),
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
 
@@ -2233,7 +2232,7 @@ def test_parser_log_integration(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
     events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
@@ -2293,7 +2292,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _NotServedParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
     # Events file must not contain not_served events
@@ -2360,7 +2359,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _ThreeEventParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
     assert summary.enrich_failed == 1
@@ -2455,7 +2454,7 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     events_file = logs_dir / "parser_jobs_beim_staat_html.events.jsonl"
@@ -2499,7 +2498,7 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(),
+            results_paths=_stub_results_paths(tmp_path),
         )
 
     assert not any("unparseable_date" in record.message for record in caplog.records), (
@@ -2568,7 +2567,7 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.written == 4
@@ -2614,7 +2613,7 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SlowTwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -2730,7 +2729,7 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.written == 4
@@ -2781,7 +2780,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoLangParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.classifier_dropped == 1
@@ -2829,7 +2828,7 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     # First batch failed (1 item), second succeeded (1 item written)
@@ -2863,7 +2862,7 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     events_file = logs_dir / "llm_classify_relevance.events.jsonl"
@@ -2893,7 +2892,7 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     events_rows = [
@@ -2927,7 +2926,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     events_rows = [
@@ -3312,7 +3311,7 @@ def test_display_pipeline_row_registered_on_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3338,7 +3337,7 @@ def test_display_body_updated_with_discovered_during_run(tmp_path: Path) -> None
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3358,7 +3357,7 @@ def test_display_stop_called_on_success(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3377,7 +3376,7 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=PlainStatusDisplay(),
     )
 
@@ -3417,7 +3416,7 @@ def test_startup_row_ordering(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3461,7 +3460,7 @@ def test_parser_row_registered_per_parser(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3490,7 +3489,7 @@ def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3520,7 +3519,7 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3551,7 +3550,7 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3596,7 +3595,7 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DeadParserForRow,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3642,7 +3641,7 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EmptyParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3686,7 +3685,7 @@ def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3729,7 +3728,7 @@ def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3759,7 +3758,7 @@ def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3817,7 +3816,7 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3860,7 +3859,7 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3916,7 +3915,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SleepyParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         stall_threshold_s=_THRESHOLD,
     )
 
@@ -3968,7 +3967,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _LongSleepParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         stall_threshold_s=_THRESHOLD,
     )
 
@@ -4006,7 +4005,7 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
@@ -4057,7 +4056,7 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _RaisingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.parsers_dead == 1
@@ -4235,7 +4234,7 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4268,7 +4267,7 @@ def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4287,7 +4286,7 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4322,7 +4321,7 @@ def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> Non
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4355,7 +4354,7 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4388,7 +4387,7 @@ def test_pending_drains_to_zero_on_classify_usage_limit(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(),
+        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 

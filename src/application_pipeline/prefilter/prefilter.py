@@ -22,9 +22,6 @@ class _Position(Protocol):
     @property
     def title(self) -> str: ...
 
-    @property
-    def raw_description(self) -> str: ...
-
 
 class DomainPreFilter:
     def __init__(self, negative_keywords: list[str]) -> None:
@@ -38,6 +35,6 @@ class DomainPreFilter:
             if k in title_hay
         )
         return PreFilterVerdict(
-            passes=not bool(blacklist_matches),
+            passes=not blacklist_matches,
             blacklist_matches=blacklist_matches,
         )

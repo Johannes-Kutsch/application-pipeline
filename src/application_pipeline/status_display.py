@@ -77,14 +77,10 @@ class _PlainRenderer:
 
 
 class _RichRenderer:
-    def __init__(
-        self,
-        get_rows: Callable[[], list[_RowState]],
-        display: StatusDisplay,
-    ) -> None:
+    def __init__(self, display: _StatusDisplay) -> None:
         from rich.live import Live
 
-        self._get_rows = get_rows
+        self._display = display
         self._live = Live(self, refresh_per_second=4)  # type: ignore[arg-type]
         self._live.start()
         self._log_handler: logging.Handler = _LiveLoggingHandler(display)
@@ -93,7 +89,7 @@ class _RichRenderer:
     def __rich_console__(self, console: object, options: object) -> object:
         from rich.table import Table
 
-        rows = self._get_rows()
+        rows = self._display._snapshot_rows()
         table = Table(show_header=True)
         table.add_column("Name")
         table.add_column("Phase")
@@ -123,10 +119,16 @@ class _RichRenderer:
 
 
 class _StatusDisplay:
-    def __init__(self, renderer: _DisplayRenderer) -> None:
+    def __init__(
+        self, make_renderer: Callable[["_StatusDisplay"], _DisplayRenderer]
+    ) -> None:
         self._lock = threading.Lock()
         self._rows: dict[str, _RowState] = {}
-        self._renderer = renderer
+        self._renderer = make_renderer(self)
+
+    def _snapshot_rows(self) -> list[_RowState]:
+        with self._lock:
+            return sorted(self._rows.values(), key=lambda r: r.order)
 
     def register(
         self, name: str, *, order: int, phase: str = "starting", body: str = ""
@@ -168,19 +170,9 @@ class _StatusDisplay:
 
 class PlainStatusDisplay(_StatusDisplay):
     def __init__(self) -> None:
-        super().__init__(_PlainRenderer())
+        super().__init__(lambda _display: _PlainRenderer())
 
 
 class RichStatusDisplay(_StatusDisplay):
     def __init__(self) -> None:
-        super().__init__(
-            _PlainRenderer()
-        )  # sets up _lock and _rows before renderer needs them
-        lock = self._lock
-        rows = self._rows
-
-        def get_rows() -> list[_RowState]:
-            with lock:
-                return sorted(rows.values(), key=lambda r: r.order)
-
-        self._renderer = _RichRenderer(get_rows=get_rows, display=self)
+        super().__init__(_RichRenderer)

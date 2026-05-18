@@ -1401,6 +1401,58 @@ def test_external_redirect_marks_seen_and_increments_counter(
     assert "https://external.example/job" in events_content
 
 
+def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> None:
+    """external_redirect event row must include skipped=True per ADR-0028."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "synched" / "logs"
+    parser_log.configure(logs_dir)
+
+    class _RedirectParser:
+        def __enter__(self) -> "_RedirectParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://example.com/job/1", title="Job 1", source="stub"
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
+            return ExternalRedirect(
+                stub=stub, outbound_url="https://external.example/job"
+            )
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_managers=_stub_results_managers(),
+    )
+
+    events = [
+        json.loads(line)
+        for line in (logs_dir / "parser_bundesagentur_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    redirect_rows = [r for r in events if r.get("event") == "external_redirect"]
+    assert len(redirect_rows) == 1
+    assert redirect_rows[0]["skipped"] is True
+
+
 def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> None:
     """ParserError mid-discover: already-yielded stubs processed, run advances to next combination."""
     seen_path = tmp_path / ".seen.json"

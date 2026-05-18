@@ -622,6 +622,7 @@ class _OutboundDispatcher:
                 "external_redirect",
                 stub_url=stub.url,
                 outbound=payload.outbound_url,
+                skipped=True,
             )
             self._dedup.mark_external_redirect(stub)
             self._metrics.external_redirect(pid)

@@ -32,18 +32,3 @@ def append(path: Path, text: str) -> None:
         raise ResultsFileError(
             f"append failed — results file may be corrupt, manual intervention may be required: {path}"
         ) from exc
-
-
-class ResultsFileManager:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-
-    def ensure_initialized(self) -> None:
-        ensure_initialized(self._path)
-
-    def append(self, rendered_block: str) -> None:
-        append(self._path, rendered_block)
-
-
-def load(path: Path) -> ResultsFileManager:
-    return ResultsFileManager(path)

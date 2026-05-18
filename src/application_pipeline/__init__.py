@@ -19,8 +19,7 @@ from .llm import (
 )
 from .prompts import PromptError, PromptTemplate, Prompts, load_prompts
 from .renderer import render
-from .results import ResultsFileError, ResultsFileManager
-from .results import load as load_results
+from .results import ResultsFileError
 from .user_settings import UserSettingsError, load_user_module
 
 __all__ = [
@@ -49,7 +48,6 @@ __all__ = [
     "Prompts",
     "RelevanceVerdict",
     "ResultsFileError",
-    "ResultsFileManager",
     "SeenResult",
     "SeenStatus",
     "SourceEntry",
@@ -57,7 +55,6 @@ __all__ = [
     "load",
     "load_layout",
     "load_prompts",
-    "load_results",
     "load_user_module",
     "render",
 ]

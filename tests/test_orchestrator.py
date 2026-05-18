@@ -117,7 +117,6 @@ def _stub_extractor() -> MagicMock:
 def _stub_results_manager() -> MagicMock:
     rm = MagicMock()
     rm.ensure_initialized.return_value = None
-    rm.next_position_number.return_value = 1
     return rm
 
 
@@ -1968,7 +1967,6 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(tmp_path: Path) -
 
     rm = MagicMock()
     rm.ensure_initialized.return_value = None
-    rm.next_position_number.return_value = 1
     rm.append.side_effect = ResultsFileError("disk full")
 
     with pytest.raises(ResultsFileError):
@@ -2180,7 +2178,6 @@ def test_results_write_error_propagates_from_run(tmp_path: Path) -> None:
     )
     crashing_rm = MagicMock()
     crashing_rm.ensure_initialized.return_value = None
-    crashing_rm.next_position_number.return_value = 1
     crashing_rm.append.side_effect = ResultsFileError("disk full")
 
     with pytest.raises(ResultsFileError):
@@ -4578,47 +4575,6 @@ def test_each_tier_routed_to_its_results_file(tmp_path: Path) -> None:
     )
 
     # _FakeExtractor: 1 green, 2 amber, 1 red (of 6 stubs: 1 prefilter-dropped, 1 classify-dropped)
-    green_cards = re.findall(
-        r"^# .+ · .+",
-        (results_dir / "green.md").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
-    amber_cards = re.findall(
-        r"^# .+ · .+",
-        (results_dir / "amber.md").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
-    red_cards = re.findall(
-        r"^# .+ · .+",
-        (results_dir / "red.md").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
-
-    assert len(green_cards) == 1
-    assert len(amber_cards) == 2
-    assert len(red_cards) == 1
-
-
-def test_per_tier_numbering_restarts_at_one(tmp_path: Path) -> None:
-    """Each tier file's position counter starts at 1 and increments independently."""
-    results_dir = tmp_path / "results"
-
-    run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-            negative_keywords='["excluded"]',
-        ),
-        extractor=_FakeExtractor(),
-        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_managers=_real_results_managers(results_dir),
-    )
-
-    # _FakeExtractor: 1 green, 2 amber, 1 red
     green_cards = re.findall(
         r"^# .+ · .+",
         (results_dir / "green.md").read_text(encoding="utf-8"),

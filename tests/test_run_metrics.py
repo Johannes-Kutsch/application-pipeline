@@ -414,10 +414,14 @@ def _format_run_divider(
     classify_total_s: float,
     judge_calls: int,
     judge_total_s: float,
-    claude_input_tokens: int,
-    claude_output_tokens: int,
-    claude_cache_read_tokens: int,
-    claude_cost_usd: float,
+    classify_input_tokens: int,
+    classify_output_tokens: int,
+    classify_cache_read_tokens: int,
+    classify_cost_usd: float,
+    judge_input_tokens: int,
+    judge_output_tokens: int,
+    judge_cache_read_tokens: int,
+    judge_cost_usd: float,
     elapsed_s: float,
 ) -> str:
     parts = [f"run {timestamp}"]
@@ -439,10 +443,14 @@ def _format_run_divider(
             f"classify_total_s={classify_total_s:.1f}",
             f"judge_calls={judge_calls}",
             f"judge_total_s={judge_total_s:.1f}",
-            f"claude_input_tokens={claude_input_tokens}",
-            f"claude_output_tokens={claude_output_tokens}",
-            f"claude_cache_read_tokens={claude_cache_read_tokens}",
-            f"claude_cost_usd={claude_cost_usd:.6f}",
+            f"classify_input_tokens={classify_input_tokens}",
+            f"classify_output_tokens={classify_output_tokens}",
+            f"classify_cache_read_tokens={classify_cache_read_tokens}",
+            f"classify_cost_usd={classify_cost_usd:.6f}",
+            f"judge_input_tokens={judge_input_tokens}",
+            f"judge_output_tokens={judge_output_tokens}",
+            f"judge_cache_read_tokens={judge_cache_read_tokens}",
+            f"judge_cost_usd={judge_cost_usd:.6f}",
             f"elapsed_s={elapsed_s:.1f}",
         ]
     )
@@ -519,10 +527,14 @@ def test_format_run_divider_no_degraded_no_failures():
         classify_total_s=2.5,
         judge_calls=1,
         judge_total_s=1.5,
-        claude_input_tokens=800,
-        claude_output_tokens=350,
-        claude_cache_read_tokens=150,
-        claude_cost_usd=0.005,
+        classify_input_tokens=500,
+        classify_output_tokens=200,
+        classify_cache_read_tokens=100,
+        classify_cost_usd=0.002,
+        judge_input_tokens=300,
+        judge_output_tokens=150,
+        judge_cache_read_tokens=50,
+        judge_cost_usd=0.003,
         elapsed_s=elapsed_s,
     )
     assert result == expected
@@ -658,6 +670,42 @@ def test_judge_resumed_present_when_nonzero():
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
     assert "judge_resumed=2" in result
+
+
+def test_format_run_divider_contains_per_callsite_token_fields():
+    display = FakeStatusDisplay()
+    metrics = _build_populated_metrics(display)
+
+    result = metrics.format_run_divider("2026-01-01T12:00:00Z", "v1", 10.0)
+
+    assert "classify_input_tokens=500" in result
+    assert "classify_output_tokens=200" in result
+    assert "classify_cache_read_tokens=100" in result
+    assert "classify_cost_usd=0.002000" in result
+    assert "judge_input_tokens=300" in result
+    assert "judge_output_tokens=150" in result
+    assert "judge_cache_read_tokens=50" in result
+    assert "judge_cost_usd=0.003000" in result
+    assert "claude_input_tokens" not in result
+    assert "claude_output_tokens" not in result
+    assert "claude_cache_read_tokens" not in result
+    assert "claude_cost_usd" not in result
+
+
+def test_format_run_divider_zero_callsite_tokens_when_no_calls():
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+
+    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+
+    assert "classify_input_tokens=0" in result
+    assert "classify_output_tokens=0" in result
+    assert "classify_cache_read_tokens=0" in result
+    assert "classify_cost_usd=0.000000" in result
+    assert "judge_input_tokens=0" in result
+    assert "judge_output_tokens=0" in result
+    assert "judge_cache_read_tokens=0" in result
+    assert "judge_cost_usd=0.000000" in result
 
 
 # ---------------------------------------------------------------------------

@@ -464,14 +464,14 @@ class RunMetrics:
             classify_total_s = self._classify_total_s
             judge_calls = self._judge_calls
             judge_total_s = self._judge_total_s
-            claude_input_tokens = self._classify_input_tokens + self._judge_input_tokens
-            claude_output_tokens = (
-                self._classify_output_tokens + self._judge_output_tokens
-            )
-            claude_cache_read_tokens = (
-                self._classify_cache_read_tokens + self._judge_cache_read_tokens
-            )
-            claude_cost_usd = self._classify_cost_usd + self._judge_cost_usd
+            classify_input_tokens = self._classify_input_tokens
+            classify_output_tokens = self._classify_output_tokens
+            classify_cache_read_tokens = self._classify_cache_read_tokens
+            classify_cost_usd = self._classify_cost_usd
+            judge_input_tokens = self._judge_input_tokens
+            judge_output_tokens = self._judge_output_tokens
+            judge_cache_read_tokens = self._judge_cache_read_tokens
+            judge_cost_usd = self._judge_cost_usd
             degraded_reason = self._degraded_reason
             classify_batches_failed = self._classify_failed
             classify_items_abandoned = self._classify_items_errored
@@ -500,10 +500,14 @@ class RunMetrics:
                 f"classify_total_s={classify_total_s:.1f}",
                 f"judge_calls={judge_calls}",
                 f"judge_total_s={judge_total_s:.1f}",
-                f"claude_input_tokens={claude_input_tokens}",
-                f"claude_output_tokens={claude_output_tokens}",
-                f"claude_cache_read_tokens={claude_cache_read_tokens}",
-                f"claude_cost_usd={claude_cost_usd:.6f}",
+                f"classify_input_tokens={classify_input_tokens}",
+                f"classify_output_tokens={classify_output_tokens}",
+                f"classify_cache_read_tokens={classify_cache_read_tokens}",
+                f"classify_cost_usd={classify_cost_usd:.6f}",
+                f"judge_input_tokens={judge_input_tokens}",
+                f"judge_output_tokens={judge_output_tokens}",
+                f"judge_cache_read_tokens={judge_cache_read_tokens}",
+                f"judge_cost_usd={judge_cost_usd:.6f}",
                 f"elapsed_s={elapsed_s:.1f}",
             ]
         )

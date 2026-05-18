@@ -2032,10 +2032,14 @@ def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
         "classify_total_s=",
         "judge_calls=",
         "judge_total_s=",
-        "claude_input_tokens=",
-        "claude_output_tokens=",
-        "claude_cache_read_tokens=",
-        "claude_cost_usd=",
+        "classify_input_tokens=",
+        "classify_output_tokens=",
+        "classify_cache_read_tokens=",
+        "classify_cost_usd=",
+        "judge_input_tokens=",
+        "judge_output_tokens=",
+        "judge_cache_read_tokens=",
+        "judge_cost_usd=",
         "elapsed_s=",
     ):
         assert key in last_block, (

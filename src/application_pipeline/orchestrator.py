@@ -43,7 +43,12 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.parsers.errors import ParserError
-from application_pipeline.prefilter import DomainPreFilter, PreFilterVerdict, TermMatch
+from application_pipeline.prefilter import (
+    PreFilterVerdict,
+    TermMatch,
+    classify_position,
+    precompute_blacklist,
+)
 from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.renderer import render
 from application_pipeline.results import ResultsFileError, append, ensure_initialized
@@ -499,7 +504,7 @@ class _OutboundDispatcher:
         *,
         parser_states: dict[str, "_ParserState"],
         dedup: DeduplicationStore,
-        prefilter: "DomainPreFilter",
+        blacklist: list[str],
         metrics: "RunMetrics",
         classify_queue: "queue.Queue[object]",
         judge_queue: "queue.Queue[object]",
@@ -508,7 +513,7 @@ class _OutboundDispatcher:
     ) -> None:
         self._parser_states = parser_states
         self._dedup = dedup
-        self._prefilter = prefilter
+        self._blacklist = blacklist
         self._metrics = metrics
         self._classify_queue = classify_queue
         self._judge_queue = judge_queue
@@ -585,7 +590,7 @@ class _OutboundDispatcher:
                 self._metrics.judge_enqueued()
                 self._judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
             else:
-                verdict = self._prefilter.classify(payload)
+                verdict = classify_position(payload, self._blacklist)
                 parser_log.record(
                     "pipeline_prefilter",
                     "decision",
@@ -645,7 +650,6 @@ def run(
     config_path: Path,
     *,
     extractor: LLMExtractor | None = None,
-    prefilter: DomainPreFilter | None = None,
     parser_registry: Callable[[str], type[Parser] | None] | None = None,
     dedup_store: DeduplicationStore | None = None,
     results_paths: dict[str, Path] | None = None,
@@ -678,10 +682,7 @@ def run(
             extractor = ClaudeExtractor(cfg, prompts)
 
         # Step 4: Domain Pre-Filter
-        if prefilter is None:
-            prefilter = DomainPreFilter(
-                negative_keywords=cfg.negative_keywords,
-            )
+        blacklist = precompute_blacklist(cfg.negative_keywords)
 
         # Step 6: Resolve parser classes; unknown types are skipped (registry logs WARNING)
         _resolve = (
@@ -800,7 +801,7 @@ def run(
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
                 dedup=dedup_run,
-                prefilter=prefilter,
+                blacklist=blacklist,
                 metrics=metrics,
                 classify_queue=classify_queue,
                 judge_queue=judge_queue,

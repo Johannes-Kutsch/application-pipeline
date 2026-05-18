@@ -27,8 +27,6 @@ from .types import (
     RelevanceVerdict,
 )
 
-_COMPONENT_ID = "claude_extractor"
-
 _CLASSIFY_MODEL = "haiku"
 _JUDGE_MODEL = "sonnet"
 _JUDGE_EFFORT = "medium"
@@ -176,7 +174,7 @@ class ClaudeExtractor:
         }
         if batch_size is not None:
             transcript["batch_size"] = batch_size
-        parser_log.record_transcript(_COMPONENT_ID, transcript)
+        parser_log.record_transcript(site.component_id, transcript)
 
         record_kwargs: dict[str, object] = {
             "cost_usd": response.cost_usd,
@@ -184,7 +182,7 @@ class ClaudeExtractor:
         }
         if batch_size is not None:
             record_kwargs["batch_size"] = batch_size
-        parser_log.record(_COMPONENT_ID, site.call, **record_kwargs)
+        parser_log.record(site.component_id, site.call, **record_kwargs)
 
         return parsed, response
 

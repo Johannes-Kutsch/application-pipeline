@@ -217,6 +217,25 @@ def test_classify_relevance_batch_returns_verdicts_in_input_order() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_classify_relevance_batch_records_events_row_to_call_site_file(
+    tmp_path: Path,
+) -> None:
+    parser_log.configure(tmp_path)
+    items = _items(2)
+    invoker = _fake_invoker(_batch_response(items))
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
+
+    extractor.classify_relevance_batch(items)
+
+    events_file = tmp_path / "classify_relevance.events.jsonl"
+    assert events_file.exists()
+    entry = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert entry["event"] == "classify_relevance_batch"
+    assert "cost_usd" in entry
+    assert "duration_s" in entry
+    assert entry["batch_size"] == 2
+
+
 def test_classify_relevance_batch_records_transcript(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     items = _items(2)
@@ -225,7 +244,7 @@ def test_classify_relevance_batch_records_transcript(tmp_path: Path) -> None:
 
     extractor.classify_relevance_batch(items)
 
-    transcript_file = tmp_path / "claude_extractor.transcripts.jsonl"
+    transcript_file = tmp_path / "classify_relevance.transcripts.jsonl"
     assert transcript_file.exists()
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert entry["call"] == "classify_relevance_batch"
@@ -366,8 +385,24 @@ def test_judge_match_skills_bound_at_construction() -> None:
 
 
 # ---------------------------------------------------------------------------
-# judge_match: transcript recording
+# judge_match: events and transcript recording
 # ---------------------------------------------------------------------------
+
+
+def test_judge_match_records_events_row_to_call_site_file(tmp_path: Path) -> None:
+    parser_log.configure(tmp_path)
+    invoker = _fake_invoker(_judge_response())
+    extractor = ClaudeExtractor(_config(), _prompts(), _invoker=invoker)
+
+    extractor.judge_match("Looking for Python dev")
+
+    events_file = tmp_path / "judge_match.events.jsonl"
+    assert events_file.exists()
+    entry = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert entry["event"] == "judge_match"
+    assert "cost_usd" in entry
+    assert "duration_s" in entry
+    assert "batch_size" not in entry
 
 
 def test_judge_match_records_transcript(tmp_path: Path) -> None:
@@ -377,7 +412,7 @@ def test_judge_match_records_transcript(tmp_path: Path) -> None:
 
     extractor.judge_match("Looking for Python dev")
 
-    transcript_file = tmp_path / "claude_extractor.transcripts.jsonl"
+    transcript_file = tmp_path / "judge_match.transcripts.jsonl"
     assert transcript_file.exists()
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert entry["call"] == "judge_match"
@@ -388,7 +423,7 @@ def test_judge_match_records_transcript(tmp_path: Path) -> None:
     assert entry["duration_s"] == pytest.approx(1.2)
 
 
-def test_both_calls_append_to_same_transcript_file(tmp_path: Path) -> None:
+def test_classify_and_judge_route_to_separate_transcript_files(tmp_path: Path) -> None:
     parser_log.configure(tmp_path)
     items = _items(1)
     extractor = ClaudeExtractor(
@@ -402,15 +437,17 @@ def test_both_calls_append_to_same_transcript_file(tmp_path: Path) -> None:
     extractor.classify_relevance_batch(items)
     extractor.judge_match("desc")
 
-    lines = (
-        (tmp_path / "claude_extractor.transcripts.jsonl")
-        .read_text(encoding="utf-8")
-        .strip()
-        .splitlines()
+    classify_entry = json.loads(
+        (tmp_path / "classify_relevance.transcripts.jsonl").read_text(encoding="utf-8")
     )
-    assert len(lines) == 2
-    assert json.loads(lines[0])["call"] == "classify_relevance_batch"
-    assert json.loads(lines[1])["call"] == "judge_match"
+    assert classify_entry["call"] == "classify_relevance_batch"
+
+    judge_entry = json.loads(
+        (tmp_path / "judge_match.transcripts.jsonl").read_text(encoding="utf-8")
+    )
+    assert judge_entry["call"] == "judge_match"
+
+    assert not (tmp_path / "claude_extractor.transcripts.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -541,10 +578,42 @@ def test_judge_truncation_leaves_no_truncation_field_in_transcript(
     extractor = ClaudeExtractor(_config(), _prompts(), _invoker=_fake_invoker(response))
     extractor.judge_match("desc")
 
-    transcript_file = tmp_path / "claude_extractor.transcripts.jsonl"
+    transcript_file = tmp_path / "judge_match.transcripts.jsonl"
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert "truncated" not in entry
     assert "truncation" not in entry
+
+
+# ---------------------------------------------------------------------------
+# claude_extractor.* files are never created
+# ---------------------------------------------------------------------------
+
+
+def test_successful_classify_does_not_write_claude_extractor_files(
+    tmp_path: Path,
+) -> None:
+    parser_log.configure(tmp_path)
+    items = _items(1)
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), _invoker=_fake_invoker(_batch_response(items))
+    )
+    extractor.classify_relevance_batch(items)
+
+    assert not (tmp_path / "claude_extractor.events.jsonl").exists()
+    assert not (tmp_path / "claude_extractor.transcripts.jsonl").exists()
+
+
+def test_successful_judge_does_not_write_claude_extractor_files(
+    tmp_path: Path,
+) -> None:
+    parser_log.configure(tmp_path)
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), _invoker=_fake_invoker(_judge_response())
+    )
+    extractor.judge_match("desc")
+
+    assert not (tmp_path / "claude_extractor.events.jsonl").exists()
+    assert not (tmp_path / "claude_extractor.transcripts.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------

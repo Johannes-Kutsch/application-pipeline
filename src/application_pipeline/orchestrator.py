@@ -264,32 +264,23 @@ class _ParserThread(threading.Thread):
                                 continue  # fire-and-forget; orchestrator counts, no reply
                             decision = self._inbound.get()
                             if isinstance(decision, _EnrichDecision):
+                                enrich_payload: (
+                                    Position | ParserError | ExternalRedirect
+                                )
                                 try:
-                                    enrich_payload: Position | ExternalRedirect = (
-                                        self._parser.enrich(item)
-                                    )
+                                    enrich_payload = self._parser.enrich(item)
                                 except ParserError as exc:
-                                    self._outbound.put(
-                                        (
-                                            self._parser_id,
-                                            _EnrichResult(
-                                                stub=item,
-                                                payload=exc,
-                                                judge_resume=decision.judge_resume,
-                                            ),
-                                        )
+                                    enrich_payload = exc
+                                self._outbound.put(
+                                    (
+                                        self._parser_id,
+                                        _EnrichResult(
+                                            stub=item,
+                                            payload=enrich_payload,
+                                            judge_resume=decision.judge_resume,
+                                        ),
                                     )
-                                else:
-                                    self._outbound.put(
-                                        (
-                                            self._parser_id,
-                                            _EnrichResult(
-                                                stub=item,
-                                                payload=enrich_payload,
-                                                judge_resume=decision.judge_resume,
-                                            ),
-                                        )
-                                    )
+                                )
                             elif decision is _SKIP_AND_END_QUERY:
                                 break
                             # else: _SKIP — continue to next stub

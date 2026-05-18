@@ -8,7 +8,6 @@ from application_pipeline.config import Config
 from application_pipeline.prompts import Prompts
 
 from .agent_output import AgentOutputProtocolError, extract_json_block
-from .boilerplate import strip_boilerplate
 from .claude_cli import (
     ClaudeCliError,
     ClaudeCliInvoker,
@@ -27,6 +26,43 @@ from .types import (
     MatchVerdict,
     RelevanceVerdict,
 )
+
+_GERMAN_BOILERPLATE_SENTINELS: list[str] = [
+    "wir bieten",
+    "was wir bieten",
+    "über uns",
+    "über das unternehmen",
+    "unser angebot",
+    "benefits",
+    "das bieten wir",
+    "wir als arbeitgeber",
+    "das erwartet dich bei uns",
+    "das erwartet sie bei uns",
+    "bewerben sie sich",
+    "bewerbung richten",
+    "senden sie ihre bewerbung",
+    "schicken sie ihre bewerbung",
+    "ihre bewerbung",
+    "bewerbungsschluss",
+    "bewerbungsfrist",
+    "wir freuen uns auf ihre bewerbung",
+    "wir freuen uns auf deine bewerbung",
+]
+
+
+def _strip_boilerplate(text: str) -> str:
+    paragraphs = text.split("\n\n")
+    result: list[str] = []
+    for paragraph in paragraphs:
+        normalized = paragraph.strip().lower()
+        if any(
+            normalized.startswith(sentinel)
+            for sentinel in _GERMAN_BOILERPLATE_SENTINELS
+        ):
+            break
+        result.append(paragraph)
+    return "\n\n".join(result).rstrip()
+
 
 _CLASSIFY_MODEL = "haiku"
 _JUDGE_MODEL = "haiku"
@@ -94,7 +130,7 @@ class ClaudeExtractor:
     ) -> tuple[MatchVerdict, CallUsage]:
         prompt = self._prompts.judge_match.render(
             skills=self._skills_block,
-            raw_description=strip_boilerplate(raw_description),
+            raw_description=_strip_boilerplate(raw_description),
         )
         data, response = self._invoke(_JUDGE_SITE, prompt, {"stub_url": stub_url})
         usage = self._usage_from(response)

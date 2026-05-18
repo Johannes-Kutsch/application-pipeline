@@ -105,8 +105,9 @@ class _ParserDead:
     traceback_str: str
 
 
-class _Enrich:
-    __slots__ = ()
+@dataclass
+class _EnrichDecision:
+    judge_resume: bool
 
 
 class _Skip:
@@ -118,7 +119,6 @@ class _SkipAndEndQuery:
 
 
 _PARSER_DONE = _ParserDone()
-_ENRICH = _Enrich()
 _SKIP = _Skip()
 _SKIP_AND_END_QUERY = _SkipAndEndQuery()
 
@@ -256,7 +256,8 @@ class _ParserThread(threading.Thread):
                             if isinstance(item, NotServedQuery):
                                 continue  # fire-and-forget; orchestrator counts, no reply
                             decision = self._inbound.get()
-                            if decision is _ENRICH:
+                            if isinstance(decision, _EnrichDecision):
+                                judge_resume = decision.judge_resume  # noqa: F841 — used in slice 2
                                 try:
                                     position = self._parser.enrich(item)
                                     self._outbound.put((self._parser_id, position))
@@ -558,11 +559,11 @@ class _OutboundDispatcher:
         if result == "miss":
             state.pending_enrich = payload
             state.pending_judge_resume = False
-            state.inbound.put(_ENRICH)
+            state.inbound.put(_EnrichDecision(judge_resume=False))
         elif result == "judge_pending":
             state.pending_enrich = payload
             state.pending_judge_resume = True
-            state.inbound.put(_ENRICH)
+            state.inbound.put(_EnrichDecision(judge_resume=True))
         else:
             state.inbound.put(_SKIP)
 

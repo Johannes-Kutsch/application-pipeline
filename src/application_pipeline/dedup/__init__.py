@@ -1,6 +1,7 @@
 from .errors import DedupStoreError
-from .run_scope import RunScopedDedup, RunScopedSeenResult
-from .store import DeduplicationStore, SeenResult, SeenStatus, load
+from .store import DeduplicationStore, RunScopedSeenResult, SeenResult, SeenStatus, load
+
+RunScopedDedup = DeduplicationStore
 
 __all__ = [
     "DedupStoreError",

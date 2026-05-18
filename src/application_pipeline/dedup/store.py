@@ -15,10 +15,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
-
-if TYPE_CHECKING:
-    from .run_scope import RunScopedDedup
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from application_pipeline.text import normalize
 
@@ -28,6 +25,9 @@ SeenStatus = Literal[
     "off_domain", "kept", "enrich_failed", "external_redirect", "classified_in_domain"
 ]
 SeenResult = Literal["url_hit", "tuple_hit", "judge_pending", "miss"]
+RunScopedSeenResult = Literal[
+    "url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"
+]
 
 
 @runtime_checkable
@@ -53,6 +53,7 @@ class DeduplicationStore:
             records
         )
         self._lock = threading.Lock()
+        self._in_run: set[str] | None = None
 
     @staticmethod
     def _validate_record(url: str, record: dict[str, Any]) -> None:
@@ -97,7 +98,7 @@ class DeduplicationStore:
             return None
         return self._tuple_index.get(tkey)
 
-    def is_seen(self, key: _SeenKey) -> SeenResult:
+    def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
         """Return which dedup tier matched ``key``; on tuple match, write alias.
 
         Side effect (per ADR-0004): when the URL tier misses but the
@@ -106,8 +107,12 @@ class DeduplicationStore:
         record's ``status`` and ``first_seen`` so future runs short-circuit
         on the cheap URL lookup. The return value is unaffected by the
         alias write.
+        Returns ``run_hit`` only while a ``run_scope()`` context is active.
         """
         with self._lock:
+            if self._in_run is not None and key.url in self._in_run:
+                return "run_hit"
+
             if key.url in self._records:
                 if self._records[key.url].get("status") == "classified_in_domain":
                     return "judge_pending"
@@ -118,6 +123,8 @@ class DeduplicationStore:
                 self._write_alias(key.url, canonical_url)
                 return "tuple_hit"
 
+            if self._in_run is not None:
+                self._in_run.add(key.url)
             return "miss"
 
     def _mark(
@@ -175,14 +182,14 @@ class DeduplicationStore:
             self._mark(key, "classified_in_domain")
 
     @contextmanager
-    def run_scope(self) -> Generator[RunScopedDedup, None, None]:
-        from .run_scope import RunScopedDedup
-
-        scope = RunScopedDedup(self)
+    def run_scope(self) -> Generator[DeduplicationStore, None, None]:
+        with self._lock:
+            self._in_run = set()
         try:
-            yield scope
+            yield self
         finally:
-            scope._clear()
+            with self._lock:
+                self._in_run = None
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]

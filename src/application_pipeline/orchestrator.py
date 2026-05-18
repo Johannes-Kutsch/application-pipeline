@@ -23,7 +23,6 @@ from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import (
     DedupStoreError,
     DeduplicationStore,
-    RunScopedDedup,
 )
 from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
@@ -499,8 +498,7 @@ class _OutboundDispatcher:
         self,
         *,
         parser_states: dict[str, "_ParserState"],
-        dedup_run: RunScopedDedup,
-        dedup_store: DeduplicationStore,
+        dedup: DeduplicationStore,
         prefilter: "DomainPreFilter",
         metrics: "RunMetrics",
         classify_queue: "queue.Queue[object]",
@@ -509,8 +507,7 @@ class _OutboundDispatcher:
         run_state: _RunState,
     ) -> None:
         self._parser_states = parser_states
-        self._dedup_run = dedup_run
-        self._dedup_store = dedup_store
+        self._dedup = dedup
         self._prefilter = prefilter
         self._metrics = metrics
         self._classify_queue = classify_queue
@@ -566,7 +563,7 @@ class _OutboundDispatcher:
         if self._run_state.is_aborted:
             state.inbound.put(_SKIP_AND_END_QUERY)
             return
-        result = self._dedup_run.is_seen(payload)
+        result = self._dedup.is_seen(payload)
         self._metrics.record_dedup(result)
         if result == "miss":
             state.inbound.put(_EnrichDecision(judge_resume=False))
@@ -607,7 +604,7 @@ class _OutboundDispatcher:
                     if len(self._classify_buffer) >= self._batch_size:
                         self._flush_classify_batch()
                 else:
-                    self._dedup_store.mark_off_domain(payload.stub)
+                    self._dedup.mark_off_domain(payload.stub)
                     self._metrics.prefilter_dropped(verdict)
         elif isinstance(payload, ParserError):
             parser_log.record(
@@ -617,7 +614,7 @@ class _OutboundDispatcher:
                 title=stub.title,
                 reason=str(payload),
             )
-            self._dedup_store.mark_enrich_failed(stub)
+            self._dedup.mark_enrich_failed(stub)
             self._metrics.enrich_failed(pid)
         elif isinstance(payload, ExternalRedirect):
             parser_log.record(
@@ -626,7 +623,7 @@ class _OutboundDispatcher:
                 stub_url=stub.url,
                 outbound=payload.outbound_url,
             )
-            self._dedup_store.mark_external_redirect(stub)
+            self._dedup.mark_external_redirect(stub)
             self._metrics.external_redirect(pid)
 
     def _handle_not_served(self, pid: str) -> None:
@@ -801,8 +798,7 @@ def run(
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
-                dedup_run=dedup_run,
-                dedup_store=dedup_store,
+                dedup=dedup_run,
                 prefilter=prefilter,
                 metrics=metrics,
                 classify_queue=classify_queue,

@@ -14,7 +14,7 @@ from application_pipeline import (
     SeenStatus,
     load,
 )
-from application_pipeline.dedup import load as dedup_load
+from application_pipeline.dedup import RunScopedSeenResult, load as dedup_load
 
 
 @dataclass
@@ -597,3 +597,93 @@ def test_tuple_alias_of_classified_in_domain_returns_judge_pending(
     assert store.is_seen(b) == "tuple_hit"
     # next is_seen on b resolves via URL tier → judge_pending
     assert store.is_seen(b) == "judge_pending"
+
+
+# ---------------------------------------------------------------------------
+# run_scope() — in-run URL tier
+# ---------------------------------------------------------------------------
+
+
+def test_run_scope_first_is_seen_returns_miss(store: DeduplicationStore) -> None:
+    with store.run_scope() as scope:
+        assert scope.is_seen(StubLike(url="https://example.com/new")) == "miss"
+
+
+def test_run_scope_second_is_seen_same_url_returns_run_hit(
+    store: DeduplicationStore,
+) -> None:
+    with store.run_scope() as scope:
+        scope.is_seen(StubLike(url="https://example.com/a"))
+        assert scope.is_seen(StubLike(url="https://example.com/a")) == "run_hit"
+
+
+def test_run_scope_run_hit_does_not_mutate_persistent_store(
+    store_path: Path, store: DeduplicationStore
+) -> None:
+    stub = StubLike(url="https://example.com/a")
+    with store.run_scope() as scope:
+        scope.is_seen(stub)  # miss → adds to in-run set
+        scope.is_seen(stub)  # run_hit → must not write to disk
+
+    assert not store_path.exists()
+
+
+def test_run_scope_url_and_tuple_hits_do_not_populate_in_run_set(
+    store: DeduplicationStore,
+) -> None:
+    a = StubLike(url="https://example.com/original")
+    b = StubLike(url="https://example.com/alias")
+    store.mark_kept(a)
+    with store.run_scope() as scope:
+        scope.is_seen(a)  # url_hit — must not land in in-run set
+        scope.is_seen(b)  # tuple_hit — must not land in in-run set
+        assert scope.is_seen(a) == "url_hit"
+        # b is now an alias in the persistent store → url_hit on second call
+        assert scope.is_seen(b) == "url_hit"
+
+
+def test_run_scope_re_entering_starts_fresh(store: DeduplicationStore) -> None:
+    stub = StubLike(url="https://example.com/fresh")
+    with store.run_scope() as scope1:
+        scope1.is_seen(stub)  # miss → added to in-run set
+        assert scope1.is_seen(stub) == "run_hit"
+
+    with store.run_scope() as scope2:
+        # persistent store was not mutated; in-run set is fresh
+        assert scope2.is_seen(stub) == "miss"
+
+
+def test_run_scoped_seen_result_has_five_variants() -> None:
+    from typing import get_args
+
+    args = get_args(RunScopedSeenResult)
+    assert set(args) == {"url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"}
+
+
+def test_run_scope_concurrent_is_seen(store: DeduplicationStore) -> None:
+    n_threads = 10
+    n_per_thread = 50
+    errors: list[Exception] = []
+    results: list[str] = []
+    lock = threading.Lock()
+
+    with store.run_scope() as scope:
+
+        def worker(thread_id: int) -> None:
+            try:
+                for i in range(n_per_thread):
+                    stub = StubLike(url=f"https://example.com/t{thread_id}/i{i}")
+                    r = scope.is_seen(stub)
+                    with lock:
+                        results.append(r)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    assert errors == [], f"threads raised: {errors}"
+    assert all(r in {"miss", "run_hit", "url_hit", "tuple_hit"} for r in results)

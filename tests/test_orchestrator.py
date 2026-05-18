@@ -145,21 +145,11 @@ def _read_all_results(results_dir: Path) -> str:
 
 
 def _wire_run_scope(dedup: MagicMock) -> None:
-    """Configure a MagicMock dedup store so run_scope() yields a real RunScopedDedup.
-
-    Tests that set dedup.is_seen.side_effect/return_value need this so that the
-    orchestrator's dedup_run (a RunScopedDedup wrapping the mock) forwards is_seen()
-    calls to the mock's configured behaviour.
-    """
-    from application_pipeline.dedup.run_scope import RunScopedDedup
+    """Configure a MagicMock dedup store so run_scope() yields the store itself."""
 
     @contextmanager
     def _run_scope():
-        scope = RunScopedDedup(dedup)
-        try:
-            yield scope
-        finally:
-            scope._clear()
+        yield dedup
 
     dedup.run_scope.side_effect = _run_scope
 
@@ -494,10 +484,6 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
             enrich_calls.append(stub.url)
             return Position(stub=stub, raw_description="good description")
 
-    dedup = MagicMock()
-    dedup.is_seen.return_value = "miss"
-    _wire_run_scope(dedup)
-
     summary = run(
         _write_config(
             tmp_path,
@@ -508,7 +494,7 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
         ),
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
-        dedup_store=dedup,
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_managers=_stub_results_managers(),
     )
 
@@ -644,10 +630,6 @@ def test_in_run_dedup_run_hits_in_log_line(
         def enrich(self, stub: PositionStub) -> Position:
             return Position(stub=stub, raw_description="good description")
 
-    dedup = MagicMock()
-    dedup.is_seen.return_value = "miss"
-    _wire_run_scope(dedup)
-
     with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
         run(
             _write_config(
@@ -659,7 +641,7 @@ def test_in_run_dedup_run_hits_in_log_line(
             ),
             extractor=_stub_extractor(),
             parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
-            dedup_store=dedup,
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
             results_managers=_stub_results_managers(),
         )
 
@@ -2052,10 +2034,6 @@ def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
         def enrich(self, stub: PositionStub) -> Position:
             return Position(stub=stub, raw_description="good description")
 
-    dedup = MagicMock()
-    dedup.is_seen.return_value = "miss"
-    _wire_run_scope(dedup)
-
     run(
         _write_config(
             tmp_path,
@@ -2066,7 +2044,7 @@ def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
         ),
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
-        dedup_store=dedup,
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_managers=_real_results_managers(results_dir),
     )
 

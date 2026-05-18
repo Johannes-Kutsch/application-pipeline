@@ -1,7 +1,6 @@
 from .config import Config, ConfigError, SourceEntry, load
 from .parsers import Position, PositionStub
 from .prefilter import (
-    DomainPreFilter,
     PreFilterVerdict,
     classify_position,
     precompute_blacklist,
@@ -32,7 +31,6 @@ __all__ = [
     "ClaudeExtractor",
     "Config",
     "ConfigError",
-    "DomainPreFilter",
     "PreFilterVerdict",
     "classify_position",
     "precompute_blacklist",

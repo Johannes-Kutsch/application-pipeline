@@ -38,11 +38,3 @@ def classify_position(position: _Position, blacklist: list[str]) -> PreFilterVer
         passes=not blacklist_matches,
         blacklist_matches=blacklist_matches,
     )
-
-
-class DomainPreFilter:
-    def __init__(self, negative_keywords: list[str]) -> None:
-        self._blacklist = precompute_blacklist(negative_keywords)
-
-    def classify(self, position: _Position) -> PreFilterVerdict:
-        return classify_position(position, self._blacklist)

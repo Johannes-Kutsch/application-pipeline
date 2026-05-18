@@ -1,5 +1,4 @@
 from .prefilter import (
-    DomainPreFilter,
     PreFilterVerdict,
     TermMatch,
     classify_position,
@@ -7,7 +6,6 @@ from .prefilter import (
 )
 
 __all__ = [
-    "DomainPreFilter",
     "PreFilterVerdict",
     "TermMatch",
     "classify_position",

@@ -169,9 +169,8 @@ class BundesagenturParser:
                 lokationen: list[dict[str, Any]] = item.get("stellenlokationen") or []
                 first_address = lokationen[0].get("adresse") or {} if lokationen else {}
                 city: str | None = first_address.get("ort") or None
-                ref_b64 = base64.b64encode(ref.encode()).decode()
                 yield PositionStub(
-                    url=f"{_PUBLIC_JOB_URL}/{ref_b64}",
+                    url=f"{_PUBLIC_JOB_URL}/{ref}",
                     title=title,
                     source=_DISPLAY_NAME,
                     company=item.get("firma") or None,
@@ -182,7 +181,8 @@ class BundesagenturParser:
             page += 1
 
     def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
-        ref_b64 = stub.url.rsplit("/", 1)[-1]
+        raw_ref = stub.url.rsplit("/", 1)[-1]
+        ref_b64 = base64.b64encode(raw_ref.encode()).decode()
         rest_url = f"{_DETAIL_BASE_URL}/jobdetails/{ref_b64}"
         raw = self._http.get(
             rest_url, error_prefix=f"Bundesagentur enrich failed for {stub.url}"

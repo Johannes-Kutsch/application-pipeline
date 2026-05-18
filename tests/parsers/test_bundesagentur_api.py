@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 from collections.abc import Callable
@@ -184,24 +183,13 @@ def test_discover_stub_location_from_stellenlokationen_first_ort() -> None:
     assert stub.location == "Berlin"
 
 
-def test_discover_stub_url_contains_base64_encoded_referenznummer() -> None:
+def test_discover_stub_url_is_public_job_page_url_with_raw_ref() -> None:
     ref = "myhash"
-    ref_b64 = base64.b64encode(ref.encode()).decode()
     http = _make_http([_search_body([_item(ref)]), _search_body([])])
     with BundesagenturParser(_http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
-    assert ref_b64 in stub.url
-
-
-def test_discover_stub_url_is_public_job_page_url() -> None:
-    ref = "myhash"
-    ref_b64 = base64.b64encode(ref.encode()).decode()
-    http = _make_http([_search_body([_item(ref)]), _search_body([])])
-    with BundesagenturParser(_http=http) as p:
-        (stub,) = list(p.discover(_query()))
-    assert isinstance(stub, PositionStub)
-    assert stub.url == f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{ref_b64}"
+    assert stub.url == f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{ref}"
 
 
 def test_discover_stub_company_none_when_firma_absent() -> None:
@@ -258,7 +246,7 @@ def test_discover_skips_item_without_referenznummer() -> None:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 1
     assert isinstance(stubs[0], PositionStub)
-    assert base64.b64encode(b"good1").decode() in stubs[0].url
+    assert "good1" in stubs[0].url
 
 
 # ---------------------------------------------------------------------------

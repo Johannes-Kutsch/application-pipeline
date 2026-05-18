@@ -450,13 +450,9 @@ class _ParserState:
 
 
 def _prefilter_reason(verdict: PreFilterVerdict) -> str:
-    if verdict.whitelist_matches and verdict.blacklist_matches:
-        return "whitelist_rescue"
-    if verdict.whitelist_matches:
-        return "whitelist_only"
     if verdict.blacklist_matches:
         return "blacklist_drop"
-    return "no_hit"
+    return "passed"
 
 
 def _serialize_matches(matches: tuple[TermMatch, ...]) -> list[dict[str, object]]:
@@ -593,10 +589,8 @@ class _OutboundDispatcher:
                 source=payload.stub.source,
                 passes=verdict.passes,
                 reason=_prefilter_reason(verdict),
-                whitelist_matches=_serialize_matches(verdict.whitelist_matches),
                 blacklist_matches=_serialize_matches(verdict.blacklist_matches),
                 title_len=len(payload.title),
-                body_len=len(payload.raw_description),
             )
             if verdict.passes:
                 self._metrics.prefilter_passed(verdict)
@@ -694,9 +688,7 @@ def run(
         # Step 4: Domain Pre-Filter
         if prefilter is None:
             prefilter = DomainPreFilter(
-                inclusion_keywords=cfg.inclusion_keywords,
                 negative_keywords=cfg.negative_keywords,
-                skills=cfg.skills,
             )
 
         # Step 6: Resolve parser classes; unknown types are skipped (registry logs WARNING)
@@ -738,10 +730,7 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display)
-        metrics.register_prefilter_keywords(
-            whitelist=[*cfg.inclusion_keywords, *cfg.skills],
-            blacklist=cfg.negative_keywords,
-        )
+        metrics.register_prefilter_keywords(blacklist=cfg.negative_keywords)
         classify_queue: queue.Queue[object] = queue.Queue()
         judge_queue: queue.Queue[object] = queue.Queue()
         _run_started_at = datetime.now(timezone.utc)
@@ -915,7 +904,7 @@ def run(
         _log.info(
             "run complete: discovered=%d skipped=%d "
             "prefilter_considered=%d prefilter_passed=%d prefilter_dropped=%d "
-            "prefilter_whitelist_hits=%d prefilter_blacklist_hits=%d prefilter_no_hit_either=%d "
+            "prefilter_blacklist_hits=%d "
             "dedup_url_hits=%d dedup_tuple_hits=%d dedup_run_hits=%d dedup_misses=%d "
             "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
             "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
@@ -924,9 +913,7 @@ def run(
             summary.prefilter_considered,
             summary.prefilter_passed,
             summary.prefilter_dropped,
-            summary.prefilter_whitelist_hits,
             summary.prefilter_blacklist_hits,
-            summary.prefilter_no_hit_either,
             summary.dedup_url_hits,
             summary.dedup_tuple_hits,
             summary.dedup_run_hits,

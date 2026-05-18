@@ -383,43 +383,35 @@ def test_load_raises_when_ollama_field_present(
 # --- keyword normalize length check ---
 
 
-@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
-def test_load_raises_when_keyword_entry_too_short(
-    tmp_path: pathlib.Path, field: str
+def test_load_raises_when_negative_keyword_entry_too_short(
+    tmp_path: pathlib.Path,
 ) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + f"\n{field} = ['ab']\n",
-    )
+    path = write_config(tmp_path, REQUIRED_BODY + "\nNEGATIVE_KEYWORDS = ['ab']\n")
 
-    with pytest.raises(ConfigError, match=field):
+    with pytest.raises(ConfigError, match="NEGATIVE_KEYWORDS"):
         load(path)
 
 
-@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
-def test_keyword_length_uses_normalized_value(
-    tmp_path: pathlib.Path, field: str
-) -> None:
+def test_keyword_length_uses_normalized_value(tmp_path: pathlib.Path) -> None:
     # "  ab  " normalizes to "ab" (length 2) — must still be rejected
     path = write_config(
         tmp_path,
-        REQUIRED_BODY + f"\n{field} = ['  ab  ']\n",
+        REQUIRED_BODY + "\nNEGATIVE_KEYWORDS = ['  ab  ']\n",
     )
 
-    with pytest.raises(ConfigError, match=field):
+    with pytest.raises(ConfigError, match="NEGATIVE_KEYWORDS"):
         load(path)
 
 
-@pytest.mark.parametrize("field", ["INCLUSION_KEYWORDS", "NEGATIVE_KEYWORDS"])
-def test_load_raises_on_duplicate_keyword_entries(
-    tmp_path: pathlib.Path, field: str
+def test_load_raises_on_duplicate_negative_keyword_entries(
+    tmp_path: pathlib.Path,
 ) -> None:
     path = write_config(
         tmp_path,
-        REQUIRED_BODY + f"\n{field} = ['Python', 'Python']\n",
+        REQUIRED_BODY + "\nNEGATIVE_KEYWORDS = ['Python', 'Python']\n",
     )
 
-    with pytest.raises(ConfigError, match=field):
+    with pytest.raises(ConfigError, match="NEGATIVE_KEYWORDS"):
         load(path)
 
 
@@ -586,28 +578,41 @@ def test_source_entry_rejects_non_positive_max_results(
         SourceEntry(parser_type="bundesagentur_api", max_results=bad_max_results)
 
 
-def test_inclusion_and_negative_keywords_default_to_empty(
-    tmp_path: pathlib.Path,
-) -> None:
+def test_negative_keywords_defaults_to_empty(tmp_path: pathlib.Path) -> None:
     path = write_config(tmp_path, REQUIRED_BODY)
 
     config = load(path)
 
-    assert config.inclusion_keywords == []
     assert config.negative_keywords == []
 
 
-def test_load_reads_inclusion_and_negative_keywords(tmp_path: pathlib.Path) -> None:
+def test_load_reads_negative_keywords(tmp_path: pathlib.Path) -> None:
     path = write_config(
         tmp_path,
-        REQUIRED_BODY
-        + "\nINCLUSION_KEYWORDS = ['Python', 'Data Science']\nNEGATIVE_KEYWORDS = ['Pflege', 'Reinigung']\n",
+        REQUIRED_BODY + "\nNEGATIVE_KEYWORDS = ['Pflege', 'Reinigung']\n",
     )
 
     config = load(path)
 
-    assert config.inclusion_keywords == ["Python", "Data Science"]
     assert config.negative_keywords == ["Pflege", "Reinigung"]
+
+
+def test_load_silently_ignores_inclusion_keywords(
+    tmp_path: pathlib.Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + "\nINCLUSION_KEYWORDS = ['Python', 'Data Science']\n",
+    )
+
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        config = load(path)
+
+    assert not hasattr(config, "inclusion_keywords")
+    assert any("INCLUSION_KEYWORDS" in r.message for r in caplog.records)
+    assert any("ADR-0026" in r.message for r in caplog.records)
 
 
 def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:

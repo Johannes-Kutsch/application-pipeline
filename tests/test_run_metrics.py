@@ -47,11 +47,9 @@ def _make_usage(
 
 
 def _verdict(
-    passes: bool, whitelist_hit: bool = False, blacklist_hit: bool = False
+    passes: bool, blacklist_matches: tuple[TermMatch, ...] = ()
 ) -> PreFilterVerdict:
-    return PreFilterVerdict(
-        passes=passes, whitelist_hit=whitelist_hit, blacklist_hit=blacklist_hit
-    )
+    return PreFilterVerdict(passes=passes, blacklist_matches=blacklist_matches)
 
 
 def _registers(display: FakeStatusDisplay) -> list[tuple[str, int, str]]:
@@ -157,26 +155,27 @@ def test_prefilter_body_matches_main_stats_format():
     metrics = RunMetrics(display)
     metrics.register_rows(0)
 
-    # whitelist hit → passes
-    metrics.prefilter_passed(_verdict(passes=True, whitelist_hit=True))
-    # no hit either → passes
-    metrics.prefilter_passed(_verdict(passes=True))
+    bl_match = (TermMatch(term="pfleg", fields=frozenset({"title"})),)
     # blacklist hit → dropped
-    metrics.prefilter_dropped(_verdict(passes=False, blacklist_hit=True))
+    metrics.prefilter_dropped(_verdict(passes=False, blacklist_matches=bl_match))
+    # no blacklist hit → passes
+    metrics.prefilter_passed(_verdict(passes=True))
+    # another pass
+    metrics.prefilter_passed(_verdict(passes=True))
 
     body = _last_body(display, "prefilter")
-    assert body == "considered=3 passed=2 dropped=1 (wl=1 bl=1)"
+    assert body == "considered=3 passed=2 dropped=1 (bl=1)"
 
 
-def test_prefilter_body_no_hit_either_not_shown_in_body():
+def test_prefilter_body_clean_pass_shows_zero_blacklist_hits():
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
     metrics.register_rows(0)
 
     metrics.prefilter_passed(_verdict(passes=True))
     body = _last_body(display, "prefilter")
-    assert "wl=0 bl=0" in body
-    assert "no_hit_either" not in body
+    assert "bl=0" in body
+    assert "wl=" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -469,9 +468,10 @@ def _build_populated_metrics(display: FakeStatusDisplay) -> RunMetrics:
     metrics.record_dedup("run_hit")
     metrics.record_dedup("miss")
     metrics.record_dedup("miss")
-    metrics.prefilter_passed(_verdict(passes=True, whitelist_hit=True))
+    bl_match = (TermMatch(term="pfleg", fields=frozenset({"title"})),)
     metrics.prefilter_passed(_verdict(passes=True))
-    metrics.prefilter_dropped(_verdict(passes=False, blacklist_hit=True))
+    metrics.prefilter_passed(_verdict(passes=True))
+    metrics.prefilter_dropped(_verdict(passes=False, blacklist_matches=bl_match))
     metrics.enrich_failed()
     metrics.external_redirect()
     metrics.parser_dead()
@@ -728,7 +728,6 @@ def test_to_run_summary_shape_matches_runsummary():
     assert summary.prefilter_considered == 3
     assert summary.prefilter_passed == 2
     assert summary.prefilter_dropped == 1
-    assert summary.prefilter_whitelist_hits == 1
     assert summary.prefilter_blacklist_hits == 1
     assert summary.classifier_dropped == 1
     assert summary.written == 1
@@ -819,8 +818,9 @@ def test_concurrent_events_produce_correct_final_counts():
         cost_usd=0.001,
         duration_s=0.1,
     )
-    verdict_pass = _verdict(passes=True, whitelist_hit=True)
-    verdict_drop = _verdict(passes=False, blacklist_hit=True)
+    bl_match = (TermMatch(term="pfleg", fields=frozenset({"title"})),)
+    verdict_pass = _verdict(passes=True)
+    verdict_drop = _verdict(passes=False, blacklist_matches=bl_match)
 
     def worker() -> None:
         for _ in range(iters):
@@ -1009,48 +1009,6 @@ def test_parser_summary_unknown_parser_id_returns_zeros():
 # ---------------------------------------------------------------------------
 
 
-def test_summarize_to_parser_log_prefilter_whitelist_keyword_hits(
-    tmp_path: Path,
-) -> None:
-    """prefilter SUMMARY block contains whitelist_keyword_hits: with term=N(t=X,b=Y) format."""
-    _parser_log.configure(tmp_path)
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
-    metrics.register_prefilter_keywords(
-        whitelist=["python", "django"], blacklist=["excluded"]
-    )
-
-    # Position 1: "python" matches in both title and body
-    metrics.prefilter_passed(
-        PreFilterVerdict(
-            passes=True,
-            whitelist_hit=True,
-            blacklist_hit=False,
-            whitelist_matches=(
-                TermMatch(term="python", fields=frozenset({"title", "body"})),
-            ),
-            blacklist_matches=(),
-        )
-    )
-    # Position 2: "django" matches body only
-    metrics.prefilter_passed(
-        PreFilterVerdict(
-            passes=True,
-            whitelist_hit=True,
-            blacklist_hit=False,
-            whitelist_matches=(TermMatch(term="django", fields=frozenset({"body"})),),
-            blacklist_matches=(),
-        )
-    )
-
-    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
-
-    run_log = (tmp_path / "run.log").read_text()
-    assert "whitelist_keyword_hits:" in run_log
-    assert "python=1(t=1,b=1)" in run_log
-    assert "django=1(t=0,b=1)" in run_log
-
-
 def test_summarize_to_parser_log_prefilter_blacklist_keyword_hits(
     tmp_path: Path,
 ) -> None:
@@ -1058,16 +1016,11 @@ def test_summarize_to_parser_log_prefilter_blacklist_keyword_hits(
     _parser_log.configure(tmp_path)
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
-    metrics.register_prefilter_keywords(
-        whitelist=["python"], blacklist=["excluded", "banned"]
-    )
+    metrics.register_prefilter_keywords(blacklist=["excluded", "banned"])
 
     metrics.prefilter_dropped(
         PreFilterVerdict(
             passes=False,
-            whitelist_hit=False,
-            blacklist_hit=True,
-            whitelist_matches=(),
             blacklist_matches=(
                 TermMatch(term="excluded", fields=frozenset({"title"})),
             ),
@@ -1082,120 +1035,74 @@ def test_summarize_to_parser_log_prefilter_blacklist_keyword_hits(
     assert "banned=0(t=0,b=0)" in run_log
 
 
-def test_prefilter_body_count_is_one_per_position_not_per_occurrence(
+def test_prefilter_blacklist_count_is_one_per_position_not_per_occurrence(
     tmp_path: Path,
 ) -> None:
-    """A position whose body mentions a term many times contributes 1 to body count."""
+    """A position whose title matches a term contributes 1 to the title count."""
     _parser_log.configure(tmp_path)
     display = FakeStatusDisplay()
     metrics = RunMetrics(display)
-    metrics.register_prefilter_keywords(whitelist=["python"], blacklist=[])
-
-    # TermMatch represents one position match regardless of occurrences
-    metrics.prefilter_passed(
-        PreFilterVerdict(
-            passes=True,
-            whitelist_hit=True,
-            blacklist_hit=False,
-            whitelist_matches=(TermMatch(term="python", fields=frozenset({"body"})),),
-            blacklist_matches=(),
-        )
-    )
-
-    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
-
-    run_log = (tmp_path / "run.log").read_text()
-    assert "python=1(t=0,b=1)" in run_log
-
-
-def test_prefilter_title_and_body_match_contributes_one_to_each(
-    tmp_path: Path,
-) -> None:
-    """A position matching a term in both title and body contributes 1 to t and 1 to b."""
-    _parser_log.configure(tmp_path)
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
-    metrics.register_prefilter_keywords(whitelist=["python"], blacklist=[])
-
-    metrics.prefilter_passed(
-        PreFilterVerdict(
-            passes=True,
-            whitelist_hit=True,
-            blacklist_hit=False,
-            whitelist_matches=(
-                TermMatch(term="python", fields=frozenset({"title", "body"})),
-            ),
-            blacklist_matches=(),
-        )
-    )
-
-    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
-
-    run_log = (tmp_path / "run.log").read_text()
-    assert "python=1(t=1,b=1)" in run_log
-
-
-def test_summarize_to_parser_log_prefilter_dead_lists(
-    tmp_path: Path,
-) -> None:
-    """whitelist_dead: and blacklist_dead: list zero-match terms; empty when all match."""
-    _parser_log.configure(tmp_path)
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
-    metrics.register_prefilter_keywords(
-        whitelist=["python", "django"], blacklist=["excluded", "banned"]
-    )
-
-    # Only "python" and "excluded" match; "django" and "banned" are dead
-    metrics.prefilter_passed(
-        PreFilterVerdict(
-            passes=True,
-            whitelist_hit=True,
-            blacklist_hit=True,
-            whitelist_matches=(TermMatch(term="python", fields=frozenset({"body"})),),
-            blacklist_matches=(TermMatch(term="excluded", fields=frozenset({"body"})),),
-        )
-    )
-
-    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
-
-    run_log = (tmp_path / "run.log").read_text()
-    assert "whitelist_dead:" in run_log
-    assert "blacklist_dead:" in run_log
-    assert "django" in run_log  # appears in whitelist_dead
-    assert "banned" in run_log  # appears in blacklist_dead
-
-
-def test_summarize_to_parser_log_prefilter_empty_dead_lists_when_all_match(
-    tmp_path: Path,
-) -> None:
-    """whitelist_dead: [] and blacklist_dead: [] when every term matches at least once."""
-    _parser_log.configure(tmp_path)
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
-    metrics.register_prefilter_keywords(whitelist=["python"], blacklist=["excluded"])
+    metrics.register_prefilter_keywords(blacklist=["pfleg"])
 
     metrics.prefilter_dropped(
         PreFilterVerdict(
             passes=False,
-            whitelist_hit=False,
-            blacklist_hit=True,
-            whitelist_matches=(),
-            blacklist_matches=(TermMatch(term="excluded", fields=frozenset({"body"})),),
-        )
-    )
-    metrics.prefilter_passed(
-        PreFilterVerdict(
-            passes=True,
-            whitelist_hit=True,
-            blacklist_hit=False,
-            whitelist_matches=(TermMatch(term="python", fields=frozenset({"title"})),),
-            blacklist_matches=(),
+            blacklist_matches=(TermMatch(term="pfleg", fields=frozenset({"title"})),),
         )
     )
 
     metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
 
     run_log = (tmp_path / "run.log").read_text()
-    assert "whitelist_dead: []" in run_log
-    assert "blacklist_dead: []" in run_log
+    assert "pfleg=1(t=1,b=0)" in run_log
+
+
+def test_summarize_to_parser_log_negative_keywords_dead_list(
+    tmp_path: Path,
+) -> None:
+    """NEGATIVE_KEYWORDS_dead: lists zero-match terms; empty when all match."""
+    _parser_log.configure(tmp_path)
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_prefilter_keywords(blacklist=["excluded", "banned"])
+
+    # Only "excluded" matches; "banned" is dead
+    metrics.prefilter_dropped(
+        PreFilterVerdict(
+            passes=False,
+            blacklist_matches=(
+                TermMatch(term="excluded", fields=frozenset({"title"})),
+            ),
+        )
+    )
+
+    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
+
+    run_log = (tmp_path / "run.log").read_text()
+    assert "NEGATIVE_KEYWORDS_dead:" in run_log
+    assert "banned" in run_log  # appears in NEGATIVE_KEYWORDS_dead
+    assert "whitelist_dead:" not in run_log
+
+
+def test_summarize_to_parser_log_negative_keywords_dead_empty_when_all_match(
+    tmp_path: Path,
+) -> None:
+    """NEGATIVE_KEYWORDS_dead: [] when every term matched at least once."""
+    _parser_log.configure(tmp_path)
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display)
+    metrics.register_prefilter_keywords(blacklist=["excluded"])
+
+    metrics.prefilter_dropped(
+        PreFilterVerdict(
+            passes=False,
+            blacklist_matches=(
+                TermMatch(term="excluded", fields=frozenset({"title"})),
+            ),
+        )
+    )
+
+    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
+
+    run_log = (tmp_path / "run.log").read_text()
+    assert "NEGATIVE_KEYWORDS_dead: []" in run_log

@@ -48,7 +48,6 @@ class Config:
     sources: list[SourceEntry]
     locations: list[str]
     include_remote: bool = True
-    inclusion_keywords: list[str] = field(default_factory=list)
     negative_keywords: list[str] = field(default_factory=list)
     seen_store_path: pathlib.Path = field(
         default_factory=lambda: pathlib.Path(".seen.json")

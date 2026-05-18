@@ -1,4 +1,5 @@
 import importlib
+import logging
 import pathlib
 
 from application_pipeline.parsers.location import LocationCoverage, validate_coverage
@@ -6,6 +7,8 @@ from application_pipeline.text.normalize import normalize
 from application_pipeline.user_settings import load_user_module
 
 from .types import Config, ConfigError, SourceEntry, resolve_data_paths
+
+_log = logging.getLogger(__name__)
 
 _REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
 
@@ -66,13 +69,17 @@ def load(path: pathlib.Path) -> Config:
     if claude_classify_batch_size < 1:
         raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be >= 1")
 
+    if hasattr(module, "INCLUSION_KEYWORDS"):
+        _log.info(
+            "config has unused field 'INCLUSION_KEYWORDS' — safe to remove, see ADR-0026"
+        )
+
     config = Config(
         keywords=module.KEYWORDS,
         skills=module.SKILLS,
         sources=module.SOURCES,
         locations=module.LOCATIONS,
         include_remote=getattr(module, "INCLUDE_REMOTE", True),
-        inclusion_keywords=getattr(module, "INCLUSION_KEYWORDS", []),
         negative_keywords=getattr(module, "NEGATIVE_KEYWORDS", []),
         seen_store_path=seen_store_path,
         results_dir=data_paths.results_dir,
@@ -166,7 +173,6 @@ def _validate(config: Config) -> None:
         [entry.parser_type for entry in config.sources],
         item_label="parser_type",
     )
-    _check_keyword_entries("INCLUSION_KEYWORDS", config.inclusion_keywords)
     _check_keyword_entries("NEGATIVE_KEYWORDS", config.negative_keywords)
     validate_coverage(
         _resolve_parser_modules(config.sources),

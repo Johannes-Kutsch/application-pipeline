@@ -730,7 +730,7 @@ _REJECTED_URL = _STUB_URLS_PF[2]
 
 
 class _PreFilterStubParser:
-    """6 stubs; stub at index 2 gets 'excluded' in its description, others don't."""
+    """6 stubs; stub at index 2 gets 'excluded' in its title so Pre-Filter drops it."""
 
     def __enter__(self) -> "_PreFilterStubParser":
         return self
@@ -739,16 +739,14 @@ class _PreFilterStubParser:
         pass
 
     def discover(self, query: ParserQuery) -> list[PositionStub]:
+        titles = ["Excluded Role" if i == 2 else f"Job {i}" for i in range(6)]
         return [
-            PositionStub(url=_STUB_URLS_PF[i], title=f"Job {i}", source="stub")
+            PositionStub(url=_STUB_URLS_PF[i], title=titles[i], source="stub")
             for i in range(6)
         ]
 
     def enrich(self, stub: PositionStub) -> Position:
-        desc = (
-            "excluded position" if stub.url == _REJECTED_URL else "regular job listing"
-        )
-        return Position(stub=stub, raw_description=desc)
+        return Position(stub=stub, raw_description="regular job listing")
 
 
 def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
@@ -777,8 +775,6 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
     assert summary.prefilter_passed == 5
     assert summary.prefilter_dropped == 1
     assert summary.prefilter_blacklist_hits == 1
-    assert summary.prefilter_whitelist_hits == 0
-    assert summary.prefilter_no_hit_either == 5
     assert summary.written == 5
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -786,42 +782,43 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Integration: prefilter whitelist-rescue counter (issue #176)
+# Integration: prefilter title-only blacklist counter
 # ---------------------------------------------------------------------------
 
-_STUB_URLS_WL = [f"https://stub.example/wl/{i}" for i in range(3)]
-_WL_BLACKLIST_ONLY_URL = _STUB_URLS_WL[0]  # blacklist hit, no whitelist → drops
-_WL_RESCUE_URL = _STUB_URLS_WL[1]  # blacklist + whitelist hit → passes (rescue)
-_WL_NO_HIT_URL = _STUB_URLS_WL[2]  # no hit either → passes
+_STUB_URLS_BL = [f"https://stub.example/bl/{i}" for i in range(3)]
+_BL_TITLE_DROP_URL = _STUB_URLS_BL[0]  # title contains negative keyword → drops
+_BL_BODY_ONLY_URL = _STUB_URLS_BL[
+    1
+]  # body contains negative keyword, clean title → passes
+_BL_NO_HIT_URL = _STUB_URLS_BL[2]  # no negative keyword anywhere → passes
 
 
-class _WhitelistRescueStubParser:
-    """3 stubs exercising all three prefilter verdict categories."""
+class _BlacklistStubParser:
+    """3 stubs covering the two prefilter outcomes: blacklist_drop and passed."""
 
-    def __enter__(self) -> "_WhitelistRescueStubParser":
+    def __enter__(self) -> "_BlacklistStubParser":
         return self
 
     def __exit__(self, *args: object) -> None:
         pass
 
     def discover(self, query: ParserQuery) -> list[PositionStub]:
+        titles = ["Pflegekraft gesucht", "Software Engineer", "Marketing Manager"]
         return [
-            PositionStub(url=url, title=f"Job {i}", source="stub")
-            for i, url in enumerate(_STUB_URLS_WL)
+            PositionStub(url=url, title=titles[i], source="stub")
+            for i, url in enumerate(_STUB_URLS_BL)
         ]
 
     def enrich(self, stub: PositionStub) -> Position:
-        if stub.url == _WL_BLACKLIST_ONLY_URL:
-            desc = "Pflegekraft gesucht"
-        elif stub.url == _WL_RESCUE_URL:
-            desc = "Pflegekraft mit Django-Kenntnissen gesucht"
+        if stub.url == _BL_BODY_ONLY_URL:
+            desc = "Pflegekraft-related description in body only"
         else:
-            desc = "Marketing Manager position"
+            desc = "Regular job description"
         return Position(stub=stub, raw_description=desc)
 
 
-def test_integration_prefilter_whitelist_rescue_counters(tmp_path: Path) -> None:
-    """Whitelist-rescue, blacklist-only-drop, and no-hit-either are counted correctly."""
+def test_integration_prefilter_title_only_blacklist_counters(tmp_path: Path) -> None:
+    """Title-only blacklist: title hit drops, body-only hit passes, no-hit passes."""
     seen_path = tmp_path / ".seen.json"
     config_path = _write_config(
         tmp_path,
@@ -835,7 +832,7 @@ def test_integration_prefilter_whitelist_rescue_counters(tmp_path: Path) -> None
     summary = run(
         config_path,
         extractor=_stub_extractor(),
-        parser_registry=lambda _: _WhitelistRescueStubParser,  # type: ignore[return-value]
+        parser_registry=lambda _: _BlacklistStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
         results_managers=_stub_results_managers(),
     )
@@ -843,24 +840,21 @@ def test_integration_prefilter_whitelist_rescue_counters(tmp_path: Path) -> None
     assert summary.prefilter_considered == 3
     assert summary.prefilter_dropped == 1
     assert summary.prefilter_passed == 2
-    assert summary.prefilter_blacklist_hits == 2  # blacklist-only + rescue
-    assert summary.prefilter_whitelist_hits == 1  # only rescue position
-    assert summary.prefilter_no_hit_either == 1  # marketing manager
+    assert summary.prefilter_blacklist_hits == 1  # only the title hit
 
 
 # ---------------------------------------------------------------------------
 # Integration: prefilter.events.jsonl — one row per decision with reason field
 # ---------------------------------------------------------------------------
 
-_PF_EVENT_URLS = [f"https://stub.example/pfev/{i}" for i in range(4)]
-_PF_EVENT_NO_HIT_URL = _PF_EVENT_URLS[0]
-_PF_EVENT_WHITELIST_ONLY_URL = _PF_EVENT_URLS[1]
-_PF_EVENT_RESCUE_URL = _PF_EVENT_URLS[2]
-_PF_EVENT_DROP_URL = _PF_EVENT_URLS[3]
+_PF_EVENT_URLS = [f"https://stub.example/pfev/{i}" for i in range(3)]
+_PF_EVENT_PASS_URL = _PF_EVENT_URLS[0]  # clean title → passed
+_PF_EVENT_BODY_ONLY_URL = _PF_EVENT_URLS[1]  # body-only hit → still passed
+_PF_EVENT_DROP_URL = _PF_EVENT_URLS[2]  # title hit → blacklist_drop
 
 
 class _PreFilterEventStubParser:
-    """4 stubs covering all four prefilter reason categories."""
+    """3 stubs covering the two prefilter reason categories: passed and blacklist_drop."""
 
     def __enter__(self) -> "_PreFilterEventStubParser":
         return self
@@ -869,18 +863,17 @@ class _PreFilterEventStubParser:
         pass
 
     def discover(self, query: ParserQuery) -> list[PositionStub]:
+        titles = ["Marketing Manager", "Software Engineer", "Pflegekraft Stelle"]
         return [
-            PositionStub(url=url, title=f"Job {i}", source="stub")
+            PositionStub(url=url, title=titles[i], source="stub")
             for i, url in enumerate(_PF_EVENT_URLS)
         ]
 
     def enrich(self, stub: PositionStub) -> Position:
-        # SKILLS=["django"] is the whitelist; NEGATIVE_KEYWORDS=["pflegekraft"] is the blacklist
         descriptions = {
-            _PF_EVENT_NO_HIT_URL: "Marketing manager position",
-            _PF_EVENT_WHITELIST_ONLY_URL: "Django developer role",
-            _PF_EVENT_RESCUE_URL: "Django pflegekraft gesucht",
-            _PF_EVENT_DROP_URL: "Pflegekraft gesucht",
+            _PF_EVENT_PASS_URL: "Marketing manager position",
+            _PF_EVENT_BODY_ONLY_URL: "Pflegekraft skills required",
+            _PF_EVENT_DROP_URL: "Details about the role",
         }
         return Position(stub=stub, raw_description=descriptions[stub.url])
 
@@ -916,43 +909,35 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
-    assert len(rows) == 4, "one row per position evaluated"
+    assert len(rows) == 3, "one row per position evaluated"
 
     by_url = {row["url"]: row for row in rows}
 
-    no_hit = by_url[_PF_EVENT_NO_HIT_URL]
-    assert no_hit["event"] == "decision"
-    assert no_hit["passes"] is True
-    assert no_hit["reason"] == "no_hit"
-    assert no_hit["whitelist_matches"] == []
-    assert no_hit["blacklist_matches"] == []
+    passed = by_url[_PF_EVENT_PASS_URL]
+    assert passed["event"] == "decision"
+    assert passed["passes"] is True
+    assert passed["reason"] == "passed"
+    assert passed["blacklist_matches"] == []
 
-    wl_only = by_url[_PF_EVENT_WHITELIST_ONLY_URL]
-    assert wl_only["passes"] is True
-    assert wl_only["reason"] == "whitelist_only"
-    assert len(wl_only["whitelist_matches"]) > 0
-    assert wl_only["blacklist_matches"] == []
-
-    rescue = by_url[_PF_EVENT_RESCUE_URL]
-    assert rescue["passes"] is True
-    assert rescue["reason"] == "whitelist_rescue"
-    assert len(rescue["whitelist_matches"]) > 0
-    assert len(rescue["blacklist_matches"]) > 0
+    body_only = by_url[_PF_EVENT_BODY_ONLY_URL]
+    assert body_only["passes"] is True
+    assert body_only["reason"] == "passed"
+    assert body_only["blacklist_matches"] == []
 
     drop = by_url[_PF_EVENT_DROP_URL]
     assert drop["passes"] is False
     assert drop["reason"] == "blacklist_drop"
-    assert drop["whitelist_matches"] == []
     assert len(drop["blacklist_matches"]) > 0
 
-    # Check envelope fields present on all rows
+    # Check envelope fields present on all rows; body_len and whitelist_matches must not appear
     for row in rows:
         assert "ts" in row
         assert "url" in row
         assert "title" in row
         assert "source" in row
         assert "title_len" in row
-        assert "body_len" in row
+        assert "body_len" not in row
+        assert "whitelist_matches" not in row
 
 
 # ---------------------------------------------------------------------------
@@ -960,7 +945,7 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 _STUB_URLS_LLM = [f"https://stub.example/llm/{i}" for i in range(6)]
-_PF_REJECTED_LLM_URL = _STUB_URLS_LLM[0]  # prefilter rejects: "excluded" in description
+_PF_REJECTED_LLM_URL = _STUB_URLS_LLM[0]  # prefilter rejects: "excluded" in title
 _CLS_REJECTED_LLM_URL = _STUB_URLS_LLM[1]  # classifier rejects: title "Job 1"
 # URLs 2-5 are judged with tiers: green, amber, red, amber
 _LLM_JUDGE_TIERS = {
@@ -972,7 +957,7 @@ _LLM_JUDGE_TIERS = {
 
 
 class _LLMStubParser:
-    """6 stubs with distinct descriptions for prefilter/classifier/judge discrimination."""
+    """6 stubs; stub 0 has 'excluded' in title so Pre-Filter drops it."""
 
     def __enter__(self) -> "_LLMStubParser":
         return self
@@ -984,20 +969,16 @@ class _LLMStubParser:
         return [
             PositionStub(
                 url=_STUB_URLS_LLM[i],
-                title=f"Job {i}",
+                title="Excluded Role" if i == 0 else f"Job {i}",
                 source="stub",
             )
             for i in range(6)
         ]
 
     def enrich(self, stub: PositionStub) -> Position:
-        if stub.url == _PF_REJECTED_LLM_URL:
-            desc = "excluded position"
-        else:
-            # Encode URL index in description so judge can return the right tier
-            idx = _STUB_URLS_LLM.index(stub.url)
-            desc = f"description for job {idx}"
-        return Position(stub=stub, raw_description=desc)
+        # Encode URL index in description so judge can return the right tier
+        idx = _STUB_URLS_LLM.index(stub.url)
+        return Position(stub=stub, raw_description=f"description for job {idx}")
 
 
 _FAKE_CLASSIFY_USAGE = CallUsage(
@@ -3244,12 +3225,14 @@ def test_prefilter_trailer_schema(tmp_path: Path) -> None:
 
     assert "SUMMARY OF SESSION" in content
     for key in (
-        "whitelist_keyword_hits:",
         "blacklist_keyword_hits:",
-        "whitelist_dead:",
-        "blacklist_dead:",
+        "NEGATIVE_KEYWORDS_dead:",
     ):
         assert key in content, f"key {key!r} missing from run.log"
+    for absent_key in ("whitelist_keyword_hits:", "whitelist_dead:", "blacklist_dead:"):
+        assert absent_key not in content, (
+            f"key {absent_key!r} should not appear in run.log"
+        )
 
 
 def test_main_run_complete_line_includes_new_fields(
@@ -3731,8 +3714,8 @@ def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:
     assert "considered=" in final
     assert "passed=" in final
     assert "dropped=" in final
-    assert "wl=" in final
     assert "bl=" in final
+    assert "wl=" not in final
 
 
 def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:

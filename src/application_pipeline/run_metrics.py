@@ -33,9 +33,7 @@ class RunSummary:
     prefilter_considered: int = 0
     prefilter_passed: int = 0
     prefilter_dropped: int = 0
-    prefilter_whitelist_hits: int = 0
     prefilter_blacklist_hits: int = 0
-    prefilter_no_hit_either: int = 0
     dedup_url_hits: int = 0
     dedup_tuple_hits: int = 0
     dedup_run_hits: int = 0
@@ -89,16 +87,12 @@ def _bump_keyword_counts(
 
 
 def _prefilter_summary_counts(
-    wl_terms: list[str],
     bl_terms: list[str],
-    wl_counts: dict[str, tuple[int, int, int]],
     bl_counts: dict[str, tuple[int, int, int]],
 ) -> dict[str, str]:
     return {
-        "whitelist_keyword_hits": _format_keyword_hits(wl_terms, wl_counts),
         "blacklist_keyword_hits": _format_keyword_hits(bl_terms, bl_counts),
-        "whitelist_dead": _format_dead_list(wl_terms, wl_counts),
-        "blacklist_dead": _format_dead_list(bl_terms, bl_counts),
+        "NEGATIVE_KEYWORDS_dead": _format_dead_list(bl_terms, bl_counts),
     }
 
 
@@ -120,9 +114,7 @@ class RunMetrics:
         self._prefilter_considered = 0
         self._prefilter_passed = 0
         self._prefilter_dropped = 0
-        self._prefilter_whitelist_hits = 0
         self._prefilter_blacklist_hits = 0
-        self._prefilter_no_hit_either = 0
         self._enrich_failed = 0
         self._external_redirects = 0
         self._parsers_dead = 0
@@ -163,10 +155,8 @@ class RunMetrics:
         self._degraded_reason: str | None = None
 
         # Per-keyword prefilter counters (populated via register_prefilter_keywords)
-        self._prefilter_whitelist: list[str] = []
         self._prefilter_blacklist: list[str] = []
         # term -> (positions_matched, title_count, body_count)
-        self._prefilter_wl_counts: dict[str, tuple[int, int, int]] = {}
         self._prefilter_bl_counts: dict[str, tuple[int, int, int]] = {}
 
         # Per-parser counters (lazily allocated on first event)
@@ -201,15 +191,9 @@ class RunMetrics:
         with self._lock:
             self._degraded_reason = reason
 
-    def register_prefilter_keywords(
-        self, whitelist: list[str], blacklist: list[str]
-    ) -> None:
+    def register_prefilter_keywords(self, blacklist: list[str]) -> None:
         with self._lock:
-            self._prefilter_whitelist = [n for k in whitelist if (n := normalize(k))]
             self._prefilter_blacklist = [n for k in blacklist if (n := normalize(k))]
-            self._prefilter_wl_counts = {
-                t: (0, 0, 0) for t in self._prefilter_whitelist
-            }
             self._prefilter_bl_counts = {
                 t: (0, 0, 0) for t in self._prefilter_blacklist
             }
@@ -540,9 +524,7 @@ class RunMetrics:
                 prefilter_considered=self._prefilter_considered,
                 prefilter_passed=self._prefilter_passed,
                 prefilter_dropped=self._prefilter_dropped,
-                prefilter_whitelist_hits=self._prefilter_whitelist_hits,
                 prefilter_blacklist_hits=self._prefilter_blacklist_hits,
-                prefilter_no_hit_either=self._prefilter_no_hit_either,
                 dedup_url_hits=self._dedup_url_hits,
                 dedup_tuple_hits=self._dedup_tuple_hits,
                 dedup_run_hits=self._dedup_run_hits,
@@ -585,14 +567,12 @@ class RunMetrics:
             judge_cache_read_tokens = self._judge_cache_read_tokens
             judge_cost_usd = self._judge_cost_usd
             judge_total_s = self._judge_total_s
-            wl_terms = list(self._prefilter_whitelist)
             bl_terms = list(self._prefilter_blacklist)
-            wl_counts = dict(self._prefilter_wl_counts)
             bl_counts = dict(self._prefilter_bl_counts)
 
         parser_log.summarize(
             "prefilter",
-            _prefilter_summary_counts(wl_terms, bl_terms, wl_counts, bl_counts),
+            _prefilter_summary_counts(bl_terms, bl_counts),
             started_at,
         )
         parser_log.summarize(
@@ -664,7 +644,7 @@ class RunMetrics:
             f"considered={self._prefilter_considered}"
             f" passed={self._prefilter_passed}"
             f" dropped={self._prefilter_dropped}"
-            f" (wl={self._prefilter_whitelist_hits} bl={self._prefilter_blacklist_hits})"
+            f" (bl={self._prefilter_blacklist_hits})"
         )
 
     def _classify_body(self) -> str:
@@ -692,11 +672,6 @@ class RunMetrics:
         return result
 
     def _tally_prefilter_verdict(self, verdict: PreFilterVerdict) -> None:
-        if verdict.whitelist_hit:
-            self._prefilter_whitelist_hits += 1
-        if verdict.blacklist_hit:
+        if verdict.blacklist_matches:
             self._prefilter_blacklist_hits += 1
-        if not verdict.whitelist_hit and not verdict.blacklist_hit:
-            self._prefilter_no_hit_either += 1
-        _bump_keyword_counts(self._prefilter_wl_counts, verdict.whitelist_matches)
         _bump_keyword_counts(self._prefilter_bl_counts, verdict.blacklist_matches)

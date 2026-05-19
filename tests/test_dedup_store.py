@@ -293,6 +293,7 @@ def test_tuple_match_writes_alias_with_original_status_and_first_seen(
     assert b.url in on_disk
     assert on_disk[b.url]["status"] == original["status"]
     assert on_disk[b.url]["first_seen"] == original["first_seen"]
+    assert on_disk[b.url]["canonical_url"] == a.url
 
 
 def test_alias_first_seen_is_originals_not_today(
@@ -530,6 +531,19 @@ def test_concurrent_marks_produce_valid_store(store_path: Path) -> None:
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     assert isinstance(on_disk, dict)
     assert len(on_disk) == n_threads * marks_per_thread
+
+
+def test_mark_not_classified_persists_status(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/nc")
+    store.mark_not_classified(stub)
+
+    assert store.is_seen(stub) == "url_hit"
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    record = on_disk["https://example.com/nc"]
+    assert record["status"] == "not_classified"
+    assert record["canonical_url"] == "https://example.com/nc"
 
 
 def test_mark_in_domain_then_is_seen_returns_judge_pending(

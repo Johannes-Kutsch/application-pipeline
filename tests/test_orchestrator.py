@@ -1519,7 +1519,7 @@ def _one_stub_config(tmp_path: Path) -> Path:
 
 
 def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
-    """After classify succeeds and judge raises ExtractorError, seen store has classified_in_domain."""
+    """After classify succeeds and judge raises ExtractorError, seen store has in_domain."""
     seen_path = tmp_path / ".seen.json"
 
     ext = MagicMock()
@@ -1542,7 +1542,7 @@ def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
 
 
 def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
-    """On rerun, a classified_in_domain URL is enriched and judged without classify being called."""
+    """On rerun, an in_domain URL is enriched and judged without classify being called."""
     seen_path = tmp_path / ".seen.json"
     classify_calls: list[object] = []
     enrich_calls: list[str] = []
@@ -1607,7 +1607,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
 
 
 def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) -> None:
-    """On rerun, if judge succeeds the URL transitions from classified_in_domain to kept."""
+    """On rerun, if judge succeeds the URL transitions from in_domain to selected_by_judge."""
     seen_path = tmp_path / ".seen.json"
 
     seen_path.write_text(
@@ -1638,7 +1638,7 @@ def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) 
 
 
 def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
-    """On rerun, if judge fails again the URL stays classified_in_domain for the next run."""
+    """On rerun, if judge fails again the URL stays in_domain for the next run."""
     seen_path = tmp_path / ".seen.json"
 
     seen_path.write_text(
@@ -4166,7 +4166,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
         seen_data.get(_ERR_URLS[i], {}).get("status") == "selected_by_judge"
         for i in range(3)
     )
-    # 4th item: classify marked it classified_in_domain; judge raised ClaudeUsageLimitError → stays classified_in_domain
+    # 4th item: classify marked it in_domain; judge raised ClaudeUsageLimitError → stays in_domain
     assert seen_data.get(_ERR_URLS[3], {}).get("status") == "in_domain"
 
     content = (results_dir / "green.md").read_text(encoding="utf-8")

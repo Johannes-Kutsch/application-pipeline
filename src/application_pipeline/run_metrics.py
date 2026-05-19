@@ -101,6 +101,7 @@ class RunMetrics:
         self._prefilter_passed = 0
         self._prefilter_dropped = 0
         self._prefilter_blacklist_hits = 0
+        self._freshness_dropped = 0
         self._enrich_failed = 0
         self._external_redirects = 0
         self._parsers_dead = 0
@@ -154,10 +155,13 @@ class RunMetrics:
             "pipeline_prefilter", order=starting_order + 1, phase="running"
         )
         self._display.register(
-            "llm_classify_relevance", order=starting_order + 2, phase="running"
+            "pipeline_freshness", order=starting_order + 2, phase="running"
         )
         self._display.register(
-            "llm_judge_match", order=starting_order + 3, phase="running"
+            "llm_classify_relevance", order=starting_order + 3, phase="running"
+        )
+        self._display.register(
+            "llm_judge_match", order=starting_order + 4, phase="running"
         )
 
     def register_parser(
@@ -244,6 +248,12 @@ class RunMetrics:
             self._tally_prefilter_verdict(verdict)
             body = self._prefilter_body()
         self._display.update_body("pipeline_prefilter", body=body)
+
+    def freshness_dropped(self) -> None:
+        with self._lock:
+            self._freshness_dropped += 1
+            body = self._freshness_body()
+        self._display.update_body("pipeline_freshness", body=body)
 
     def enrich_failed(self, parser_id: str = "") -> None:
         with self._lock:
@@ -679,6 +689,9 @@ class RunMetrics:
             f" dropped={self._prefilter_dropped}"
             f" (bl={self._prefilter_blacklist_hits})"
         )
+
+    def _freshness_body(self) -> str:
+        return f"dropped={self._freshness_dropped}"
 
     def _classify_body(self) -> str:
         numerator = self._classify_calls + self._classify_failed

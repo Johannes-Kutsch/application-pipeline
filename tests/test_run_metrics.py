@@ -68,7 +68,7 @@ def _last_body(display: FakeStatusDisplay, row: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_register_rows_creates_four_rows_with_correct_order_and_phase(
+def test_register_rows_creates_five_rows_with_correct_order_and_phase(
     run_log: RunLog,
 ) -> None:
     display = FakeStatusDisplay()
@@ -78,8 +78,9 @@ def test_register_rows_creates_four_rows_with_correct_order_and_phase(
     assert _registers(display) == [
         ("pipeline_dedup", 10, "running"),
         ("pipeline_prefilter", 11, "running"),
-        ("llm_classify_relevance", 12, "running"),
-        ("llm_judge_match", 13, "running"),
+        ("pipeline_freshness", 12, "running"),
+        ("llm_classify_relevance", 13, "running"),
+        ("llm_judge_match", 14, "running"),
     ]
 
 
@@ -89,7 +90,7 @@ def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
     metrics.register_rows(starting_order=0)
 
     orders = [c.kwargs["order"] for c in display.calls if c.method == "register"]
-    assert orders == [0, 1, 2, 3]
+    assert orders == [0, 1, 2, 3, 4]
 
 
 # ---------------------------------------------------------------------------

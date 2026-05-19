@@ -36,7 +36,7 @@ from application_pipeline.llm import (
     LLMExtractor,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
-from application_pipeline.llm.types import StructuredExtract
+from application_pipeline.llm.types import MatchVerdict, StructuredExtract
 from application_pipeline.parsers import (
     ExternalRedirect,
     NotServedQuery,
@@ -187,6 +187,10 @@ class _PoolCollector:
     def add_judge_pending(self, position: "Position") -> None:
         with self._lock:
             self._positions[position.stub.url] = position
+
+    def get_position(self, url: str) -> "Position | None":
+        with self._lock:
+            return self._positions.get(url)
 
     def build_candidates(
         self, extract_store: "extracts_module.ExtractStore | None"
@@ -867,7 +871,7 @@ def run(
 
         daily_top_5_count = 0
         if candidates:
-            verdicts: list | None = None
+            verdicts: list[MatchVerdict] | None = None
             judge_usage = None
             while True:
                 try:
@@ -890,13 +894,11 @@ def run(
                         log_tail="",
                         failures_dir=cfg.failures_path,
                     )
-                    verdicts = None
                     break
 
             if verdicts is not None and judge_usage is not None:
-                sorted_verdicts = sorted(verdicts, key=lambda v: v.rank)
-                for verdict in sorted_verdicts:
-                    position = pool_collector._positions.get(verdict.id)
+                for verdict in sorted(verdicts, key=lambda v: v.rank):
+                    position = pool_collector.get_position(verdict.id)
                     if position is None:
                         continue
                     rendered = render(position, verdict, layout)

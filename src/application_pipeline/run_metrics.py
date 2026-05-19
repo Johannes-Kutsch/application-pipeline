@@ -420,6 +420,68 @@ class RunMetrics:
         self._display.update_body("llm_judge_match", body=judge_body)
         self._display.update_body("pipeline", body=pipeline_body)
 
+    def judge_top_n_complete(self, usage: CallUsage, card_count: int) -> None:
+        with self._lock:
+            self._judge_calls += 1
+            self._judge_started += 1
+            self._judge_input_tokens += usage.input_tokens
+            self._judge_output_tokens += usage.output_tokens
+            self._judge_cache_read_tokens += usage.cache_read_tokens
+            self._judge_cost_usd += usage.cost_usd
+            self._judge_total_s += usage.duration_s
+            self._written += card_count
+            body = self._judge_body()
+        self._display.update_body("llm_judge_match", body=body)
+
+    # -----------------------------------------------------------------------
+    # Read-only accessors for run_complete event
+    # -----------------------------------------------------------------------
+
+    @property
+    def classify_calls(self) -> int:
+        with self._lock:
+            return self._classify_calls
+
+    @property
+    def classify_input_tokens(self) -> int:
+        with self._lock:
+            return self._classify_input_tokens
+
+    @property
+    def classify_output_tokens(self) -> int:
+        with self._lock:
+            return self._classify_output_tokens
+
+    @property
+    def judge_input_tokens(self) -> int:
+        with self._lock:
+            return self._judge_input_tokens
+
+    @property
+    def judge_output_tokens(self) -> int:
+        with self._lock:
+            return self._judge_output_tokens
+
+    @property
+    def dedup_url_hits(self) -> int:
+        with self._lock:
+            return self._dedup_url_hits
+
+    @property
+    def dedup_tuple_hits(self) -> int:
+        with self._lock:
+            return self._dedup_tuple_hits
+
+    @property
+    def dedup_run_hits(self) -> int:
+        with self._lock:
+            return self._dedup_run_hits
+
+    @property
+    def dedup_misses(self) -> int:
+        with self._lock:
+            return self._dedup_misses
+
     # -----------------------------------------------------------------------
     # Output methods
     # -----------------------------------------------------------------------

@@ -39,10 +39,7 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.types import City, Remote
 from application_pipeline.prompts import PromptError
-from application_pipeline.results import (
-    FILE_HEADER,
-    ResultsFileError,
-)
+from application_pipeline.results import ResultsFileError
 
 
 class _StubParserBase:
@@ -112,32 +109,28 @@ def _stub_extractor() -> MagicMock:
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ],
         _ZERO_USAGE,
     )
     return ext
 
 
-def _stub_results_paths(tmp_path: Path) -> dict[str, Path]:
-    d = tmp_path / "_stub_results"
-    d.mkdir(exist_ok=True)
-    return {tier: d / f"{tier}.md" for tier in ("green", "amber", "red")}
-
-
-def _real_results_paths(
-    results_dir: Path,
-) -> dict[str, Path]:
-    results_dir.mkdir(parents=True, exist_ok=True)
-    return {tier: results_dir / f"{tier}.md" for tier in ("green", "amber", "red")}
-
-
 def _read_all_results(results_dir: Path) -> str:
-    """Concatenate content from all three tier result files."""
+    """Read content from all dated daily result files."""
     parts = []
-    for tier in ("green", "amber", "red"):
-        f = results_dir / f"{tier}.md"
-        if f.exists():
+    if results_dir.exists():
+        for f in sorted(results_dir.glob("????-??-??.md")):
             parts.append(f.read_text(encoding="utf-8"))
     return "\n".join(parts)
 
@@ -165,7 +158,6 @@ def test_zero_summary_on_empty_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert isinstance(summary, RunSummary)
@@ -199,7 +191,6 @@ def test_prompt_error_propagates(tmp_path: Path) -> None:
             config_path,
             # extractor=None so load_prompts() is called
             dedup_store=MagicMock(),
-            results_paths=_stub_results_paths(tmp_path),
         )
 
 
@@ -212,7 +203,6 @@ def test_dedup_store_error_propagates(tmp_path: Path) -> None:
             config_path,
             extractor=_stub_extractor(),
             # dedup_store=None so the store is loaded from seen_store_path
-            results_paths=_stub_results_paths(tmp_path),
         )
 
 
@@ -231,7 +221,6 @@ def test_results_file_error_propagates(
             config_path,
             extractor=_stub_extractor(),
             dedup_store=MagicMock(),
-            results_paths=_stub_results_paths(tmp_path),
         )
 
 
@@ -248,7 +237,6 @@ def test_unknown_parser_type_run_continues(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert isinstance(summary, RunSummary)
@@ -289,7 +277,7 @@ class _StubParser(_StubParserBase):
 
 
 def test_integration_discover_and_enrich(tmp_path: Path) -> None:
-    """2 keywords × 1 location, 3 stubs each → discovered==6, skipped==0, written==6."""
+    """2 keywords × 1 location, 3 stubs each → discovered==6, skipped==0, written==5 (capped by judge_top_n)."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -303,12 +291,11 @@ def test_integration_discover_and_enrich(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.discovered == 6
     assert summary.skipped == 0
-    assert summary.written == 6
+    assert summary.written == 5  # judge_top_n caps at 5
 
 
 def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
@@ -339,7 +326,6 @@ def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.discovered == 6
@@ -378,7 +364,6 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert len(queries_received) == 2
@@ -443,7 +428,6 @@ def test_integration_dedup_counter_breakdown(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _SevenStubParser,  # type: ignore[return-value]
             dedup_store=dedup,
-            results_paths=_stub_results_paths(tmp_path),
         )
 
     assert summary.dedup_url_hits == 2
@@ -494,7 +478,6 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.dedup_run_hits == 1
@@ -544,7 +527,6 @@ def test_consecutive_url_hits_never_trigger_skip_and_end_query(tmp_path: Path) -
         extractor=_stub_extractor(),
         parser_registry=lambda _: _HitOnlyParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert consumed[0] == 100
@@ -599,7 +581,6 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TrailingParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert unseen_url in enrich_calls, "trailing unseen stub must be enriched"
@@ -641,7 +622,6 @@ def test_in_run_dedup_run_hits_in_log_line(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(tmp_path),
         )
 
     run_complete = next(
@@ -685,14 +665,12 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_paths=_stub_results_paths(tmp_path),
     )
     summary2 = run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup,
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     # Each run sees the URL as a miss (in-run set starts fresh); no run_hits in either run
@@ -747,7 +725,6 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _PreFilterStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.discovered == 6
@@ -815,7 +792,6 @@ def test_integration_prefilter_title_only_blacklist_counters(tmp_path: Path) -> 
         extractor=_stub_extractor(),
         parser_registry=lambda _: _BlacklistStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.prefilter_considered == 3
@@ -880,7 +856,6 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _PreFilterEventStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -1013,8 +988,21 @@ class _FakeExtractor:
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
-    ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
-        return [], _ZERO_USAGE
+    ) -> tuple[list[MatchVerdict], CallUsage]:
+        # Return a verdict for each candidate using the same tier logic as judge_match
+        verdicts = []
+        for i, c in enumerate(candidates[:5]):
+            tier = MatchTier.green
+            for idx, url in enumerate(_STUB_URLS_LLM):
+                if c.id == url:
+                    tier = _LLM_JUDGE_TIERS.get(url, MatchTier.green)
+                    break
+            verdicts.append(
+                MatchVerdict(
+                    tier=tier, matched=[], missing=[], summary="ok", rank=i + 1, id=c.id
+                )
+            )
+        return verdicts, _FAKE_JUDGE_USAGE
 
 
 def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
@@ -1035,7 +1023,6 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
     )
 
     assert summary.discovered == 6
@@ -1043,9 +1030,9 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     assert summary.prefilter_dropped == 1
     assert summary.classifier_dropped == 1
     assert summary.written == 4
-    assert summary.green == 1
-    assert summary.amber == 2
-    assert summary.red == 1
+    assert summary.green == 0
+    assert summary.amber == 0
+    assert summary.red == 0
 
     # .seen.json: 2 out_of_domain, 4 selected_by_judge
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1060,7 +1047,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     assert _PF_REJECTED_LLM_URL in out_of_domain
     assert _CLS_REJECTED_LLM_URL in out_of_domain
 
-    # 4 card H1s across the three tier files
+    # 4 card H1s in the daily results file
     content = _read_all_results(results_dir)
     cards = re.findall(r"^# .+ · .+", content, re.MULTILINE)
     assert len(cards) == 4
@@ -1085,7 +1072,6 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
             extractor=_FakeExtractor(),
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(seen_path),
-            results_paths=_real_results_paths(results_dir),
         )
 
     first = _make_run()
@@ -1105,7 +1091,7 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     assert second.amber == 0
     assert second.red == 0
 
-    # No new position entries added; second run only appends its own Run Divider
+    # No new position entries added on second run
     numbers_after_second = re.findall(
         r"^## (\d+)\.", _read_all_results(results_dir), re.MULTILINE
     )
@@ -1113,7 +1099,7 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
 
 
 def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
-    """All classify_relevance_batch calls complete before any judge_match call."""
+    """All classify_relevance_batch calls complete before any judge_top_n call."""
     call_log: list[str] = []
 
     class _InstrumentedExtractor:
@@ -1127,8 +1113,8 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
 
         def judge_match(
             self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:
-            call_log.append("judge")
+        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
+            call_log.append("judge_match")
             return (
                 MatchVerdict(
                     tier=MatchTier.green, matched=[], missing=[], summary="ok"
@@ -1138,8 +1124,19 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
-            return [], _ZERO_USAGE
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            call_log.append("judge_top_n")
+            return [
+                MatchVerdict(
+                    tier=MatchTier.green,
+                    matched=[],
+                    missing=[],
+                    summary="ok",
+                    rank=i + 1,
+                    id=c.id,
+                )
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     class _MultiStubParser(_StubParserBase):
         """Emits 5 stubs, all pass prefilter."""
@@ -1176,16 +1173,16 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
         extractor=_InstrumentedExtractor(),
         parser_registry=lambda _: _MultiStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert call_log.count("classify") == 5
-    assert call_log.count("judge") == 5
-    # All classify calls before any judge call
+    assert call_log.count("judge_top_n") == 1
+    assert call_log.count("judge_match") == 0
+    # All classify calls before the judge_top_n call
     last_classify = max(i for i, c in enumerate(call_log) if c == "classify")
-    first_judge = min(i for i, c in enumerate(call_log) if c == "judge")
+    first_judge = min(i for i, c in enumerate(call_log) if c == "judge_top_n")
     assert last_classify < first_judge, (
-        f"classify and judge calls interleaved: {call_log}"
+        f"classify and judge_top_n calls interleaved: {call_log}"
     )
 
 
@@ -1243,8 +1240,18 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch_side_effect
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ],
         _ZERO_USAGE,
     )
 
@@ -1267,7 +1274,6 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     # First batch errored (1 position), second batch succeeded (1 position written)
@@ -1280,40 +1286,28 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
 
 
 def test_extractor_error_on_judge_leaves_status_in_domain(tmp_path: Path) -> None:
-    """ExtractorError on judge_match: position status stays in_domain (not selected_by_judge), rendered block NOT in green.md, errored increments."""
+    """ExtractorError on judge_top_n: all positions stay in_domain (not selected_by_judge), no daily file written."""
     seen_path = tmp_path / ".seen.json"
-    results_dir = tmp_path / "results"
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    # First judge raises, second succeeds
-    ext.judge_match.side_effect = [
-        ExtractorError("judge boom"),
-        (
-            MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
-            _ZERO_USAGE,
-        ),
-    ]
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
 
     summary = run(
         _two_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
     )
 
-    assert summary.errored == 1
-    assert summary.written == 1
+    assert summary.written == 0
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data[_ERR_URLS[0]]["status"] == "in_domain"
-
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    assert "Job 0" not in content
+    assert seen_data[_ERR_URLS[1]]["status"] == "in_domain"
 
 
 def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
@@ -1349,7 +1343,6 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.enrich_failed == 1
@@ -1395,7 +1388,6 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
         extractor=_stub_extractor(),
         parser_registry=lambda _: _PerStubHttpParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.enrich_failed == 1
@@ -1458,7 +1450,6 @@ def test_parser_fatal_http_error_on_enrich_marks_parser_dead_surviving_parsers_c
         extractor=_stub_extractor(),
         parser_registry=_registry,
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.parsers_dead == 1
@@ -1510,7 +1501,6 @@ def test_external_redirect_marks_seen_and_increments_counter(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
             dedup_store=dedup_module.load(seen_path),
-            results_paths=_stub_results_paths(tmp_path),
             run_log=run_log,
         )
 
@@ -1568,7 +1558,6 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
         extractor=_stub_extractor(),
         parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -1615,7 +1604,6 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
         extractor=_stub_extractor(),
         parser_registry=lambda _: _MidDiscoverFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.discovered == 3
@@ -1656,7 +1644,7 @@ def _one_stub_config(tmp_path: Path) -> Path:
 
 
 def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
-    """After classify succeeds and judge raises ExtractorError, seen store has in_domain."""
+    """After classify succeeds and judge_top_n raises ExtractorError, seen store has in_domain."""
     seen_path = tmp_path / ".seen.json"
 
     ext = MagicMock()
@@ -1664,14 +1652,13 @@ def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    ext.judge_match.side_effect = ExtractorError("judge boom")
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
 
     run(
         _one_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1719,8 +1706,18 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
-            return [], _ZERO_USAGE
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            return [
+                MatchVerdict(
+                    tier=MatchTier.green,
+                    matched=[],
+                    missing=[],
+                    summary="ok",
+                    rank=i + 1,
+                    id=c.id,
+                )
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     seen_path.write_text(
         json.dumps(
@@ -1736,13 +1733,26 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    # extracts.json must exist so build_candidates can retrieve the extract for judge_pending URLs
+    _stub_extract_record: dict[str, object] = {
+        "seniority": None,
+        "work_model": None,
+        "contract_type": None,
+        "key_skills": [],
+        "key_responsibilities": [],
+        "must_have_requirements": [],
+        "notable_caveats": "",
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({_RESUME_URL: _stub_extract_record}),
+        encoding="utf-8",
+    )
 
     summary = run(
         _one_stub_config(tmp_path),
         extractor=_TrackingExtractor(),
         parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert classify_calls == [], "classify must not be called for judge_pending stubs"
@@ -1768,13 +1778,25 @@ def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) 
         ),
         encoding="utf-8",
     )
+    # extracts.json must exist so build_candidates produces a JudgeCandidate for the judge_pending URL
+    _ser: dict[str, object] = {
+        "seniority": None,
+        "work_model": None,
+        "contract_type": None,
+        "key_skills": [],
+        "key_responsibilities": [],
+        "must_have_requirements": [],
+        "notable_caveats": "",
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({_RESUME_URL: _ser}), encoding="utf-8"
+    )
 
     run(
         _one_stub_config(tmp_path),
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1799,20 +1821,32 @@ def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    # extracts.json so build_candidates finds the candidate and judge_top_n is actually called
+    _ser: dict[str, object] = {
+        "seniority": None,
+        "work_model": None,
+        "contract_type": None,
+        "key_skills": [],
+        "key_responsibilities": [],
+        "must_have_requirements": [],
+        "notable_caveats": "",
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({_RESUME_URL: _ser}), encoding="utf-8"
+    )
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    ext.judge_match.side_effect = ExtractorError("judge boom again")
+    ext.judge_top_n.side_effect = ExtractorError("judge boom again")
 
     run(
         _one_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1823,6 +1857,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
     """The dedup store does not cache raw_description; enrich is called fresh on rerun."""
     seen_path = tmp_path / ".seen.json"
     enrich_descriptions: list[str] = []
+    judge_candidate_ids: list[str] = []
 
     class _FreshDescParser(_StubParserBase):
         def __enter__(self) -> "_FreshDescParser":
@@ -1839,8 +1874,6 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
             enrich_descriptions.append(desc)
             return Position(stub=stub, raw_description=desc)
 
-    judge_descriptions: list[str] = []
-
     class _CapturingExtractor:
         def classify_relevance_batch(
             self, items: list[ClassifyItem]
@@ -1851,8 +1884,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
 
         def judge_match(
             self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:
-            judge_descriptions.append(raw_description)
+        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             return (
                 MatchVerdict(
                     tier=MatchTier.green, matched=[], missing=[], summary="ok"
@@ -1862,8 +1894,20 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
-            return [], _ZERO_USAGE
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            for c in candidates:
+                judge_candidate_ids.append(c.id)
+            return [
+                MatchVerdict(
+                    tier=MatchTier.green,
+                    matched=[],
+                    missing=[],
+                    summary="ok",
+                    rank=i + 1,
+                    id=c.id,
+                )
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     seen_path.write_text(
         json.dumps(
@@ -1879,17 +1923,34 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    # extracts.json must exist so build_candidates can retrieve the extract for judge_pending URLs
+    _stub_extract_record: dict[str, object] = {
+        "seniority": None,
+        "work_model": None,
+        "contract_type": None,
+        "key_skills": [],
+        "key_responsibilities": [],
+        "must_have_requirements": [],
+        "notable_caveats": "",
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({_RESUME_URL: _stub_extract_record}),
+        encoding="utf-8",
+    )
 
     run(
         _one_stub_config(tmp_path),
         extractor=_CapturingExtractor(),
         parser_registry=lambda _: _FreshDescParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
-    assert enrich_descriptions == ["fresh description fetched on rerun"]
-    assert judge_descriptions == ["fresh description fetched on rerun"]
+    assert enrich_descriptions == ["fresh description fetched on rerun"], (
+        "enrich must be called fresh on rerun"
+    )
+    assert _RESUME_URL in judge_candidate_ids, (
+        "judge_top_n must be called with the freshly-enriched position as a candidate"
+    )
 
 
 def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> None:
@@ -1929,7 +1990,6 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.enrich_failed == 1
@@ -1937,10 +1997,13 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
     assert seen_data[_RESUME_URL]["status"] == "enrich_failed"
 
 
-def test_judge_pending_appears_in_run_divider(tmp_path: Path) -> None:
-    """judge_resumed=N appears in Run Divider when stubs took the judge_pending path."""
+def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
+    """judge_resumed=N appears in run_complete event when stubs took the judge_pending path."""
+    import application_pipeline.parser_log as parser_log
+
     seen_path = tmp_path / ".seen.json"
-    results_dir = tmp_path / "results"
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
 
     seen_path.write_text(
         json.dumps(
@@ -1956,28 +2019,35 @@ def test_judge_pending_appears_in_run_divider(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    _ser: dict[str, object] = {
+        "seniority": None,
+        "work_model": None,
+        "contract_type": None,
+        "key_skills": [],
+        "key_responsibilities": [],
+        "must_have_requirements": [],
+        "notable_caveats": "",
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({_RESUME_URL: _ser}), encoding="utf-8"
+    )
 
-    run(
+    summary = run(
         _one_stub_config(tmp_path),
         extractor=_stub_extractor(),
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
+        run_log=run_log,
     )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "judge_resumed=1" in last_block, (
-        f"judge_resumed missing from divider: {last_block!r}"
-    )
+    assert summary.written == 1, "judge_pending stub must be written"
 
 
-def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
+def test_judge_pending_judge_failure_stays_in_domain_on_rerun(
     tmp_path: Path,
 ) -> None:
-    """judge_resumed=1 appears in Run Divider even when judge fails on the resumed stub."""
+    """On rerun, if judge_top_n fails the resumed stub stays in_domain."""
     seen_path = tmp_path / ".seen.json"
-    results_dir = tmp_path / "results"
 
     seen_path.write_text(
         json.dumps(
@@ -1992,6 +2062,18 @@ def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
             }
         ),
         encoding="utf-8",
+    )
+    _ser: dict[str, object] = {
+        "seniority": None,
+        "work_model": None,
+        "contract_type": None,
+        "key_skills": [],
+        "key_responsibilities": [],
+        "must_have_requirements": [],
+        "notable_caveats": "",
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({_RESUME_URL: _ser}), encoding="utf-8"
     )
 
     ext = MagicMock()
@@ -1999,21 +2081,17 @@ def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    ext.judge_match.side_effect = ExtractorError("judge boom")
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
 
     run(
         _one_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
     )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "judge_resumed=1" in last_block, (
-        f"judge_resumed missing from divider when judge failed: {last_block!r}"
-    )
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_RESUME_URL]["status"] == "in_domain"
 
 
 # ---------------------------------------------------------------------------
@@ -2049,7 +2127,6 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DeadParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.parsers_dead == 1
@@ -2113,7 +2190,6 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=_registry,
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.parsers_dead == 1
@@ -2138,7 +2214,6 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(seen_path),
-            results_paths=_stub_results_paths(tmp_path),
         )
 
     seen_data = (
@@ -2154,14 +2229,19 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(
 
 
 # ---------------------------------------------------------------------------
-# Run Divider (issue #116)
+# run_complete event (issue #116 / #390)
 # ---------------------------------------------------------------------------
 
 
-def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
-    """Successful run appends a Run Divider HTML comment with all expected metric keys."""
+def test_run_complete_event_logged_to_pipeline_orchestrator_events(
+    tmp_path: Path,
+) -> None:
+    """Successful run writes a run_complete event to pipeline_orchestrator.events.jsonl."""
+    import application_pipeline.parser_log as parser_log
+
     seen_path = tmp_path / ".seen.json"
-    results_dir = tmp_path / "results"
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -2176,49 +2256,35 @@ def test_integration_run_divider_appended_on_success(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
+        run_log=run_log,
     )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    # File ends with a Run Divider (strip trailing newline before split)
-    last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert last_block.startswith("<!-- run "), (
-        f"last line is not a run divider: {last_block!r}"
-    )
-
-    # All expected metric keys present
+    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    assert events_file.exists(), "pipeline_orchestrator.events.jsonl must be written"
+    rows = [
+        json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    run_complete_rows = [r for r in rows if r.get("event") == "run_complete"]
+    assert len(run_complete_rows) == 1
+    row = run_complete_rows[0]
     for key in (
-        "kept=",
-        "errors=",
-        "classify_calls=",
-        "classify_items=",
-        "classify_total_s=",
-        "judge_calls=",
-        "judge_total_s=",
-        "classify_input_tokens=",
-        "classify_output_tokens=",
-        "classify_cache_read_tokens=",
-        "classify_cost_usd=",
-        "judge_input_tokens=",
-        "judge_output_tokens=",
-        "judge_cache_read_tokens=",
-        "judge_cost_usd=",
-        "elapsed_s=",
+        "classify_calls",
+        "dedup_url_hits",
+        "dedup_tuple_hits",
+        "dedup_run_hits",
+        "dedup_misses",
+        "elapsed_s",
     ):
-        assert key in last_block, (
-            f"metric key {key!r} missing from divider: {last_block!r}"
-        )
-
-    # Per-source count present for the stub source
-    assert "sources=stub:" in last_block, f"sources key missing: {last_block!r}"
-
-    # Divider is a well-formed HTML comment
-    assert last_block.endswith(" -->"), f"divider not closed: {last_block!r}"
+        assert key in row, f"key {key!r} missing from run_complete event"
 
 
-def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
-    """Run Divider includes dedup_run_hits=N when in-run dupes are present."""
-    results_dir = tmp_path / "results"
+def test_run_complete_event_carries_dedup_run_hits(tmp_path: Path) -> None:
+    """run_complete event includes dedup_run_hits=1 when in-run dupes are present."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
     dup_url = "https://divider.example/dup"
 
     class _DupParser(_StubParserBase):
@@ -2245,19 +2311,23 @@ def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DupParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_real_results_paths(results_dir),
+        run_log=run_log,
     )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_block = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "dedup_run_hits=1" in last_block, (
-        f"dedup_run_hits missing from divider: {last_block!r}"
-    )
+    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    rows = [
+        json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    run_complete_rows = [r for r in rows if r.get("event") == "run_complete"]
+    assert len(run_complete_rows) == 1
+    assert run_complete_rows[0]["dedup_run_hits"] == 1
 
 
-def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
-    """An exception escaping the main run path does not produce a Run Divider."""
-    results_dir = tmp_path / "results"
+def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
+    """An exception escaping the main run path does not produce a daily results file."""
+    from datetime import datetime, timezone
+
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -2265,6 +2335,8 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
+    today = datetime.now(timezone.utc).date().isoformat()
+    results_dir = tmp_path / "results"
 
     class _CrashingExtractor:
         def classify_relevance_batch(
@@ -2288,13 +2360,15 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
             extractor=_CrashingExtractor(),
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_real_results_paths(results_dir),
         )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    assert "<!-- run " not in content, (
-        "run divider must not be written when run crashes"
-    )
+    # Daily file should not contain any card content (it's initialized empty)
+    dated_file = results_dir / f"{today}.md"
+    if dated_file.exists():
+        content = dated_file.read_text(encoding="utf-8")
+        assert re.findall(r"^# .+ · .+", content, re.MULTILINE) == [], (
+            "no cards must be written when run crashes"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2358,7 +2432,6 @@ def test_results_write_error_propagates_from_run(
             extractor=_FakeExtractor(),
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(tmp_path),
         )
 
 
@@ -2393,7 +2466,6 @@ def test_parser_log_integration(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(tmp_path),
             run_log=run_log,
         )
 
@@ -2454,7 +2526,6 @@ def test_not_served_queries_counted_in_parser_log_summary(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _NotServedParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(tmp_path),
             run_log=run_log,
         )
 
@@ -2522,7 +2593,6 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _ThreeEventParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(tmp_path),
             run_log=run_log,
         )
 
@@ -2618,7 +2688,6 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -2663,7 +2732,6 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
             extractor=_stub_extractor(),
             parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            results_paths=_stub_results_paths(tmp_path),
             run_log=run_log,
         )
 
@@ -2705,8 +2773,18 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ],
         _ZERO_USAGE,
     )
 
@@ -2735,7 +2813,6 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.written == 4
@@ -2781,7 +2858,6 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SlowTwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -2838,25 +2914,25 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SixStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
     )
 
-    # 6 positions → 3 batches of 2
-    assert summary.written == 6
+    # 6 positions → 3 batches of 2; judge_top_n caps at 5
+    assert summary.written == 5
     assert summary.classify_items == 6
     assert summary.classifier_dropped == 0
 
-    # .seen.json: all 6 URLs kept
+    # .seen.json: 5 URLs kept (top-5 from judge_top_n)
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     kept_urls = {
         url for url, rec in seen_data.items() if rec["status"] == "selected_by_judge"
     }
-    assert kept_urls == _ALL_URLS
+    assert len(kept_urls) == 5
+    assert kept_urls.issubset(_ALL_URLS)
 
-    # green.md: all 6 URLs appear in rendered content (stub_extractor always returns green)
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
+    # Daily results file: 5 URLs appear in rendered content
+    content = _read_all_results(results_dir)
     urls_in_content = {url for url in _ALL_URLS if url in content}
-    assert urls_in_content == _ALL_URLS
+    assert len(urls_in_content) == 5
 
 
 def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
@@ -2871,8 +2947,18 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ],
         _ZERO_USAGE,
     )
 
@@ -2901,7 +2987,6 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.written == 4
@@ -2910,7 +2995,7 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
 
 
 def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
-    """Positions classified as off-domain are marked seen immediately; judge_match is NOT called."""
+    """Positions classified as off-domain are not included in judge_top_n candidates."""
     seen_path = tmp_path / ".seen.json"
     _OFF_URL = "https://offdomain.example/0"
     _ON_URL = "https://offdomain.example/1"
@@ -2927,12 +3012,27 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
             for item in items
         ], _ZERO_USAGE
 
+    judge_candidate_ids: list[list[str]] = []
+
+    def _judge_top_n(
+        candidates: list[JudgeCandidate],
+    ) -> tuple[list[MatchVerdict], CallUsage]:
+        judge_candidate_ids.append([c.id for c in candidates])
+        return [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ], _ZERO_USAGE
+
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
-        _ZERO_USAGE,
-    )
+    ext.judge_top_n.side_effect = _judge_top_n
 
     class _TwoLangParser(_StubParserBase):
         def __enter__(self) -> "_TwoLangParser":
@@ -2957,13 +3057,14 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoLangParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     assert summary.classifier_dropped == 1
     assert summary.written == 1
-    # judge_match called only once (for the in-domain position)
-    assert ext.judge_match.call_count == 1
+    # judge_top_n called with only the in-domain candidate
+    assert len(judge_candidate_ids) == 1
+    assert _ON_URL in judge_candidate_ids[0]
+    assert _OFF_URL not in judge_candidate_ids[0]
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data[_OFF_URL]["status"] == "out_of_domain"
@@ -2985,8 +3086,18 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ],
         _ZERO_USAGE,
     )
 
@@ -3007,7 +3118,6 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_stub_results_paths(tmp_path),
     )
 
     # First batch failed (1 item), second succeeded (1 item written)
@@ -3041,7 +3151,6 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -3069,7 +3178,6 @@ def test_classify_batch_abandoned_log_includes_urls(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -3104,7 +3212,6 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -3119,7 +3226,7 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
-    """ExtractorUnreachableError with forensics → returncode and stderr_excerpt in judge_match.log."""
+    """ExtractorUnreachableError with forensics → returncode and stderr_excerpt in judge_top_n log."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -3130,7 +3237,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    ext.judge_match.side_effect = ExtractorUnreachableError(
+    ext.judge_top_n.side_effect = ExtractorUnreachableError(
         "cli gone", returncode=2, stderr="timeout on judge"
     )
 
@@ -3139,13 +3246,12 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
     events_rows = [
         json.loads(line)
-        for line in (logs_dir / "llm_judge_match.events.jsonl")
+        for line in (logs_dir / "llm_judge_top_n.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]
@@ -3219,16 +3325,15 @@ def test_run_summary_carries_token_and_cost_totals(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(tmp_path / "results"),
     )
 
     # 5 items pass prefilter → 1 classify batch
     assert summary.classify_items == 5
-    # 1 classify batch × 10 input tokens + 4 judge calls × 8 input tokens
-    assert summary.claude_input_tokens == 10 + 4 * 8
-    assert summary.claude_output_tokens == 5 + 4 * 4
-    assert summary.claude_cache_read_tokens == 2 + 4 * 1
-    assert abs(summary.claude_cost_usd - (0.001 + 4 * 0.0008)) < 1e-9
+    # 1 classify batch × 10 input tokens + 1 judge_top_n call × 8 input tokens
+    assert summary.claude_input_tokens == 10 + 8
+    assert summary.claude_output_tokens == 5 + 4
+    assert summary.claude_cache_read_tokens == 2 + 1
+    assert abs(summary.claude_cost_usd - (0.001 + 0.0008)) < 1e-9
 
 
 def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
@@ -3253,7 +3358,6 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(tmp_path / "results"),
         run_log=run_log,
     )
 
@@ -3299,7 +3403,6 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(tmp_path / "results"),
         run_log=run_log,
     )
 
@@ -3345,7 +3448,6 @@ def test_prefilter_trailer_schema(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(tmp_path / "results"),
         run_log=run_log,
     )
 
@@ -3419,7 +3521,6 @@ def test_display_pipeline_row_registered_on_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3445,7 +3546,6 @@ def test_display_body_updated_with_discovered_during_run(tmp_path: Path) -> None
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3465,7 +3565,6 @@ def test_display_stop_called_on_success(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3486,7 +3585,6 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=PlainStatusDisplay(run_log=run_log),
         run_log=run_log,
     )
@@ -3527,7 +3625,6 @@ def test_startup_row_ordering(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3571,7 +3668,6 @@ def test_parser_row_registered_per_parser(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3600,7 +3696,6 @@ def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3630,7 +3725,6 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3661,7 +3755,6 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3706,7 +3799,6 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DeadParserForRow,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3752,7 +3844,6 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EmptyParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3796,7 +3887,6 @@ def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3839,7 +3929,6 @@ def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3869,7 +3958,6 @@ def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3927,7 +4015,6 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -3970,7 +4057,6 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4026,7 +4112,6 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SleepyParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         stall_threshold_s=_THRESHOLD,
         run_log=run_log,
     )
@@ -4079,7 +4164,6 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _LongSleepParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         stall_threshold_s=_THRESHOLD,
         run_log=run_log,
     )
@@ -4118,7 +4202,6 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -4170,7 +4253,6 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _RaisingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -4210,15 +4292,10 @@ def test_non_quota_worker_exception_writes_failure_report(
                 RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
             ], _ZERO_USAGE
 
-        def judge_match(
-            self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:
-            raise RuntimeError("disk full")
-
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
-            return [], _ZERO_USAGE
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            raise RuntimeError("disk full")
 
     monkeypatch.setattr(
         "application_pipeline.orchestrator.ClaudeExtractor",
@@ -4273,10 +4350,6 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     """ExtractorError on classify: classify_relevance row body is refreshed with calls_failed=N items_failed=M."""
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
-        _ZERO_USAGE,
-    )
 
     display = FakeStatusDisplay()
 
@@ -4285,7 +4358,6 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4296,36 +4368,27 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     assert "items_failed=2" in last_body
 
 
-def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
-    """ExtractorError on judge_match: judge_match row body is refreshed with errored=N."""
+def test_judge_error_written_is_zero(tmp_path: Path) -> None:
+    """ExtractorError on judge_top_n: no positions written, run completes without raising."""
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    ext.judge_match.side_effect = [
-        ExtractorError("judge boom"),
-        (
-            MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
-            _ZERO_USAGE,
-        ),
-    ]
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
 
     display = FakeStatusDisplay()
 
-    run(
+    summary = run(
         _two_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
-    judge_bodies = display.body_updates_for("llm_judge_match")
-    assert judge_bodies, "expected at least one judge_match body update"
-    last_body = judge_bodies[-1]
-    assert "calls_failed=1" in last_body
+    assert summary.written == 0, "no positions should be written when judge_top_n fails"
+    assert "llm_judge_match" in display.registered_names()
 
 
 def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
@@ -4337,7 +4400,6 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4349,21 +4411,27 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
         assert "calls_failed=" not in body
 
 
-def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> None:
-    """judge_match body counts both failures and successes in numerator and denominator."""
+def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
+    """judge_top_n success: llm_judge_match body shows 1/1 calls with no error tokens."""
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    # First judge fails, second succeeds
-    ext.judge_match.side_effect = [
-        ExtractorError("judge boom"),
-        (
-            MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
-            _ZERO_USAGE,
-        ),
-    ]
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ],
+        _ZERO_USAGE,
+    )
 
     display = FakeStatusDisplay()
 
@@ -4372,23 +4440,15 @@ def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> Non
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
     judge_bodies = display.body_updates_for("llm_judge_match")
     assert judge_bodies, "expected judge_match body updates"
     last_body = judge_bodies[-1]
-    # 2 finished (1 fail + 1 success) out of 2 started, with calls_failed segment
-    assert "2/2 calls" in last_body
-    assert "calls_failed=1" in last_body
-
-    results_dir = tmp_path / "results"
-    if (results_dir / "green.md").exists():
-        content = (results_dir / "green.md").read_text(encoding="utf-8")
-        assert "<!-- run " not in content, (
-            "Run Divider must not be written on worker abort"
-        )
+    # 1 successful judge_top_n call
+    assert "1/1 calls" in last_body
+    assert "calls_failed=" not in last_body
 
 
 # ---------------------------------------------------------------------------
@@ -4405,7 +4465,6 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         status_display=display,
     )
 
@@ -4421,15 +4480,18 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Issue #233: Run Divider conditional counters for abandoned batches / judges
+# Issue #233: classify batch failures logged to classify_relevance events
 # ---------------------------------------------------------------------------
 
 
-def test_run_divider_includes_classify_abandoned_counters_on_batch_failure(
+def test_classify_abandoned_counters_logged_on_batch_failure(
     tmp_path: Path,
 ) -> None:
-    """A run with one failing classify batch writes classify_batches_failed and classify_items_abandoned in the Run Divider."""
-    results_dir = tmp_path / "results"
+    """A run with one failing classify batch logs batch_abandoned to classify_relevance.events.jsonl."""
+    import application_pipeline.parser_log as pl
+
+    logs_dir = tmp_path / "logs"
+    run_log = pl.RunLog(logs_dir)
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
@@ -4439,92 +4501,91 @@ def test_run_divider_includes_classify_abandoned_counters_on_batch_failure(
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_real_results_paths(results_dir),
+        run_log=run_log,
     )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "classify_batches_failed=1" in last_line, (
-        f"classify_batches_failed missing from divider: {last_line!r}"
-    )
-    assert "classify_items_abandoned=2" in last_line, (
-        f"classify_items_abandoned missing from divider: {last_line!r}"
-    )
+    events_rows = [
+        json.loads(line)
+        for line in (logs_dir / "llm_classify_relevance.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    abandoned = [r for r in events_rows if r.get("event") == "batch_abandoned"]
+    assert len(abandoned) == 1
+    assert abandoned[0]["batch_size"] == 2
 
 
-def test_run_divider_includes_judge_items_abandoned_on_judge_failure(
+def test_judge_top_n_failure_leaves_no_daily_file(
     tmp_path: Path,
 ) -> None:
-    """A run with one failing judge_match call writes judge_items_abandoned=1 in the Run Divider."""
-    results_dir = tmp_path / "results"
+    """A run where judge_top_n fails does not write any cards to the daily file."""
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).date().isoformat()
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    ext.judge_match.side_effect = ExtractorError("judge boom")
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
 
     run(
         _two_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_real_results_paths(results_dir),
     )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "judge_items_abandoned=2" in last_line, (
-        f"judge_items_abandoned missing from divider: {last_line!r}"
-    )
-
-
-def test_run_divider_omits_abandoned_counters_on_clean_run(tmp_path: Path) -> None:
-    """A clean run (no LLM failures) writes a Run Divider without any abandoned-counter fields."""
     results_dir = tmp_path / "results"
+    dated_file = results_dir / f"{today}.md"
+    if dated_file.exists():
+        content = dated_file.read_text(encoding="utf-8")
+        cards = re.findall(r"^# .+ · .+", content, re.MULTILINE)
+        assert cards == [], (
+            f"no cards should be written on judge_top_n failure: {cards}"
+        )
+
+
+def test_clean_run_writes_no_abandoned_events(tmp_path: Path) -> None:
+    """A clean run (no LLM failures) does not log any batch_abandoned events."""
+    import application_pipeline.parser_log as pl
+
+    logs_dir = tmp_path / "logs"
+    run_log = pl.RunLog(logs_dir)
 
     run(
         _two_stub_config(tmp_path),
         extractor=_stub_extractor(),
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_real_results_paths(results_dir),
+        run_log=run_log,
     )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "classify_batches_failed" not in last_line, (
-        f"classify_batches_failed should be absent on clean run: {last_line!r}"
-    )
-    assert "classify_items_abandoned" not in last_line, (
-        f"classify_items_abandoned should be absent on clean run: {last_line!r}"
-    )
-    assert "judge_items_abandoned" not in last_line, (
-        f"judge_items_abandoned should be absent on clean run: {last_line!r}"
-    )
+    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
+    if events_file.exists():
+        rows = [
+            json.loads(line)
+            for line in events_file.read_text(encoding="utf-8").splitlines()
+        ]
+        abandoned = [r for r in rows if r.get("event") == "batch_abandoned"]
+        assert abandoned == [], f"no batch_abandoned events on clean run: {abandoned}"
 
 
 def test_abandoned_classify_batch_does_not_set_degraded_reason(tmp_path: Path) -> None:
-    """An abandoned classify batch does not cause degraded_reason to appear in the Run Divider."""
-    results_dir = tmp_path / "results"
-
+    """An abandoned classify batch does not cause the run to set degraded_reason."""
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
 
-    run(
+    summary = run(
         _two_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_real_results_paths(results_dir),
     )
 
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "degraded_reason" not in last_line, (
-        f"degraded_reason must be absent when only classify batch abandoned: {last_line!r}"
-    )
+    # An abandoned classify batch should not abort the run
+    assert isinstance(summary, RunSummary)
 
 
 # ---------------------------------------------------------------------------
@@ -4535,7 +4596,7 @@ def test_abandoned_classify_batch_does_not_set_degraded_reason(tmp_path: Path) -
 def test_results_file_lands_under_config_dir_regardless_of_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Tier files are written under <config_dir>/results/, not relative to CWD."""
+    """Daily results dir is created under <config_dir>/results/, not relative to CWD."""
     config_path = _write_config(tmp_path)
     other_dir = tmp_path / "other"
     other_dir.mkdir()
@@ -4548,8 +4609,9 @@ def test_results_file_lands_under_config_dir_regardless_of_cwd(
         dedup_store=MagicMock(),
     )
 
-    assert (tmp_path / "results" / "green.md").exists()
-    assert not (other_dir / "results" / "green.md").exists()
+    # ensure_initialized creates the results dir under config_dir, not CWD
+    assert (tmp_path / "results").is_dir()
+    assert not (other_dir / "results").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -4557,12 +4619,14 @@ def test_results_file_lands_under_config_dir_regardless_of_cwd(
 # ---------------------------------------------------------------------------
 
 
-def test_each_tier_routed_to_its_results_file(tmp_path: Path) -> None:
-    """Green/amber/red verdicts are written to green.md/amber.md/red.md respectively."""
-    results_dir = tmp_path / "results"
-    results_dir.mkdir()
+def test_verdicts_written_to_daily_results_file(tmp_path: Path) -> None:
+    """All judge_top_n verdicts are written to the daily results file."""
+    from datetime import datetime, timezone
 
-    run(
+    today = datetime.now(timezone.utc).date().isoformat()
+    seen_path = tmp_path / ".seen.json"
+
+    summary = run(
         _write_config(
             tmp_path,
             sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -4573,81 +4637,28 @@ def test_each_tier_routed_to_its_results_file(tmp_path: Path) -> None:
         ),
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths={
-            "green": results_dir / "green.md",
-            "amber": results_dir / "amber.md",
-            "red": results_dir / "red.md",
-        },
+        dedup_store=dedup_module.load(seen_path),
     )
 
-    # _FakeExtractor: 1 green, 2 amber, 1 red (of 6 stubs: 1 prefilter-dropped, 1 classify-dropped)
-    green_cards = re.findall(
-        r"^# .+ · .+",
-        (results_dir / "green.md").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
-    amber_cards = re.findall(
-        r"^# .+ · .+",
-        (results_dir / "amber.md").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
-    red_cards = re.findall(
-        r"^# .+ · .+",
-        (results_dir / "red.md").read_text(encoding="utf-8"),
-        re.MULTILINE,
-    )
-
-    assert len(green_cards) == 1
-    assert len(amber_cards) == 2
-    assert len(red_cards) == 1
-
-
-def test_file_header_written_to_each_tier_file(tmp_path: Path) -> None:
-    """The hardcoded FILE_HEADER appears at the top of every tier file after initialization."""
     results_dir = tmp_path / "results"
+    dated_file = results_dir / f"{today}.md"
+    assert dated_file.exists(), f"Expected daily file at {dated_file}"
 
-    run(
-        _write_config(tmp_path),
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: None,
-        dedup_store=MagicMock(),
-        results_paths=_real_results_paths(results_dir),
-    )
-
-    for tier in ("green", "amber", "red"):
-        content = (results_dir / f"{tier}.md").read_text(encoding="utf-8")
-        assert content.startswith(FILE_HEADER), (
-            f"{tier}.md does not start with FILE_HEADER: {content[:80]!r}"
-        )
+    # _FakeExtractor: 4 in-domain stubs (after 1 prefilter-drop and 1 classify-drop)
+    # judge_top_n returns up to 5 verdicts
+    content = dated_file.read_text(encoding="utf-8")
+    cards = re.findall(r"^# .+ · .+", content, re.MULTILINE)
+    assert len(cards) == 4
+    assert summary.written == 4
 
 
-def test_run_divider_appended_to_all_three_tier_files(tmp_path: Path) -> None:
-    """Run Divider is appended to green.md, amber.md, and red.md after every run."""
-    results_dir = tmp_path / "results"
+def test_daily_file_written_event_logged(tmp_path: Path) -> None:
+    """daily_file_written event is logged to pipeline_orchestrator.events.jsonl when cards are written."""
+    import application_pipeline.parser_log as parser_log
 
-    run(
-        _write_config(tmp_path),
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: None,
-        dedup_store=MagicMock(),
-        results_paths=_real_results_paths(results_dir),
-    )
-
-    for tier in ("green", "amber", "red"):
-        content = (results_dir / f"{tier}.md").read_text(encoding="utf-8")
-        last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-        assert last_line.startswith("<!-- run "), (
-            f"{tier}.md missing Run Divider: {last_line!r}"
-        )
-
-
-def test_deleting_green_creates_fresh_file_amber_red_retain_content(
-    tmp_path: Path,
-) -> None:
-    """Deleting green.md triggers fresh header+numbering; amber.md and red.md keep their content."""
-    results_dir = tmp_path / "results"
     seen_path = tmp_path / ".seen.json"
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -4657,48 +4668,27 @@ def test_deleting_green_creates_fresh_file_amber_red_retain_content(
         negative_keywords='["excluded"]',
     )
 
-    def _do_run() -> None:
-        run(
-            config_path,
-            extractor=_FakeExtractor(),
-            parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
-            dedup_store=dedup_module.load(seen_path),
-            results_paths=_real_results_paths(results_dir),
-        )
-
-    _do_run()
-
-    amber_after_first = (results_dir / "amber.md").read_text(encoding="utf-8")
-    red_after_first = (results_dir / "red.md").read_text(encoding="utf-8")
-    amber_numbers_first = re.findall(r"^## (\d+)\.", amber_after_first, re.MULTILINE)
-
-    (results_dir / "green.md").unlink()
-
-    # Second run: all URLs seen → 0 new positions, but green.md recreated
-    _do_run()
-
-    assert (results_dir / "green.md").exists(), "green.md must be recreated"
-    green_content = (results_dir / "green.md").read_text(encoding="utf-8")
-    assert green_content.startswith(FILE_HEADER), (
-        "fresh green.md must start with FILE_HEADER"
+    run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
     )
 
-    # amber.md and red.md retain their content from the first run
-    amber_after_second = (results_dir / "amber.md").read_text(encoding="utf-8")
-    red_after_second = (results_dir / "red.md").read_text(encoding="utf-8")
-    amber_numbers_second = re.findall(r"^## (\d+)\.", amber_after_second, re.MULTILINE)
-
-    assert amber_numbers_second[: len(amber_numbers_first)] == amber_numbers_first, (
-        "amber.md must retain positions from first run"
-    )
-    assert red_after_second.startswith(red_after_first[: len(red_after_first) // 2]), (
-        "red.md must retain content from first run"
-    )
+    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    assert events_file.exists()
+    rows = [
+        json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    daily_written = [r for r in rows if r.get("event") == "daily_file_written"]
+    assert len(daily_written) == 1
+    assert daily_written[0]["card_count"] == 4
 
 
-def test_deleting_green_does_not_affect_seen_json(tmp_path: Path) -> None:
-    """Deleting green.md leaves .seen.json intact; no URLs are re-evaluated."""
-    results_dir = tmp_path / "results"
+def test_second_run_skips_all_urls_and_seen_json_unchanged(tmp_path: Path) -> None:
+    """Second run: all URLs skipped, .seen.json unchanged."""
     seen_path = tmp_path / ".seen.json"
     config_path = _write_config(
         tmp_path,
@@ -4714,23 +4704,20 @@ def test_deleting_green_does_not_affect_seen_json(tmp_path: Path) -> None:
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
     )
 
     seen_after_first = json.loads(seen_path.read_text(encoding="utf-8"))
-    (results_dir / "green.md").unlink()
 
     second = run(
         config_path,
         extractor=_FakeExtractor(),
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
     )
 
     seen_after_second = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_after_first == seen_after_second, (
-        "Deleting green.md must not change .seen.json"
+        "Second run must not change .seen.json"
     )
     assert second.skipped == first.discovered, (
         "All URLs from first run must be skipped on second run"
@@ -4738,8 +4725,8 @@ def test_deleting_green_does_not_affect_seen_json(tmp_path: Path) -> None:
     assert second.written == 0
 
 
-def test_current_md_ignored_if_present(tmp_path: Path) -> None:
-    """If data/results/current.md exists, it is neither read nor written; tier files are independent."""
+def test_old_md_files_ignored_in_results_dir(tmp_path: Path) -> None:
+    """Non-dated files in results dir (e.g. current.md) are not touched by the run."""
     results_dir = tmp_path / "results"
     results_dir.mkdir(parents=True)
     current_md = results_dir / "current.md"
@@ -4750,14 +4737,10 @@ def test_current_md_ignored_if_present(tmp_path: Path) -> None:
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        results_paths=_real_results_paths(results_dir),
     )
 
     # current.md must be untouched
     assert current_md.read_text(encoding="utf-8") == "old content"
-    # Tier files must exist
-    for tier in ("green", "amber", "red"):
-        assert (results_dir / f"{tier}.md").exists(), f"{tier}.md must be created"
 
 
 # ---------------------------------------------------------------------------
@@ -4768,9 +4751,8 @@ def test_current_md_ignored_if_present(tmp_path: Path) -> None:
 def test_quota_classify_retries_and_completes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ClaudeUsageLimitError on classify → orchestrator sleeps and retries; run completes, no degraded_reason."""
+    """ClaudeUsageLimitError on classify → orchestrator sleeps and retries; run completes."""
     seen_path = tmp_path / ".seen.json"
-    results_dir = tmp_path / "results"
 
     slept: list[float] = []
     monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
@@ -4793,8 +4775,18 @@ def test_quota_classify_retries_and_completes(
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ],
         _ZERO_USAGE,
     )
 
@@ -4803,16 +4795,11 @@ def test_quota_classify_retries_and_completes(
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
     )
 
     assert summary.written == 2
     assert len(slept) == 1
     assert slept[0] > 0
-
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "degraded_reason" not in last_line
 
 
 def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
@@ -4843,8 +4830,18 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ],
         _ZERO_USAGE,
     )
 
@@ -4853,7 +4850,6 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
         run_log=run_log,
     )
 
@@ -4874,41 +4870,118 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
 def test_quota_judge_retries_and_completes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ClaudeUsageLimitError on judge → orchestrator sleeps and retries; run completes."""
+    """ClaudeUsageLimitError on judge_top_n → orchestrator sleeps and retries; run completes."""
     seen_path = tmp_path / ".seen.json"
-    results_dir = tmp_path / "results"
 
     slept: list[float] = []
     monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
 
     judge_call_count = [0]
 
-    def _judge(
-        raw_description: str, *, stub_url: str = ""
-    ) -> tuple[MatchVerdict, CallUsage]:
+    def _judge_top_n(
+        candidates: list[JudgeCandidate],
+    ) -> tuple[list[MatchVerdict], CallUsage]:
         judge_call_count[0] += 1
         if judge_call_count[0] == 1:
             raise ClaudeUsageLimitError(
                 "quota", returncode=1, stdout="", stderr="quota", envelope=None
             )
-        return MatchVerdict(
-            tier=MatchTier.green, matched=[], missing=[], summary="ok"
-        ), _ZERO_USAGE
+        return [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="ok",
+                rank=i + 1,
+                id=c.id,
+            )
+            for i, c in enumerate(candidates[:5])
+        ], _ZERO_USAGE
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
         [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
-    ext.judge_match.side_effect = _judge
+    ext.judge_top_n.side_effect = _judge_top_n
 
     summary = run(
         _two_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
     )
 
     assert summary.written == 2
     assert len(slept) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Daily cutover — issue #390
+# ---------------------------------------------------------------------------
+
+_DAILY390_URL = "https://daily390.example/job-1"
+
+
+class _Daily390Parser(_StubParserBase):
+    """Single-stub parser used by the issue-390 daily cutover tests."""
+
+    def __enter__(self) -> "_Daily390Parser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [PositionStub(url=_DAILY390_URL, title="Python Dev", source="stub")]
+
+    def enrich(self, stub: PositionStub) -> Position:
+        return Position(stub=stub, raw_description="good job description")
+
+
+def test_successful_run_writes_dated_daily_file(tmp_path: Path) -> None:
+    """Successful run writes data/results/YYYY-MM-DD.md; trio files are not written."""
+    from datetime import datetime, timezone
+
+    seen_path = tmp_path / ".seen.json"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    ext = MagicMock()
+    ext.classify_relevance_batch.side_effect = lambda items: (
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_top_n.return_value = (
+        [
+            MatchVerdict(
+                tier=MatchTier.green,
+                matched=[],
+                missing=[],
+                summary="great match",
+                rank=1,
+                id=_DAILY390_URL,
+            )
+        ],
+        _ZERO_USAGE,
+    )
+
+    run(
+        config_path,
+        extractor=ext,
+        parser_registry=lambda _: _Daily390Parser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    results_dir = tmp_path / "results"
+    dated_file = results_dir / f"{today}.md"
+    assert dated_file.exists(), f"Expected daily file at {dated_file}"
+    assert not (results_dir / "green.md").exists(), "green.md must not be written"
+    assert not (results_dir / "amber.md").exists(), "amber.md must not be written"
+    assert not (results_dir / "red.md").exists(), "red.md must not be written"

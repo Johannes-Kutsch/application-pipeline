@@ -14,6 +14,7 @@ from pathlib import Path
 
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
+from application_pipeline import extracts as extracts_module
 from application_pipeline import layout as layout_module
 from application_pipeline.llm import quota as _quota
 from application_pipeline.parser_log import RunLog
@@ -25,14 +26,17 @@ from application_pipeline.dedup import (
     DedupStoreError,
     DeduplicationStore,
 )
+from application_pipeline.failure_report import write_failure as _write_failure
 from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
     ClassifyItem,
     ClaudeExtractor,
     ExtractorError,
+    JudgeCandidate,
     LLMExtractor,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
+from application_pipeline.llm.types import StructuredExtract
 from application_pipeline.parsers import (
     ExternalRedirect,
     NotServedQuery,
@@ -161,21 +165,57 @@ _NO_MORE_BATCHES = _NoMoreBatches()
 
 
 # ---------------------------------------------------------------------------
-# Judge queue protocol
+# Pool collector — thread-safe accumulator for judge candidates
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _JudgeJob:
-    position: "Position"
-    item_id: str
+class _PoolCollector:
+    """Collects (Position, StructuredExtract) pairs from classify and judge-pending paths."""
 
+    def __init__(self) -> None:
+        self._positions: dict[str, "Position"] = {}
+        self._extracts: dict[str, "StructuredExtract"] = {}
+        self._lock = threading.Lock()
 
-class _NoMoreJudges:
-    __slots__ = ()
+    def add_classified(
+        self, position: "Position", extract: "StructuredExtract"
+    ) -> None:
+        with self._lock:
+            self._positions[position.stub.url] = position
+            self._extracts[position.stub.url] = extract
 
+    def add_judge_pending(self, position: "Position") -> None:
+        with self._lock:
+            self._positions[position.stub.url] = position
 
-_NO_MORE_JUDGES = _NoMoreJudges()
+    def build_candidates(
+        self, extract_store: "extracts_module.ExtractStore | None"
+    ) -> "list[JudgeCandidate]":
+        with self._lock:
+            positions = dict(self._positions)
+            extracts = dict(self._extracts)
+        candidates = []
+        for url, position in positions.items():
+            extract: StructuredExtract | None = extracts.get(url)
+            if extract is None and extract_store is not None:
+                extract = extract_store.get(url)
+            if extract is None:
+                continue
+            candidates.append(
+                JudgeCandidate(
+                    id=url,
+                    extract=extract,
+                    title=position.stub.title,
+                    company=position.stub.company,
+                    location=position.stub.location,
+                )
+            )
+        return candidates
+
+    @property
+    def pool_size(self) -> int:
+        with self._lock:
+            return len(self._positions)
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +381,7 @@ class _ClassifyThread(_QueueWorker):
         self,
         *,
         classify_queue: queue.Queue[object],
-        judge_queue: "queue.Queue[object]",
+        pool_collector: "_PoolCollector",
         extractor: LLMExtractor,
         dedup_store: DeduplicationStore,
         metrics: "RunMetrics",
@@ -355,7 +395,7 @@ class _ClassifyThread(_QueueWorker):
             run_state=run_state,
         )
         self.name = "classify-worker"
-        self._judge_queue = judge_queue
+        self._pool_collector = pool_collector
         self._extractor = extractor
         self._dedup_store = dedup_store
         self._metrics = metrics
@@ -364,9 +404,6 @@ class _ClassifyThread(_QueueWorker):
     def _on_dequeue(self, item: object) -> None:
         assert isinstance(item, _ClassifyBatch)
         self._metrics.classify_batch_dequeued(len(item.positions))
-
-    def _on_shutdown(self) -> None:
-        self._judge_queue.put(_NO_MORE_JUDGES)
 
     def _process(self, item: object) -> None:
         assert isinstance(item, _ClassifyBatch)
@@ -402,96 +439,10 @@ class _ClassifyThread(_QueueWorker):
             else:
                 assert verdict.extract is not None
                 self._dedup_store.mark_in_domain(position.stub, extract=verdict.extract)
-                self._metrics.judge_enqueued()
-                self._judge_queue.put(
-                    _JudgeJob(
-                        position=position,
-                        item_id=batch.item_id,
-                    )
-                )
+                self._pool_collector.add_classified(position, verdict.extract)
         self._metrics.classify_batch_complete(
             classify_usage, len(items), classifier_dropped
         )
-
-
-# ---------------------------------------------------------------------------
-# Judge thread
-# ---------------------------------------------------------------------------
-
-
-class _JudgeThread(_QueueWorker):
-    def __init__(
-        self,
-        *,
-        judge_queue: queue.Queue[object],
-        extractor: LLMExtractor,
-        results_paths: "dict[str, Path]",
-        dedup_store: DeduplicationStore,
-        layout: "Layout",
-        metrics: "RunMetrics",
-        run_state: _RunState,
-        run_log: RunLog,
-    ) -> None:
-        super().__init__(
-            input_queue=judge_queue,
-            sentinel=_NO_MORE_JUDGES,
-            stage_name="judge",
-            run_state=run_state,
-        )
-        self.name = "judge-worker"
-        self._extractor = extractor
-        self._results_paths = results_paths
-        self._dedup_store = dedup_store
-        self._layout = layout
-        self._metrics = metrics
-        self._run_log = run_log
-
-    def _on_dequeue(self, item: object) -> None:
-        self._metrics.judge_dequeued()
-
-    def _process(self, item: object) -> None:
-        assert isinstance(item, _JudgeJob)
-        job = item
-        while True:
-            try:
-                match_verdict, judge_usage = self._extractor.judge_match(
-                    job.position.raw_description,
-                    stub_url=job.position.stub.url,
-                )
-                path = self._results_paths[match_verdict.tier.value]
-                rendered = render(job.position, match_verdict, self._layout)
-                append(path, rendered)
-                self._dedup_store.mark_selected_by_judge(job.position.stub)
-                self._metrics.judge_complete(
-                    judge_usage, match_verdict.tier, job.position.stub.source
-                )
-                break
-            except ClaudeUsageLimitError as err:
-                _quota_sleep(err, self._run_log)
-            except ExtractorError as exc:
-                _log.warning("judge_match failed: %s", exc)
-                self._run_log.event(
-                    "llm_judge_match",
-                    "error",
-                    stub_url=job.position.stub.url,
-                    returncode=getattr(exc, "returncode", None),
-                    stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
-                    error=str(exc),
-                )
-                self._metrics.judge_failed()
-                break
-
-
-# ---------------------------------------------------------------------------
-# Run Divider helpers
-# ---------------------------------------------------------------------------
-
-
-def _discover_release_tag() -> str | None:
-    try:
-        return Path("current").readlink().name or None
-    except OSError:
-        return None
 
 
 @dataclass
@@ -541,7 +492,7 @@ class _OutboundDispatcher:
         blacklist: list[str],
         metrics: "RunMetrics",
         classify_queue: "queue.Queue[object]",
-        judge_queue: "queue.Queue[object]",
+        pool_collector: "_PoolCollector",
         batch_size: int,
         run_state: _RunState,
         run_log: RunLog,
@@ -551,7 +502,7 @@ class _OutboundDispatcher:
         self._blacklist = blacklist
         self._metrics = metrics
         self._classify_queue = classify_queue
-        self._judge_queue = judge_queue
+        self._pool_collector = pool_collector
         self._batch_size = batch_size
         self._run_state = run_state
         self._run_log = run_log
@@ -623,8 +574,7 @@ class _OutboundDispatcher:
                     self._metrics.unparseable_date(pid)
             self._metrics.enriched(pid)
             if wrapper.judge_resume:
-                self._metrics.judge_enqueued()
-                self._judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
+                self._pool_collector.add_judge_pending(payload)
             else:
                 verdict = classify_position(payload, self._blacklist)
                 self._run_log.event(
@@ -688,12 +638,13 @@ def run(
     extractor: LLMExtractor | None = None,
     parser_registry: Callable[[str], type[Parser] | None] | None = None,
     dedup_store: DeduplicationStore | None = None,
-    results_paths: dict[str, Path] | None = None,
     layout: Layout | None = None,
     status_display: StatusDisplay | None = None,
     run_log: RunLog | None = None,
     stall_threshold_s: float = _STALL_THRESHOLD_S,
 ) -> RunSummary:
+    cron_anchored_date = datetime.now(timezone.utc).date().isoformat()
+
     if status_display is None:
         status_display = PlainStatusDisplay(run_log=run_log)
 
@@ -734,29 +685,29 @@ def run(
             if cls is not None:
                 resolved.append((cls, source))
 
-        # Step 7: Dedup store
+        # Step 7: Dedup store (wire ExtractStore for judge_pending extract retrieval)
+        extract_store = extracts_module.load(
+            cfg.seen_store_path.parent / "extracts.json"
+        )
         if dedup_store is None:
             try:
-                dedup_store = dedup_module.load(cfg.seen_store_path)
+                dedup_store = dedup_module.load(
+                    cfg.seen_store_path, extract_store=extract_store
+                )
             except DedupStoreError as exc:
                 _log.error("startup failed — dedup store: %s", exc)
                 raise
 
-        # Step 8: Layout + Results manager + initialization
+        # Step 8: Layout + daily results file initialization
         if layout is None:
             if cfg.layout is not None:
                 layout = layout_module.load(cfg.layout)
             else:
                 layout = layout_module.default()
 
-        if results_paths is None:
-            results_paths = {
-                tier: cfg.results_dir / f"{tier}.md"
-                for tier in ("green", "amber", "red")
-            }
+        daily_file_path = cfg.results_dir / f"{cron_anchored_date}.md"
         try:
-            for path in results_paths.values():
-                ensure_initialized(path)
+            ensure_initialized(daily_file_path)
         except ResultsFileError as exc:
             _log.error("startup failed — results file: %s", exc)
             raise
@@ -765,7 +716,7 @@ def run(
         metrics = RunMetrics(status_display, run_log=run_log)
         metrics.register_prefilter_keywords(blacklist=cfg.negative_keywords)
         classify_queue: queue.Queue[object] = queue.Queue()
-        judge_queue: queue.Queue[object] = queue.Queue()
+        pool_collector = _PoolCollector()
         _run_started_at = datetime.now(timezone.utc)
 
         locations: list[Location] = [City(loc) for loc in cfg.locations]
@@ -823,25 +774,14 @@ def run(
 
             classify_thread = _ClassifyThread(
                 classify_queue=classify_queue,
-                judge_queue=judge_queue,
+                pool_collector=pool_collector,
                 extractor=extractor,
                 dedup_store=dedup_store,
-                metrics=metrics,
-                run_state=run_state,
-                run_log=run_log,
-            )
-            judge_thread = _JudgeThread(
-                judge_queue=judge_queue,
-                extractor=extractor,
-                results_paths=results_paths,
-                dedup_store=dedup_store,
-                layout=layout,
                 metrics=metrics,
                 run_state=run_state,
                 run_log=run_log,
             )
             classify_thread.start()
-            judge_thread.start()
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
@@ -849,7 +789,7 @@ def run(
                 blacklist=blacklist,
                 metrics=metrics,
                 classify_queue=classify_queue,
-                judge_queue=judge_queue,
+                pool_collector=pool_collector,
                 batch_size=cfg.claude_classify_batch_size,
                 run_state=run_state,
                 run_log=run_log,
@@ -913,33 +853,88 @@ def run(
 
             dispatcher.flush_residual()
 
-        # Sentinel cascade: classify drains → forwards _NO_MORE_JUDGES → judge drains → exits
         classify_thread.join()
-        judge_thread.join()
 
         if classify_thread.exc is not None:
             raise classify_thread.exc
-        if judge_thread.exc is not None:
-            raise judge_thread.exc
 
         # Emit per-call-site SUMMARY OF SESSION trailers
         metrics.summarize_to_parser_log(_run_started_at)
 
-        # Step 13: Append Run Divider — only on successful completion
+        # Step 13: Single end-of-run judge_top_n call
+        candidates = pool_collector.build_candidates(extract_store)
+        pool_size = pool_collector.pool_size
+
+        daily_top_5_count = 0
+        if candidates:
+            verdicts: list | None = None
+            judge_usage = None
+            while True:
+                try:
+                    verdicts, judge_usage = extractor.judge_top_n(candidates)
+                    break
+                except ClaudeUsageLimitError as err:
+                    _quota_sleep(err, run_log)
+                except ExtractorError as exc:
+                    _log.warning("judge_top_n failed: %s", exc)
+                    run_log.event(
+                        "llm_judge_top_n",
+                        "error",
+                        returncode=getattr(exc, "returncode", None),
+                        stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
+                        error=str(exc),
+                    )
+                    _write_failure(
+                        stage="judge_top_n",
+                        error=exc,
+                        log_tail="",
+                        failures_dir=cfg.failures_path,
+                    )
+                    verdicts = None
+                    break
+
+            if verdicts is not None and judge_usage is not None:
+                sorted_verdicts = sorted(verdicts, key=lambda v: v.rank)
+                for verdict in sorted_verdicts:
+                    position = pool_collector._positions.get(verdict.id)
+                    if position is None:
+                        continue
+                    rendered = render(position, verdict, layout)
+                    try:
+                        append(daily_file_path, rendered)
+                    except ResultsFileError as exc:
+                        _log.error("daily file append failed: %s", exc)
+                        raise
+                    dedup_store.mark_selected_by_judge(position.stub)
+                    daily_top_5_count += 1
+                metrics.judge_top_n_complete(judge_usage, daily_top_5_count)
+                run_log.event(
+                    "pipeline_orchestrator",
+                    "daily_file_written",
+                    path=str(daily_file_path),
+                    card_count=daily_top_5_count,
+                )
+
         elapsed_s = time.monotonic() - _start
         if run_state.degraded_reason is not None:
             metrics.set_degraded_reason(run_state.degraded_reason)
-        divider = metrics.format_run_divider(
-            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            tag=_discover_release_tag(),
-            elapsed_s=elapsed_s,
+
+        run_log.event(
+            "pipeline_orchestrator",
+            "run_complete",
+            classify_calls=metrics.classify_calls,
+            classify_input_tokens=metrics.classify_input_tokens,
+            classify_output_tokens=metrics.classify_output_tokens,
+            judge_input_tokens=metrics.judge_input_tokens,
+            judge_output_tokens=metrics.judge_output_tokens,
+            dedup_url_hits=metrics.dedup_url_hits,
+            dedup_tuple_hits=metrics.dedup_tuple_hits,
+            dedup_run_hits=metrics.dedup_run_hits,
+            dedup_misses=metrics.dedup_misses,
+            pool_size=pool_size,
+            daily_top_5_count=daily_top_5_count,
+            elapsed_s=round(elapsed_s, 1),
         )
-        try:
-            for path in results_paths.values():
-                append(path, divider)
-        except ResultsFileError as exc:
-            _log.error("run divider append failed: %s", exc)
-            raise
 
         summary = metrics.to_run_summary(duration_s=elapsed_s)
         _log.info(
@@ -947,7 +942,7 @@ def run(
             "prefilter_considered=%d prefilter_passed=%d prefilter_dropped=%d "
             "prefilter_blacklist_hits=%d "
             "dedup_url_hits=%d dedup_tuple_hits=%d dedup_run_hits=%d dedup_misses=%d "
-            "classifier_dropped=%d written=%d green=%d amber=%d red=%d "
+            "classifier_dropped=%d written=%d "
             "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
             summary.discovered,
             summary.skipped,
@@ -961,9 +956,6 @@ def run(
             summary.dedup_misses,
             summary.classifier_dropped,
             summary.written,
-            summary.green,
-            summary.amber,
-            summary.red,
             summary.enrich_failed,
             summary.external_redirects,
             summary.errored,

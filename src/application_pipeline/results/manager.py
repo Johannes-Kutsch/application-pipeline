@@ -5,19 +5,10 @@ from pathlib import Path
 
 from .errors import ResultsFileError
 
-FILE_HEADER = """\
-<!-- schema-version: 1 -->
-<!-- Delete this file and re-run the pipeline to reset -->
-
-"""
-
 
 def ensure_initialized(path: Path) -> None:
     try:
-        if path.exists() and path.stat().st_size > 0:
-            return
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(FILE_HEADER, encoding="utf-8")
     except OSError as exc:
         raise ResultsFileError(str(exc)) from exc
 

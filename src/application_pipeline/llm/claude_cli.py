@@ -3,7 +3,10 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
+
+from application_pipeline.llm import quota as _quota
 
 _USAGE_LIMIT_PHRASES = ("usage limit", "rate limit")
 
@@ -26,7 +29,24 @@ class _ClaudeCliForensicsError(Exception):
 
 
 class ClaudeUsageLimitError(_ClaudeCliForensicsError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        returncode: int,
+        stdout: str,
+        stderr: str,
+        envelope: dict[str, Any] | None,
+        reset_time: datetime | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            envelope=envelope,
+        )
+        self.reset_time = reset_time
 
 
 class _ClaudeClassifiedError(_ClaudeCliForensicsError):
@@ -143,12 +163,14 @@ class ClaudeCliInvoker:
             )
 
         if _signals_usage_limit_envelope(envelope):
+            result_text = str(envelope.get("result", ""))
             raise ClaudeUsageLimitError(
-                f"Claude subscription cap reached: {envelope.get('result', '')}",
+                f"Claude subscription cap reached: {result_text}",
                 returncode=returncode,
                 stdout=stdout,
                 stderr=stderr,
                 envelope=envelope,
+                reset_time=_quota.parse_reset_time(result_text),
             )
 
         if returncode != 0:
@@ -159,6 +181,7 @@ class ClaudeCliInvoker:
                     stdout=stdout,
                     stderr=stderr,
                     envelope=envelope,
+                    reset_time=_quota.parse_reset_time(stderr),
                 )
             raise ClaudeCliError(
                 f"claude CLI exited {returncode}: "

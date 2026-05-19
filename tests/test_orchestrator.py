@@ -3093,115 +3093,6 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     assert any(row.get("stderr_excerpt") == "timeout on judge" for row in events_rows)
 
 
-def test_claude_usage_limit_error_degrades_gracefully(tmp_path: Path) -> None:
-    """ClaudeUsageLimitError during classify → run completes, degraded_reason in divider, items unmarked."""
-    seen_path = tmp_path / ".seen.json"
-    results_dir = tmp_path / "results"
-
-    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
-        raise ClaudeUsageLimitError(
-            "subscription cap",
-            returncode=1,
-            stdout="",
-            stderr="subscription cap",
-            envelope=None,
-        )
-
-    ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
-
-    summary = run(
-        _two_stub_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(results_dir),
-    )
-
-    # Run completes successfully with zero written
-    assert summary.written == 0
-
-    # In-flight items (the batch that hit the limit) remain unmarked
-    seen_data = (
-        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
-    )
-    assert all(url not in seen_data for url in _ERR_URLS[:2])
-
-    # Run Divider records degraded_reason=usage_limit
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "degraded_reason=usage_limit" in last_line, (
-        f"expected degraded_reason in divider: {last_line!r}"
-    )
-
-
-def test_claude_usage_limit_error_exits_zero_no_failure_report(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """ClaudeUsageLimitError during classify → run degrades, exits 0, NO failure report written."""
-    monkeypatch.chdir(tmp_path)
-    config_path = _write_config(tmp_path)
-    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
-
-    class _UsageLimitExtractor:
-        def classify_relevance_batch(
-            self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            raise ClaudeUsageLimitError(
-                "subscription cap",
-                returncode=1,
-                stdout="",
-                stderr="subscription cap",
-                envelope=None,
-            )
-
-        def judge_match(
-            self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
-            raise NotImplementedError
-
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator.ClaudeExtractor",
-        lambda *a, **kw: _UsageLimitExtractor(),
-    )
-
-    from application_pipeline.__main__ import main
-
-    class _OneStubParser(_StubParserBase):
-        def __enter__(self) -> "_OneStubParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [
-                PositionStub(
-                    url="https://limit.example/0",
-                    title="Job",
-                    source="s",
-                )
-            ]
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="software engineering role")
-
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator._default_registry",
-        type("_Reg", (), {"get": staticmethod(lambda _: _OneStubParser)})(),
-    )
-
-    # Degraded run exits 0 (not 1)
-    main()
-
-    # No failure report written
-    failures_dir = tmp_path / "failures"
-    reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
-    assert len(reports) == 0, (
-        f"expected no failure report on usage limit, got {reports}"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Prompt loader: only de + en; init materialises only de + en
 # ---------------------------------------------------------------------------
@@ -4239,80 +4130,8 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Degraded-run policy: ClaudeUsageLimitError + non-quota abort (issue #217)
+# Non-quota abort (issue #217)
 # ---------------------------------------------------------------------------
-
-
-def test_claude_usage_limit_error_on_judge_degrades_gracefully(
-    tmp_path: Path,
-) -> None:
-    """ClaudeUsageLimitError on 4th judge_match → exit 0, degraded_reason in divider, 4th item unmarked."""
-    seen_path = tmp_path / ".seen.json"
-    results_dir = tmp_path / "results"
-
-    judge_call_count = [0]
-
-    def _judge(
-        raw_description: str, *, stub_url: str = ""
-    ) -> tuple[MatchVerdict, CallUsage]:
-        judge_call_count[0] += 1
-        if judge_call_count[0] >= 4:
-            raise ClaudeUsageLimitError(
-                "quota", returncode=1, stdout="", stderr="quota", envelope=None
-            )
-        return MatchVerdict(
-            tier=MatchTier.green, matched=[], missing=[], summary="ok"
-        ), _ZERO_USAGE
-
-    ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
-        _ZERO_USAGE,
-    )
-    ext.judge_match.side_effect = _judge
-
-    class _FourStubParser(_StubParserBase):
-        def __enter__(self) -> "_FourStubParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [
-                PositionStub(url=_ERR_URLS[i], title=f"Job {i}", source="stub")
-                for i in range(4)
-            ]
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="good description")
-
-    summary = run(
-        _batch_size_config(tmp_path, 1),
-        extractor=ext,
-        parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(seen_path),
-        results_paths=_real_results_paths(tmp_path / "results"),
-    )
-
-    assert summary.written == 3
-
-    seen_data = (
-        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
-    )
-    # First 3 judge calls succeeded → marked kept
-    assert all(
-        seen_data.get(_ERR_URLS[i], {}).get("status") == "selected_by_judge"
-        for i in range(3)
-    )
-    # 4th item: classify marked it in_domain; judge raised ClaudeUsageLimitError → stays in_domain
-    assert seen_data.get(_ERR_URLS[3], {}).get("status") == "in_domain"
-
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "degraded_reason=usage_limit" in last_line, (
-        f"expected degraded_reason in divider: {last_line!r}"
-    )
 
 
 def test_non_quota_worker_exception_writes_failure_report(
@@ -4534,36 +4353,6 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
     )
 
 
-def test_pending_drains_to_zero_on_classify_usage_limit(tmp_path: Path) -> None:
-    """On classify ClaudeUsageLimitError, workers drain queues and pending returns to zero."""
-    ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError(
-        "quota", returncode=1, stdout="", stderr="quota", envelope=None
-    )
-    ext.judge_match.return_value = (
-        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
-        _ZERO_USAGE,
-    )
-
-    display = FakeStatusDisplay()
-
-    run(
-        _batch_size_config(tmp_path, 1),
-        extractor=ext,
-        parser_registry=lambda _: _MixedLangParser199,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_stub_results_paths(tmp_path),
-        status_display=display,
-    )
-
-    # After degraded drain, classify pending should be 0 in final body
-    classify_bodies = display.body_updates_for("llm_classify_relevance")
-    assert classify_bodies, "expected classify_relevance body updates"
-    assert "0 items in queue" in classify_bodies[-1], (
-        f"Classify pending should drain to 0 after usage limit: {classify_bodies[-1]!r}"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Issue #233: Run Divider conditional counters for abandoned batches / judges
 # ---------------------------------------------------------------------------
@@ -4668,32 +4457,6 @@ def test_abandoned_classify_batch_does_not_set_degraded_reason(tmp_path: Path) -
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
     assert "degraded_reason" not in last_line, (
         f"degraded_reason must be absent when only classify batch abandoned: {last_line!r}"
-    )
-
-
-def test_degraded_run_preserves_degraded_reason_independent_of_abandoned_counters(
-    tmp_path: Path,
-) -> None:
-    """A degraded run still writes degraded_reason=usage_limit; abandoned counters are orthogonal."""
-    results_dir = tmp_path / "results"
-
-    ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = ClaudeUsageLimitError(
-        "cap", returncode=1, stdout="", stderr="cap", envelope=None
-    )
-
-    run(
-        _two_stub_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        results_paths=_real_results_paths(results_dir),
-    )
-
-    content = (results_dir / "green.md").read_text(encoding="utf-8")
-    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
-    assert "degraded_reason=usage_limit" in last_line, (
-        f"degraded_reason=usage_limit must be present: {last_line!r}"
     )
 
 
@@ -4928,3 +4691,153 @@ def test_current_md_ignored_if_present(tmp_path: Path) -> None:
     # Tier files must exist
     for tier in ("green", "amber", "red"):
         assert (results_dir / f"{tier}.md").exists(), f"{tier}.md must be created"
+
+
+# ---------------------------------------------------------------------------
+# Quota sleep-and-retry (issue #388)
+# ---------------------------------------------------------------------------
+
+
+def test_quota_classify_retries_and_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ClaudeUsageLimitError on classify → orchestrator sleeps and retries; run completes, no degraded_reason."""
+    seen_path = tmp_path / ".seen.json"
+    results_dir = tmp_path / "results"
+
+    slept: list[float] = []
+    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
+
+    call_count = [0]
+
+    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise ClaudeUsageLimitError(
+                "subscription cap",
+                returncode=1,
+                stdout="",
+                stderr="subscription cap",
+                envelope=None,
+            )
+        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+
+    ext = MagicMock()
+    ext.classify_relevance_batch.side_effect = _batch
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
+    )
+
+    summary = run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_paths=_real_results_paths(results_dir),
+    )
+
+    assert summary.written == 2
+    assert len(slept) == 1
+    assert slept[0] > 0
+
+    content = (results_dir / "green.md").read_text(encoding="utf-8")
+    last_line = content.rstrip("\n").rsplit("\n", 1)[-1]
+    assert "degraded_reason" not in last_line
+
+
+def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """quota_sleep event is written to pipeline_orchestrator.events.jsonl with required fields."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
+    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", lambda _: None)
+
+    call_count = [0]
+
+    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise ClaudeUsageLimitError(
+                "cap",
+                returncode=1,
+                stdout="",
+                stderr="cap",
+                envelope=None,
+            )
+        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+
+    ext = MagicMock()
+    ext.classify_relevance_batch.side_effect = _batch
+    ext.judge_match.return_value = (
+        MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok"),
+        _ZERO_USAGE,
+    )
+
+    run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
+    )
+
+    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    assert events_file.exists(), "pipeline_orchestrator.events.jsonl must be written"
+    rows = [
+        json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    quota_rows = [r for r in rows if r.get("event") == "quota_sleep"]
+    assert len(quota_rows) == 1
+    row = quota_rows[0]
+    assert "wake_time" in row
+    assert "duration_s" in row
+    assert "reset_time" in row
+
+
+def test_quota_judge_retries_and_completes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ClaudeUsageLimitError on judge → orchestrator sleeps and retries; run completes."""
+    seen_path = tmp_path / ".seen.json"
+    results_dir = tmp_path / "results"
+
+    slept: list[float] = []
+    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
+
+    judge_call_count = [0]
+
+    def _judge(
+        raw_description: str, *, stub_url: str = ""
+    ) -> tuple[MatchVerdict, CallUsage]:
+        judge_call_count[0] += 1
+        if judge_call_count[0] == 1:
+            raise ClaudeUsageLimitError(
+                "quota", returncode=1, stdout="", stderr="quota", envelope=None
+            )
+        return MatchVerdict(
+            tier=MatchTier.green, matched=[], missing=[], summary="ok"
+        ), _ZERO_USAGE
+
+    ext = MagicMock()
+    ext.classify_relevance_batch.side_effect = lambda items: (
+        [RelevanceVerdict(in_domain=True) for _ in items],
+        _ZERO_USAGE,
+    )
+    ext.judge_match.side_effect = _judge
+
+    summary = run(
+        _two_stub_config(tmp_path),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_paths=_real_results_paths(results_dir),
+    )
+
+    assert summary.written == 2
+    assert len(slept) >= 1

@@ -3,7 +3,9 @@ import dataclasses
 import pytest
 
 from application_pipeline.llm import (
+    CallUsage,
     ClassifyItem,
+    JudgeCandidate,
     LLMExtractor,
     ExtractorError,
     MatchTier,
@@ -169,6 +171,11 @@ def test_match_verdict_summary_over_600_chars_succeeds():
 # --- LLMExtractor Protocol ---
 
 
+_ZERO_USAGE = CallUsage(
+    input_tokens=0, output_tokens=0, cache_read_tokens=0, cost_usd=0.0, duration_s=0.0
+)
+
+
 class _StubExtractor:
     def classify_relevance_batch(
         self, items: list[ClassifyItem]
@@ -177,6 +184,11 @@ class _StubExtractor:
 
     def judge_match(self, raw_description: str) -> MatchVerdict:
         return MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok")
+
+    def judge_top_n(
+        self, candidates: list[JudgeCandidate]
+    ) -> tuple[list[MatchVerdict], CallUsage]:
+        return [], _ZERO_USAGE
 
 
 def test_conforming_class_is_llm_extractor():

@@ -51,6 +51,15 @@ class StructuredExtract:
 
 
 @dataclass(frozen=True)
+class JudgeCandidate:
+    id: str
+    extract: "StructuredExtract"
+    title: str
+    company: str | None
+    location: str | None
+
+
+@dataclass(frozen=True)
 class ClassifyItem:
     id: str
     title: str
@@ -76,6 +85,7 @@ class MatchVerdict:
     missing: list[str]
     summary: str
     rank: int = 1
+    id: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.tier, MatchTier):
@@ -108,3 +118,7 @@ class LLMExtractor(Protocol):
     def judge_match(
         self, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]: ...
+
+    def judge_top_n(
+        self, candidates: list[JudgeCandidate]
+    ) -> tuple[list[MatchVerdict], CallUsage]: ...

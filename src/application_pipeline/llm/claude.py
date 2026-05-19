@@ -22,6 +22,7 @@ from .types import (
     ExtractorMalformedJSONError,
     ExtractorSchemaError,
     ExtractorUnreachableError,
+    JudgeCandidate,
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
@@ -98,6 +99,15 @@ _JUDGE_SITE = _CallSite(
     protocol_error_cls=ExtractorMalformedJSONError,
 )
 
+_JUDGE_TOP_N_SITE = _CallSite(
+    call="judge_top_n",
+    component_id="llm_judge_match",
+    tag="verdicts",
+    model=_JUDGE_MODEL,
+    effort=_JUDGE_EFFORT,
+    protocol_error_cls=ExtractorBatchMalformedError,
+)
+
 
 class ClaudeExtractor:
     def __init__(
@@ -151,6 +161,30 @@ class ClaudeExtractor:
             raise ExtractorSchemaError(
                 f"judge_match: failed to validate Claude response: {exc}"
             ) from exc
+
+    def judge_top_n(
+        self, candidates: list[JudgeCandidate]
+    ) -> tuple[list[MatchVerdict], CallUsage]:
+        if not candidates:
+            return [], CallUsage(
+                input_tokens=0,
+                output_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=0.0,
+                duration_s=0.0,
+            )
+        candidates_block = self._format_candidates(candidates)
+        prompt = self._prompts.judge_top_n.render(
+            skills=self._skills_block,
+            candidates=candidates_block,
+        )
+        data, response = self._invoke(
+            _JUDGE_TOP_N_SITE,
+            prompt,
+            {"candidate_count": len(candidates)},
+        )
+        usage = self._usage_from(response)
+        return self._parse_top_n_response(data, candidates), usage
 
     def _invoke(
         self,
@@ -269,6 +303,103 @@ class ClaudeExtractor:
             cost_usd=response.cost_usd,
             duration_s=response.duration_s,
         )
+
+    @staticmethod
+    def _format_candidates(candidates: list[JudgeCandidate]) -> str:
+        parts: list[str] = []
+        for c in candidates:
+            extract = c.extract
+            skills_str = ", ".join(extract.key_skills) if extract.key_skills else "—"
+            responsibilities_str = (
+                ", ".join(extract.key_responsibilities)
+                if extract.key_responsibilities
+                else "—"
+            )
+            requirements_str = (
+                ", ".join(extract.must_have_requirements)
+                if extract.must_have_requirements
+                else "—"
+            )
+            lines = [
+                f"[Candidate id={c.id}]",
+                f"Title: {c.title}",
+            ]
+            if c.company:
+                lines.append(f"Company: {c.company}")
+            if c.location:
+                lines.append(f"Location: {c.location}")
+            if extract.seniority:
+                lines.append(f"Seniority: {extract.seniority}")
+            if extract.work_model:
+                lines.append(f"Work model: {extract.work_model}")
+            if extract.contract_type:
+                lines.append(f"Contract: {extract.contract_type}")
+            lines += [
+                f"Key skills: {skills_str}",
+                f"Responsibilities: {responsibilities_str}",
+                f"Requirements: {requirements_str}",
+            ]
+            if extract.notable_caveats:
+                lines.append(f"Caveats: {extract.notable_caveats}")
+            parts.append("\n".join(lines))
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _parse_top_n_response(
+        data: object, candidates: list[JudgeCandidate]
+    ) -> list[MatchVerdict]:
+        if not isinstance(data, list):
+            raise ExtractorBatchMalformedError(
+                f"judge_top_n: expected JSON array, got {type(data).__name__}"
+            )
+        if len(data) > 5:
+            raise ExtractorBatchMalformedError(
+                f"judge_top_n: response contains {len(data)} verdicts, expected at most 5"
+            )
+        valid_ids = {c.id for c in candidates}
+        seen_ranks: set[int] = set()
+        seen_ids: set[str] = set()
+        verdicts: list[MatchVerdict] = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n: verdict entry is not a dict: {entry!r}"
+                )
+            entry_id = entry.get("id")
+            if not isinstance(entry_id, str) or entry_id not in valid_ids:
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n: unknown or missing id in verdict: {entry_id!r}"
+                )
+            if entry_id in seen_ids:
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n: duplicate id in response: {entry_id!r}"
+                )
+            rank = entry.get("rank")
+            if not isinstance(rank, int) or not (1 <= rank <= 5):
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n: rank must be int in 1..5, got {rank!r} for id {entry_id!r}"
+                )
+            if rank in seen_ranks:
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n: duplicate rank {rank} in response"
+                )
+            try:
+                verdict = MatchVerdict(
+                    tier=MatchTier.green,
+                    matched=list(entry["matched"])[:10],
+                    missing=list(entry["missing"])[:10],
+                    summary=str(entry["summary"]),
+                    rank=rank,
+                    id=entry_id,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n: malformed verdict for id {entry_id!r}: {exc}"
+                ) from exc
+            seen_ranks.add(rank)
+            seen_ids.add(entry_id)
+            verdicts.append(verdict)
+        return verdicts
 
     @staticmethod
     def _format_classify_items(items: list[ClassifyItem]) -> str:

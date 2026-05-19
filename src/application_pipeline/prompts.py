@@ -12,10 +12,14 @@ class PromptError(Exception):
 
 CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"ITEMS"})
 JUDGE_MATCH_SLOTS: frozenset[str] = frozenset({"skills", "raw_description"})
+JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"skills", "candidates"})
 
 _PACKAGE_CLASSIFY_SLOTS: frozenset[str] = frozenset({"ITEMS", "USER_INFO"})
 _PACKAGE_JUDGE_SLOTS: frozenset[str] = frozenset(
     {"skills", "raw_description", "USER_INFO"}
+)
+_PACKAGE_JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset(
+    {"skills", "candidates", "USER_INFO"}
 )
 
 
@@ -39,6 +43,7 @@ class PromptTemplate:
 class Prompts:
     classify_relevance: PromptTemplate
     judge_match: PromptTemplate
+    judge_top_n: PromptTemplate
 
 
 def load_prompts(config: Config) -> Prompts:
@@ -64,7 +69,16 @@ def load_prompts(config: Config) -> Prompts:
         JUDGE_MATCH_SLOTS,
         judge_user_info,
     )
-    return Prompts(classify_relevance=classify, judge_match=judge)
+    judge_top_n = _load_package_template(
+        pkg,
+        "judge_top_n",
+        _PACKAGE_JUDGE_TOP_N_SLOTS,
+        JUDGE_TOP_N_SLOTS,
+        judge_user_info,
+    )
+    return Prompts(
+        classify_relevance=classify, judge_match=judge, judge_top_n=judge_top_n
+    )
 
 
 def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:

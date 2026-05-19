@@ -20,6 +20,7 @@ from application_pipeline.llm import (
     ExtractorBatchMalformedError,
     ExtractorError,
     ExtractorUnreachableError,
+    JudgeCandidate,
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
@@ -995,6 +996,11 @@ class _FakeExtractor:
             tier=MatchTier.green, matched=[], missing=[], summary="ok"
         ), _FAKE_JUDGE_USAGE
 
+    def judge_top_n(
+        self, candidates: list[JudgeCandidate]
+    ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
+        return [], _ZERO_USAGE
+
 
 def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     """Happy path: 6 stubs, 1 prefilter-dropped, 1 classifier-dropped, 4 written."""
@@ -1112,6 +1118,11 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
                 ),
                 _ZERO_USAGE,
             )
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
+            return [], _ZERO_USAGE
 
     class _MultiStubParser(_StubParserBase):
         """Emits 5 stubs, all pass prefilter."""
@@ -1685,6 +1696,11 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
                 _ZERO_USAGE,
             )
 
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
+            return [], _ZERO_USAGE
+
     seen_path.write_text(
         json.dumps(
             {
@@ -1820,6 +1836,11 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
                 ),
                 _ZERO_USAGE,
             )
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
+            return [], _ZERO_USAGE
 
     seen_path.write_text(
         json.dumps(
@@ -2231,6 +2252,11 @@ def test_crashed_run_does_not_write_run_divider(tmp_path: Path) -> None:
         def judge_match(
             self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
+            raise NotImplementedError
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
     with pytest.raises(RuntimeError):
@@ -3158,6 +3184,11 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
         def judge_match(
             self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
+            raise NotImplementedError
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
             raise NotImplementedError
 
     monkeypatch.setattr(
@@ -4333,6 +4364,11 @@ def test_non_quota_worker_exception_writes_failure_report(
             self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:
             raise RuntimeError("disk full")
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:  # pragma: no cover
+            return [], _ZERO_USAGE
 
     monkeypatch.setattr(
         "application_pipeline.orchestrator.ClaudeExtractor",

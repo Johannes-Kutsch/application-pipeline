@@ -217,10 +217,13 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
 
 
 def test_prompts_is_frozen() -> None:
+    from application_pipeline.prompts import JUDGE_TOP_N_SLOTS
+
     tpl = PromptTemplate("{ITEMS}", CLASSIFY_RELEVANCE_SLOTS)
     prompts = Prompts(
         classify_relevance=tpl,
         judge_match=PromptTemplate("{skills} {raw_description}", JUDGE_MATCH_SLOTS),
+        judge_top_n=PromptTemplate("{skills} {candidates}", JUDGE_TOP_N_SLOTS),
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         prompts.classify_relevance = tpl  # type: ignore[misc]

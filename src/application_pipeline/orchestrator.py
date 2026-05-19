@@ -373,10 +373,10 @@ class _ClassifyThread(_QueueWorker):
         classifier_dropped = 0
         for verdict, position in zip(verdicts, batch.positions):
             if not verdict.in_domain:
-                self._dedup_store.mark_off_domain(position.stub)
+                self._dedup_store.mark_out_of_domain(position.stub)
                 classifier_dropped += 1
             else:
-                self._dedup_store.mark_classified_in_domain(position.stub)
+                self._dedup_store.mark_in_domain(position.stub)
                 self._metrics.judge_enqueued()
                 self._judge_queue.put(
                     _JudgeJob(
@@ -435,7 +435,7 @@ class _JudgeThread(_QueueWorker):
             path = self._results_paths[match_verdict.tier.value]
             rendered = render(job.position, match_verdict, self._layout)
             append(path, rendered)
-            self._dedup_store.mark_kept(job.position.stub)
+            self._dedup_store.mark_selected_by_judge(job.position.stub)
             self._metrics.judge_complete(
                 judge_usage, match_verdict.tier, job.position.stub.source
             )
@@ -618,7 +618,7 @@ class _OutboundDispatcher:
                     if len(self._classify_buffer) >= self._batch_size:
                         self._flush_classify_batch()
                 else:
-                    self._dedup.mark_off_domain(payload.stub)
+                    self._dedup.mark_out_of_domain(payload.stub)
                     self._metrics.prefilter_dropped(verdict)
         elif isinstance(payload, ParserError):
             self._run_log.event(

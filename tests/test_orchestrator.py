@@ -306,7 +306,7 @@ def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
             "company_lc": None,
             "title_lc": None,
             "location_lc": None,
-            "status": "off_domain",
+            "status": "out_of_domain",
             "first_seen": "2024-01-01",
         }
         for url in _STUB_URLS
@@ -746,7 +746,7 @@ def test_integration_prefilter_rejects_off_domain(tmp_path: Path) -> None:
     assert summary.written == 5
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_REJECTED_URL]["status"] == "off_domain"
+    assert seen_data[_REJECTED_URL]["status"] == "out_of_domain"
 
 
 # ---------------------------------------------------------------------------
@@ -1025,16 +1025,18 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     assert summary.amber == 2
     assert summary.red == 1
 
-    # .seen.json: 2 off_domain, 4 kept
+    # .seen.json: 2 out_of_domain, 4 selected_by_judge
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    off_domain = [
-        url for url, rec in seen_data.items() if rec["status"] == "off_domain"
+    out_of_domain = [
+        url for url, rec in seen_data.items() if rec["status"] == "out_of_domain"
     ]
-    kept = [url for url, rec in seen_data.items() if rec["status"] == "kept"]
-    assert len(off_domain) == 2
-    assert len(kept) == 4
-    assert _PF_REJECTED_LLM_URL in off_domain
-    assert _CLS_REJECTED_LLM_URL in off_domain
+    selected = [
+        url for url, rec in seen_data.items() if rec["status"] == "selected_by_judge"
+    ]
+    assert len(out_of_domain) == 2
+    assert len(selected) == 4
+    assert _PF_REJECTED_LLM_URL in out_of_domain
+    assert _CLS_REJECTED_LLM_URL in out_of_domain
 
     # 4 card H1s across the three tier files
     content = _read_all_results(results_dir)
@@ -1246,8 +1248,8 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
     assert _ERR_URLS[0] not in seen_data
 
 
-def test_extractor_error_on_judge_marks_classified_in_domain(tmp_path: Path) -> None:
-    """ExtractorError on judge_match: position marked classified_in_domain (not kept), rendered block NOT in green.md, errored increments."""
+def test_extractor_error_on_judge_leaves_status_in_domain(tmp_path: Path) -> None:
+    """ExtractorError on judge_match: position status stays in_domain (not selected_by_judge), rendered block NOT in green.md, errored increments."""
     seen_path = tmp_path / ".seen.json"
     results_dir = tmp_path / "results"
 
@@ -1277,7 +1279,7 @@ def test_extractor_error_on_judge_marks_classified_in_domain(tmp_path: Path) -> 
     assert summary.written == 1
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_ERR_URLS[0]]["status"] == "classified_in_domain"
+    assert seen_data[_ERR_URLS[0]]["status"] == "in_domain"
 
     content = (results_dir / "green.md").read_text(encoding="utf-8")
     assert "Job 0" not in content
@@ -1516,8 +1518,8 @@ def _one_stub_config(tmp_path: Path) -> Path:
     )
 
 
-def test_judge_failure_marks_classified_in_domain(tmp_path: Path) -> None:
-    """After classify succeeds and judge raises ExtractorError, seen store has classified_in_domain."""
+def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
+    """After classify succeeds and judge raises ExtractorError, seen store has in_domain."""
     seen_path = tmp_path / ".seen.json"
 
     ext = MagicMock()
@@ -1536,11 +1538,11 @@ def test_judge_failure_marks_classified_in_domain(tmp_path: Path) -> None:
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "classified_in_domain"
+    assert seen_data[_RESUME_URL]["status"] == "in_domain"
 
 
 def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
-    """On rerun, a classified_in_domain URL is enriched and judged without classify being called."""
+    """On rerun, an in_domain URL is enriched and judged without classify being called."""
     seen_path = tmp_path / ".seen.json"
     classify_calls: list[object] = []
     enrich_calls: list[str] = []
@@ -1583,7 +1585,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "classified_in_domain",
+                    "status": "in_domain",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1604,8 +1606,8 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
     assert summary.written == 1, "judge_pending stub must reach judge and be written"
 
 
-def test_judge_pending_success_transitions_to_kept(tmp_path: Path) -> None:
-    """On rerun, if judge succeeds the URL transitions from classified_in_domain to kept."""
+def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) -> None:
+    """On rerun, if judge succeeds the URL transitions from in_domain to selected_by_judge."""
     seen_path = tmp_path / ".seen.json"
 
     seen_path.write_text(
@@ -1615,7 +1617,7 @@ def test_judge_pending_success_transitions_to_kept(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "classified_in_domain",
+                    "status": "in_domain",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1632,11 +1634,11 @@ def test_judge_pending_success_transitions_to_kept(tmp_path: Path) -> None:
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "kept"
+    assert seen_data[_RESUME_URL]["status"] == "selected_by_judge"
 
 
-def test_judge_pending_failure_stays_classified_in_domain(tmp_path: Path) -> None:
-    """On rerun, if judge fails again the URL stays classified_in_domain for the next run."""
+def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
+    """On rerun, if judge fails again the URL stays in_domain for the next run."""
     seen_path = tmp_path / ".seen.json"
 
     seen_path.write_text(
@@ -1646,7 +1648,7 @@ def test_judge_pending_failure_stays_classified_in_domain(tmp_path: Path) -> Non
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "classified_in_domain",
+                    "status": "in_domain",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1670,7 +1672,7 @@ def test_judge_pending_failure_stays_classified_in_domain(tmp_path: Path) -> Non
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "classified_in_domain"
+    assert seen_data[_RESUME_URL]["status"] == "in_domain"
 
 
 def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
@@ -1719,7 +1721,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "classified_in_domain",
+                    "status": "in_domain",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1763,7 +1765,7 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "classified_in_domain",
+                    "status": "in_domain",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1796,7 +1798,7 @@ def test_judge_pending_appears_in_run_divider(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "classified_in_domain",
+                    "status": "in_domain",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1833,7 +1835,7 @@ def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "classified_in_domain",
+                    "status": "in_domain",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1992,7 +1994,11 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
     # No position must be marked kept
-    kept = [url for url, rec in seen_data.items() if rec.get("status") == "kept"]
+    kept = [
+        url
+        for url, rec in seen_data.items()
+        if rec.get("status") == "selected_by_judge"
+    ]
     assert kept == []
 
 
@@ -2684,7 +2690,9 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
 
     # .seen.json: all 6 URLs kept
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    kept_urls = {url for url, rec in seen_data.items() if rec["status"] == "kept"}
+    kept_urls = {
+        url for url, rec in seen_data.items() if rec["status"] == "selected_by_judge"
+    }
     assert kept_urls == _ALL_URLS
 
     # green.md: all 6 URLs appear in rendered content (stub_extractor always returns green)
@@ -2793,7 +2801,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     assert ext.judge_match.call_count == 1
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_OFF_URL]["status"] == "off_domain"
+    assert seen_data[_OFF_URL]["status"] == "out_of_domain"
 
 
 def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
@@ -4155,10 +4163,11 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
     )
     # First 3 judge calls succeeded → marked kept
     assert all(
-        seen_data.get(_ERR_URLS[i], {}).get("status") == "kept" for i in range(3)
+        seen_data.get(_ERR_URLS[i], {}).get("status") == "selected_by_judge"
+        for i in range(3)
     )
-    # 4th item: classify marked it classified_in_domain; judge raised ClaudeUsageLimitError → stays classified_in_domain
-    assert seen_data.get(_ERR_URLS[3], {}).get("status") == "classified_in_domain"
+    # 4th item: classify marked it in_domain; judge raised ClaudeUsageLimitError → stays in_domain
+    assert seen_data.get(_ERR_URLS[3], {}).get("status") == "in_domain"
 
     content = (results_dir / "green.md").read_text(encoding="utf-8")
     last_line = content.rstrip("\n").rsplit("\n", 1)[-1]

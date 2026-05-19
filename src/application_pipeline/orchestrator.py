@@ -317,7 +317,7 @@ class _ParserThread(threading.Thread):
 # ---------------------------------------------------------------------------
 
 
-def _quota_sleep(err: "ClaudeUsageLimitError", run_log: RunLog) -> None:
+def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
     now = datetime.now(timezone.utc)
     wake = _quota.compute_wake_time(err.reset_time, now)
     duration_s = max(0.0, (wake - now).total_seconds())

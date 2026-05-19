@@ -24,6 +24,7 @@ from application_pipeline.llm import (
     MatchVerdict,
     RelevanceVerdict,
 )
+from application_pipeline.llm.types import StructuredExtract
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.http import HttpParserFatalError, HttpStubNotRetryableError
 from application_pipeline.orchestrator import RunSummary, run
@@ -93,11 +94,21 @@ _ZERO_USAGE = CallUsage(
     input_tokens=0, output_tokens=0, cache_read_tokens=0, cost_usd=0.0, duration_s=0.0
 )
 
+_STUB_EXTRACT = StructuredExtract(
+    seniority=None,
+    work_model=None,
+    contract_type=None,
+    key_skills=[],
+    key_responsibilities=[],
+    must_have_requirements=[],
+    notable_caveats="",
+)
+
 
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     ext.judge_match.return_value = (
@@ -977,7 +988,11 @@ class _FakeExtractor:
         self, items: list[ClassifyItem]
     ) -> tuple[list[RelevanceVerdict], CallUsage]:
         verdicts = [
-            RelevanceVerdict(in_domain=(item.title != "Job 1")) for item in items
+            RelevanceVerdict(
+                in_domain=(item.title != "Job 1"),
+                extract=_STUB_EXTRACT if item.title != "Job 1" else None,
+            )
+            for item in items
         ]
         return verdicts, _FAKE_CLASSIFY_USAGE
 
@@ -1100,7 +1115,9 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
             self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
             call_log.extend(["classify"] * len(items))
-            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+            return [
+                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+            ], _ZERO_USAGE
 
         def judge_match(
             self, raw_description: str, *, stub_url: str = ""
@@ -1209,7 +1226,9 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
         call_count[0] += 1
         if call_count[0] == 1:
             raise ExtractorError("classify batch boom")
-        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+        return [
+            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+        ], _ZERO_USAGE
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch_side_effect
@@ -1256,7 +1275,7 @@ def test_extractor_error_on_judge_leaves_status_in_domain(tmp_path: Path) -> Non
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     # First judge raises, second succeeds
@@ -1631,7 +1650,7 @@ def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     ext.judge_match.side_effect = ExtractorError("judge boom")
@@ -1673,7 +1692,9 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
             self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
             classify_calls.extend(items)
-            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+            return [
+                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+            ], _ZERO_USAGE
 
         def judge_match(
             self, raw_description: str, *, stub_url: str = ""
@@ -1765,7 +1786,7 @@ def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     ext.judge_match.side_effect = ExtractorError("judge boom again")
@@ -1808,7 +1829,9 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
         def classify_relevance_batch(
             self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+            return [
+                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+            ], _ZERO_USAGE
 
         def judge_match(
             self, raw_description: str, *, stub_url: str = ""
@@ -1952,7 +1975,7 @@ def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     ext.judge_match.side_effect = ExtractorError("judge boom")
@@ -2650,7 +2673,9 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
 
     def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         batch_sizes_seen.append(len(items))
-        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+        return [
+            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+        ], _ZERO_USAGE
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
@@ -2814,7 +2839,9 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
 
     def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         batch_sizes.append(len(items))
-        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+        return [
+            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+        ], _ZERO_USAGE
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
@@ -2865,7 +2892,12 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         # First item off-domain, second in-domain
         return [
-            RelevanceVerdict(in_domain=(item.raw_description != "off domain content"))
+            RelevanceVerdict(
+                in_domain=(item.raw_description != "off domain content"),
+                extract=_STUB_EXTRACT
+                if item.raw_description != "off domain content"
+                else None,
+            )
             for item in items
         ], _ZERO_USAGE
 
@@ -2921,7 +2953,9 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
         call_count[0] += 1
         if call_count[0] == 1:
             raise ExtractorBatchMalformedError("length mismatch")
-        return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+        return [
+            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+        ], _ZERO_USAGE
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = _batch
@@ -3067,7 +3101,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     ext.judge_match.side_effect = ExtractorUnreachableError(
@@ -4266,7 +4300,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     ext.judge_match.side_effect = _judge
@@ -4327,7 +4361,9 @@ def test_non_quota_worker_exception_writes_failure_report(
         def classify_relevance_batch(
             self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            return [RelevanceVerdict(in_domain=True) for _ in items], _ZERO_USAGE
+            return [
+                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+            ], _ZERO_USAGE
 
         def judge_match(
             self, raw_description: str, *, stub_url: str = ""
@@ -4414,7 +4450,7 @@ def test_judge_error_refreshes_status_body(tmp_path: Path) -> None:
     """ExtractorError on judge_match: judge_match row body is refreshed with errored=N."""
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     ext.judge_match.side_effect = [
@@ -4467,7 +4503,7 @@ def test_judge_body_mixed_fail_success_shows_all_finished(tmp_path: Path) -> Non
     """judge_match body counts both failures and successes in numerator and denominator."""
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     # First judge fails, second succeeds
@@ -4604,7 +4640,7 @@ def test_run_divider_includes_judge_items_abandoned_on_judge_failure(
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True) for _ in items],
+        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
         _ZERO_USAGE,
     )
     ext.judge_match.side_effect = ExtractorError("judge boom")

@@ -15,6 +15,22 @@ from application_pipeline import (
     load,
 )
 from application_pipeline.dedup import RunScopedSeenResult, load as dedup_load
+from application_pipeline.extracts import load as extract_load
+from application_pipeline.llm.types import StructuredExtract
+
+
+def _extract(**overrides: object) -> StructuredExtract:
+    base: dict[str, object] = {
+        "seniority": "senior",
+        "work_model": "remote",
+        "contract_type": "permanent",
+        "key_skills": ["python"],
+        "key_responsibilities": ["ship things"],
+        "must_have_requirements": ["3+ years"],
+        "notable_caveats": "",
+    }
+    base.update(overrides)
+    return StructuredExtract(**base)  # type: ignore[arg-type]
 
 
 @dataclass
@@ -551,7 +567,7 @@ def test_mark_in_domain_then_is_seen_returns_judge_pending(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid")
-    store.mark_in_domain(stub)
+    store.mark_in_domain(stub, extract=_extract())
     assert store.is_seen(stub) == "judge_pending"
 
 
@@ -560,7 +576,7 @@ def test_mark_in_domain_then_mark_selected_by_judge_returns_url_hit(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid3")
-    store.mark_in_domain(stub)
+    store.mark_in_domain(stub, extract=_extract())
     store.mark_selected_by_judge(stub)
 
     assert store.is_seen(stub) == "url_hit"
@@ -574,7 +590,7 @@ def test_mark_in_domain_persists_correct_record(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid2")
-    store.mark_in_domain(stub)
+    store.mark_in_domain(stub, extract=_extract())
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     record = on_disk["https://example.com/cid2"]
@@ -632,7 +648,7 @@ def test_tuple_alias_of_in_domain_returns_judge_pending(
     store = dedup_load(store_path)
     a = StubLike(url="https://example.com/original")
     b = StubLike(url="https://example.com/alias")
-    store.mark_in_domain(a)
+    store.mark_in_domain(a, extract=_extract())
     # tuple hit writes alias with in_domain status
     assert store.is_seen(b) == "tuple_hit"
     # next is_seen on b resolves via URL tier → judge_pending
@@ -727,3 +743,90 @@ def test_run_scope_concurrent_is_seen(store: DeduplicationStore) -> None:
 
     assert errors == [], f"threads raised: {errors}"
     assert all(r in {"miss", "run_hit", "url_hit", "tuple_hit"} for r in results)
+
+
+# ---------------------------------------------------------------------------
+# ExtractStore integration
+# ---------------------------------------------------------------------------
+
+
+def test_mark_in_domain_writes_extract_to_extract_store(tmp_path: Path) -> None:
+    extract_path = tmp_path / "extracts.json"
+    extract_store = extract_load(extract_path)
+    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
+
+    stub = StubLike(url="https://example.com/job1")
+    extract = _extract()
+    store.mark_in_domain(stub, extract=extract)
+
+    assert extract_store.get(stub.url) == extract
+
+
+def test_mark_selected_by_judge_on_in_domain_deletes_extract(tmp_path: Path) -> None:
+    extract_path = tmp_path / "extracts.json"
+    extract_store = extract_load(extract_path)
+    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
+
+    stub = StubLike(url="https://example.com/job2")
+    store.mark_in_domain(stub, extract=_extract())
+    store.mark_selected_by_judge(stub)
+
+    assert extract_store.get(stub.url) is None
+    assert store.is_seen(stub) == "url_hit"
+
+
+def test_mark_enrich_failed_on_in_domain_deletes_extract(tmp_path: Path) -> None:
+    extract_path = tmp_path / "extracts.json"
+    extract_store = extract_load(extract_path)
+    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
+
+    stub = StubLike(url="https://example.com/job3")
+    store.mark_in_domain(stub, extract=_extract())
+    store.mark_enrich_failed(stub)
+
+    assert extract_store.get(stub.url) is None
+
+
+def test_mark_out_of_domain_on_in_domain_deletes_extract(tmp_path: Path) -> None:
+    extract_path = tmp_path / "extracts.json"
+    extract_store = extract_load(extract_path)
+    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
+
+    stub = StubLike(url="https://example.com/job4")
+    store.mark_in_domain(stub, extract=_extract())
+    store.mark_out_of_domain(stub)
+
+    assert extract_store.get(stub.url) is None
+
+
+def test_in_domain_invariant_extract_exists_iff_status_in_domain(
+    tmp_path: Path,
+) -> None:
+    extract_path = tmp_path / "extracts.json"
+    extract_store = extract_load(extract_path)
+    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
+
+    in_stub = StubLike(
+        url="https://example.com/in", company="A", title="T", location="L"
+    )
+    out_stub = StubLike(
+        url="https://example.com/out", company="B", title="T", location="L"
+    )
+    sel_stub = StubLike(
+        url="https://example.com/sel", company="C", title="T", location="L"
+    )
+    ef_stub = StubLike(
+        url="https://example.com/ef", company="D", title="T", location="L"
+    )
+
+    store.mark_in_domain(in_stub, extract=_extract())
+    store.mark_out_of_domain(out_stub)
+    store.mark_in_domain(sel_stub, extract=_extract())
+    store.mark_selected_by_judge(sel_stub)
+    store.mark_in_domain(ef_stub, extract=_extract())
+    store.mark_enrich_failed(ef_stub)
+
+    assert extract_store.get(in_stub.url) is not None
+    assert extract_store.get(out_stub.url) is None
+    assert extract_store.get(sel_stub.url) is None
+    assert extract_store.get(ef_stub.url) is None

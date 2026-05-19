@@ -377,7 +377,8 @@ class _ClassifyThread(_QueueWorker):
                 self._dedup_store.mark_out_of_domain(position.stub)
                 classifier_dropped += 1
             else:
-                self._dedup_store.mark_in_domain(position.stub)
+                assert verdict.extract is not None
+                self._dedup_store.mark_in_domain(position.stub, extract=verdict.extract)
                 self._metrics.judge_enqueued()
                 self._judge_queue.put(
                     _JudgeJob(

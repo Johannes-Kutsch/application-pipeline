@@ -1311,15 +1311,17 @@ def test_judge_top_n_with_10_candidates_returns_5_verdicts(run_log: RunLog) -> N
 
 
 def test_judge_top_n_empty_candidates_returns_empty_list(run_log: RunLog) -> None:
+    invoker = MagicMock(spec=ClaudeCliInvoker)
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
         run_log=run_log,
-        _invoker=MagicMock(spec=ClaudeCliInvoker),
+        _invoker=invoker,
     )
     results, usage = extractor.judge_top_n([])
     assert results == []
     assert usage.cost_usd == pytest.approx(0.0)
+    invoker.call.assert_not_called()
 
 
 def test_judge_top_n_response_with_unknown_id_raises_batch_malformed(

@@ -9,8 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import application_pipeline.parser_log as _parser_log
-
 from fake_status_display import FakeStatusDisplay
 
 from application_pipeline import dedup as dedup_module
@@ -54,18 +52,6 @@ class _StubParserBase:
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _reset_log_state():
-    """Reset parser_log module state between tests.
-
-    Some tests call main() which configures parser_log. Without this reset
-    the configured logs path leaks across tests.
-    """
-    _parser_log._logs_dir = None
-    yield
-    _parser_log._logs_dir = None
 
 
 def _write_config(
@@ -3390,7 +3376,9 @@ def test_display_stop_called_on_success(tmp_path: Path) -> None:
 
 def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
     """pipeline register() writes a lifecycle record to lifecycle.jsonl via parser_log."""
-    run_log = _parser_log.RunLog(tmp_path / "logs")
+    from application_pipeline.parser_log import RunLog
+
+    run_log = RunLog(tmp_path / "logs")
     config_path = _write_config(tmp_path)
 
     from application_pipeline.status_display import PlainStatusDisplay

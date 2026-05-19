@@ -15,7 +15,6 @@ from pathlib import Path
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline import layout as layout_module
-from application_pipeline import parser_log
 from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
 from application_pipeline.run_metrics import RunMetrics, RunSummary
@@ -671,9 +670,6 @@ def run(
     if status_display is None:
         status_display = PlainStatusDisplay(run_log=run_log)
 
-    if run_log is not None:
-        parser_log.configure(run_log.logs_dir)
-
     run_state = _RunState()
     _start = time.monotonic()
     status_display.register("pipeline", order=0, phase="running")
@@ -688,7 +684,6 @@ def run(
 
         if run_log is None:
             run_log = RunLog(cfg.logs_path)
-            parser_log.configure(run_log.logs_dir)
 
         # Steps 2-3: Load prompts, build extractor
         if extractor is None:

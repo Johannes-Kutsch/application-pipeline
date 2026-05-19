@@ -5,9 +5,6 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
-_logs_dir: Path | None = None
-_default: RunLog | None = None
-
 
 class RunLog:
     def __init__(self, logs_dir: Path) -> None:
@@ -64,58 +61,3 @@ class RunLog:
             "run.log",
             f"=== {component_id}  {ts}  summary ===\n\nSUMMARY OF SESSION {ts}\n{lines}\n\n\n",
         )
-
-
-def _active() -> RunLog | None:
-    """Return the active RunLog, lazily creating one when _logs_dir was set directly."""
-    global _default
-    if _logs_dir is None:
-        return None
-    if _default is None or _default.logs_dir is not _logs_dir:
-        _default = RunLog(_logs_dir)
-    return _default
-
-
-def configure(logs_dir: Path) -> None:
-    global _logs_dir, _default
-    _default = RunLog(logs_dir)
-    _logs_dir = logs_dir
-
-
-def record(component_id: str, event_type: str, **fields: object) -> None:
-    run_log = _active()
-    if run_log is None:
-        return
-    run_log.event(component_id, event_type, **fields)
-
-
-def record_lifecycle(component_id: str, event_type: str, **fields: object) -> None:
-    run_log = _active()
-    if run_log is None:
-        return
-    run_log.lifecycle(component_id, event_type, **fields)
-
-
-def record_transcript(component_id: str, entry: Mapping[str, object]) -> None:
-    run_log = _active()
-    if run_log is None:
-        return
-    run_log.transcript(component_id, entry)
-
-
-def record_traceback(component_id: str, traceback_str: str) -> None:
-    run_log = _active()
-    if run_log is None:
-        return
-    run_log.traceback(component_id, traceback_str)
-
-
-def summarize(
-    component_id: str,
-    counts: Mapping[str, int | float | str],
-    started_at: datetime,
-) -> None:
-    run_log = _active()
-    if run_log is None:
-        return
-    run_log.summary(component_id, counts, started_at)

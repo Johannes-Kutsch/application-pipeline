@@ -112,9 +112,6 @@ class _StatusDisplay:
 
 
 class PlainStatusDisplay(_StatusDisplay):
-    def __init__(self, *, run_log: RunLog | None) -> None:
-        super().__init__(run_log=run_log)
-
     def _on_registered(self, name: str, order: int, phase: str) -> None:
         print(f"{name}: registered order={order} phase={phase}")
 

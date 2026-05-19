@@ -70,6 +70,10 @@ def render(
         parts.append(position.raw_description)
         parts.append("")
 
+    # Rank
+    parts.append(f"**Rank:** {verdict.rank}")
+    parts.append("")
+
     # Footer
     parts.append("---")
     parts.append(f"<{stub.url}>")

@@ -63,6 +63,7 @@ class MatchVerdict:
     matched: list[str]
     missing: list[str]
     summary: str
+    rank: int = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.tier, MatchTier):
@@ -70,6 +71,10 @@ class MatchVerdict:
         if len(self.matched) > 10 or len(self.missing) > 10:
             raise ExtractorSchemaError(
                 "matched/missing must have at most 10 entries each"
+            )
+        if not (1 <= self.rank <= 5):
+            raise ExtractorSchemaError(
+                f"rank must be between 1 and 5, got {self.rank!r}"
             )
 
 

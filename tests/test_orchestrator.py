@@ -2887,6 +2887,38 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
     assert "batch_error" not in content
 
 
+def test_classify_batch_abandoned_log_includes_urls(tmp_path: Path) -> None:
+    """batch_abandoned event includes the URLs of every position in the failing batch."""
+    import application_pipeline.parser_log as pl
+
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = pl.RunLog(logs_dir)
+
+    ext = MagicMock()
+    ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
+
+    run(
+        _batch_size_config(tmp_path, 100),
+        extractor=ext,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
+    )
+
+    events_rows = [
+        json.loads(line)
+        for line in (logs_dir / "llm_classify_relevance.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    abandoned = [row for row in events_rows if row.get("event") == "batch_abandoned"]
+    assert abandoned, "expected at least one batch_abandoned event"
+    urls_in_log = abandoned[0].get("urls", [])
+    assert _ERR_URLS[0] in urls_in_log, f"expected URL {_ERR_URLS[0]!r} in urls field"
+    assert _ERR_URLS[1] in urls_in_log, f"expected URL {_ERR_URLS[1]!r} in urls field"
+
+
 def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     """ExtractorUnreachableError with forensics → returncode and stderr_excerpt in classify_relevance.log."""
     import application_pipeline.parser_log as pl

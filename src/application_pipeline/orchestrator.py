@@ -363,6 +363,7 @@ class _ClassifyThread(_QueueWorker):
                 "llm_classify_relevance",
                 "batch_abandoned",
                 batch_size=len(batch.positions),
+                urls=[p.stub.url for p in batch.positions],
                 returncode=getattr(exc, "returncode", None),
                 stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
                 error=str(exc),

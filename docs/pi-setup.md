@@ -283,7 +283,7 @@ This step seeds `data/` with the default `config.py`, `layout.py`, and the promp
 
 ## 8. Crontab install
 
-The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock` to enforce the single-writer invariant (see [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md)).
+The cron wrapper runs the **Pipeline Orchestrator** once per calendar day via `flock` to enforce the single-writer invariant (see [ADR-0010](adr/0010-pi-pulls-tags-state-via-syncthing.md)). The exact local time is the operator's choice; `crontab.example` shows `0 7 * * *` (07:00 UTC) as a concrete starting point.
 
 34. Copy `crontab.example` from the repo:
     ```bash
@@ -308,7 +308,7 @@ The cron wrapper runs the **Pipeline Orchestrator** four times daily via `flock`
     crontab ~/crontab.merged
     crontab -l
     ```
-    Expected: the merged crontab is now installed; the `pi-tick.sh` line schedules it at 8, 12, 16, and 20 UTC daily.
+    Expected: the merged crontab is now installed; the `pi-tick.sh` line schedules it once per calendar day.
 
 37. Remove the temporary files:
     ```bash
@@ -381,3 +381,32 @@ The **Seen State** file (`.seen.json`) tracks which **Position** URLs have alrea
     Expected: size > 0 bytes.
 
 46. Resume the remaining bootstrap steps (34–37) to install the crontab, then trigger a manual run (step 38) and confirm no duplicate flood in `current.md`.
+
+---
+
+## Deploying the daily-top-5 refactor
+
+The daily-top-5 refactor (issue #390) changes the output layout: the old trio of results files (`green.md`, `amber.md`, `red.md`) and the rolling `current.md` are replaced by one dated **Daily Results File** per calendar day at `data/results/YYYY-MM-DD.md`. The **Seen State** format also changed. Before the first cron tick fires on the new code, wipe the stale artifacts so the pipeline starts clean.
+
+**Stop** any in-flight tick (confirm `crontab -l` shows no currently-running flock job) before proceeding.
+
+47. Delete the **Seen State** file so all previously-seen positions are re-evaluated under the new status schema:
+    ```bash
+    rm -f ~/application-pipeline/data/.seen.json
+    ```
+
+48. Delete the old results trio — these files are not read by the new code but will cause confusion if left in place:
+    ```bash
+    rm -f ~/application-pipeline/data/results/green.md \
+          ~/application-pipeline/data/results/amber.md \
+          ~/application-pipeline/data/results/red.md
+    ```
+
+49. Ensure the `data/results/` directory exists (the new code writes dated files there and does not create the directory itself):
+    ```bash
+    mkdir -p ~/application-pipeline/data/results
+    ls -ld ~/application-pipeline/data/results
+    ```
+    Expected: directory is present.
+
+50. Deploy the new tag following steps 27–32, then trigger a manual run (step 38). The first run will re-classify all previously-seen positions from scratch and produce a dated **Daily Results File** under `data/results/`.

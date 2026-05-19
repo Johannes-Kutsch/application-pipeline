@@ -75,27 +75,44 @@ class ParserHttp:
             _http_get if _http_get is not None else self._real_http_get
         )
 
-    @staticmethod
-    def _check_response_status(resp: httpx.Response, url: str) -> None:
+    def _real_http_get(self, url: str, timeout: float) -> bytes:
+        component_id = "parser_http"
+        resp = self._client.get(url, timeout=timeout)
         if resp.is_success:
-            return
+            return resp.content
         status = resp.status_code
         if status == 404:
-            raise HttpStubNotRetryableError(f"not found: {url}")
+            reason = f"not found: {url}"
+            self._run_log.event(
+                component_id, "http_get_skipped", url=url, status=status, reason=reason
+            )
+            raise HttpStubNotRetryableError(reason)
         if status in (400, 422):
-            raise HttpStubNotRetryableError(f"malformed: {url} status={status}")
+            reason = f"malformed: {url} status={status}"
+            self._run_log.event(
+                component_id, "http_get_skipped", url=url, status=status, reason=reason
+            )
+            raise HttpStubNotRetryableError(reason)
         if status in (401, 403):
-            raise HttpParserFatalError(f"auth: {url} status={status}")
+            reason = f"auth: {url} status={status}"
+            self._run_log.event(
+                component_id, "http_get_fatal", url=url, status=status, reason=reason
+            )
+            raise HttpParserFatalError(reason)
         if 500 <= status < 600 and status not in RETRY_STATUSES:
-            raise HttpParserFatalError(f"upstream: {url} status={status}")
+            reason = f"upstream: {url} status={status}"
+            self._run_log.event(
+                component_id, "http_get_fatal", url=url, status=status, reason=reason
+            )
+            raise HttpParserFatalError(reason)
         if status not in RETRY_STATUSES:
-            raise HttpParserFatalError(f"unexpected: {url} status={status}")
+            reason = f"unexpected: {url} status={status}"
+            self._run_log.event(
+                component_id, "http_get_fatal", url=url, status=status, reason=reason
+            )
+            raise HttpParserFatalError(reason)
         resp.raise_for_status()
-
-    def _real_http_get(self, url: str, timeout: float) -> bytes:
-        resp = self._client.get(url, timeout=timeout)
-        self._check_response_status(resp, url)
-        return resp.content
+        return resp.content  # unreachable — raise_for_status always raises for non-2xx
 
     def _get_with_retry(self, url: str) -> bytes:
         component_id = "parser_http"
@@ -151,6 +168,8 @@ class ParserHttp:
             return self._get_with_retry(url)
         except HttpRetryError as exc:
             raise ParserError(f"{error_prefix}: {exc}") from exc.__cause__
+        except HttpStubNotRetryableError as exc:
+            raise ParserError(f"{error_prefix}: {exc}") from exc
 
     def __enter__(self) -> ParserHttp:
         return self

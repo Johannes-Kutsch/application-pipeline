@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
 import pytest
 import respx
 
-from application_pipeline.http import HttpNotRetryableError
+from application_pipeline.http import (
+    HttpParserFatalError,
+    HttpStubNotRetryableError,
+)
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.http import (
@@ -104,25 +108,56 @@ def test_get_parser_error_chains_to_underlying_cause(run_log: RunLog):
 
 
 # ---------------------------------------------------------------------------
-# Non-retryable statuses → unwrapped HttpNotRetryableError
+# Per-stub HTTP errors (404/400/422) → wrapped ParserError
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("exc_msg", ["not found:", "auth:", "malformed:", "upstream:"])
-def test_get_propagates_not_retryable_error_unwrapped(run_log: RunLog, exc_msg):
+def test_get_wraps_stub_not_retryable_as_parser_error(run_log: RunLog):
     def http_get(url: str, timeout: float) -> bytes:
-        raise HttpNotRetryableError(exc_msg)
+        raise HttpStubNotRetryableError("not found: http://example.com/")
 
     parser = ParserHttp(
         run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
     )
-    with pytest.raises(HttpNotRetryableError):
+    with pytest.raises(ParserError, match="myprefix"):
+        parser.get("http://example.com/", error_prefix="myprefix")
+
+
+def test_get_stub_not_retryable_cause_is_original_exception(run_log: RunLog):
+    original = HttpStubNotRetryableError("not found: http://example.com/")
+
+    def http_get(url: str, timeout: float) -> bytes:
+        raise original
+
+    parser = ParserHttp(
+        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
+    )
+    with pytest.raises(ParserError) as exc_info:
+        parser.get("http://example.com/", error_prefix="p")
+
+    assert exc_info.value.__cause__ is original
+
+
+# ---------------------------------------------------------------------------
+# Parser-fatal HTTP errors (401/403/5xx/unknown) → HttpParserFatalError propagates
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("reason", ["auth:", "upstream:", "unexpected:"])
+def test_get_propagates_parser_fatal_error_unwrapped(run_log: RunLog, reason: str):
+    def http_get(url: str, timeout: float) -> bytes:
+        raise HttpParserFatalError(reason)
+
+    parser = ParserHttp(
+        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
+    )
+    with pytest.raises(HttpParserFatalError):
         parser.get("http://example.com/", error_prefix="p")
 
 
-def test_get_not_retryable_is_not_wrapped_in_parser_error(run_log: RunLog):
+def test_get_parser_fatal_is_not_wrapped_in_parser_error(run_log: RunLog):
     def http_get(url: str, timeout: float) -> bytes:
-        raise HttpNotRetryableError("not found: url")
+        raise HttpParserFatalError("auth: url status=401")
 
     parser = ParserHttp(
         run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
@@ -132,7 +167,7 @@ def test_get_not_retryable_is_not_wrapped_in_parser_error(run_log: RunLog):
     assert not isinstance(exc_info.value, ParserError)
 
 
-def test_get_not_retryable_fires_on_first_attempt_without_further_tries(
+def test_get_parser_fatal_fires_on_first_attempt_without_further_tries(
     run_log: RunLog,
 ):
     calls = 0
@@ -140,12 +175,35 @@ def test_get_not_retryable_fires_on_first_attempt_without_further_tries(
     def http_get(url: str, timeout: float) -> bytes:
         nonlocal calls
         calls += 1
-        raise HttpNotRetryableError("auth: url")
+        raise HttpParserFatalError("auth: url status=401")
 
     parser = ParserHttp(
         run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
     )
-    with pytest.raises(HttpNotRetryableError):
+    with pytest.raises(HttpParserFatalError):
+        parser.get("http://example.com/", error_prefix="p")
+    assert calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stub and parser-fatal errors both skip the retry loop
+# ---------------------------------------------------------------------------
+
+
+def test_get_stub_not_retryable_fires_on_first_attempt_without_further_tries(
+    run_log: RunLog,
+):
+    calls = 0
+
+    def http_get(url: str, timeout: float) -> bytes:
+        nonlocal calls
+        calls += 1
+        raise HttpStubNotRetryableError("not found: url")
+
+    parser = ParserHttp(
+        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
+    )
+    with pytest.raises(ParserError):
         parser.get("http://example.com/", error_prefix="p")
     assert calls == 1
 
@@ -300,3 +358,77 @@ def test_context_manager_returns_self(run_log: RunLog):
     parser = ParserHttp(run_log=run_log, _http_get=http_get)
     with parser as p:
         assert p is parser
+
+
+# ---------------------------------------------------------------------------
+# Structured event emission — http_get_skipped / http_get_fatal
+# ---------------------------------------------------------------------------
+
+
+def _read_events(run_log: RunLog, component_id: str) -> list[dict[str, object]]:
+    path = run_log.logs_dir / f"{component_id}.events.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+@respx.mock
+def test_get_emits_http_get_skipped_event_on_404(run_log: RunLog):
+    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(404))
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(ParserError):
+            parser.get("http://example.com/job/1", error_prefix="p")
+
+    skipped = [
+        e
+        for e in _read_events(run_log, "parser_http")
+        if e["event"] == "http_get_skipped"
+    ]
+    assert len(skipped) == 1
+    assert skipped[0]["url"] == "http://example.com/job/1"
+    assert skipped[0]["status"] == 404
+
+
+@respx.mock
+def test_get_emits_http_get_fatal_event_on_401(run_log: RunLog):
+    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(401))
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(HttpParserFatalError):
+            parser.get("http://example.com/job/1", error_prefix="p")
+
+    fatal = [
+        e
+        for e in _read_events(run_log, "parser_http")
+        if e["event"] == "http_get_fatal"
+    ]
+    assert len(fatal) == 1
+    assert fatal[0]["url"] == "http://example.com/job/1"
+    assert fatal[0]["status"] == 401
+
+
+@pytest.mark.parametrize("status", [400, 422])
+@respx.mock
+def test_get_wraps_400_and_422_as_parser_error(run_log: RunLog, status: int):
+    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(status))
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(ParserError):
+            parser.get("http://example.com/job/1", error_prefix="p")
+
+
+@respx.mock
+def test_get_raises_parser_fatal_for_non_retryable_5xx(run_log: RunLog):
+    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(501))
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(HttpParserFatalError):
+            parser.get("http://example.com/job/1", error_prefix="p")
+
+
+@respx.mock
+def test_get_raises_parser_fatal_for_unknown_status(run_log: RunLog):
+    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(451))
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(HttpParserFatalError):
+            parser.get("http://example.com/job/1", error_prefix="p")

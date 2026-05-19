@@ -659,6 +659,11 @@ class _OutboundDispatcher:
             self._dedup.mark_external_redirect(stub)
             self._metrics.external_redirect(pid)
 
+    def emit_freshness_run_complete(self) -> None:
+        self._run_log.event(
+            "pipeline_freshness", "run_complete", **self._freshness_counts
+        )
+
     def _handle_not_served(self, pid: str) -> None:
         self._metrics.not_served_query(pid)
 
@@ -684,8 +689,8 @@ def run(
     run_log: RunLog | None = None,
     stall_threshold_s: float = _STALL_THRESHOLD_S,
 ) -> RunSummary:
-    _anchored_today: date = datetime.now(timezone.utc).date()
-    cron_anchored_date = _anchored_today.isoformat()
+    anchored_today: date = datetime.now(timezone.utc).date()
+    cron_anchored_date = anchored_today.isoformat()
 
     if status_display is None:
         status_display = PlainStatusDisplay(run_log=run_log)
@@ -835,7 +840,7 @@ def run(
                 batch_size=cfg.claude_classify_batch_size,
                 run_state=run_state,
                 run_log=run_log,
-                anchored_today=_anchored_today,
+                anchored_today=anchored_today,
                 max_listing_age_days=cfg.max_listing_age_days,
             )
 
@@ -895,11 +900,7 @@ def run(
                     pstate.started_at,
                 )
 
-            run_log.event(
-                "pipeline_freshness",
-                "run_complete",
-                **dispatcher._freshness_counts,
-            )
+            dispatcher.emit_freshness_run_complete()
             dispatcher.flush_residual()
 
         classify_thread.join()

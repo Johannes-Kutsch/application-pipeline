@@ -55,9 +55,13 @@ def main() -> None:
         sys.exit(2)
 
     config_path = Path(args[0])
-    display = RichStatusDisplay() if sys.stdout.isatty() else PlainStatusDisplay()
+    run_log = RunLog(config_path.resolve().parent / "logs")
+    display = (
+        RichStatusDisplay(run_log=run_log)
+        if sys.stdout.isatty()
+        else PlainStatusDisplay(run_log=run_log)
+    )
     try:
-        run_log = RunLog(config_path.resolve().parent / "logs")
         summary = run(config_path, status_display=display, run_log=run_log)
     except Exception as exc:
         try:

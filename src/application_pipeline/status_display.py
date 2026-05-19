@@ -5,7 +5,7 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
-from application_pipeline import parser_log
+from application_pipeline.parser_log import RunLog
 
 
 class StatusDisplay(Protocol):
@@ -120,10 +120,14 @@ class _RichRenderer:
 
 class _StatusDisplay:
     def __init__(
-        self, make_renderer: Callable[["_StatusDisplay"], _DisplayRenderer]
+        self,
+        make_renderer: Callable[["_StatusDisplay"], _DisplayRenderer],
+        *,
+        run_log: RunLog | None,
     ) -> None:
         self._lock = threading.Lock()
         self._rows: dict[str, _RowState] = {}
+        self._run_log = run_log
         self._renderer = make_renderer(self)
 
     def _snapshot_rows(self) -> list[_RowState]:
@@ -135,7 +139,8 @@ class _StatusDisplay:
     ) -> None:
         with self._lock:
             self._rows[name] = _RowState(name=name, order=order, phase=phase, body=body)
-            parser_log.record_lifecycle(name, "registered", order=order, phase=phase)
+            if self._run_log is not None:
+                self._run_log.lifecycle(name, "registered", order=order, phase=phase)
             self._renderer.on_registered(name, order, phase)
 
     def update_phase(self, name: str, *, phase: str) -> None:
@@ -144,7 +149,8 @@ class _StatusDisplay:
             if row is None or row.phase == phase:
                 return
             row.phase = phase
-            parser_log.record_lifecycle(name, "phase_changed", phase=phase)
+            if self._run_log is not None:
+                self._run_log.lifecycle(name, "phase_changed", phase=phase)
             self._renderer.on_phase_changed(name, phase)
 
     def update_body(self, name: str, *, body: str) -> None:
@@ -158,7 +164,8 @@ class _StatusDisplay:
     def remove(self, name: str) -> None:
         with self._lock:
             self._rows.pop(name, None)
-            parser_log.record_lifecycle(name, "removed")
+            if self._run_log is not None:
+                self._run_log.lifecycle(name, "removed")
             self._renderer.on_removed(name)
 
     def print(self, *, caller: str, message: str) -> None:
@@ -169,10 +176,10 @@ class _StatusDisplay:
 
 
 class PlainStatusDisplay(_StatusDisplay):
-    def __init__(self) -> None:
-        super().__init__(lambda _display: _PlainRenderer())
+    def __init__(self, *, run_log: RunLog | None) -> None:
+        super().__init__(lambda _display: _PlainRenderer(), run_log=run_log)
 
 
 class RichStatusDisplay(_StatusDisplay):
-    def __init__(self) -> None:
-        super().__init__(_RichRenderer)
+    def __init__(self, *, run_log: RunLog | None) -> None:
+        super().__init__(_RichRenderer, run_log=run_log)

@@ -14,43 +14,41 @@ class RunLog:
         logs_dir.mkdir(parents=True, exist_ok=True)
         self._logs_dir = logs_dir
 
-    def _append(self, path: Path, text: str) -> None:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(text)
-
-    def _ts(self) -> str:
+    def _now(self) -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    def _append(self, filename: str, text: str) -> None:
+        with (self._logs_dir / filename).open("a", encoding="utf-8") as f:
+            f.write(text)
+
+    def _write_jsonl(self, filename: str, row: Mapping[str, object]) -> None:
+        self._append(filename, json.dumps(dict(row)) + "\n")
+
     def event(self, component_id: str, event_type: str, **fields: object) -> None:
-        ts = self._ts()
-        row: dict[str, object] = {"ts": ts, "event": event_type}
-        row.update(fields)
-        self._append(
-            self._logs_dir / f"{component_id}.events.jsonl", json.dumps(row) + "\n"
+        self._write_jsonl(
+            f"{component_id}.events.jsonl",
+            {"ts": self._now(), "event": event_type, **fields},
         )
 
     def lifecycle(self, component_id: str, event_type: str, **fields: object) -> None:
-        ts = self._ts()
-        row: dict[str, object] = {
-            "ts": ts,
-            "event": event_type,
-            "component": component_id,
-        }
-        row.update(fields)
-        self._append(self._logs_dir / "lifecycle.jsonl", json.dumps(row) + "\n")
-
-    def transcript(self, component_id: str, entry: Mapping[str, object]) -> None:
-        self._append(
-            self._logs_dir / f"{component_id}.transcripts.jsonl",
-            json.dumps(entry) + "\n",
+        self._write_jsonl(
+            "lifecycle.jsonl",
+            {
+                "ts": self._now(),
+                "event": event_type,
+                "component": component_id,
+                **fields,
+            },
         )
 
+    def transcript(self, component_id: str, entry: Mapping[str, object]) -> None:
+        self._write_jsonl(f"{component_id}.transcripts.jsonl", entry)
+
     def traceback(self, component_id: str, traceback_str: str) -> None:
-        ts = self._ts()
-        text = f"=== {component_id}  {ts}  traceback ===\n{traceback_str}"
-        if not traceback_str.endswith("\n"):
-            text += "\n"
-        self._append(self._logs_dir / "run.log", text)
+        body = traceback_str if traceback_str.endswith("\n") else traceback_str + "\n"
+        self._append(
+            "run.log", f"=== {component_id}  {self._now()}  traceback ===\n{body}"
+        )
 
     def summary(
         self,
@@ -63,7 +61,7 @@ class RunLog:
             f"{k}: {v}" if isinstance(v, str) else f"{k}={v}" for k, v in counts.items()
         )
         self._append(
-            self._logs_dir / "run.log",
+            "run.log",
             f"=== {component_id}  {ts}  summary ===\n\nSUMMARY OF SESSION {ts}\n{lines}\n\n\n",
         )
 

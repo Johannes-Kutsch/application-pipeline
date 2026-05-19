@@ -669,7 +669,7 @@ def run(
     stall_threshold_s: float = _STALL_THRESHOLD_S,
 ) -> RunSummary:
     if status_display is None:
-        status_display = PlainStatusDisplay()
+        status_display = PlainStatusDisplay(run_log=run_log)
 
     if run_log is not None:
         parser_log.configure(run_log.logs_dir)

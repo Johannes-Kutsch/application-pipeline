@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import application_pipeline.parser_log as _parser_log
+from application_pipeline.parser_log import RunLog
 from application_pipeline.status_display import (
     PlainStatusDisplay,
     RichStatusDisplay,
@@ -17,20 +17,15 @@ from application_pipeline.status_display import (
 from fake_status_display import FakeStatusDisplay
 
 
-@pytest.fixture(autouse=True)
-def _reset_log_state():
-    _parser_log._logs_dir = None
-    yield
-    _parser_log._logs_dir = None
-
-
 # ---------------------------------------------------------------------------
 # Exact line output
 # ---------------------------------------------------------------------------
 
 
-def test_plain_register_prints_line(capsys: pytest.CaptureFixture[str]) -> None:
-    display = PlainStatusDisplay()
+def test_plain_register_prints_line(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
     display.register("pipeline", order=0, phase="running")
 
     out = capsys.readouterr().out
@@ -39,8 +34,9 @@ def test_plain_register_prints_line(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_plain_update_phase_on_transition_prints_line(
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
-    display = PlainStatusDisplay()
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
     display.register("pipeline", order=0, phase="running")
     capsys.readouterr()  # flush register output
 
@@ -52,8 +48,9 @@ def test_plain_update_phase_on_transition_prints_line(
 
 def test_plain_update_phase_no_transition_is_silent(
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
-    display = PlainStatusDisplay()
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
     display.register("pipeline", order=0, phase="running")
     capsys.readouterr()
 
@@ -63,8 +60,10 @@ def test_plain_update_phase_no_transition_is_silent(
     assert out == ""
 
 
-def test_plain_update_body_is_silent(capsys: pytest.CaptureFixture[str]) -> None:
-    display = PlainStatusDisplay()
+def test_plain_update_body_is_silent(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
     display.register("pipeline", order=0, phase="running")
     capsys.readouterr()
 
@@ -74,8 +73,10 @@ def test_plain_update_body_is_silent(capsys: pytest.CaptureFixture[str]) -> None
     assert out == ""
 
 
-def test_plain_remove_prints_line(capsys: pytest.CaptureFixture[str]) -> None:
-    display = PlainStatusDisplay()
+def test_plain_remove_prints_line(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
     display.register("pipeline", order=0, phase="running")
     capsys.readouterr()
 
@@ -85,8 +86,10 @@ def test_plain_remove_prints_line(capsys: pytest.CaptureFixture[str]) -> None:
     assert out == "pipeline: removed\n"
 
 
-def test_plain_full_sequence_exact_output(capsys: pytest.CaptureFixture[str]) -> None:
-    display = PlainStatusDisplay()
+def test_plain_full_sequence_exact_output(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
 
     display.register("pipeline", order=0, phase="running")
     display.update_body("pipeline", body="discovered=5 written=0 errors=0")  # silent
@@ -102,20 +105,22 @@ def test_plain_full_sequence_exact_output(capsys: pytest.CaptureFixture[str]) ->
     )
 
 
-def test_plain_stop_is_silent(capsys: pytest.CaptureFixture[str]) -> None:
-    display = PlainStatusDisplay()
+def test_plain_stop_is_silent(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
     display.stop()
     assert capsys.readouterr().out == ""
 
 
 # ---------------------------------------------------------------------------
-# parser_log integration (renderer-agnostic — lifecycle logic lives in _StatusDisplay)
+# RunLog integration (renderer-agnostic — lifecycle logic lives in _StatusDisplay)
 # ---------------------------------------------------------------------------
 
 
 def test_register_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
-    _parser_log.configure(tmp_path)
-    display = PlainStatusDisplay()
+    run_log = RunLog(tmp_path)
+    display = PlainStatusDisplay(run_log=run_log)
     display.register("pipeline", order=0, phase="running")
 
     rows = [
@@ -131,8 +136,8 @@ def test_register_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
 
 
 def test_update_phase_transition_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
-    _parser_log.configure(tmp_path)
-    display = PlainStatusDisplay()
+    run_log = RunLog(tmp_path)
+    display = PlainStatusDisplay(run_log=run_log)
     display.register("pipeline", order=0, phase="running")
     display.update_phase("pipeline", phase="done")
 
@@ -148,8 +153,8 @@ def test_update_phase_transition_writes_to_lifecycle_jsonl(tmp_path: Path) -> No
 def test_update_phase_no_transition_does_not_write_extra_lifecycle_row(
     tmp_path: Path,
 ) -> None:
-    _parser_log.configure(tmp_path)
-    display = PlainStatusDisplay()
+    run_log = RunLog(tmp_path)
+    display = PlainStatusDisplay(run_log=run_log)
     display.register("pipeline", order=0, phase="running")
 
     lines_before = (
@@ -164,8 +169,8 @@ def test_update_phase_no_transition_does_not_write_extra_lifecycle_row(
 
 
 def test_remove_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
-    _parser_log.configure(tmp_path)
-    display = PlainStatusDisplay()
+    run_log = RunLog(tmp_path)
+    display = PlainStatusDisplay(run_log=run_log)
     display.register("pipeline", order=0, phase="running")
     display.remove("pipeline")
 
@@ -183,10 +188,10 @@ def test_remove_writes_to_lifecycle_jsonl(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_plain_does_not_install_log_handler() -> None:
+def test_plain_does_not_install_log_handler(tmp_path: Path) -> None:
     root = logging.getLogger()
     count_before = len(root.handlers)
-    display = PlainStatusDisplay()
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
     display.stop()
     assert len(root.handlers) == count_before
 
@@ -215,8 +220,9 @@ def test_log_warning_forwarded_to_display_print_during_active_session() -> None:
 
 def test_plain_concurrent_phase_updates_produce_complete_lines(
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
-    display = PlainStatusDisplay()
+    display = PlainStatusDisplay(run_log=RunLog(tmp_path))
     n = 20
     for i in range(n):
         display.register(f"parser-{i}", order=i, phase="starting")
@@ -242,10 +248,10 @@ def test_plain_concurrent_phase_updates_produce_complete_lines(
 
 
 @pytest.fixture
-def rich_display():
+def rich_display(tmp_path: Path):
     with unittest.mock.patch("rich.live.Live") as mock_live_cls:
         mock_live_cls.return_value.console = unittest.mock.MagicMock()
-        display = RichStatusDisplay()
+        display = RichStatusDisplay(run_log=RunLog(tmp_path))
         yield display
         display.stop()
 

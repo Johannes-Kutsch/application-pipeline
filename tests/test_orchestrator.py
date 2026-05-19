@@ -3394,7 +3394,7 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
         results_paths=_stub_results_paths(tmp_path),
-        status_display=PlainStatusDisplay(),
+        status_display=PlainStatusDisplay(run_log=run_log),
         run_log=run_log,
     )
 

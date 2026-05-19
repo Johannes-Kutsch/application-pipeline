@@ -858,7 +858,7 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     config_path = _write_config(
         tmp_path,
@@ -875,6 +875,7 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
         parser_registry=lambda _: _PreFilterEventStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
     )
 
     events_file = logs_dir / "pipeline_prefilter.events.jsonl"
@@ -1341,7 +1342,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     seen_path = tmp_path / ".seen.json"
 
@@ -1378,6 +1379,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
             parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
             dedup_store=dedup_module.load(seen_path),
             results_paths=_stub_results_paths(tmp_path),
+            run_log=run_log,
         )
 
     assert summary.external_redirects == 1
@@ -1402,7 +1404,7 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     class _RedirectParser:
         def __enter__(self) -> "_RedirectParser":
@@ -1435,6 +1437,7 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
         parser_registry=lambda _: _RedirectParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
     )
 
     events = [
@@ -2219,7 +2222,7 @@ def test_parser_log_integration(
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     config_path = _write_config(
         tmp_path,
@@ -2236,6 +2239,7 @@ def test_parser_log_integration(
             parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
             results_paths=_stub_results_paths(tmp_path),
+            run_log=run_log,
         )
 
     events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
@@ -2278,7 +2282,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
             raise AssertionError("enrich must not be called")
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     # 3 keywords × 1 location × no remote = 3 discover() calls → 3 sentinels
     config_path = _write_config(
@@ -2296,6 +2300,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
             parser_registry=lambda _: _NotServedParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
             results_paths=_stub_results_paths(tmp_path),
+            run_log=run_log,
         )
 
     # Events file must not contain not_served events
@@ -2324,7 +2329,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     _STUB_URLS = [
         "https://stub.example/0",
@@ -2363,6 +2368,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
             parser_registry=lambda _: _ThreeEventParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
             results_paths=_stub_results_paths(tmp_path),
+            run_log=run_log,
         )
 
     assert summary.enrich_failed == 1
@@ -2442,7 +2448,7 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     config_path = _write_config(
         tmp_path,
@@ -2458,6 +2464,7 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
     )
 
     events_file = logs_dir / "parser_jobs_beim_staat_html.events.jsonl"
@@ -2485,7 +2492,7 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     config_path = _write_config(
         tmp_path,
@@ -2502,6 +2509,7 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
             parser_registry=lambda _: _WarnParser,  # type: ignore[return-value]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
             results_paths=_stub_results_paths(tmp_path),
+            run_log=run_log,
         )
 
     assert not any("unparseable_date" in record.message for record in caplog.records), (
@@ -2852,7 +2860,7 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
-    pl.configure(logs_dir)
+    run_log = pl.RunLog(logs_dir)
 
     def _batch(items: list[ClassifyItem]) -> list[RelevanceVerdict]:
         raise ExtractorBatchMalformedError("id mismatch")
@@ -2866,6 +2874,7 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
     )
 
     events_file = logs_dir / "llm_classify_relevance.events.jsonl"
@@ -2882,7 +2891,7 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
-    pl.configure(logs_dir)
+    run_log = pl.RunLog(logs_dir)
 
     def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
         raise ExtractorUnreachableError("cli gone", returncode=1, stderr="no such file")
@@ -2896,6 +2905,7 @@ def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
     )
 
     events_rows = [
@@ -2913,7 +2923,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
-    pl.configure(logs_dir)
+    run_log = pl.RunLog(logs_dir)
 
     ext = MagicMock()
     ext.classify_relevance_batch.side_effect = lambda items: (
@@ -2930,6 +2940,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
     )
 
     events_rows = [
@@ -3134,7 +3145,7 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     seen_path = tmp_path / ".seen.json"
     config_path = _write_config(
@@ -3152,11 +3163,12 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
         results_paths=_real_results_paths(tmp_path / "results"),
+        run_log=run_log,
     )
 
-    run_log = logs_dir / "run.log"
-    assert run_log.exists(), "run.log must be created"
-    content = run_log.read_text(encoding="utf-8")
+    run_log_file = logs_dir / "run.log"
+    assert run_log_file.exists(), "run.log must be created"
+    content = run_log_file.read_text(encoding="utf-8")
 
     assert "SUMMARY OF SESSION" in content
     for key in (
@@ -3179,7 +3191,7 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     seen_path = tmp_path / ".seen.json"
     config_path = _write_config(
@@ -3197,11 +3209,12 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
         results_paths=_real_results_paths(tmp_path / "results"),
+        run_log=run_log,
     )
 
-    run_log = logs_dir / "run.log"
-    assert run_log.exists(), "run.log must be created"
-    content = run_log.read_text(encoding="utf-8")
+    run_log_file = logs_dir / "run.log"
+    assert run_log_file.exists(), "run.log must be created"
+    content = run_log_file.read_text(encoding="utf-8")
 
     assert "SUMMARY OF SESSION" in content
     for key in (
@@ -3224,7 +3237,7 @@ def test_prefilter_trailer_schema(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     seen_path = tmp_path / ".seen.json"
     config_path = _write_config(
@@ -3242,11 +3255,12 @@ def test_prefilter_trailer_schema(tmp_path: Path) -> None:
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
         results_paths=_real_results_paths(tmp_path / "results"),
+        run_log=run_log,
     )
 
-    run_log = logs_dir / "run.log"
-    assert run_log.exists(), "run.log must be created"
-    content = run_log.read_text(encoding="utf-8")
+    run_log_file = logs_dir / "run.log"
+    assert run_log_file.exists(), "run.log must be created"
+    content = run_log_file.read_text(encoding="utf-8")
 
     assert "SUMMARY OF SESSION" in content
     for key in (
@@ -3369,7 +3383,7 @@ def test_display_stop_called_on_success(tmp_path: Path) -> None:
 
 def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
     """pipeline register() writes a lifecycle record to lifecycle.jsonl via parser_log."""
-    _parser_log.configure(tmp_path / "logs")
+    run_log = _parser_log.RunLog(tmp_path / "logs")
     config_path = _write_config(tmp_path)
 
     from application_pipeline.status_display import PlainStatusDisplay
@@ -3381,6 +3395,7 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
         dedup_store=MagicMock(),
         results_paths=_stub_results_paths(tmp_path),
         status_display=PlainStatusDisplay(),
+        run_log=run_log,
     )
 
     lifecycle_rows = [
@@ -3887,7 +3902,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     _THRESHOLD = 0.05  # 50 ms — fast enough for tests
 
@@ -3920,6 +3935,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
         stall_threshold_s=_THRESHOLD,
+        run_log=run_log,
     )
 
     events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
@@ -3939,7 +3955,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     _THRESHOLD = 0.05
 
@@ -3972,6 +3988,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
         stall_threshold_s=_THRESHOLD,
+        run_log=run_log,
     )
 
     events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
@@ -3993,7 +4010,7 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     config_path = _write_config(
         tmp_path,
@@ -4009,6 +4026,7 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
     )
 
     events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
@@ -4028,7 +4046,7 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
-    parser_log.configure(logs_dir)
+    run_log = parser_log.RunLog(logs_dir)
 
     class _RaisingParser:
         def __enter__(self) -> "_RaisingParser":
@@ -4060,6 +4078,7 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
         parser_registry=lambda _: _RaisingParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         results_paths=_stub_results_paths(tmp_path),
+        run_log=run_log,
     )
 
     assert summary.parsers_dead == 1

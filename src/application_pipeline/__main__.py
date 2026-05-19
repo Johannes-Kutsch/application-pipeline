@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path.home() / ".env")
 
-from application_pipeline import parser_log  # noqa: E402
+from application_pipeline.parser_log import RunLog  # noqa: E402
 from application_pipeline.config import resolve_data_paths  # noqa: E402
 from application_pipeline.failure_report import write_failure  # noqa: E402
 from application_pipeline.orchestrator import current_stage, run  # noqa: E402
@@ -57,8 +57,8 @@ def main() -> None:
     config_path = Path(args[0])
     display = RichStatusDisplay() if sys.stdout.isatty() else PlainStatusDisplay()
     try:
-        parser_log.configure(config_path.resolve().parent / "logs")
-        summary = run(config_path, status_display=display)
+        run_log = RunLog(config_path.resolve().parent / "logs")
+        summary = run(config_path, status_display=display, run_log=run_log)
     except Exception as exc:
         try:
             write_failure(

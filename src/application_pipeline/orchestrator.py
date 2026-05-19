@@ -16,6 +16,7 @@ from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline import layout as layout_module
 from application_pipeline import parser_log
+from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
 from application_pipeline.run_metrics import RunMetrics, RunSummary
 from application_pipeline.status_display import PlainStatusDisplay, StatusDisplay
@@ -237,6 +238,8 @@ class _ParserThread(threading.Thread):
         worklist: list[ParserQuery],
         outbound: queue.Queue[tuple[str, object]],
         inbound: queue.Queue[object],
+        *,
+        run_log: RunLog,
     ) -> None:
         super().__init__(name=f"parser-{parser_id}", daemon=True)
         self._parser_id = parser_id
@@ -244,6 +247,7 @@ class _ParserThread(threading.Thread):
         self._worklist = worklist
         self._outbound = outbound
         self._inbound = inbound
+        self._run_log = run_log
 
     def run(self) -> None:
         try:
@@ -253,7 +257,7 @@ class _ParserThread(threading.Thread):
                     if isinstance(query.location, City)
                     else "Remote"
                 )
-                parser_log.record(
+                self._run_log.event(
                     "parser_" + self._parser_id,
                     "query_started",
                     keyword=query.keyword,
@@ -294,7 +298,7 @@ class _ParserThread(threading.Thread):
                             close()
                     self._outbound.put((self._parser_id, _QUERY_DONE))
                 finally:
-                    parser_log.record(
+                    self._run_log.event(
                         "parser_" + self._parser_id,
                         "query_ended",
                         keyword=query.keyword,
@@ -323,6 +327,7 @@ class _ClassifyThread(_QueueWorker):
         dedup_store: DeduplicationStore,
         metrics: "RunMetrics",
         run_state: _RunState,
+        run_log: RunLog,
     ) -> None:
         super().__init__(
             input_queue=classify_queue,
@@ -335,6 +340,7 @@ class _ClassifyThread(_QueueWorker):
         self._extractor = extractor
         self._dedup_store = dedup_store
         self._metrics = metrics
+        self._run_log = run_log
 
     def _on_dequeue(self, item: object) -> None:
         assert isinstance(item, _ClassifyBatch)
@@ -354,7 +360,7 @@ class _ClassifyThread(_QueueWorker):
             return
         except ExtractorError as exc:
             _log.warning("classify_relevance_batch failed: %s", exc)
-            parser_log.record(
+            self._run_log.event(
                 "llm_classify_relevance",
                 "batch_abandoned",
                 batch_size=len(batch.positions),
@@ -400,6 +406,7 @@ class _JudgeThread(_QueueWorker):
         layout: "Layout",
         metrics: "RunMetrics",
         run_state: _RunState,
+        run_log: RunLog,
     ) -> None:
         super().__init__(
             input_queue=judge_queue,
@@ -413,6 +420,7 @@ class _JudgeThread(_QueueWorker):
         self._dedup_store = dedup_store
         self._layout = layout
         self._metrics = metrics
+        self._run_log = run_log
 
     def _on_dequeue(self, item: object) -> None:
         self._metrics.judge_dequeued()
@@ -437,7 +445,7 @@ class _JudgeThread(_QueueWorker):
             return
         except ExtractorError as exc:
             _log.warning("judge_match failed: %s", exc)
-            parser_log.record(
+            self._run_log.event(
                 "llm_judge_match",
                 "error",
                 stub_url=job.position.stub.url,
@@ -510,6 +518,7 @@ class _OutboundDispatcher:
         judge_queue: "queue.Queue[object]",
         batch_size: int,
         run_state: _RunState,
+        run_log: RunLog,
     ) -> None:
         self._parser_states = parser_states
         self._dedup = dedup
@@ -519,6 +528,7 @@ class _OutboundDispatcher:
         self._judge_queue = judge_queue
         self._batch_size = batch_size
         self._run_state = run_state
+        self._run_log = run_log
         self._classify_buffer: list[Position] = []
         self._batch_id: int = 0
 
@@ -582,7 +592,7 @@ class _OutboundDispatcher:
         payload = wrapper.payload
         if isinstance(payload, Position):
             for warning in payload._warnings:
-                parser_log.record("parser_" + pid, warning)
+                self._run_log.event("parser_" + pid, warning)
                 if warning.startswith("unparseable_date"):
                     self._metrics.unparseable_date(pid)
             self._metrics.enriched(pid)
@@ -591,7 +601,7 @@ class _OutboundDispatcher:
                 self._judge_queue.put(_JudgeJob(position=payload, item_id="resume"))
             else:
                 verdict = classify_position(payload, self._blacklist)
-                parser_log.record(
+                self._run_log.event(
                     "pipeline_prefilter",
                     "decision",
                     url=payload.stub.url,
@@ -612,7 +622,7 @@ class _OutboundDispatcher:
                     self._dedup.mark_off_domain(payload.stub)
                     self._metrics.prefilter_dropped(verdict)
         elif isinstance(payload, ParserError):
-            parser_log.record(
+            self._run_log.event(
                 "parser_" + pid,
                 "enrich_failed",
                 stub_url=stub.url,
@@ -622,7 +632,7 @@ class _OutboundDispatcher:
             self._dedup.mark_enrich_failed(stub)
             self._metrics.enrich_failed(pid)
         elif isinstance(payload, ExternalRedirect):
-            parser_log.record(
+            self._run_log.event(
                 "parser_" + pid,
                 "external_redirect",
                 stub_url=stub.url,
@@ -642,7 +652,7 @@ class _OutboundDispatcher:
         self._metrics.parser_done(pid)
 
     def _handle_parser_dead(self, pid: str, payload: _ParserDead) -> None:
-        parser_log.record_traceback("parser_" + pid, payload.traceback_str)
+        self._run_log.traceback("parser_" + pid, payload.traceback_str)
         self._metrics.parser_dead(pid)
 
 
@@ -655,10 +665,14 @@ def run(
     results_paths: dict[str, Path] | None = None,
     layout: Layout | None = None,
     status_display: StatusDisplay | None = None,
+    run_log: RunLog | None = None,
     stall_threshold_s: float = _STALL_THRESHOLD_S,
 ) -> RunSummary:
     if status_display is None:
         status_display = PlainStatusDisplay()
+
+    if run_log is not None:
+        parser_log.configure(run_log._logs_dir)
 
     run_state = _RunState()
     _start = time.monotonic()
@@ -671,6 +685,10 @@ def run(
         except ConfigError as exc:
             _log.error("startup failed — config: %s", exc)
             raise
+
+        if run_log is None:
+            run_log = RunLog(cfg.logs_path)
+            parser_log.configure(run_log._logs_dir)
 
         # Steps 2-3: Load prompts, build extractor
         if extractor is None:
@@ -757,7 +775,9 @@ def run(
                     parser_id=parser_id,
                     inbound=inbound,
                 )
-                t = _ParserThread(parser_id, parser, worklist, outbound, inbound)
+                t = _ParserThread(
+                    parser_id, parser, worklist, outbound, inbound, run_log=run_log
+                )
                 threads.append((parser_id, t))
 
             for i, (pid, t) in enumerate(threads):
@@ -767,7 +787,7 @@ def run(
                 state.started_monotonic = time.monotonic()
                 state.last_event_monotonic = state.started_monotonic
                 _log.info("parser %s started", pid)
-                parser_log.record("parser_" + pid, "parser started")
+                run_log.event("parser_" + pid, "parser started")
                 metrics.register_parser(
                     pid,
                     order=2 + i,
@@ -785,6 +805,7 @@ def run(
                 dedup_store=dedup_store,
                 metrics=metrics,
                 run_state=run_state,
+                run_log=run_log,
             )
             judge_thread = _JudgeThread(
                 judge_queue=judge_queue,
@@ -794,6 +815,7 @@ def run(
                 layout=layout,
                 metrics=metrics,
                 run_state=run_state,
+                run_log=run_log,
             )
             classify_thread.start()
             judge_thread.start()
@@ -807,6 +829,7 @@ def run(
                 judge_queue=judge_queue,
                 batch_size=cfg.claude_classify_batch_size,
                 run_state=run_state,
+                run_log=run_log,
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())
@@ -826,7 +849,7 @@ def run(
                         age = now - stall_state.last_event_monotonic
                         if age < stall_threshold_s or stall_state.stall_logged:
                             continue
-                        parser_log.record(
+                        run_log.event(
                             "parser_" + stall_pid,
                             "stalled",
                             last_event_age_s=round(age, 1),
@@ -838,7 +861,7 @@ def run(
                             else None
                         )
                         if frame is not None:
-                            parser_log.record_traceback(
+                            run_log.traceback(
                                 "parser_" + stall_pid,
                                 "".join(traceback.format_stack(frame)),
                             )
@@ -857,7 +880,7 @@ def run(
 
             parsers_done_monotonic = time.monotonic()
             for pid, pstate in parser_states.items():
-                parser_log.summarize(
+                run_log.summary(
                     "parser_" + pid,
                     metrics.parser_summary(
                         pid, parsers_done_monotonic, pstate.started_monotonic

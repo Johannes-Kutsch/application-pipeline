@@ -19,6 +19,7 @@ from .types import (
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
+    StructuredExtract,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "MatchTier",
     "MatchVerdict",
     "RelevanceVerdict",
+    "StructuredExtract",
 ]

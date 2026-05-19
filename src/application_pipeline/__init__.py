@@ -20,6 +20,7 @@ from .llm import (
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
+    StructuredExtract,
 )
 from .prompts import PromptError, PromptTemplate, Prompts, load_prompts
 from .renderer import render
@@ -53,6 +54,7 @@ __all__ = [
     "Prompts",
     "RelevanceVerdict",
     "ResultsFileError",
+    "StructuredExtract",
     "SeenResult",
     "SeenStatus",
     "SourceEntry",

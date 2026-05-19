@@ -25,6 +25,7 @@ from .types import (
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
+    StructuredExtract,
 )
 
 _GERMAN_BOILERPLATE_SENTINELS: list[str] = [
@@ -293,7 +294,7 @@ class ClaudeExtractor:
             )
 
         input_ids = [item.id for item in items]
-        response_by_id: dict[str, bool] = {}
+        verdicts_by_id: dict[str, RelevanceVerdict] = {}
         for entry in parsed_result:
             if not isinstance(entry, dict):
                 raise ExtractorBatchMalformedError(
@@ -304,7 +305,7 @@ class ClaudeExtractor:
                 raise ExtractorBatchMalformedError(
                     f"classify_relevance_batch: unknown or missing id in verdict: {entry_id!r}"
                 )
-            if entry_id in response_by_id:
+            if entry_id in verdicts_by_id:
                 raise ExtractorBatchMalformedError(
                     f"classify_relevance_batch: duplicate id in response: {entry_id!r}"
                 )
@@ -313,6 +314,37 @@ class ClaudeExtractor:
                 raise ExtractorBatchMalformedError(
                     f"classify_relevance_batch: in_domain must be bool for id {entry_id!r}"
                 )
-            response_by_id[entry_id] = in_domain
+            extract = (
+                ClaudeExtractor._parse_structured_extract(entry_id, entry)
+                if in_domain
+                else None
+            )
+            verdicts_by_id[entry_id] = RelevanceVerdict(
+                in_domain=in_domain, extract=extract
+            )
 
-        return [RelevanceVerdict(in_domain=response_by_id[item.id]) for item in items]
+        return [verdicts_by_id[item.id] for item in items]
+
+    @staticmethod
+    def _parse_structured_extract(
+        entry_id: str, entry: dict[str, object]
+    ) -> StructuredExtract:
+        raw = entry.get("extract")
+        if not isinstance(raw, dict):
+            raise ExtractorBatchMalformedError(
+                f"classify_relevance_batch: missing or invalid extract for in-domain id {entry_id!r}"
+            )
+        try:
+            return StructuredExtract(
+                seniority=raw.get("seniority"),
+                work_model=raw.get("work_model"),
+                contract_type=raw.get("contract_type"),
+                key_skills=list(raw["key_skills"]),
+                key_responsibilities=list(raw["key_responsibilities"]),
+                must_have_requirements=list(raw["must_have_requirements"]),
+                notable_caveats=str(raw["notable_caveats"]),
+            )
+        except (KeyError, TypeError) as exc:
+            raise ExtractorBatchMalformedError(
+                f"classify_relevance_batch: malformed extract for in-domain id {entry_id!r}: {exc}"
+            ) from exc

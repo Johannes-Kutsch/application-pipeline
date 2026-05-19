@@ -60,6 +60,7 @@ class ClassifyItem:
 @dataclass(frozen=True)
 class RelevanceVerdict:
     in_domain: bool
+    extract: StructuredExtract | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.in_domain, bool):

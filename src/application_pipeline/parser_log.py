@@ -12,13 +12,13 @@ _default: RunLog | None = None
 class RunLog:
     def __init__(self, logs_dir: Path) -> None:
         logs_dir.mkdir(parents=True, exist_ok=True)
-        self._logs_dir = logs_dir
+        self.logs_dir = logs_dir
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _append(self, filename: str, text: str) -> None:
-        with (self._logs_dir / filename).open("a", encoding="utf-8") as f:
+        with (self.logs_dir / filename).open("a", encoding="utf-8") as f:
             f.write(text)
 
     def _write_jsonl(self, filename: str, row: Mapping[str, object]) -> None:
@@ -71,7 +71,7 @@ def _active() -> RunLog | None:
     global _default
     if _logs_dir is None:
         return None
-    if _default is None or _default._logs_dir is not _logs_dir:
+    if _default is None or _default.logs_dir is not _logs_dir:
         _default = RunLog(_logs_dir)
     return _default
 

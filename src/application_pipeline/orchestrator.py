@@ -672,7 +672,7 @@ def run(
         status_display = PlainStatusDisplay()
 
     if run_log is not None:
-        parser_log.configure(run_log._logs_dir)
+        parser_log.configure(run_log.logs_dir)
 
     run_state = _RunState()
     _start = time.monotonic()
@@ -688,7 +688,7 @@ def run(
 
         if run_log is None:
             run_log = RunLog(cfg.logs_path)
-            parser_log.configure(run_log._logs_dir)
+            parser_log.configure(run_log.logs_dir)
 
         # Steps 2-3: Load prompts, build extractor
         if extractor is None:

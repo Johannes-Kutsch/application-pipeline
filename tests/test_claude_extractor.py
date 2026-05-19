@@ -86,6 +86,16 @@ def _judge_raw(verdict: object) -> str:
     return f"<verdict>{json.dumps(verdict)}</verdict>"
 
 
+def _classify_response(raw_result: object) -> ClaudeResponse:
+    return ClaudeResponse(
+        raw_response=_classify_raw(raw_result),
+        usage=_usage(),
+        cost_usd=0.001,
+        duration_s=0.5,
+        session_id="s",
+    )
+
+
 _DEFAULT_EXTRACT: dict[str, object] = {
     "seniority": None,
     "work_model": None,
@@ -253,15 +263,11 @@ def test_classify_in_domain_verdict_carries_structured_extract(
         id="0", title="Data Engineer", raw_description="Python+SQL role"
     )
     raw_result = [{"id": "0", "in_domain": True, "extract": _EXTRACT_PAYLOAD}]
-    response = ClaudeResponse(
-        raw_response=_classify_raw(raw_result),
-        usage=_usage(),
-        cost_usd=0.001,
-        duration_s=0.5,
-        session_id="s",
-    )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        _invoker=_fake_invoker(_classify_response(raw_result)),
     )
     results, _ = extractor.classify_relevance_batch([item])
     assert results[0].in_domain is True
@@ -278,15 +284,11 @@ def test_classify_in_domain_verdict_carries_structured_extract(
 def test_classify_out_of_domain_verdict_has_extract_none(run_log: RunLog) -> None:
     item = ClassifyItem(id="0", title="Cashier", raw_description="Shop job")
     raw_result = [{"id": "0", "in_domain": False}]
-    response = ClaudeResponse(
-        raw_response=_classify_raw(raw_result),
-        usage=_usage(),
-        cost_usd=0.001,
-        duration_s=0.5,
-        session_id="s",
-    )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        _invoker=_fake_invoker(_classify_response(raw_result)),
     )
     results, _ = extractor.classify_relevance_batch([item])
     assert results[0].in_domain is False
@@ -298,15 +300,11 @@ def test_classify_in_domain_missing_extract_raises_batch_malformed(
 ) -> None:
     item = ClassifyItem(id="0", title="Engineer", raw_description="Tech role")
     raw_result = [{"id": "0", "in_domain": True}]
-    response = ClaudeResponse(
-        raw_response=_classify_raw(raw_result),
-        usage=_usage(),
-        cost_usd=0.001,
-        duration_s=0.5,
-        session_id="s",
-    )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        _invoker=_fake_invoker(_classify_response(raw_result)),
     )
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.classify_relevance_batch([item])
@@ -317,15 +315,11 @@ def test_classify_in_domain_malformed_extract_raises_batch_malformed(
 ) -> None:
     item = ClassifyItem(id="0", title="Engineer", raw_description="Tech role")
     raw_result = [{"id": "0", "in_domain": True, "extract": "not-a-dict"}]
-    response = ClaudeResponse(
-        raw_response=_classify_raw(raw_result),
-        usage=_usage(),
-        cost_usd=0.001,
-        duration_s=0.5,
-        session_id="s",
-    )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        _invoker=_fake_invoker(_classify_response(raw_result)),
     )
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.classify_relevance_batch([item])
@@ -335,21 +329,13 @@ def test_classify_in_domain_extract_missing_required_field_raises_batch_malforme
     run_log: RunLog,
 ) -> None:
     item = ClassifyItem(id="0", title="Engineer", raw_description="Tech role")
-    incomplete_extract = {
-        "seniority": "senior",
-        "work_model": "remote",
-        # missing contract_type, key_skills, key_responsibilities, must_have_requirements, notable_caveats
-    }
+    incomplete_extract = {"seniority": "senior", "work_model": "remote"}
     raw_result = [{"id": "0", "in_domain": True, "extract": incomplete_extract}]
-    response = ClaudeResponse(
-        raw_response=_classify_raw(raw_result),
-        usage=_usage(),
-        cost_usd=0.001,
-        duration_s=0.5,
-        session_id="s",
-    )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        _invoker=_fake_invoker(_classify_response(raw_result)),
     )
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.classify_relevance_batch([item])
@@ -368,15 +354,11 @@ def test_classify_mixed_batch_in_domain_gets_extract_out_of_domain_gets_none(
         {"id": "b", "in_domain": False},
         {"id": "c", "in_domain": True, "extract": _EXTRACT_PAYLOAD},
     ]
-    response = ClaudeResponse(
-        raw_response=_classify_raw(raw_result),
-        usage=_usage(),
-        cost_usd=0.001,
-        duration_s=0.5,
-        session_id="s",
-    )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        _invoker=_fake_invoker(_classify_response(raw_result)),
     )
     results, _ = extractor.classify_relevance_batch(items)
     assert results[0].in_domain is True

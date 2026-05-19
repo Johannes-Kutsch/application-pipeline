@@ -294,7 +294,7 @@ class ClaudeExtractor:
             )
 
         input_ids = [item.id for item in items]
-        response_by_id: dict[str, tuple[bool, StructuredExtract | None]] = {}
+        verdicts_by_id: dict[str, RelevanceVerdict] = {}
         for entry in parsed_result:
             if not isinstance(entry, dict):
                 raise ExtractorBatchMalformedError(
@@ -305,7 +305,7 @@ class ClaudeExtractor:
                 raise ExtractorBatchMalformedError(
                     f"classify_relevance_batch: unknown or missing id in verdict: {entry_id!r}"
                 )
-            if entry_id in response_by_id:
+            if entry_id in verdicts_by_id:
                 raise ExtractorBatchMalformedError(
                     f"classify_relevance_batch: duplicate id in response: {entry_id!r}"
                 )
@@ -314,18 +314,16 @@ class ClaudeExtractor:
                 raise ExtractorBatchMalformedError(
                     f"classify_relevance_batch: in_domain must be bool for id {entry_id!r}"
                 )
-            extract: StructuredExtract | None = None
-            if in_domain:
-                extract = ClaudeExtractor._parse_structured_extract(entry_id, entry)
-            response_by_id[entry_id] = (in_domain, extract)
-
-        return [
-            RelevanceVerdict(
-                in_domain=response_by_id[item.id][0],
-                extract=response_by_id[item.id][1],
+            extract = (
+                ClaudeExtractor._parse_structured_extract(entry_id, entry)
+                if in_domain
+                else None
             )
-            for item in items
-        ]
+            verdicts_by_id[entry_id] = RelevanceVerdict(
+                in_domain=in_domain, extract=extract
+            )
+
+        return [verdicts_by_id[item.id] for item in items]
 
     @staticmethod
     def _parse_structured_extract(
@@ -338,12 +336,12 @@ class ClaudeExtractor:
             )
         try:
             return StructuredExtract(
-                seniority=raw.get("seniority"),  # type: ignore[arg-type]
-                work_model=raw.get("work_model"),  # type: ignore[arg-type]
-                contract_type=raw.get("contract_type"),  # type: ignore[arg-type]
-                key_skills=list(raw["key_skills"]),  # type: ignore[arg-type]
-                key_responsibilities=list(raw["key_responsibilities"]),  # type: ignore[arg-type]
-                must_have_requirements=list(raw["must_have_requirements"]),  # type: ignore[arg-type]
+                seniority=raw.get("seniority"),
+                work_model=raw.get("work_model"),
+                contract_type=raw.get("contract_type"),
+                key_skills=list(raw["key_skills"]),
+                key_responsibilities=list(raw["key_responsibilities"]),
+                must_have_requirements=list(raw["must_have_requirements"]),
                 notable_caveats=str(raw["notable_caveats"]),
             )
         except (KeyError, TypeError) as exc:

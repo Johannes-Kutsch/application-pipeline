@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 
 class ExtractorError(Exception):
@@ -37,6 +37,17 @@ class MatchTier(str, Enum):
     green = "green"
     amber = "amber"
     red = "red"
+
+
+@dataclass(frozen=True)
+class StructuredExtract:
+    seniority: str | None
+    work_model: Literal["remote", "hybrid", "on-site"] | None
+    contract_type: Literal["permanent", "fixed-term", "freelance"] | None
+    key_skills: list[str]
+    key_responsibilities: list[str]
+    must_have_requirements: list[str]
+    notable_caveats: str
 
 
 @dataclass(frozen=True)

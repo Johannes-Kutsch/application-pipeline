@@ -75,27 +75,35 @@ class ParserHttp:
             _http_get if _http_get is not None else self._real_http_get
         )
 
-    @staticmethod
-    def _check_response_status(resp: httpx.Response, url: str) -> None:
-        if resp.is_success:
-            return
-        status = resp.status_code
-        if status == 404:
-            raise HttpStubNotRetryableError(f"not found: {url}")
-        if status in (400, 422):
-            raise HttpStubNotRetryableError(f"malformed: {url} status={status}")
-        if status in (401, 403):
-            raise HttpParserFatalError(f"auth: {url} status={status}")
-        if 500 <= status < 600 and status not in RETRY_STATUSES:
-            raise HttpParserFatalError(f"upstream: {url} status={status}")
-        if status not in RETRY_STATUSES:
-            raise HttpParserFatalError(f"unexpected: {url} status={status}")
-        resp.raise_for_status()
-
     def _real_http_get(self, url: str, timeout: float) -> bytes:
         resp = self._client.get(url, timeout=timeout)
-        self._check_response_status(resp, url)
-        return resp.content
+        if resp.is_success:
+            return resp.content
+        status = resp.status_code
+        classified = self._classify_failure(status, url)
+        if classified is None:
+            # Retryable — let httpx raise so the retry loop handles it.
+            resp.raise_for_status()
+            return resp.content  # unreachable
+        reason, fatal = classified
+        event = "http_get_fatal" if fatal else "http_get_skipped"
+        self._run_log.event("parser_http", event, url=url, status=status, reason=reason)
+        raise (HttpParserFatalError if fatal else HttpStubNotRetryableError)(reason)
+
+    @staticmethod
+    def _classify_failure(status: int, url: str) -> tuple[str, bool] | None:
+        """Returns (reason, fatal) for non-retryable statuses, or None if retryable."""
+        if status == 404:
+            return f"not found: {url}", False
+        if status in (400, 422):
+            return f"malformed: {url} status={status}", False
+        if status in (401, 403):
+            return f"auth: {url} status={status}", True
+        if 500 <= status < 600 and status not in RETRY_STATUSES:
+            return f"upstream: {url} status={status}", True
+        if status not in RETRY_STATUSES:
+            return f"unexpected: {url} status={status}", True
+        return None
 
     def _get_with_retry(self, url: str) -> bytes:
         component_id = "parser_http"
@@ -151,6 +159,8 @@ class ParserHttp:
             return self._get_with_retry(url)
         except HttpRetryError as exc:
             raise ParserError(f"{error_prefix}: {exc}") from exc.__cause__
+        except HttpStubNotRetryableError as exc:
+            raise ParserError(f"{error_prefix}: {exc}") from exc
 
     def __enter__(self) -> ParserHttp:
         return self

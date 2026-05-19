@@ -25,6 +25,7 @@ from application_pipeline.llm import (
     RelevanceVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
+from application_pipeline.http import HttpParserFatalError, HttpStubNotRetryableError
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import (
     ExternalRedirect,
@@ -33,8 +34,8 @@ from application_pipeline.parsers import (
     Position,
     PositionStub,
 )
-from application_pipeline.parsers.types import City, Remote
 from application_pipeline.parsers.errors import ParserError
+from application_pipeline.parsers.types import City, Remote
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import (
     FILE_HEADER,
@@ -1326,6 +1327,112 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data[_ERR_URLS[1]]["status"] == "enrich_failed"
+
+
+def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
+    tmp_path: Path,
+) -> None:
+    """enrich() raises ParserError (from HttpStubNotRetryableError path) → enrich_failed, parser thread continues."""
+    seen_path = tmp_path / ".seen.json"
+
+    class _PerStubHttpParser(_StubParserBase):
+        def __enter__(self) -> "_PerStubHttpParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=_ERR_URLS[i], title=f"Job {i}", source="stub")
+                for i in range(3)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            if stub.url == _ERR_URLS[1]:
+                exc = HttpStubNotRetryableError("not found: stub_url")
+                raise ParserError("myjobboard: not found: stub_url") from exc
+            return Position(stub=stub, raw_description="ok")
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _PerStubHttpParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        results_paths=_stub_results_paths(tmp_path),
+    )
+
+    assert summary.enrich_failed == 1
+    assert summary.parsers_dead == 0
+    assert summary.written == 2
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_ERR_URLS[1]]["status"] == "enrich_failed"
+
+
+def test_parser_fatal_http_error_on_enrich_marks_parser_dead_surviving_parsers_continue(
+    tmp_path: Path,
+) -> None:
+    """enrich() raises HttpParserFatalError → parsers_dead increments, surviving parsers complete."""
+
+    class _FatalHttpParser(_StubParserBase):
+        def __enter__(self) -> "_FatalHttpParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=_ERR_URLS[0], title="Job 0", source="fatal")]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            raise HttpParserFatalError("auth: stub_url status=401")
+
+    class _HealthyParser(_StubParserBase):
+        def __enter__(self) -> "_HealthyParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://ok.example/0", title="Job ok", source="healthy"
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="ok")
+
+    def _registry(parser_type: str) -> type[Parser] | None:
+        if parser_type == "fatal":
+            return _FatalHttpParser  # type: ignore[return-value]
+        if parser_type == "healthy":
+            return _HealthyParser  # type: ignore[return-value]
+        return None
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api"), SourceEntry(parser_type="fatal"), SourceEntry(parser_type="healthy")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=_registry,
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        results_paths=_stub_results_paths(tmp_path),
+    )
+
+    assert summary.parsers_dead == 1
+    assert summary.written == 1
 
 
 def test_external_redirect_marks_seen_and_increments_counter(

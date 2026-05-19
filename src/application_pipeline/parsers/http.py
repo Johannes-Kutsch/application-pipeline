@@ -5,7 +5,12 @@ from collections.abc import Callable, Mapping
 
 import httpx
 
-from application_pipeline.http import HttpNotRetryableError, HttpRetryError
+from application_pipeline.http import (
+    HttpNotRetryableError,
+    HttpParserFatalError,
+    HttpRetryError,
+    HttpStubNotRetryableError,
+)
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 
@@ -75,14 +80,18 @@ class ParserHttp:
         if resp.is_success:
             return
         status = resp.status_code
-        if status == 404:
-            raise HttpNotRetryableError(f"not found: {url}")
+        if status in (404, 400, 422):
+            raise HttpStubNotRetryableError(
+                f"not found: {url}"
+                if status == 404
+                else f"malformed: {url} status={status}"
+            )
         if status in (401, 403):
-            raise HttpNotRetryableError(f"auth: {url} status={status}")
-        if status in (400, 422):
-            raise HttpNotRetryableError(f"malformed: {url} status={status}")
+            raise HttpParserFatalError(f"auth: {url} status={status}")
         if 500 <= status < 600 and status not in RETRY_STATUSES:
-            raise HttpNotRetryableError(f"upstream: {url} status={status}")
+            raise HttpParserFatalError(f"upstream: {url} status={status}")
+        if status not in RETRY_STATUSES:
+            raise HttpParserFatalError(f"unexpected: {url} status={status}")
         resp.raise_for_status()
 
     def _real_http_get(self, url: str, timeout: float) -> bytes:

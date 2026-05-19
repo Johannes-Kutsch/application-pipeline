@@ -15,11 +15,15 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from application_pipeline.text import normalize
 
 from .errors import DedupStoreError
+
+if TYPE_CHECKING:
+    from application_pipeline.extracts import ExtractStore
+    from application_pipeline.llm.types import StructuredExtract
 
 SeenStatus = Literal[
     "not_classified",
@@ -55,7 +59,13 @@ class _SeenKey(Protocol):
 
 
 class DeduplicationStore:
-    def __init__(self, path: Path, records: dict[str, dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        path: Path,
+        records: dict[str, dict[str, Any]],
+        *,
+        extract_store: ExtractStore | None = None,
+    ) -> None:
         self._path = path
         self._records = records
         self._tuple_index: dict[tuple[str, str, str], str] = self._build_tuple_index(
@@ -63,6 +73,7 @@ class DeduplicationStore:
         )
         self._lock = threading.Lock()
         self._in_run: set[str] | None = None
+        self._extract_store = extract_store
 
     @staticmethod
     def _validate_record(url: str, record: dict[str, Any]) -> None:
@@ -178,22 +189,30 @@ class DeduplicationStore:
     def mark_out_of_domain(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "out_of_domain")
+            if self._extract_store is not None:
+                self._extract_store.delete(key.url)
 
     def mark_selected_by_judge(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "selected_by_judge", overwrite_if="in_domain")
+            if self._extract_store is not None:
+                self._extract_store.delete(key.url)
 
     def mark_enrich_failed(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "enrich_failed", overwrite_if="in_domain")
+            if self._extract_store is not None:
+                self._extract_store.delete(key.url)
 
     def mark_external_redirect(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "external_redirect")
 
-    def mark_in_domain(self, key: _SeenKey) -> None:
+    def mark_in_domain(self, key: _SeenKey, *, extract: StructuredExtract) -> None:
         with self._lock:
             self._mark(key, "in_domain")
+            if self._extract_store is not None:
+                self._extract_store.put(key.url, extract)
 
     @contextmanager
     def run_scope(self) -> Generator[DeduplicationStore, None, None]:
@@ -238,9 +257,11 @@ class DeduplicationStore:
             ) from exc
 
 
-def load(path: Path) -> DeduplicationStore:
+def load(
+    path: Path, *, extract_store: ExtractStore | None = None
+) -> DeduplicationStore:
     if not path.exists():
-        return DeduplicationStore(path, {})
+        return DeduplicationStore(path, {}, extract_store=extract_store)
 
     try:
         raw = path.read_bytes()
@@ -274,4 +295,4 @@ def load(path: Path) -> DeduplicationStore:
                     f"(see wipe instruction in the store migration guide)"
                 )
 
-    return DeduplicationStore(path, data)
+    return DeduplicationStore(path, data, extract_store=extract_store)

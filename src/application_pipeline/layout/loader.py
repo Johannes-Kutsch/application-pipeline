@@ -13,6 +13,15 @@ _REQUIRED_FIELDS = (
     "CARD_TEMPLATE",
 )
 
+# Module-level variable names from the pre-ADR-0029 layout format that are no longer supported.
+_RETIRED_MODULE_VARS: dict[str, str] = {
+    "TIER_EMOJI": "tier_emoji",
+    "TIER_COLOR": "tier_color",
+}
+
+# Placeholders in CARD_TEMPLATE that were retired with ADR-0029.
+_RETIRED_PLACEHOLDERS = ("emoji", "color", "tier")
+
 # Fields that may appear in PLACEHOLDER_GROUPS.
 # Excludes renderer-derived fields (emoji, color, tier, number),
 # verdict aggregates (matched, missing, summary), and raw_description.
@@ -80,6 +89,15 @@ def load(path: pathlib.Path) -> Layout:
     module = load_user_module(path, LayoutError)
     resolved = path.resolve()
 
+    for var_name, keyword in _RETIRED_MODULE_VARS.items():
+        if hasattr(module, var_name):
+            raise LayoutError(
+                f"'{keyword}' is a retired layout keyword. "
+                f"See the migration note in docs/pi-setup.md.",
+                field=var_name,
+                resolved_path=resolved,
+            )
+
     for name in _REQUIRED_FIELDS:
         if not hasattr(module, name):
             raise LayoutError(
@@ -88,9 +106,19 @@ def load(path: pathlib.Path) -> Layout:
                 resolved_path=resolved,
             )
 
+    card_template: str = module.CARD_TEMPLATE
+    for placeholder in _RETIRED_PLACEHOLDERS:
+        if f"{{{placeholder}}}" in card_template:
+            raise LayoutError(
+                f"'{placeholder}' is a retired CARD_TEMPLATE placeholder. "
+                f"See the migration note in docs/pi-setup.md.",
+                field="CARD_TEMPLATE",
+                resolved_path=resolved,
+            )
+
     layout = Layout(
         placeholder_groups=module.PLACEHOLDER_GROUPS,
-        card_template=module.CARD_TEMPLATE,
+        card_template=card_template,
     )
     _validate(layout, resolved)
     _smoke_test(layout, resolved)

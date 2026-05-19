@@ -139,13 +139,13 @@ def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> No
     second_body = textwrap.dedent(
         """
         PLACEHOLDER_GROUPS = {}
-        CARD_TEMPLATE = "## {number}. {company} ({tier})\\n"
+        CARD_TEMPLATE = "## {rank}. {company}\\n"
         """
     )
     path.write_text(second_body, encoding="utf-8")
     second = load_layout(path)
 
-    assert second.card_template == "## {number}. {company} ({tier})\n"
+    assert second.card_template == "## {rank}. {company}\n"
 
 
 # --- Unknown top-level names are ignored ---
@@ -249,6 +249,57 @@ def test_valid_layout_passes_smoke_test(tmp_path: pathlib.Path) -> None:
     layout = load_layout(path)
 
     assert isinstance(layout, Layout)
+
+
+# --- Retired identifier detection ---
+
+
+def test_load_raises_for_tier_emoji_module_variable(tmp_path: pathlib.Path) -> None:
+    body = (
+        'TIER_EMOJI = {"green": "✅", "amber": "⚠️", "red": "❌"}\n'
+        "PLACEHOLDER_GROUPS = {}\n"
+        'CARD_TEMPLATE = "## {title}\\n"\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    with pytest.raises(LayoutError) as exc_info:
+        load_layout(path)
+
+    msg = str(exc_info.value)
+    assert "tier_emoji" in msg
+    assert "docs/pi-setup.md" in msg
+
+
+def test_load_raises_for_tier_color_module_variable(tmp_path: pathlib.Path) -> None:
+    body = (
+        'TIER_COLOR = {"green": "#00ff00", "amber": "#ffaa00", "red": "#ff0000"}\n'
+        "PLACEHOLDER_GROUPS = {}\n"
+        'CARD_TEMPLATE = "## {title}\\n"\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    with pytest.raises(LayoutError) as exc_info:
+        load_layout(path)
+
+    msg = str(exc_info.value)
+    assert "tier_color" in msg
+    assert "docs/pi-setup.md" in msg
+
+
+@pytest.mark.parametrize("placeholder", ["emoji", "color", "tier"])
+def test_load_raises_for_retired_card_template_placeholder(
+    tmp_path: pathlib.Path, placeholder: str
+) -> None:
+    body = (
+        "PLACEHOLDER_GROUPS = {}\n"
+        f'CARD_TEMPLATE = "## {{title}} {{{placeholder}}}\\n"\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    with pytest.raises(LayoutError) as exc_info:
+        load_layout(path)
+
+    assert placeholder in str(exc_info.value)
 
 
 # --- LayoutError in __main__._FATAL produces a failure artifact ---

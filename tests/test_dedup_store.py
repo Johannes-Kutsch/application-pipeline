@@ -57,35 +57,38 @@ def test_is_seen_miss_on_fresh_store(store: DeduplicationStore) -> None:
     assert store.is_seen(StubLike(url="https://example.com/1")) == "miss"
 
 
-def test_mark_kept_then_is_seen_returns_url_hit(store: DeduplicationStore) -> None:
+def test_mark_selected_by_judge_then_is_seen_returns_url_hit(
+    store: DeduplicationStore,
+) -> None:
     stub = StubLike(url="https://example.com/1")
-    store.mark_kept(stub)
+    store.mark_selected_by_judge(stub)
     assert store.is_seen(stub) == "url_hit"
 
 
-def test_mark_off_domain_persists_status(store_path: Path) -> None:
+def test_mark_out_of_domain_persists_status(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/x")
-    store.mark_off_domain(stub)
+    store.mark_out_of_domain(stub)
 
     assert store.is_seen(stub) == "url_hit"
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     record = on_disk["https://example.com/x"]
-    assert record["status"] == "off_domain"
+    assert record["status"] == "out_of_domain"
+    assert record["canonical_url"] == "https://example.com/x"
     assert record["company_lc"] == "acme"
     assert record["title_lc"] == "engineer"
     assert record["location_lc"] == "hamburg"
     assert record["first_seen"] == date.today().isoformat()
 
 
-def test_mark_kept_persists_status(store_path: Path) -> None:
+def test_mark_selected_by_judge_persists_status(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/k")
-    store.mark_kept(stub)
+    store.mark_selected_by_judge(stub)
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk["https://example.com/k"]["status"] == "kept"
+    assert on_disk["https://example.com/k"]["status"] == "selected_by_judge"
 
 
 def test_mark_enrich_failed_persists_status(store_path: Path) -> None:
@@ -113,20 +116,20 @@ def test_mark_external_redirect_persists_status(store_path: Path) -> None:
 def test_second_mark_same_url_is_silent_no_op(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/y")
-    store.mark_kept(stub)
+    store.mark_selected_by_judge(stub)
     first = json.loads(store_path.read_text(encoding="utf-8"))
 
-    store.mark_off_domain(stub)
+    store.mark_out_of_domain(stub)
     second = json.loads(store_path.read_text(encoding="utf-8"))
 
     assert first == second
-    assert second["https://example.com/y"]["status"] == "kept"
+    assert second["https://example.com/y"]["status"] == "selected_by_judge"
 
 
 def test_first_seen_preserved_across_reload(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/keep")
-    store.mark_kept(stub)
+    store.mark_selected_by_judge(stub)
 
     reloaded = dedup_load(store_path)
     assert reloaded.is_seen(stub) == "url_hit"
@@ -162,7 +165,7 @@ def test_persist_oserror_raises_dedup_store_error(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/initial")
-    store.mark_kept(stub)
+    store.mark_selected_by_judge(stub)
     before = store_path.read_bytes()
 
     import os as _os
@@ -173,7 +176,7 @@ def test_persist_oserror_raises_dedup_store_error(
     monkeypatch.setattr(_os, "replace", boom)
 
     with pytest.raises(DedupStoreError) as exc_info:
-        store.mark_kept(StubLike(url="https://example.com/new"))
+        store.mark_selected_by_judge(StubLike(url="https://example.com/new"))
 
     assert isinstance(exc_info.value.__cause__, OSError)
     assert store_path.read_bytes() == before
@@ -192,7 +195,7 @@ def test_persist_write_oserror_raises_dedup_store_error(
     monkeypatch.setattr(_os, "write", boom)
 
     with pytest.raises(DedupStoreError) as exc_info:
-        store.mark_kept(StubLike(url="https://example.com/x"))
+        store.mark_selected_by_judge(StubLike(url="https://example.com/x"))
 
     assert isinstance(exc_info.value.__cause__, OSError)
 
@@ -227,9 +230,11 @@ def test_alias_write_corrupt_record_raises_dedup_store_error(
         PositionLike(url="https://example.com/a"),
     ],
 )
-def test_mark_kept_accepts_stub_and_position(store_path: Path, obj: object) -> None:
+def test_mark_selected_by_judge_accepts_stub_and_position(
+    store_path: Path, obj: object
+) -> None:
     store = dedup_load(store_path)
-    store.mark_kept(obj)  # type: ignore[arg-type]
+    store.mark_selected_by_judge(obj)  # type: ignore[arg-type]
     assert store.is_seen(obj) == "url_hit"  # type: ignore[arg-type]
 
 
@@ -242,9 +247,9 @@ def test_no_debug_records_during_is_seen_and_mark_methods(
 
     with caplog.at_level(logging.DEBUG, logger="application_pipeline.dedup.store"):
         store.is_seen(stub_a)
-        store.mark_kept(stub_a)
+        store.mark_selected_by_judge(stub_a)
         store.is_seen(stub_a)
-        store.mark_off_domain(stub_a)
+        store.mark_out_of_domain(stub_a)
         store.is_seen(stub_b)
 
     debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
@@ -256,7 +261,7 @@ def test_handles_none_company_title_location(store_path: Path) -> None:
     stub = StubLike(
         url="https://example.com/n", company=None, title=None, location=None
     )
-    store.mark_kept(stub)
+    store.mark_selected_by_judge(stub)
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     record = on_disk["https://example.com/n"]
@@ -269,7 +274,7 @@ def test_tuple_match_under_new_url_returns_tuple_hit(store_path: Path) -> None:
     store = dedup_load(store_path)
     a = StubLike(url="https://bundesagentur.de/job/1")
     b = StubLike(url="https://stellen.hamburg/job/42")
-    store.mark_kept(a)
+    store.mark_selected_by_judge(a)
     assert store.is_seen(b) == "tuple_hit"
 
 
@@ -279,7 +284,7 @@ def test_tuple_match_writes_alias_with_original_status_and_first_seen(
     store = dedup_load(store_path)
     a = StubLike(url="https://bundesagentur.de/job/1")
     b = StubLike(url="https://stellen.hamburg/job/42")
-    store.mark_kept(a)
+    store.mark_selected_by_judge(a)
     original = json.loads(store_path.read_text(encoding="utf-8"))[a.url]
 
     store.is_seen(b)
@@ -301,7 +306,7 @@ def test_alias_first_seen_is_originals_not_today(
                     "company_lc": "acme",
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
-                    "status": "kept",
+                    "status": "selected_by_judge",
                     "first_seen": "2024-01-15",
                 }
             }
@@ -320,7 +325,7 @@ def test_after_alias_reload_resolves_via_url_tier(store_path: Path) -> None:
     store = dedup_load(store_path)
     a = StubLike(url="https://bundesagentur.de/x")
     b = StubLike(url="https://stellen.hamburg/y")
-    store.mark_kept(a)
+    store.mark_selected_by_judge(a)
     store.is_seen(b)
 
     reloaded = dedup_load(store_path)
@@ -333,7 +338,7 @@ def test_after_alias_reload_resolves_via_url_tier(store_path: Path) -> None:
 
 def test_tuple_match_case_insensitive(store_path: Path) -> None:
     store = dedup_load(store_path)
-    store.mark_kept(
+    store.mark_selected_by_judge(
         StubLike(
             url="https://example.com/1",
             company="acme gmbh",
@@ -356,7 +361,7 @@ def test_tuple_match_case_insensitive(store_path: Path) -> None:
 
 def test_tuple_match_collapses_internal_whitespace(store_path: Path) -> None:
     store = dedup_load(store_path)
-    store.mark_kept(
+    store.mark_selected_by_judge(
         StubLike(
             url="https://example.com/1",
             company="ACME GmbH",
@@ -379,7 +384,7 @@ def test_tuple_match_collapses_internal_whitespace(store_path: Path) -> None:
 
 def test_tuple_lookup_skipped_when_field_none(store_path: Path) -> None:
     store = dedup_load(store_path)
-    store.mark_kept(
+    store.mark_selected_by_judge(
         StubLike(
             url="https://example.com/1",
             company=None,
@@ -405,7 +410,7 @@ def test_tuple_lookup_skipped_when_field_empty_after_normalize(
     store_path: Path,
 ) -> None:
     store = dedup_load(store_path)
-    store.mark_kept(
+    store.mark_selected_by_judge(
         StubLike(
             url="https://example.com/1",
             company="   ",
@@ -433,7 +438,7 @@ def test_none_company_url_match_still_works_on_second_is_seen(
     stub = StubLike(
         url="https://example.com/n", company=None, title="Engineer", location="Hamburg"
     )
-    store.mark_kept(stub)
+    store.mark_selected_by_judge(stub)
     assert store.is_seen(stub) == "url_hit"
 
 
@@ -445,7 +450,7 @@ def test_tuple_index_built_at_load_time(store_path: Path) -> None:
                     "company_lc": "acme",
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
-                    "status": "kept",
+                    "status": "selected_by_judge",
                     "first_seen": "2024-01-01",
                 }
             }
@@ -473,9 +478,9 @@ def test_round_trip_mix_of_originals_and_aliases(store_path: Path) -> None:
     c = StubLike(
         url="https://a.example/2", company="Beta", title="PM", location="Berlin"
     )
-    store.mark_kept(a)
+    store.mark_selected_by_judge(a)
     store.is_seen(b)  # writes alias under b.url
-    store.mark_off_domain(c)
+    store.mark_out_of_domain(c)
 
     before = json.loads(store_path.read_text(encoding="utf-8"))
     reloaded = dedup_load(store_path)
@@ -510,7 +515,7 @@ def test_concurrent_marks_produce_valid_store(store_path: Path) -> None:
                     title=f"Role{i}",
                     location="Hamburg",
                 )
-                store.mark_kept(stub)
+                store.mark_selected_by_judge(stub)
         except Exception as exc:
             errors.append(exc)
 
@@ -527,47 +532,48 @@ def test_concurrent_marks_produce_valid_store(store_path: Path) -> None:
     assert len(on_disk) == n_threads * marks_per_thread
 
 
-def test_mark_classified_in_domain_then_is_seen_returns_judge_pending(
+def test_mark_in_domain_then_is_seen_returns_judge_pending(
     store_path: Path,
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid")
-    store.mark_classified_in_domain(stub)
+    store.mark_in_domain(stub)
     assert store.is_seen(stub) == "judge_pending"
 
 
-def test_mark_classified_in_domain_then_mark_kept_returns_url_hit(
+def test_mark_in_domain_then_mark_selected_by_judge_returns_url_hit(
     store_path: Path,
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid3")
-    store.mark_classified_in_domain(stub)
-    store.mark_kept(stub)
+    store.mark_in_domain(stub)
+    store.mark_selected_by_judge(stub)
 
     assert store.is_seen(stub) == "url_hit"
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk["https://example.com/cid3"]["status"] == "kept"
+    assert on_disk["https://example.com/cid3"]["status"] == "selected_by_judge"
 
 
-def test_mark_classified_in_domain_persists_correct_record(
+def test_mark_in_domain_persists_correct_record(
     store_path: Path,
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid2")
-    store.mark_classified_in_domain(stub)
+    store.mark_in_domain(stub)
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     record = on_disk["https://example.com/cid2"]
-    assert record["status"] == "classified_in_domain"
+    assert record["status"] == "in_domain"
+    assert record["canonical_url"] == "https://example.com/cid2"
     assert record["first_seen"] == date.today().isoformat()
     assert record["company_lc"] == "acme"
     assert record["title_lc"] == "engineer"
     assert record["location_lc"] == "hamburg"
 
 
-def test_preexisting_statuses_still_return_url_hit(store_path: Path) -> None:
-    for status in ("off_domain", "kept", "enrich_failed", "external_redirect"):
+def test_non_legacy_statuses_still_return_url_hit(store_path: Path) -> None:
+    for status in ("enrich_failed", "external_redirect"):
         store_path.write_text(
             json.dumps(
                 {
@@ -586,14 +592,34 @@ def test_preexisting_statuses_still_return_url_hit(store_path: Path) -> None:
         assert store.is_seen(StubLike(url="https://example.com/legacy")) == "url_hit"
 
 
-def test_tuple_alias_of_classified_in_domain_returns_judge_pending(
+def test_legacy_status_raises_on_load(store_path: Path) -> None:
+    for status in ("off_domain", "kept", "classified_in_domain"):
+        store_path.write_text(
+            json.dumps(
+                {
+                    "https://example.com/legacy": {
+                        "company_lc": "acme",
+                        "title_lc": "engineer",
+                        "location_lc": "hamburg",
+                        "status": status,
+                        "first_seen": "2024-01-01",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(DedupStoreError, match=status):
+            dedup_load(store_path)
+
+
+def test_tuple_alias_of_in_domain_returns_judge_pending(
     store_path: Path,
 ) -> None:
     store = dedup_load(store_path)
     a = StubLike(url="https://example.com/original")
     b = StubLike(url="https://example.com/alias")
-    store.mark_classified_in_domain(a)
-    # tuple hit writes alias with classified_in_domain status
+    store.mark_in_domain(a)
+    # tuple hit writes alias with in_domain status
     assert store.is_seen(b) == "tuple_hit"
     # next is_seen on b resolves via URL tier → judge_pending
     assert store.is_seen(b) == "judge_pending"
@@ -633,7 +659,7 @@ def test_run_scope_url_and_tuple_hits_do_not_populate_in_run_set(
 ) -> None:
     a = StubLike(url="https://example.com/original")
     b = StubLike(url="https://example.com/alias")
-    store.mark_kept(a)
+    store.mark_selected_by_judge(a)
     with store.run_scope() as scope:
         scope.is_seen(a)  # url_hit — must not land in in-run set
         scope.is_seen(b)  # tuple_hit — must not land in in-run set

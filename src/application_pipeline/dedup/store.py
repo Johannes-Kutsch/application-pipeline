@@ -22,8 +22,17 @@ from application_pipeline.text import normalize
 from .errors import DedupStoreError
 
 SeenStatus = Literal[
-    "off_domain", "kept", "enrich_failed", "external_redirect", "classified_in_domain"
+    "not_classified",
+    "out_of_domain",
+    "in_domain",
+    "selected_by_judge",
+    "enrich_failed",
+    "external_redirect",
 ]
+
+_LEGACY_STATUSES: frozenset[str] = frozenset(
+    {"off_domain", "kept", "classified_in_domain"}
+)
 SeenResult = Literal["url_hit", "tuple_hit", "judge_pending", "miss"]
 RunScopedSeenResult = Literal[
     "url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"
@@ -114,7 +123,7 @@ class DeduplicationStore:
                 return "run_hit"
 
             if key.url in self._records:
-                if self._records[key.url].get("status") == "classified_in_domain":
+                if self._records[key.url].get("status") == "in_domain":
                     return "judge_pending"
                 return "url_hit"
 
@@ -147,6 +156,7 @@ class DeduplicationStore:
         title_lc = normalize(key.title)
         location_lc = normalize(key.location)
         record = {
+            "canonical_url": key.url,
             "company_lc": company_lc,
             "title_lc": title_lc,
             "location_lc": location_lc,
@@ -161,25 +171,29 @@ class DeduplicationStore:
         if company_lc and title_lc and location_lc:
             self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
 
-    def mark_off_domain(self, key: _SeenKey) -> None:
+    def mark_not_classified(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "off_domain")
+            self._mark(key, "not_classified")
 
-    def mark_kept(self, key: _SeenKey) -> None:
+    def mark_out_of_domain(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "kept", overwrite_if="classified_in_domain")
+            self._mark(key, "out_of_domain")
+
+    def mark_selected_by_judge(self, key: _SeenKey) -> None:
+        with self._lock:
+            self._mark(key, "selected_by_judge", overwrite_if="in_domain")
 
     def mark_enrich_failed(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "enrich_failed", overwrite_if="classified_in_domain")
+            self._mark(key, "enrich_failed", overwrite_if="in_domain")
 
     def mark_external_redirect(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "external_redirect")
 
-    def mark_classified_in_domain(self, key: _SeenKey) -> None:
+    def mark_in_domain(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "classified_in_domain")
+            self._mark(key, "in_domain")
 
     @contextmanager
     def run_scope(self) -> Generator[DeduplicationStore, None, None]:
@@ -195,6 +209,7 @@ class DeduplicationStore:
         original = self._records[canonical_url]
         self._validate_record(canonical_url, original)
         record = {
+            "canonical_url": original.get("canonical_url", canonical_url),
             "company_lc": original["company_lc"],
             "title_lc": original["title_lc"],
             "location_lc": original["location_lc"],
@@ -248,5 +263,15 @@ def load(path: Path) -> DeduplicationStore:
         raise DedupStoreError(
             f"dedup store at {path} must be a JSON object, got {type(data).__name__}"
         )
+
+    for url, record in data.items():
+        if isinstance(record, dict):
+            status = record.get("status")
+            if status in _LEGACY_STATUSES:
+                raise DedupStoreError(
+                    f"dedup store at {path} contains legacy status {status!r} "
+                    f"for {url!r}; wipe the store to start fresh "
+                    f"(see wipe instruction in the store migration guide)"
+                )
 
     return DeduplicationStore(path, data)

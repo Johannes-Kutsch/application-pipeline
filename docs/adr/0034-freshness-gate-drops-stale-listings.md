@@ -1,0 +1,34 @@
+# Freshness Gate drops stale listings post-enrich
+
+A new deterministic stage, the **Freshness Gate**, runs after `Parser.enrich()` and before the **Relevance Classifier**. It drops a **Position** when either its `posted_date` is older than `Config.MAX_LISTING_AGE_DAYS` (default 180) or its `deadline` is before the cron-anchored logical date. Drops write a new terminal-skip dedup status `expired` and, when the source was a pool member, delete the **Structured Extract** from `data/extracts.json`. The gate re-runs on every enrich including Pool re-discovery, so `in_domain → expired` transitions are possible.
+
+Companion ADRs: ADR-0029, ADR-0030, ADR-0031, ADR-0033.
+
+## Why
+
+- **The brief is freshness, not domain fit.** Issue #376 ("ensure listings are still valid and not filed a year ago") describes a temporal validity check that is orthogonal to the **Domain Pre-Filter**'s title-blacklist and to the **Relevance Classifier**'s in-domain judgment. Conflating it with either would muddy the existing semantics — `out_of_domain` means "wrong professional fit, forever", which is a different statement than "this listing has expired".
+- **Two date fields, two failure modes, one gate.** `posted_date` age and `deadline < today` both invalidate a listing, but neither alone is sufficient (a fresh-posted listing with a past deadline is invalid; an old listing with a future deadline is arguably valid). Checking both, treating each `None` as "no signal", lets the gate act on whatever signal a source exposes without forcing parsers to guess.
+- **Post-enrich is the only correct placement.** `posted_date` and `deadline` live on `Position`, not on `PositionStub`, so a pre-enrich gate is impossible. Running before the **Relevance Classifier** saves the LLM batch cost on stale listings — the gate is cheap, the classifier is not.
+- **A new status, not an overload of `out_of_domain`.** Two terminal-skip statuses (`expired` and `out_of_domain`) keep the per-keyword analytics in `pipeline_prefilter.events.jsonl` honest, keep the `expired` count separately surfaced in run metrics, and leave room for a future operator policy that re-enables `expired` URLs on re-post (no such policy exists in v1, but the status separation costs nothing now and preserves the option).
+- **Gate re-runs on Pool re-discovery to bound staleness.** A listing classified `in_domain` on day 1 with `posted_date` 175 days ago would otherwise linger in the **Pool** indefinitely as long as a parser kept surfacing it. Re-running the gate on every enrich — including pool re-discovery — costs nothing (the Position is being enriched anyway to render the **Card**) and naturally evicts items the source refuses to remove. The `in_domain → expired` transition deletes the **Structured Extract** in the same way `selected_by_judge` does.
+- **Cron-anchored "today".** The gate consumes the same logical date the **Daily Results File** uses (per ADR-0030). A run sleeping through a quota window (ADR-0032) keeps the same threshold reference it started with — a listing is not dropped just because the sleep crossed midnight.
+- **Deadline-passed is non-tunable.** A passed deadline is a passed deadline; there is no policy knob. Only `MAX_LISTING_AGE_DAYS` is configurable. Validation: `≥ 1`.
+
+## Considered alternatives
+
+- **Fold the gate into the Domain Pre-Filter.** Rejected: the prefilter is title-only on stubs by contract (ADR-0026); a date check requires post-enrich `Position` fields and is a different shape of decision. Keeping them separate preserves the prefilter's pure-stub-blacklist semantics.
+- **Reuse `out_of_domain` for stale drops.** Rejected: collapses two distinct reasons into one status, breaks the per-keyword "dead negative keyword" analytics, and forecloses on the future "re-enable expired URLs on re-post" option.
+- **Gate only on first-contact (`not_classified → expired`).** Rejected: pool items would never expire if their source keeps surfacing them — a year-old listing on jobs-beim-staat that the parser still returns would sit in the **Pool** forever. The re-enrich cost is already being paid for **Card** rendering, so re-gating is free.
+- **Let the Relevance Classifier handle staleness via the prompt.** Rejected: spends LLM tokens on a check `today - posted_date` can do for free, and makes the staleness threshold an opaque LLM judgment instead of a configurable integer. Determinism wins here.
+- **Drop the deadline check; only check `posted_date` age.** Rejected: matches the issue text more narrowly but misses fresh-posted listings with already-passed deadlines (a real failure mode on `bewerbungsschluss`-bearing sources like bundesagentur). Adding deadline at the same time costs one comparison.
+
+## Consequences
+
+- **`.seen.json` status enum gains `expired`.** Per ADR-0033 the deploy already wipes `.seen.json`; no separate migration. Going forward, a load-time encounter with an unknown status raises (no silent translation).
+- **`DeduplicationStore` gains `mark_expired(stub)`.** Mirrors the other `mark_*` methods. When the prior status was `in_domain`, the call also deletes the URL's entry from `data/extracts.json` (same cleanup as `mark_selected_by_judge`).
+- **`Config` gains `MAX_LISTING_AGE_DAYS: int` (default 180).** Validated `≥ 1` by the **Config Loader**. Template config (`src/application_pipeline/templates/config.py`) ships the default with a `#` comment explaining the knob.
+- **New log component `pipeline_freshness`** (per ADR-0024/0028). Files: `pipeline_freshness.transcripts.jsonl` (one record per Position evaluated, fields `url, title, source, posted_date, deadline, anchored_today, age_days, passes, reason ∈ {passed, too_old, deadline_passed, too_old_and_deadline_passed}`) and `pipeline_freshness.events.jsonl` (per-run `event=run_complete` row with counts by reason). New **Agent Row** in the **Status Display** between `pipeline_prefilter` and `llm_classify_relevance`.
+- **Pipeline order becomes:** `discover → dedup → prefilter (title) → enrich → freshness gate → classifier → judge → render`. The freshness gate is the first stage that reads `Position` fields rather than `PositionStub` fields.
+- **Pool shrinkage before the judge call.** A run may transition pool items `in_domain → expired` before invoking the **Match Judge**, so the judge's candidate count can be smaller than yesterday's pool size even when nothing new failed today. The judge already tolerates variable pool sizes (returns up to 5).
+- **Future-dated `posted_date` (parser data error) passes.** The gate only drops on `today - posted_date > threshold`; a negative age passes silently. If parser correctness becomes a concern, a separate sanity check is the right place — not this gate.
+- **No new Failure Report mode.** An `expired` drop is normal flow, not a failure. Run-end metrics surface the count.

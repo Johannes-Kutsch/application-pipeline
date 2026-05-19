@@ -15,6 +15,7 @@ from pathlib import Path
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline import layout as layout_module
+from application_pipeline.llm import quota as _quota
 from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
 from application_pipeline.run_metrics import RunMetrics, RunSummary
@@ -312,6 +313,25 @@ class _ParserThread(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
+# Quota sleep helper
+# ---------------------------------------------------------------------------
+
+
+def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
+    now = datetime.now(timezone.utc)
+    wake = _quota.compute_wake_time(err.reset_time, now)
+    duration_s = max(0.0, (wake - now).total_seconds())
+    run_log.event(
+        "pipeline_orchestrator",
+        "quota_sleep",
+        reset_time=err.reset_time.isoformat() if err.reset_time is not None else None,
+        wake_time=wake.isoformat(),
+        duration_s=duration_s,
+    )
+    time.sleep(duration_s)
+
+
+# ---------------------------------------------------------------------------
 # Classify thread
 # ---------------------------------------------------------------------------
 
@@ -352,24 +372,27 @@ class _ClassifyThread(_QueueWorker):
         assert isinstance(item, _ClassifyBatch)
         batch = item
         items = _make_classify_items(batch.positions)
-        try:
-            verdicts, classify_usage = self._extractor.classify_relevance_batch(items)
-        except ClaudeUsageLimitError:
-            self._run_state.set_degraded("usage_limit", self.name)
-            return
-        except ExtractorError as exc:
-            _log.warning("classify_relevance_batch failed: %s", exc)
-            self._run_log.event(
-                "llm_classify_relevance",
-                "batch_abandoned",
-                batch_size=len(batch.positions),
-                urls=[p.stub.url for p in batch.positions],
-                returncode=getattr(exc, "returncode", None),
-                stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
-                error=str(exc),
-            )
-            self._metrics.classify_batch_failed(len(batch.positions))
-            return
+        while True:
+            try:
+                verdicts, classify_usage = self._extractor.classify_relevance_batch(
+                    items
+                )
+                break
+            except ClaudeUsageLimitError as err:
+                _quota_sleep(err, self._run_log)
+            except ExtractorError as exc:
+                _log.warning("classify_relevance_batch failed: %s", exc)
+                self._run_log.event(
+                    "llm_classify_relevance",
+                    "batch_abandoned",
+                    batch_size=len(batch.positions),
+                    urls=[p.stub.url for p in batch.positions],
+                    returncode=getattr(exc, "returncode", None),
+                    stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
+                    error=str(exc),
+                )
+                self._metrics.classify_batch_failed(len(batch.positions))
+                return
 
         classifier_dropped = 0
         for verdict, position in zip(verdicts, batch.positions):
@@ -429,32 +452,34 @@ class _JudgeThread(_QueueWorker):
     def _process(self, item: object) -> None:
         assert isinstance(item, _JudgeJob)
         job = item
-        try:
-            match_verdict, judge_usage = self._extractor.judge_match(
-                job.position.raw_description,
-                stub_url=job.position.stub.url,
-            )
-            path = self._results_paths[match_verdict.tier.value]
-            rendered = render(job.position, match_verdict, self._layout)
-            append(path, rendered)
-            self._dedup_store.mark_selected_by_judge(job.position.stub)
-            self._metrics.judge_complete(
-                judge_usage, match_verdict.tier, job.position.stub.source
-            )
-        except ClaudeUsageLimitError:
-            self._run_state.set_degraded("usage_limit", self.name)
-            return
-        except ExtractorError as exc:
-            _log.warning("judge_match failed: %s", exc)
-            self._run_log.event(
-                "llm_judge_match",
-                "error",
-                stub_url=job.position.stub.url,
-                returncode=getattr(exc, "returncode", None),
-                stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
-                error=str(exc),
-            )
-            self._metrics.judge_failed()
+        while True:
+            try:
+                match_verdict, judge_usage = self._extractor.judge_match(
+                    job.position.raw_description,
+                    stub_url=job.position.stub.url,
+                )
+                path = self._results_paths[match_verdict.tier.value]
+                rendered = render(job.position, match_verdict, self._layout)
+                append(path, rendered)
+                self._dedup_store.mark_selected_by_judge(job.position.stub)
+                self._metrics.judge_complete(
+                    judge_usage, match_verdict.tier, job.position.stub.source
+                )
+                break
+            except ClaudeUsageLimitError as err:
+                _quota_sleep(err, self._run_log)
+            except ExtractorError as exc:
+                _log.warning("judge_match failed: %s", exc)
+                self._run_log.event(
+                    "llm_judge_match",
+                    "error",
+                    stub_url=job.position.stub.url,
+                    returncode=getattr(exc, "returncode", None),
+                    stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
+                    error=str(exc),
+                )
+                self._metrics.judge_failed()
+                break
 
 
 # ---------------------------------------------------------------------------

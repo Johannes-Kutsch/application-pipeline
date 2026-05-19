@@ -157,6 +157,31 @@ def test_rate_limit_phrase_also_raises_usage_limit_error():
         _invoker(_runner(returncode=1, stdout=envelope)).call("p", model="haiku")
 
 
+# --- reset_time on usage limit error ---
+
+
+def test_usage_limit_error_carries_parsed_reset_time():
+    result_text = "Claude AI usage limit reached. Your limit resets May 20, 3pm (UTC)"
+    envelope = json.dumps({"is_error": True, "result": result_text, "usage": {}})
+    with pytest.raises(ClaudeUsageLimitError) as exc_info:
+        _invoker(_runner(returncode=1, stdout=envelope)).call("p", model="haiku")
+    from datetime import timezone
+
+    rt = exc_info.value.reset_time
+    assert rt is not None
+    assert rt.tzinfo == timezone.utc
+    assert rt.month == 5
+    assert rt.hour == 15  # 3pm
+
+
+def test_usage_limit_error_reset_time_none_when_unparseable():
+    result_text = "Claude AI usage limit reached, no time info here"
+    envelope = json.dumps({"is_error": True, "result": result_text, "usage": {}})
+    with pytest.raises(ClaudeUsageLimitError) as exc_info:
+        _invoker(_runner(returncode=1, stdout=envelope)).call("p", model="haiku")
+    assert exc_info.value.reset_time is None
+
+
 # --- non-zero exit without structured limit signal ---
 
 

@@ -5168,10 +5168,9 @@ def test_freshness_drop_does_not_write_failure_report(tmp_path: Path) -> None:
     assert not failures_dir.exists() or list(failures_dir.iterdir()) == []
 
 
-def test_freshness_gate_not_applied_to_pool_reentry(tmp_path: Path) -> None:
-    """A Position already in the Pool (judge_pending) is not re-gated by the freshness gate."""
+def test_freshness_gate_applied_to_stale_pool_reentry(tmp_path: Path) -> None:
+    """A stale in_domain URL re-enriched on Pool re-discovery transitions to expired."""
     seen_path = tmp_path / ".seen.json"
-    classify_calls: list[ClassifyItem] = []
 
     # Pre-seed URL as in_domain so dedup returns judge_pending
     stale_url = "https://pool-reentry.example/stale"
@@ -5199,18 +5198,18 @@ def test_freshness_gate_not_applied_to_pool_reentry(tmp_path: Path) -> None:
             return [PositionStub(url=stale_url, title="Old Pool Job", source="stub")]
 
         def enrich(self, stub: PositionStub) -> Position:
-            # Return a very stale position that would fail freshness if evaluated
             return Position(
                 stub=stub,
                 raw_description="stale pool job",
                 posted_date=today - _timedelta(days=500),
             )
 
+    judge_candidates: list[JudgeCandidate] = []
+
     class _TrackingExtractor2:
         def classify_relevance_batch(
             self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            classify_calls.extend(items)
             return [
                 RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
             ], _ZERO_USAGE
@@ -5218,6 +5217,7 @@ def test_freshness_gate_not_applied_to_pool_reentry(tmp_path: Path) -> None:
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
         ) -> tuple[list[MatchVerdict], CallUsage]:
+            judge_candidates.extend(candidates)
             return [
                 MatchVerdict(matched=[], missing=[], summary="ok", rank=i + 1, id=c.id)
                 for i, c in enumerate(candidates[:5])
@@ -5236,6 +5236,371 @@ def test_freshness_gate_not_applied_to_pool_reentry(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # Pool re-entry must NOT be expired — freshness gate skipped for judge_pending
     seen_data_after = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data_after[stale_url]["status"] != "expired"
+    assert seen_data_after[stale_url]["status"] == "expired"
+    assert all(c.id != stale_url for c in judge_candidates)
+
+
+def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
+    """in_domain → expired transition on pool re-discovery removes the entry from extracts.json."""
+    stale_url = "https://pool-reentry.example/stale-extract"
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                stale_url: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "in_domain",
+                    "first_seen": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Write a pre-existing extract for the URL
+    extracts_path.write_text(
+        json.dumps(
+            {
+                stale_url: {
+                    "seniority": None,
+                    "work_model": None,
+                    "contract_type": None,
+                    "key_skills": [],
+                    "key_responsibilities": [],
+                    "must_have_requirements": [],
+                    "notable_caveats": "",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    today = _date.today()
+
+    class _StaleExtractParser(_StubParserBase):
+        def __enter__(self) -> "_StaleExtractParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=stale_url, title="Extract Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(
+                stub=stub,
+                raw_description="stale",
+                posted_date=today - _timedelta(days=500),
+            )
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StaleExtractParser,  # type: ignore[return-value]
+        # no dedup_store= so orchestrator wires extract_store into dedup_store
+    )
+
+    extracts_after = json.loads(extracts_path.read_text(encoding="utf-8"))
+    assert stale_url not in extracts_after
+
+
+def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge(
+    tmp_path: Path,
+) -> None:
+    """A still-fresh in_domain URL passes the gate, stays in_domain, and is judged."""
+    fresh_url = "https://pool-reentry.example/fresh"
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                fresh_url: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "in_domain",
+                    "first_seen": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    extracts_path.write_text(
+        json.dumps(
+            {
+                fresh_url: {
+                    "seniority": None,
+                    "work_model": None,
+                    "contract_type": None,
+                    "key_skills": [],
+                    "key_responsibilities": [],
+                    "must_have_requirements": [],
+                    "notable_caveats": "",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    today = _date.today()
+    judge_candidates: list[JudgeCandidate] = []
+
+    class _FreshPoolParser(_StubParserBase):
+        def __enter__(self) -> "_FreshPoolParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=fresh_url, title="Fresh Pool Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(
+                stub=stub,
+                raw_description="fresh pool job",
+                posted_date=today,
+            )
+
+    class _JudgeTrackingExtractor:
+        def classify_relevance_batch(
+            self, items: list[ClassifyItem]
+        ) -> tuple[list[RelevanceVerdict], CallUsage]:
+            return [
+                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
+            ], _ZERO_USAGE
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            judge_candidates.extend(candidates)
+            return [
+                MatchVerdict(matched=[], missing=[], summary="ok", rank=i + 1, id=c.id)
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_JudgeTrackingExtractor(),
+        parser_registry=lambda _: _FreshPoolParser,  # type: ignore[return-value]
+    )
+
+    seen_data_after = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data_after[fresh_url]["status"] != "expired"
+    assert any(c.id == fresh_url for c in judge_candidates)
+
+
+def test_freshness_pool_reentry_evaluation_appears_in_transcripts(
+    tmp_path: Path,
+) -> None:
+    """Pool re-discovery freshness evaluations appear in pipeline_freshness.transcripts.jsonl."""
+    import application_pipeline.parser_log as parser_log
+
+    stale_url = "https://pool-reentry.example/transcript-stale"
+    seen_path = tmp_path / ".seen.json"
+    seen_path.write_text(
+        json.dumps(
+            {
+                stale_url: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "in_domain",
+                    "first_seen": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
+    today = _date.today()
+
+    class _StaleTranscriptParser(_StubParserBase):
+        def __enter__(self) -> "_StaleTranscriptParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=stale_url, title="Pool Transcript Job", source="stub")
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(
+                stub=stub,
+                raw_description="stale pool",
+                posted_date=today - _timedelta(days=500),
+            )
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StaleTranscriptParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    transcripts_file = logs_dir / "pipeline_freshness.transcripts.jsonl"
+    assert transcripts_file.exists()
+    rows = [
+        json.loads(line)
+        for line in transcripts_file.read_text(encoding="utf-8").splitlines()
+    ]
+    by_url = {row["url"]: row for row in rows}
+    assert stale_url in by_url
+    row = by_url[stale_url]
+    assert row["passes"] is False
+    assert row["reason"] == "too_old"
+    assert "age_days" in row
+    assert "anchored_today" in row
+
+
+def test_freshness_pool_reentry_expired_does_not_write_failure_report(
+    tmp_path: Path,
+) -> None:
+    """in_domain → expired transition on pool re-discovery does not produce a Failure Report."""
+    stale_url = "https://pool-reentry.example/no-failure"
+    seen_path = tmp_path / ".seen.json"
+    seen_path.write_text(
+        json.dumps(
+            {
+                stale_url: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "in_domain",
+                    "first_seen": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    today = _date.today()
+
+    class _StaleNoFailureParser(_StubParserBase):
+        def __enter__(self) -> "_StaleNoFailureParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=stale_url, title="No Failure Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(
+                stub=stub,
+                raw_description="stale",
+                posted_date=today - _timedelta(days=500),
+            )
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StaleNoFailureParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    failures_dir = tmp_path / "failures"
+    assert not failures_dir.exists() or list(failures_dir.iterdir()) == []
+
+
+def test_freshness_pool_reentry_counted_in_run_complete_event(tmp_path: Path) -> None:
+    """Pool re-discovery evaluations appear in pipeline_freshness run_complete counts."""
+    import application_pipeline.parser_log as parser_log
+
+    stale_url = "https://pool-reentry.example/count"
+    seen_path = tmp_path / ".seen.json"
+    seen_path.write_text(
+        json.dumps(
+            {
+                stale_url: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "in_domain",
+                    "first_seen": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
+    today = _date.today()
+
+    class _StaleCountParser(_StubParserBase):
+        def __enter__(self) -> "_StaleCountParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=stale_url, title="Count Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(
+                stub=stub,
+                raw_description="stale",
+                posted_date=today - _timedelta(days=500),
+            )
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StaleCountParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    events_file = logs_dir / "pipeline_freshness.events.jsonl"
+    rows = [
+        json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    run_complete = next(r for r in rows if r.get("event") == "run_complete")
+    assert run_complete["too_old"] == 1
+    assert run_complete["passed"] == 0

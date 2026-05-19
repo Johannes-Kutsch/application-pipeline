@@ -589,7 +589,33 @@ class _OutboundDispatcher:
                     self._metrics.unparseable_date(pid)
             self._metrics.enriched(pid)
             if wrapper.judge_resume:
-                self._pool_collector.add_judge_pending(payload)
+                freshness = _evaluate_freshness(
+                    payload, self._anchored_today, self._max_listing_age_days
+                )
+                self._run_log.transcript(
+                    "pipeline_freshness",
+                    {
+                        "url": payload.stub.url,
+                        "title": payload.title,
+                        "source": payload.stub.source,
+                        "posted_date": payload.posted_date.isoformat()
+                        if payload.posted_date is not None
+                        else None,
+                        "deadline": payload.deadline.isoformat()
+                        if payload.deadline is not None
+                        else None,
+                        "anchored_today": self._anchored_today.isoformat(),
+                        "age_days": freshness.age_days,
+                        "passes": freshness.passes,
+                        "reason": freshness.reason,
+                    },
+                )
+                self._freshness_counts[freshness.reason] += 1
+                if freshness.passes:
+                    self._pool_collector.add_judge_pending(payload)
+                else:
+                    self._dedup.mark_expired(payload.stub)
+                    self._metrics.freshness_dropped()
             else:
                 verdict = classify_position(payload, self._blacklist)
                 self._run_log.event(

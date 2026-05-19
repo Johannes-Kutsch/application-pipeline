@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from application_pipeline.dedup import RunScopedSeenResult
-from application_pipeline.llm.types import CallUsage, MatchTier
+from application_pipeline.llm.types import CallUsage
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter import PreFilterVerdict, TermMatch
 from application_pipeline.status_display import StatusDisplay
@@ -41,9 +41,6 @@ class RunSummary:
     judge_resumed: int = 0
     classifier_dropped: int = 0
     written: int = 0
-    green: int = 0
-    amber: int = 0
-    red: int = 0
     enrich_failed: int = 0
     external_redirects: int = 0
     errored: int = 0
@@ -135,9 +132,6 @@ class RunMetrics:
         self._judge_cache_read_tokens = 0
         self._judge_cost_usd = 0.0
         self._written = 0
-        self._green = 0
-        self._amber = 0
-        self._red = 0
         self._written_per_source: dict[str, int] = {}
         self._judge_errored = 0
 
@@ -390,7 +384,7 @@ class RunMetrics:
             body = self._judge_body()
         self._display.update_body("llm_judge_match", body=body)
 
-    def judge_complete(self, usage: CallUsage, tier: MatchTier, source: str) -> None:
+    def judge_complete(self, usage: CallUsage, source: str) -> None:
         with self._lock:
             self._judge_calls += 1
             self._judge_input_tokens += usage.input_tokens
@@ -402,12 +396,6 @@ class RunMetrics:
             self._written_per_source[source] = (
                 self._written_per_source.get(source, 0) + 1
             )
-            if tier == MatchTier.green:
-                self._green += 1
-            elif tier == MatchTier.amber:
-                self._amber += 1
-            else:
-                self._red += 1
             body = self._judge_body()
         self._display.update_body("llm_judge_match", body=body)
 
@@ -586,9 +574,6 @@ class RunMetrics:
                 judge_resumed=self._judge_resumed,
                 classifier_dropped=self._classifier_dropped,
                 written=self._written,
-                green=self._green,
-                amber=self._amber,
-                red=self._red,
                 enrich_failed=self._enrich_failed,
                 external_redirects=self._external_redirects,
                 errored=self._judge_errored + self._classify_items_errored,
@@ -613,9 +598,6 @@ class RunMetrics:
             classify_total_s = self._classify_total_s
             judge_calls = self._judge_calls
             judge_failed = self._judge_failed
-            green = self._green
-            amber = self._amber
-            red = self._red
             judge_input_tokens = self._judge_input_tokens
             judge_output_tokens = self._judge_output_tokens
             judge_cache_read_tokens = self._judge_cache_read_tokens
@@ -650,9 +632,6 @@ class RunMetrics:
             {
                 "judges_sent": judge_calls,
                 "judges_failed": judge_failed,
-                "green": green,
-                "amber": amber,
-                "red": red,
                 "input_tokens": judge_input_tokens,
                 "output_tokens": judge_output_tokens,
                 "cache_read_tokens": judge_cache_read_tokens,
@@ -718,7 +697,6 @@ class RunMetrics:
         finished = self._judge_calls + self._judge_failed
         result = (
             f"{finished}/{self._judge_started} calls"
-            f" · green={self._green} amber={self._amber} red={self._red}"
             f" · {self._pending_judge} items in queue"
         )
         if self._judge_failed > 0:

@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from application_pipeline import Layout, MatchTier, MatchVerdict
+from application_pipeline import Layout, MatchVerdict
 from application_pipeline.parsers.types import Position, PositionStub
 from application_pipeline.renderer import render
 
@@ -10,8 +10,6 @@ from application_pipeline.renderer import render
 @pytest.fixture
 def layout() -> Layout:
     return Layout(
-        tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
-        tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
         placeholder_groups={},
         card_template="",
     )
@@ -39,7 +37,6 @@ def position(stub: PositionStub) -> Position:
 @pytest.fixture
 def green_verdict() -> MatchVerdict:
     return MatchVerdict(
-        tier=MatchTier.green,
         matched=["Python", "Data Engineering"],
         missing=["Rust"],
         summary="Strong fit overall.",
@@ -49,7 +46,6 @@ def green_verdict() -> MatchVerdict:
 @pytest.fixture
 def amber_verdict() -> MatchVerdict:
     return MatchVerdict(
-        tier=MatchTier.amber,
         matched=["Python"],
         missing=["Rust", "Go"],
         summary="Partial fit.",
@@ -59,7 +55,6 @@ def amber_verdict() -> MatchVerdict:
 @pytest.fixture
 def red_verdict() -> MatchVerdict:
     return MatchVerdict(
-        tier=MatchTier.red,
         matched=[],
         missing=["Rust", "C++"],
         summary="Poor fit.",
@@ -72,8 +67,6 @@ def red_verdict() -> MatchVerdict:
 def test_layout_has_no_headline_template() -> None:
     assert not hasattr(
         Layout(
-            tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
-            tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
             placeholder_groups={},
             card_template="",
         ),
@@ -91,8 +84,6 @@ def test_card_h1_is_location_led(
         position,
         green_verdict,
         Layout(
-            tier_emoji={"green": "🟢", "amber": "🟡", "red": "🔴"},
-            tier_color={"green": "#2ea043", "amber": "#d29922", "red": "#da3633"},
             placeholder_groups={},
             card_template="",
         ),
@@ -501,7 +492,6 @@ def test_render_includes_default_rank(
 
 def test_render_reflects_explicit_rank(layout: Layout, position: Position) -> None:
     verdict = MatchVerdict(
-        tier=MatchTier.green,
         matched=[],
         missing=[],
         summary="ok",

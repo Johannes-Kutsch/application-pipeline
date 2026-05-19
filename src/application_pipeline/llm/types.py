@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from enum import Enum
 from typing import Literal, Protocol, runtime_checkable
 
 
@@ -31,12 +30,6 @@ class ExtractorSchemaError(ExtractorError):
 
 class ExtractorBatchMalformedError(ExtractorError):
     pass
-
-
-class MatchTier(str, Enum):
-    green = "green"
-    amber = "amber"
-    red = "red"
 
 
 @dataclass(frozen=True)
@@ -76,11 +69,16 @@ class RelevanceVerdict:
             raise ExtractorSchemaError(
                 f"in_domain must be bool, got {type(self.in_domain).__name__}"
             )
+        if self.in_domain and self.extract is None:
+            raise ExtractorSchemaError(
+                "extract must not be None when in_domain is True"
+            )
+        if not self.in_domain and self.extract is not None:
+            raise ExtractorSchemaError("extract must be None when in_domain is False")
 
 
 @dataclass(frozen=True)
 class MatchVerdict:
-    tier: MatchTier
     matched: list[str]
     missing: list[str]
     summary: str
@@ -88,8 +86,6 @@ class MatchVerdict:
     id: str = ""
 
     def __post_init__(self) -> None:
-        if not isinstance(self.tier, MatchTier):
-            raise ExtractorSchemaError(f"tier must be a MatchTier, got {self.tier!r}")
         if len(self.matched) > 10 or len(self.missing) > 10:
             raise ExtractorSchemaError(
                 "matched/missing must have at most 10 entries each"
@@ -114,10 +110,6 @@ class LLMExtractor(Protocol):
     def classify_relevance_batch(
         self, items: list[ClassifyItem]
     ) -> tuple[list[RelevanceVerdict], CallUsage]: ...
-
-    def judge_match(
-        self, raw_description: str, *, stub_url: str = ""
-    ) -> tuple[MatchVerdict, CallUsage]: ...
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]

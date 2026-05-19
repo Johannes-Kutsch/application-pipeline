@@ -20,10 +20,8 @@ from .types import (
     ExtractorBatchMalformedError,
     ExtractorError,
     ExtractorMalformedJSONError,
-    ExtractorSchemaError,
     ExtractorUnreachableError,
     JudgeCandidate,
-    MatchTier,
     MatchVerdict,
     RelevanceVerdict,
     StructuredExtract,
@@ -90,15 +88,6 @@ _CLASSIFY_SITE = _CallSite(
     protocol_error_cls=ExtractorBatchMalformedError,
 )
 
-_JUDGE_SITE = _CallSite(
-    call="judge_match",
-    component_id="llm_judge_match",
-    tag="verdict",
-    model=_JUDGE_MODEL,
-    effort=_JUDGE_EFFORT,
-    protocol_error_cls=ExtractorMalformedJSONError,
-)
-
 _JUDGE_TOP_N_SITE = _CallSite(
     call="judge_top_n",
     component_id="llm_judge_match",
@@ -137,30 +126,6 @@ class ClaudeExtractor:
         )
         usage = self._usage_from(response)
         return self._parse_batch_response(parsed, items), usage
-
-    def judge_match(
-        self, raw_description: str, *, stub_url: str = ""
-    ) -> tuple[MatchVerdict, CallUsage]:
-        prompt = self._prompts.judge_match.render(
-            skills=self._skills_block,
-            raw_description=_strip_boilerplate(raw_description),
-        )
-        data, response = self._invoke(_JUDGE_SITE, prompt, {"stub_url": stub_url})
-        usage = self._usage_from(response)
-        try:
-            return (
-                MatchVerdict(
-                    tier=MatchTier(data["tier"]),
-                    matched=list(data["matched"])[:10],
-                    missing=list(data["missing"])[:10],
-                    summary=str(data["summary"]),
-                ),
-                usage,
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ExtractorSchemaError(
-                f"judge_match: failed to validate Claude response: {exc}"
-            ) from exc
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
@@ -385,7 +350,6 @@ class ClaudeExtractor:
                 )
             try:
                 verdict = MatchVerdict(
-                    tier=MatchTier.green,
                     matched=list(entry["matched"])[:10],
                     missing=list(entry["missing"])[:10],
                     summary=str(entry["summary"]),

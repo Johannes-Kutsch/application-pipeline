@@ -19,7 +19,5 @@ class LayoutError(UserSettingsError):
 
 @dataclass(frozen=True)
 class Layout:
-    tier_emoji: dict[str, str]
-    tier_color: dict[str, str]
     placeholder_groups: dict[str, tuple[str, list[str]]]
     card_template: str

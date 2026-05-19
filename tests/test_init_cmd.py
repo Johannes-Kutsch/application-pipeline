@@ -110,8 +110,6 @@ def test_layout_template_loads_successfully(tmp_path: Path) -> None:
     layout = load_layout(tmp_path / "layout.py")
 
     assert isinstance(layout, Layout)
-    assert set(layout.tier_emoji) == {"green", "amber", "red"}
-    assert set(layout.tier_color) == {"green", "amber", "red"}
 
 
 # --- User-info file seeding ---

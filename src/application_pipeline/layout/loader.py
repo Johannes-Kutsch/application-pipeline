@@ -1,8 +1,7 @@
-import dataclasses
 import pathlib
 from datetime import date
 
-from application_pipeline.llm.types import MatchTier, MatchVerdict
+from application_pipeline.llm.types import MatchVerdict
 from application_pipeline.parsers.types import Position, PositionStub
 from application_pipeline.renderer import render
 from application_pipeline.user_settings import load_user_module
@@ -10,13 +9,9 @@ from application_pipeline.user_settings import load_user_module
 from .types import Layout, LayoutError
 
 _REQUIRED_FIELDS = (
-    "TIER_EMOJI",
-    "TIER_COLOR",
     "PLACEHOLDER_GROUPS",
     "CARD_TEMPLATE",
 )
-
-_TIERS = frozenset({"green", "amber", "red"})
 
 # Fields that may appear in PLACEHOLDER_GROUPS.
 # Excludes renderer-derived fields (emoji, color, tier, number),
@@ -75,7 +70,6 @@ _SPARSE_POSITION = Position(
 )
 
 _SMOKE_VERDICT = MatchVerdict(
-    tier=MatchTier.green,
     matched=["Python", "FastAPI"],
     missing=["Kubernetes"],
     summary="Good candidate.",
@@ -95,8 +89,6 @@ def load(path: pathlib.Path) -> Layout:
             )
 
     layout = Layout(
-        tier_emoji=module.TIER_EMOJI,
-        tier_color=module.TIER_COLOR,
         placeholder_groups=module.PLACEHOLDER_GROUPS,
         card_template=module.CARD_TEMPLATE,
     )
@@ -106,38 +98,6 @@ def load(path: pathlib.Path) -> Layout:
 
 
 def _validate(layout: Layout, resolved_path: pathlib.Path) -> None:
-    missing_emoji = _TIERS - set(layout.tier_emoji)
-    if missing_emoji:
-        raise LayoutError(
-            f"'TIER_EMOJI' at {resolved_path}: missing tiers: {', '.join(sorted(missing_emoji))}",
-            field="TIER_EMOJI",
-            resolved_path=resolved_path,
-        )
-
-    extra_emoji = set(layout.tier_emoji) - _TIERS
-    if extra_emoji:
-        raise LayoutError(
-            f"'TIER_EMOJI' at {resolved_path}: unknown tiers: {', '.join(sorted(extra_emoji))}",
-            field="TIER_EMOJI",
-            resolved_path=resolved_path,
-        )
-
-    missing_color = _TIERS - set(layout.tier_color)
-    if missing_color:
-        raise LayoutError(
-            f"'TIER_COLOR' at {resolved_path}: missing tiers: {', '.join(sorted(missing_color))}",
-            field="TIER_COLOR",
-            resolved_path=resolved_path,
-        )
-
-    extra_color = set(layout.tier_color) - _TIERS
-    if extra_color:
-        raise LayoutError(
-            f"'TIER_COLOR' at {resolved_path}: unknown tiers: {', '.join(sorted(extra_color))}",
-            field="TIER_COLOR",
-            resolved_path=resolved_path,
-        )
-
     for group_name, (_, fields) in layout.placeholder_groups.items():
         for field in fields:
             if field not in _GROUPABLE_FIELDS:
@@ -154,12 +114,10 @@ def _smoke_test(layout: Layout, resolved_path: pathlib.Path) -> None:
         ("sparse", _SPARSE_POSITION),
     ]
     for density, position in fixtures:
-        for tier in MatchTier:
-            verdict = dataclasses.replace(_SMOKE_VERDICT, tier=tier)
-            try:
-                render(position, verdict, layout)
-            except Exception as exc:
-                raise LayoutError(
-                    f"smoke-test failed for {density} × {tier.value} at {resolved_path}: {exc}",
-                    resolved_path=resolved_path,
-                ) from exc
+        try:
+            render(position, _SMOKE_VERDICT, layout)
+        except Exception as exc:
+            raise LayoutError(
+                f"smoke-test failed for {density} at {resolved_path}: {exc}",
+                resolved_path=resolved_path,
+            ) from exc

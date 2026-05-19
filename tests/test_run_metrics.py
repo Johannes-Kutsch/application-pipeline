@@ -9,7 +9,7 @@ import pytest
 
 from fake_status_display import FakeStatusDisplay
 
-from application_pipeline.llm.types import CallUsage, MatchTier
+from application_pipeline.llm.types import CallUsage
 from application_pipeline.orchestrator import RunSummary
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter import PreFilterVerdict, TermMatch
@@ -304,13 +304,13 @@ def test_judge_body_no_errors(run_log: RunLog) -> None:
     usage = _make_usage()
     metrics.judge_enqueued()
     metrics.judge_dequeued()
-    metrics.judge_complete(usage, tier=MatchTier.green, source="linkedin")
+    metrics.judge_complete(usage, source="linkedin")
     metrics.judge_enqueued()
     metrics.judge_dequeued()
-    metrics.judge_complete(usage, tier=MatchTier.amber, source="indeed")
+    metrics.judge_complete(usage, source="indeed")
 
     body = _last_body(display, "llm_judge_match")
-    assert body == "2/2 calls · green=1 amber=1 red=0 · 0 items in queue"
+    assert body == "2/2 calls · 0 items in queue"
     assert "calls_failed" not in body
 
 
@@ -349,10 +349,10 @@ def test_judge_body_idle_steady_state_uses_calls_and_items_in_queue(
     usage = _make_usage()
     metrics.judge_enqueued()
     metrics.judge_dequeued()
-    metrics.judge_complete(usage, tier=MatchTier.green, source="linkedin")
+    metrics.judge_complete(usage, source="linkedin")
 
     body = _last_body(display, "llm_judge_match")
-    assert body == "1/1 calls · green=1 amber=0 red=0 · 0 items in queue"
+    assert body == "1/1 calls · 0 items in queue"
 
 
 def test_judge_body_denominator_unchanged_before_dequeue(run_log: RunLog) -> None:
@@ -364,7 +364,7 @@ def test_judge_body_denominator_unchanged_before_dequeue(run_log: RunLog) -> Non
 
     body = _last_body(display, "llm_judge_match")
     # denominator stays at 0 until the worker dequeues; queue increments to 1
-    assert body == "0/0 calls · green=0 amber=0 red=0 · 1 items in queue"
+    assert body == "0/0 calls · 1 items in queue"
 
 
 def test_judge_body_dequeue_increments_denominator_and_decrements_queue(
@@ -379,7 +379,7 @@ def test_judge_body_dequeue_increments_denominator_and_decrements_queue(
 
     body = _last_body(display, "llm_judge_match")
     # denominator=1 (started), queue=0 (dequeued), numerator still 0 (in flight)
-    assert body == "0/1 calls · green=0 amber=0 red=0 · 0 items in queue"
+    assert body == "0/1 calls · 0 items in queue"
 
 
 def test_judge_body_failure_increments_numerator_and_shows_calls_failed(
@@ -394,9 +394,7 @@ def test_judge_body_failure_increments_numerator_and_shows_calls_failed(
     metrics.judge_failed()
 
     body = _last_body(display, "llm_judge_match")
-    assert (
-        body == "1/1 calls · green=0 amber=0 red=0 · 0 items in queue · calls_failed=1"
-    )
+    assert body == "1/1 calls · 0 items in queue · calls_failed=1"
 
 
 # ---------------------------------------------------------------------------
@@ -504,7 +502,7 @@ def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> Run
     )
     metrics.judge_enqueued()
     metrics.judge_dequeued()
-    metrics.judge_complete(judge_usage, tier=MatchTier.green, source="linkedin")
+    metrics.judge_complete(judge_usage, source="linkedin")
 
     return metrics
 
@@ -570,7 +568,7 @@ def test_format_run_divider_with_sources(run_log: RunLog) -> None:
     usage = _make_usage()
     metrics.judge_enqueued()
     metrics.judge_dequeued()
-    metrics.judge_complete(usage, MatchTier.green, "linkedin")
+    metrics.judge_complete(usage, "linkedin")
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 10.0)
     assert "sources=linkedin:1" in result
@@ -740,9 +738,6 @@ def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
     assert summary.prefilter_blacklist_hits == 1
     assert summary.classifier_dropped == 1
     assert summary.written == 1
-    assert summary.green == 1
-    assert summary.amber == 0
-    assert summary.red == 0
     assert summary.enrich_failed == 1
     assert summary.external_redirects == 1
     assert summary.errored == 0
@@ -785,7 +780,6 @@ def test_summarize_to_parser_log_writes_classify_and_judge_summaries(
     assert "in_domain=1" in run_log_text
     assert "off_domain=1" in run_log_text
     assert "judges_sent=1" in run_log_text
-    assert "green=1" in run_log_text
 
 
 def test_summarize_to_parser_log_uses_started_at_timestamp(tmp_path: Path) -> None:
@@ -837,7 +831,7 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
             metrics.classify_batch_complete(usage, items=1, classifier_dropped=0)
             metrics.judge_enqueued()
             metrics.judge_dequeued()
-            metrics.judge_complete(usage, MatchTier.green, "src")
+            metrics.judge_complete(usage, "src")
 
     threads = [threading.Thread(target=worker) for _ in range(n_threads)]
     for t in threads:
@@ -855,7 +849,6 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
     assert summary.prefilter_considered == total * 2
     assert summary.enrich_failed == total
     assert summary.written == total
-    assert summary.green == total
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
     assert f"kept={total}" in result

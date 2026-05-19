@@ -21,7 +21,6 @@ from application_pipeline.llm import (
     ExtractorError,
     ExtractorUnreachableError,
     JudgeCandidate,
-    MatchTier,
     MatchVerdict,
     RelevanceVerdict,
 )
@@ -112,7 +111,6 @@ def _stub_extractor() -> MagicMock:
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -166,9 +164,6 @@ def test_zero_summary_on_empty_run(tmp_path: Path) -> None:
     assert summary.written == 0
     assert summary.classifier_dropped == 0
     assert summary.prefilter_dropped == 0
-    assert summary.green == 0
-    assert summary.amber == 0
-    assert summary.red == 0
     assert summary.duration_seconds >= 0.0
 
 
@@ -907,13 +902,6 @@ def test_prefilter_events_jsonl_written_per_decision(tmp_path: Path) -> None:
 _STUB_URLS_LLM = [f"https://stub.example/llm/{i}" for i in range(6)]
 _PF_REJECTED_LLM_URL = _STUB_URLS_LLM[0]  # prefilter rejects: "excluded" in title
 _CLS_REJECTED_LLM_URL = _STUB_URLS_LLM[1]  # classifier rejects: title "Job 1"
-# URLs 2-5 are judged with tiers: green, amber, red, amber
-_LLM_JUDGE_TIERS = {
-    _STUB_URLS_LLM[2]: MatchTier.green,
-    _STUB_URLS_LLM[3]: MatchTier.amber,
-    _STUB_URLS_LLM[4]: MatchTier.red,
-    _STUB_URLS_LLM[5]: MatchTier.amber,
-}
 
 
 class _LLMStubParser(_StubParserBase):
@@ -975,32 +963,15 @@ class _FakeExtractor:
     def judge_match(
         self, raw_description: str, *, stub_url: str = ""
     ) -> tuple[MatchVerdict, CallUsage]:
-        # Extract job index from description ("description for job N")
-        for idx, url in enumerate(_STUB_URLS_LLM):
-            if f"job {idx}" in raw_description:
-                tier = _LLM_JUDGE_TIERS.get(url, MatchTier.green)
-                return MatchVerdict(
-                    tier=tier, matched=[], missing=[], summary="ok"
-                ), _FAKE_JUDGE_USAGE
-        return MatchVerdict(
-            tier=MatchTier.green, matched=[], missing=[], summary="ok"
-        ), _FAKE_JUDGE_USAGE
+        return MatchVerdict(matched=[], missing=[], summary="ok"), _FAKE_JUDGE_USAGE
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
     ) -> tuple[list[MatchVerdict], CallUsage]:
-        # Return a verdict for each candidate using the same tier logic as judge_match
         verdicts = []
         for i, c in enumerate(candidates[:5]):
-            tier = MatchTier.green
-            for idx, url in enumerate(_STUB_URLS_LLM):
-                if c.id == url:
-                    tier = _LLM_JUDGE_TIERS.get(url, MatchTier.green)
-                    break
             verdicts.append(
-                MatchVerdict(
-                    tier=tier, matched=[], missing=[], summary="ok", rank=i + 1, id=c.id
-                )
+                MatchVerdict(matched=[], missing=[], summary="ok", rank=i + 1, id=c.id)
             )
         return verdicts, _FAKE_JUDGE_USAGE
 
@@ -1030,9 +1001,6 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     assert summary.prefilter_dropped == 1
     assert summary.classifier_dropped == 1
     assert summary.written == 4
-    assert summary.green == 0
-    assert summary.amber == 0
-    assert summary.red == 0
 
     # .seen.json: 2 out_of_domain, 4 selected_by_judge
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1087,9 +1055,6 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     assert second.prefilter_dropped == 0
     assert second.classifier_dropped == 0
     assert second.written == 0
-    assert second.green == 0
-    assert second.amber == 0
-    assert second.red == 0
 
     # No new position entries added on second run
     numbers_after_second = re.findall(
@@ -1116,9 +1081,7 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             call_log.append("judge_match")
             return (
-                MatchVerdict(
-                    tier=MatchTier.green, matched=[], missing=[], summary="ok"
-                ),
+                MatchVerdict(matched=[], missing=[], summary="ok"),
                 _ZERO_USAGE,
             )
 
@@ -1128,7 +1091,6 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
             call_log.append("judge_top_n")
             return [
                 MatchVerdict(
-                    tier=MatchTier.green,
                     matched=[],
                     missing=[],
                     summary="ok",
@@ -1243,7 +1205,6 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -1698,9 +1659,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
             self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:
             return (
-                MatchVerdict(
-                    tier=MatchTier.green, matched=[], missing=[], summary="ok"
-                ),
+                MatchVerdict(matched=[], missing=[], summary="ok"),
                 _ZERO_USAGE,
             )
 
@@ -1709,7 +1668,6 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
         ) -> tuple[list[MatchVerdict], CallUsage]:
             return [
                 MatchVerdict(
-                    tier=MatchTier.green,
                     matched=[],
                     missing=[],
                     summary="ok",
@@ -1886,9 +1844,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
             self, raw_description: str, *, stub_url: str = ""
         ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
             return (
-                MatchVerdict(
-                    tier=MatchTier.green, matched=[], missing=[], summary="ok"
-                ),
+                MatchVerdict(matched=[], missing=[], summary="ok"),
                 _ZERO_USAGE,
             )
 
@@ -1899,7 +1855,6 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
                 judge_candidate_ids.append(c.id)
             return [
                 MatchVerdict(
-                    tier=MatchTier.green,
                     matched=[],
                     missing=[],
                     summary="ok",
@@ -2776,7 +2731,6 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -2950,7 +2904,6 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -3020,7 +2973,6 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         judge_candidate_ids.append([c.id for c in candidates])
         return [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -3089,7 +3041,6 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -3414,9 +3365,6 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
     for key in (
         "judges_sent=",
         "judges_failed=",
-        "green=",
-        "amber=",
-        "red=",
         "input_tokens=",
         "output_tokens=",
         "cache_read_tokens=",
@@ -4421,7 +4369,6 @@ def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -4778,7 +4725,6 @@ def test_quota_classify_retries_and_completes(
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -4833,7 +4779,6 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -4888,7 +4833,6 @@ def test_quota_judge_retries_and_completes(
             )
         return [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="ok",
@@ -4961,7 +4905,6 @@ def test_successful_run_writes_dated_daily_file(tmp_path: Path) -> None:
     ext.judge_top_n.return_value = (
         [
             MatchVerdict(
-                tier=MatchTier.green,
                 matched=[],
                 missing=[],
                 summary="great match",

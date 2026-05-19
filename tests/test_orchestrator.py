@@ -960,11 +960,6 @@ class _FakeExtractor:
         ]
         return verdicts, _FAKE_CLASSIFY_USAGE
 
-    def judge_match(
-        self, raw_description: str, *, stub_url: str = ""
-    ) -> tuple[MatchVerdict, CallUsage]:
-        return MatchVerdict(matched=[], missing=[], summary="ok"), _FAKE_JUDGE_USAGE
-
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
     ) -> tuple[list[MatchVerdict], CallUsage]:
@@ -1075,15 +1070,6 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
             return [
                 RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
             ], _ZERO_USAGE
-
-        def judge_match(
-            self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
-            call_log.append("judge_match")
-            return (
-                MatchVerdict(matched=[], missing=[], summary="ok"),
-                _ZERO_USAGE,
-            )
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
@@ -1655,14 +1641,6 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
                 RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
             ], _ZERO_USAGE
 
-        def judge_match(
-            self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:
-            return (
-                MatchVerdict(matched=[], missing=[], summary="ok"),
-                _ZERO_USAGE,
-            )
-
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
         ) -> tuple[list[MatchVerdict], CallUsage]:
@@ -1839,14 +1817,6 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
             return [
                 RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
             ], _ZERO_USAGE
-
-        def judge_match(
-            self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
-            return (
-                MatchVerdict(matched=[], missing=[], summary="ok"),
-                _ZERO_USAGE,
-            )
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
@@ -2298,11 +2268,6 @@ def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
             self, items: list[ClassifyItem]
         ) -> tuple[list[RelevanceVerdict], CallUsage]:
             raise RuntimeError("unexpected crash escaping main path")
-
-        def judge_match(
-            self, raw_description: str, *, stub_url: str = ""
-        ) -> tuple[MatchVerdict, CallUsage]:  # pragma: no cover
-            raise NotImplementedError
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]

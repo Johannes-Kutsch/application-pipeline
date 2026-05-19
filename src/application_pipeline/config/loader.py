@@ -69,6 +69,13 @@ def load(path: pathlib.Path) -> Config:
     if claude_classify_batch_size < 1:
         raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be >= 1")
 
+    raw_max_age = getattr(module, "MAX_LISTING_AGE_DAYS", 180)
+    if isinstance(raw_max_age, bool) or not isinstance(raw_max_age, int):
+        raise ConfigError("MAX_LISTING_AGE_DAYS must be an integer")
+    max_listing_age_days = raw_max_age
+    if max_listing_age_days < 1:
+        raise ConfigError("MAX_LISTING_AGE_DAYS must be >= 1")
+
     if hasattr(module, "INCLUSION_KEYWORDS"):
         _log.info(
             "config has unused field 'INCLUSION_KEYWORDS' — safe to remove, see ADR-0026"
@@ -91,6 +98,7 @@ def load(path: pathlib.Path) -> Config:
         judge_match_prompt=judge_match_prompt,
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
         claude_classify_batch_size=claude_classify_batch_size,
+        max_listing_age_days=max_listing_age_days,
     )
     _validate(config)
     return config

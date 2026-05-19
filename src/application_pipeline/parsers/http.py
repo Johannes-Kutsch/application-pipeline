@@ -76,43 +76,34 @@ class ParserHttp:
         )
 
     def _real_http_get(self, url: str, timeout: float) -> bytes:
-        component_id = "parser_http"
         resp = self._client.get(url, timeout=timeout)
         if resp.is_success:
             return resp.content
         status = resp.status_code
+        classified = self._classify_failure(status, url)
+        if classified is None:
+            # Retryable — let httpx raise so the retry loop handles it.
+            resp.raise_for_status()
+            return resp.content  # unreachable
+        reason, fatal = classified
+        event = "http_get_fatal" if fatal else "http_get_skipped"
+        self._run_log.event("parser_http", event, url=url, status=status, reason=reason)
+        raise (HttpParserFatalError if fatal else HttpStubNotRetryableError)(reason)
+
+    @staticmethod
+    def _classify_failure(status: int, url: str) -> tuple[str, bool] | None:
+        """Returns (reason, fatal) for non-retryable statuses, or None if retryable."""
         if status == 404:
-            reason = f"not found: {url}"
-            self._run_log.event(
-                component_id, "http_get_skipped", url=url, status=status, reason=reason
-            )
-            raise HttpStubNotRetryableError(reason)
+            return f"not found: {url}", False
         if status in (400, 422):
-            reason = f"malformed: {url} status={status}"
-            self._run_log.event(
-                component_id, "http_get_skipped", url=url, status=status, reason=reason
-            )
-            raise HttpStubNotRetryableError(reason)
+            return f"malformed: {url} status={status}", False
         if status in (401, 403):
-            reason = f"auth: {url} status={status}"
-            self._run_log.event(
-                component_id, "http_get_fatal", url=url, status=status, reason=reason
-            )
-            raise HttpParserFatalError(reason)
+            return f"auth: {url} status={status}", True
         if 500 <= status < 600 and status not in RETRY_STATUSES:
-            reason = f"upstream: {url} status={status}"
-            self._run_log.event(
-                component_id, "http_get_fatal", url=url, status=status, reason=reason
-            )
-            raise HttpParserFatalError(reason)
+            return f"upstream: {url} status={status}", True
         if status not in RETRY_STATUSES:
-            reason = f"unexpected: {url} status={status}"
-            self._run_log.event(
-                component_id, "http_get_fatal", url=url, status=status, reason=reason
-            )
-            raise HttpParserFatalError(reason)
-        resp.raise_for_status()
-        return resp.content  # unreachable — raise_for_status always raises for non-2xx
+            return f"unexpected: {url} status={status}", True
+        return None
 
     def _get_with_retry(self, url: str) -> bytes:
         component_id = "parser_http"

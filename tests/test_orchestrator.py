@@ -25,6 +25,7 @@ from application_pipeline.llm import (
     RelevanceVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
+from application_pipeline.http import HttpParserFatalError, HttpStubNotRetryableError
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import (
     ExternalRedirect,
@@ -33,9 +34,8 @@ from application_pipeline.parsers import (
     Position,
     PositionStub,
 )
-from application_pipeline.parsers.types import City, Remote
-from application_pipeline.http import HttpParserFatalError, HttpStubNotRetryableError
 from application_pipeline.parsers.errors import ParserError
+from application_pipeline.parsers.types import City, Remote
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import (
     FILE_HEADER,

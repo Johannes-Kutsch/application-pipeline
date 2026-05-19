@@ -1,0 +1,118 @@
+% cv_template.tex — single source of truth for cover letter + resume.
+% Three outputs via the \BUILD flag:
+%   cover    → cover letter only (1 page)
+%   resume   → resume only       (2 pages)
+%   combined → both, separated   (3 pages, default)
+%
+% User-specific data (identity, contact, content pool, photo, signature) is
+% read from \UserDataDir/, which defaults to user-info.example so this
+% template compiles standalone. A build orchestrator overrides via
+%   pdflatex "\def\UserDataDir{<abs path>}\def\BUILD{combined}\input{cv_template}"
+%
+% See templates/README.md for the placeholder convention and content-pool format.
+
+\documentclass[11pt,a4paper,sans]{moderncv}
+
+\moderncvstyle{casual}
+\moderncvcolor{blue}
+
+\usepackage[ngerman]{babel}
+\usepackage[utf8x]{inputenc}
+\usepackage{enumitem}
+\usepackage{ragged2e}
+\usepackage{setspace}
+\usepackage{xpatch}
+\usepackage{etoolbox}
+\usepackage{graphicx}
+\usepackage[scale=0.75]{geometry}
+
+% Ported from cv_7.tex — remove the trailing dot moderncv appends to \cventry.
+\xpatchcmd{\cventry}{.\strut}{\strut}{}{}
+
+% Ported from cv_7.tex — tighter itemize spacing.
+\setlist[itemize]{itemsep=-0.2em}
+\setlist[itemize,2]{topsep=-0.4em}
+
+% Build flag and user-data directory — both overridable from the command line.
+\providecommand{\BUILD}{combined}
+\providecommand{\UserDataDir}{user-info.example}
+
+% Identity + contact come from \UserDataDir; signature/photo are referenced as files.
+\input{\UserDataDir/identity}
+\input{\UserDataDir/contact}
+
+% Override moderncv's letter-closing to inject the signature image automatically,
+% so the applicant never has to print/sign/scan an Anschreiben. This couples to
+% moderncv internals by design; a Tier-3 refactor of the class will absorb it.
+\renewcommand*{\makeletterclosing}{%
+  \vspace{1em}\closing\\[\medskipamount]%
+  \includegraphics[height=2.5em]{\UserDataDir/signature}\\%
+  \@firstname~\@familyname%
+}
+
+\setstretch{1}
+\begin{document}
+
+%----------------------------------------------------------------------------------------
+% COVER LETTER
+%----------------------------------------------------------------------------------------
+\ifdefstring{\BUILD}{resume}{}{%
+\clearpage
+\recipient{<<RECIPIENT_LINE_1>>}{<<RECIPIENT_LINE_2>>}
+\date{\today}
+\opening{<<OPENING>>}
+\closing{Mit freundlichen Grüßen,}
+
+\makelettertitle
+\setstretch{1.8}
+\vspace{-1em}
+\justify
+
+<<COVER_INTRO>>
+
+<<COVER_PIVOT>>
+
+<<COVER_FIT>>
+
+<<COVER_CLOSING>>
+
+\makeletterclosing
+
+\setstretch{1}
+\ifdefstring{\BUILD}{combined}{\newpage}{}%
+}
+
+%----------------------------------------------------------------------------------------
+% RESUME
+%----------------------------------------------------------------------------------------
+\ifdefstring{\BUILD}{cover}{}{%
+
+% Content-pool macros (\itemFoo, \itemBar, ...) — see content_pool format in README.
+\input{\UserDataDir/content_pool}
+
+\makecvtitle
+\vspace{-4.3em}
+
+\section{Persönliche Informationen}
+\cvitem{Name}{\@firstname{} \@familyname}
+\cvitem{Adresse}{<<ADDRESS_STREET>>, <<ADDRESS_CITY>>}
+\cvitem{Telefon}{<<PHONE>>}
+\cvitem{E-Mail}{<<EMAIL>>}
+\cvitem{GitHub}{<<GITHUB_URL>>}
+\cvitem{LinkedIn}{<<LINKEDIN_URL>>}
+
+% RESUME_BODY: ordered \section{...} + \itemFoo \itemBar blocks selected per Position.
+<<RESUME_BODY>>
+
+\section{Kenntnisse}
+<<SKILLS_BLOCK>>
+
+\section{Sprachen}
+<<LANGUAGES_BLOCK>>
+
+\section{Hobbies und Interessen}
+\renewcommand{\listitemsymbol}{-~}
+<<HOBBIES_BLOCK>>
+}
+
+\end{document}

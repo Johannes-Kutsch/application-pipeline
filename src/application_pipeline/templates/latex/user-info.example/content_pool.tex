@@ -1,0 +1,100 @@
+% content_pool.tex — example seed items showing the metadata-header convention.
+%
+% Each item is a single \newcommand whose body is one or more
+% \cventry / \subcventry / \cvitem calls. The LaTeX comment block above each
+% item is metadata the future /write-cv skill reads (without parsing TeX):
+%
+%   %%% ITEM: <macro-name-without-backslash>
+%   %%% section: <berufserfahrung | ausbildung | projects>
+%   %%% tags: [<free,comma,separated,labels>]   (reserve `always` for items that must appear in every application)
+%   %%% relevance: <jobtype>=<high|medium|low>, ...
+%   %%% summary: <one-line gist the orchestrator reasons over>
+%
+% This example pool is intentionally small (2 jobs, 2 degrees, 3 projects) to
+% keep the demo compile to ~3 pages. The real pool lives in
+% ~/application-pipeline/data/user-info/content_pool.tex and grows freely.
+
+% ----- Berufserfahrung -----
+
+%%% ITEM: itemJobExample1
+%%% section: berufserfahrung
+%%% tags: [industry, leadership]
+%%% relevance: games=high, mle=medium
+%%% summary: <<JOB_1_SUMMARY>>
+\newcommand{\itemJobExample1}{%
+  \cventry[0.5em]{<<JOB_1_DATES>>}{<<JOB_1_ROLE>>}{<<JOB_1_EMPLOYER>>}{}{}{%
+    \begin{itemize}
+      \item <<JOB_1_BULLET_1>>
+      \item <<JOB_1_BULLET_2>>
+      \item <<JOB_1_BULLET_3>>
+    \end{itemize}}%
+}
+
+%%% ITEM: itemJobExample2
+%%% section: berufserfahrung
+%%% tags: [freelance]
+%%% relevance: games=high, mle=low
+%%% summary: <<JOB_2_SUMMARY>>
+\newcommand{\itemJobExample2}{%
+  \cventry{<<JOB_2_DATES>>}{<<JOB_2_ROLE>>}{<<JOB_2_EMPLOYER>>}{}{}{%
+    \begin{itemize}
+      \item <<JOB_2_BULLET_1>>
+      \item <<JOB_2_BULLET_2>>
+    \end{itemize}}%
+}
+
+% ----- Ausbildung -----
+
+%%% ITEM: itemDegreeMaster
+%%% section: ausbildung
+%%% tags: [always, academic]
+%%% relevance: games=high, mle=high
+%%% summary: <<DEGREE_1_SUMMARY>>
+\newcommand{\itemDegreeMaster}{%
+  \cventry{<<DEGREE_1_DATES>>}{<<DEGREE_1_TITLE>>}{<<DEGREE_1_SCHOOL>>}{}{}{}%
+  \subcventry{<<DEGREE_1_THESIS_LABEL>>}{<<DEGREE_1_THESIS_TITLE>>}{<<DEGREE_1_THESIS_DESC>>}%
+  \vspace{0.5em}%
+}
+
+%%% ITEM: itemDegreeBachelor
+%%% section: ausbildung
+%%% tags: [always, academic, awarded]
+%%% relevance: games=medium, mle=high
+%%% summary: <<DEGREE_2_SUMMARY>>
+\newcommand{\itemDegreeBachelor}{%
+  \cventry{<<DEGREE_2_DATES>>}{<<DEGREE_2_TITLE>>}{<<DEGREE_2_SCHOOL>>}{}{}{}%
+  \subcventry{<<DEGREE_2_THESIS_LABEL>>}{<<DEGREE_2_THESIS_TITLE>>}{<<DEGREE_2_THESIS_DESC>>%
+    \vspace{-.8em}%
+    \begin{itemize}\item <<DEGREE_2_AWARD>>\end{itemize}}%
+}
+
+% ----- Projects -----
+
+%%% ITEM: itemProjectMLE
+%%% section: projects
+%%% tags: [mle]
+%%% relevance: mle=high, games=low
+%%% summary: <<PROJECT_MLE_SUMMARY>>
+\newcommand{\itemProjectMLE}{%
+  \cventry[0.5em]{<<PROJECT_MLE_DATE>>}{<<PROJECT_MLE_TITLE>>}{}{}{}{<<PROJECT_MLE_DESC>>}%
+}
+
+%%% ITEM: itemProjectGames
+%%% section: projects
+%%% tags: [games]
+%%% relevance: games=high, mle=low
+%%% summary: <<PROJECT_GAMES_SUMMARY>>
+\newcommand{\itemProjectGames}{%
+  \cventry[0.5em]{<<PROJECT_GAMES_DATE>>}{<<PROJECT_GAMES_TITLE>>}{}{}{}{<<PROJECT_GAMES_DESC>>}%
+}
+
+%%% ITEM: itemProjectAwarded
+%%% section: projects
+%%% tags: [always, awarded]
+%%% relevance: games=high, mle=medium
+%%% summary: <<PROJECT_AWARDED_SUMMARY>>
+\newcommand{\itemProjectAwarded}{%
+  \cventry[0.5em]{<<PROJECT_AWARDED_DATE>>}{<<PROJECT_AWARDED_TITLE>>}{}{}{}{<<PROJECT_AWARDED_DESC>>%
+    \vspace{-.5em}%
+    \begin{itemize}\item <<PROJECT_AWARDED_NOTE>>\end{itemize}}%
+}

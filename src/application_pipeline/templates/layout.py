@@ -37,6 +37,8 @@ CARD_TEMPLATE = """\
 
 {raw_description}
 
+**Rank:** {rank}
+
 ---
 <{url}>
 """

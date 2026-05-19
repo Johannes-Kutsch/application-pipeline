@@ -487,3 +487,25 @@ def test_red_tier_renders_card(
     assert "## AI Assessment" in result
     assert "Poor fit." in result
     assert "Senior Engineer" in result
+
+
+# --- Rank rendering ---
+
+
+def test_render_includes_default_rank(
+    layout: Layout, position: Position, green_verdict: MatchVerdict
+) -> None:
+    result = render(position, green_verdict, layout)
+    assert "**Rank:** 1" in result
+
+
+def test_render_reflects_explicit_rank(layout: Layout, position: Position) -> None:
+    verdict = MatchVerdict(
+        tier=MatchTier.green,
+        matched=[],
+        missing=[],
+        summary="ok",
+        rank=4,
+    )
+    result = render(position, verdict, layout)
+    assert "**Rank:** 4" in result

@@ -10,6 +10,7 @@ from application_pipeline.llm import (
     MatchVerdict,
     RelevanceVerdict,
 )
+from application_pipeline.llm.types import ExtractorSchemaError
 
 
 # --- ExtractorError ---
@@ -131,6 +132,27 @@ def test_match_verdict_missing_entry_over_80_chars_succeeds():
         summary="ok",
     )
     assert v.missing == [long_entry]
+
+
+def test_match_verdict_default_rank_is_one():
+    v = MatchVerdict(tier=MatchTier.green, matched=[], missing=[], summary="ok")
+    assert v.rank == 1
+
+
+@pytest.mark.parametrize("rank", [1, 2, 3, 4, 5])
+def test_match_verdict_accepts_rank_in_range(rank: int):
+    v = MatchVerdict(
+        tier=MatchTier.green, matched=[], missing=[], summary="ok", rank=rank
+    )
+    assert v.rank == rank
+
+
+@pytest.mark.parametrize("rank", [0, -1, 6, 100])
+def test_match_verdict_rejects_rank_out_of_range(rank: int):
+    with pytest.raises(ExtractorSchemaError):
+        MatchVerdict(
+            tier=MatchTier.green, matched=[], missing=[], summary="ok", rank=rank
+        )
 
 
 def test_match_verdict_summary_over_600_chars_succeeds():

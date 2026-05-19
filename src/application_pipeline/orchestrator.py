@@ -740,7 +740,7 @@ def run(
             raise
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
-        metrics = RunMetrics(status_display)
+        metrics = RunMetrics(status_display, run_log=run_log)
         metrics.register_prefilter_keywords(blacklist=cfg.negative_keywords)
         classify_queue: queue.Queue[object] = queue.Queue()
         judge_queue: queue.Queue[object] = queue.Queue()

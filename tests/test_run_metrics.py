@@ -9,9 +9,9 @@ import pytest
 
 from fake_status_display import FakeStatusDisplay
 
-from application_pipeline import parser_log as _parser_log
 from application_pipeline.llm.types import CallUsage, MatchTier
 from application_pipeline.orchestrator import RunSummary
+from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter import PreFilterVerdict, TermMatch
 from application_pipeline.run_metrics import RunMetrics
 
@@ -21,12 +21,9 @@ from application_pipeline.run_metrics import RunMetrics
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _reset_parser_log():
-    orig = _parser_log._logs_dir
-    _parser_log._logs_dir = None
-    yield
-    _parser_log._logs_dir = orig
+@pytest.fixture
+def run_log(tmp_path: Path) -> RunLog:
+    return RunLog(tmp_path)
 
 
 def _make_usage(
@@ -71,9 +68,11 @@ def _last_body(display: FakeStatusDisplay, row: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_register_rows_creates_four_rows_with_correct_order_and_phase():
+def test_register_rows_creates_four_rows_with_correct_order_and_phase(
+    run_log: RunLog,
+) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(starting_order=10)
 
     assert _registers(display) == [
@@ -84,9 +83,9 @@ def test_register_rows_creates_four_rows_with_correct_order_and_phase():
     ]
 
 
-def test_register_rows_starting_at_zero():
+def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(starting_order=0)
 
     orders = [c.kwargs["order"] for c in display.calls if c.method == "register"]
@@ -98,9 +97,9 @@ def test_register_rows_starting_at_zero():
 # ---------------------------------------------------------------------------
 
 
-def test_pipeline_body_matches_main_stats_format():
+def test_pipeline_body_matches_main_stats_format(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.discovered()
@@ -114,9 +113,9 @@ def test_pipeline_body_matches_main_stats_format():
     assert body == "discovered=2 written=0 errors=2"
 
 
-def test_pipeline_body_reflects_judge_errored():
+def test_pipeline_body_reflects_judge_errored(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.judge_failed()
@@ -129,9 +128,9 @@ def test_pipeline_body_reflects_judge_errored():
 # ---------------------------------------------------------------------------
 
 
-def test_dedup_body_matches_main_stats_format():
+def test_dedup_body_matches_main_stats_format(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.record_dedup("url_hit")
@@ -150,9 +149,9 @@ def test_dedup_body_matches_main_stats_format():
 # ---------------------------------------------------------------------------
 
 
-def test_prefilter_body_matches_main_stats_format():
+def test_prefilter_body_matches_main_stats_format(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     bl_match = (TermMatch(term="pfleg"),)
@@ -167,9 +166,9 @@ def test_prefilter_body_matches_main_stats_format():
     assert body == "considered=3 passed=2 dropped=1 (bl=1)"
 
 
-def test_prefilter_body_clean_pass_shows_zero_blacklist_hits():
+def test_prefilter_body_clean_pass_shows_zero_blacklist_hits(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.prefilter_passed(_verdict(passes=True))
@@ -183,9 +182,9 @@ def test_prefilter_body_clean_pass_shows_zero_blacklist_hits():
 # ---------------------------------------------------------------------------
 
 
-def test_classify_body_no_failures():
+def test_classify_body_no_failures(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     usage = _make_usage()
@@ -200,9 +199,9 @@ def test_classify_body_no_failures():
     assert "batches_failed" not in body
 
 
-def test_classify_body_with_failures():
+def test_classify_body_with_failures(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.classify_buffered(3)
@@ -216,9 +215,9 @@ def test_classify_body_with_failures():
     assert "items_errored" not in body
 
 
-def test_classify_body_pending_count():
+def test_classify_body_pending_count(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.classify_buffered(4)
@@ -229,9 +228,11 @@ def test_classify_body_pending_count():
     assert "6 items in queue" in body
 
 
-def test_classify_denominator_increments_at_dequeue_not_enqueue():
+def test_classify_denominator_increments_at_dequeue_not_enqueue(
+    run_log: RunLog,
+) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.classify_buffered(5)
@@ -246,9 +247,9 @@ def test_classify_denominator_increments_at_dequeue_not_enqueue():
     assert body_after_dequeue.startswith("0/1 calls")
 
 
-def test_classify_numerator_increments_on_failure():
+def test_classify_numerator_increments_on_failure(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.classify_buffered(3)
@@ -260,9 +261,9 @@ def test_classify_numerator_increments_on_failure():
     assert body.startswith("1/1 calls")
 
 
-def test_classify_idle_state_shows_n_over_n():
+def test_classify_idle_state_shows_n_over_n(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     usage = _make_usage()
@@ -276,9 +277,9 @@ def test_classify_idle_state_shows_n_over_n():
     assert body == "2/2 calls · 0 items in queue"
 
 
-def test_classify_body_updates_per_item_without_batch_flush():
+def test_classify_body_updates_per_item_without_batch_flush(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.classify_buffered(1)
@@ -295,9 +296,9 @@ def test_classify_body_updates_per_item_without_batch_flush():
 # ---------------------------------------------------------------------------
 
 
-def test_judge_body_no_errors():
+def test_judge_body_no_errors(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     usage = _make_usage()
@@ -313,9 +314,9 @@ def test_judge_body_no_errors():
     assert "calls_failed" not in body
 
 
-def test_judge_body_with_errors():
+def test_judge_body_with_errors(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.judge_enqueued()
@@ -326,9 +327,9 @@ def test_judge_body_with_errors():
     assert "calls_failed=1" in body
 
 
-def test_judge_body_pending_count():
+def test_judge_body_pending_count(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.judge_enqueued()
@@ -338,9 +339,11 @@ def test_judge_body_pending_count():
     assert "2 items in queue" in body
 
 
-def test_judge_body_idle_steady_state_uses_calls_and_items_in_queue():
+def test_judge_body_idle_steady_state_uses_calls_and_items_in_queue(
+    run_log: RunLog,
+) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     usage = _make_usage()
@@ -352,9 +355,9 @@ def test_judge_body_idle_steady_state_uses_calls_and_items_in_queue():
     assert body == "1/1 calls · green=1 amber=0 red=0 · 0 items in queue"
 
 
-def test_judge_body_denominator_unchanged_before_dequeue():
+def test_judge_body_denominator_unchanged_before_dequeue(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.judge_enqueued()
@@ -364,9 +367,11 @@ def test_judge_body_denominator_unchanged_before_dequeue():
     assert body == "0/0 calls · green=0 amber=0 red=0 · 1 items in queue"
 
 
-def test_judge_body_dequeue_increments_denominator_and_decrements_queue():
+def test_judge_body_dequeue_increments_denominator_and_decrements_queue(
+    run_log: RunLog,
+) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.judge_enqueued()
@@ -377,9 +382,11 @@ def test_judge_body_dequeue_increments_denominator_and_decrements_queue():
     assert body == "0/1 calls · green=0 amber=0 red=0 · 0 items in queue"
 
 
-def test_judge_body_failure_increments_numerator_and_shows_calls_failed():
+def test_judge_body_failure_increments_numerator_and_shows_calls_failed(
+    run_log: RunLog,
+) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.judge_enqueued()
@@ -456,9 +463,9 @@ def _format_run_divider(
     return f"<!-- {' '.join(parts)} -->\n"
 
 
-def _build_populated_metrics(display: FakeStatusDisplay) -> RunMetrics:
+def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> RunMetrics:
     """Returns a RunMetrics with representative events covering all counter types."""
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.discovered()
@@ -502,9 +509,9 @@ def _build_populated_metrics(display: FakeStatusDisplay) -> RunMetrics:
     return metrics
 
 
-def test_format_run_divider_no_degraded_no_failures():
+def test_format_run_divider_no_degraded_no_failures(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = _build_populated_metrics(display)
+    metrics = _build_populated_metrics(display, run_log)
 
     timestamp = "2026-01-01T12:00:00Z"
     tag = "v1.2.3"
@@ -540,26 +547,26 @@ def test_format_run_divider_no_degraded_no_failures():
     assert result == expected
 
 
-def test_format_run_divider_no_tag():
+def test_format_run_divider_no_tag(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 10.0)
     assert "tag=" not in result
     assert result.startswith("<!-- run 2026-01-01T00:00:00Z")
 
 
-def test_format_run_divider_no_sources():
+def test_format_run_divider_no_sources(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 10.0)
     assert "sources=" not in result
 
 
-def test_format_run_divider_with_sources():
+def test_format_run_divider_with_sources(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     usage = _make_usage()
     metrics.judge_enqueued()
     metrics.judge_dequeued()
@@ -574,34 +581,34 @@ def test_format_run_divider_with_sources():
 # ---------------------------------------------------------------------------
 
 
-def test_degraded_reason_absent_by_default():
+def test_degraded_reason_absent_by_default(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
     assert "degraded_reason" not in result
 
 
-def test_degraded_reason_present_after_set():
+def test_degraded_reason_present_after_set(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.set_degraded_reason("usage_limit")
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
     assert "degraded_reason=usage_limit" in result
 
 
-def test_classify_batches_failed_absent_when_zero():
+def test_classify_batches_failed_absent_when_zero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
     assert "classify_batches_failed" not in result
 
 
-def test_classify_batches_failed_present_when_nonzero():
+def test_classify_batches_failed_present_when_nonzero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.classify_buffered(2)
     metrics.classify_batch_enqueued(2)
     metrics.classify_batch_dequeued(2)
@@ -612,12 +619,14 @@ def test_classify_batches_failed_present_when_nonzero():
     assert "classify_items_abandoned=2" in result
 
 
-def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned():
+def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned(
+    run_log: RunLog,
+) -> None:
     """Today the orchestrator does `judge_stats.errored += classify_stats.items_errored`
     before formatting the divider, so abandoned classify items count as errors
     and toward judge_items_abandoned. The module must preserve that roll-up."""
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.classify_buffered(3)
     metrics.classify_batch_enqueued(3)
     metrics.classify_batch_dequeued(3)
@@ -635,17 +644,17 @@ def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned():
     assert summary.errored == 4
 
 
-def test_judge_items_abandoned_absent_when_zero():
+def test_judge_items_abandoned_absent_when_zero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
     assert "judge_items_abandoned" not in result
 
 
-def test_judge_items_abandoned_present_when_nonzero():
+def test_judge_items_abandoned_present_when_nonzero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.judge_enqueued()
     metrics.judge_dequeued()
     metrics.judge_failed()
@@ -654,17 +663,17 @@ def test_judge_items_abandoned_present_when_nonzero():
     assert "judge_items_abandoned=1" in result
 
 
-def test_judge_resumed_absent_when_zero():
+def test_judge_resumed_absent_when_zero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
     assert "judge_resumed" not in result
 
 
-def test_judge_resumed_present_when_nonzero():
+def test_judge_resumed_present_when_nonzero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.record_dedup("judge_pending")
     metrics.record_dedup("judge_pending")
 
@@ -672,9 +681,9 @@ def test_judge_resumed_present_when_nonzero():
     assert "judge_resumed=2" in result
 
 
-def test_format_run_divider_contains_per_callsite_token_fields():
+def test_format_run_divider_contains_per_callsite_token_fields(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = _build_populated_metrics(display)
+    metrics = _build_populated_metrics(display, run_log)
 
     result = metrics.format_run_divider("2026-01-01T12:00:00Z", "v1", 10.0)
 
@@ -692,9 +701,9 @@ def test_format_run_divider_contains_per_callsite_token_fields():
     assert "claude_cost_usd" not in result
 
 
-def test_format_run_divider_zero_callsite_tokens_when_no_calls():
+def test_format_run_divider_zero_callsite_tokens_when_no_calls(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
 
@@ -713,9 +722,9 @@ def test_format_run_divider_zero_callsite_tokens_when_no_calls():
 # ---------------------------------------------------------------------------
 
 
-def test_to_run_summary_shape_matches_runsummary():
+def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = _build_populated_metrics(display)
+    metrics = _build_populated_metrics(display, run_log)
     summary = metrics.to_run_summary(duration_s=55.5)
 
     assert isinstance(summary, RunSummary)
@@ -745,9 +754,9 @@ def test_to_run_summary_shape_matches_runsummary():
     assert abs(summary.claude_cost_usd - 0.005) < 1e-9
 
 
-def test_to_run_summary_is_frozen():
+def test_to_run_summary_is_frozen(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     summary = metrics.to_run_summary(duration_s=1.0)
 
     with pytest.raises((AttributeError, TypeError)):
@@ -762,41 +771,33 @@ def test_to_run_summary_is_frozen():
 def test_summarize_to_parser_log_writes_classify_and_judge_summaries(
     tmp_path: Path,
 ) -> None:
-    _parser_log.configure(tmp_path)
+    run_log = RunLog(tmp_path)
     display = FakeStatusDisplay()
-    metrics = _build_populated_metrics(display)
+    metrics = _build_populated_metrics(display, run_log)
     started_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
     metrics.summarize_to_parser_log(started_at)
 
-    run_log = (tmp_path / "run.log").read_text()
-    assert "SUMMARY OF SESSION" in run_log
-    assert "batches_sent=1" in run_log
-    assert "items_classified=2" in run_log
-    assert "in_domain=1" in run_log
-    assert "off_domain=1" in run_log
-    assert "judges_sent=1" in run_log
-    assert "green=1" in run_log
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "SUMMARY OF SESSION" in run_log_text
+    assert "batches_sent=1" in run_log_text
+    assert "items_classified=2" in run_log_text
+    assert "in_domain=1" in run_log_text
+    assert "off_domain=1" in run_log_text
+    assert "judges_sent=1" in run_log_text
+    assert "green=1" in run_log_text
 
 
 def test_summarize_to_parser_log_uses_started_at_timestamp(tmp_path: Path) -> None:
-    _parser_log.configure(tmp_path)
+    run_log = RunLog(tmp_path)
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     started_at = datetime(2025, 6, 15, 8, 30, 0, tzinfo=timezone.utc)
 
     metrics.summarize_to_parser_log(started_at)
 
-    run_log = (tmp_path / "run.log").read_text()
-    assert "2025-06-15T08:30:00Z" in run_log
-
-
-def test_summarize_to_parser_log_noop_when_logs_dir_not_configured() -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
-    # _logs_dir is None (reset by autouse fixture) → should not raise
-    started_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    metrics.summarize_to_parser_log(started_at)  # no exception
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "2025-06-15T08:30:00Z" in run_log_text
 
 
 # ---------------------------------------------------------------------------
@@ -804,10 +805,10 @@ def test_summarize_to_parser_log_noop_when_logs_dir_not_configured() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_concurrent_events_produce_correct_final_counts():
+def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None:
     """All counter updates from concurrent threads must sum correctly."""
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     n_threads = 8
     iters = 50
@@ -867,11 +868,11 @@ def test_concurrent_events_produce_correct_final_counts():
 # ---------------------------------------------------------------------------
 
 
-def test_parser_summary_reflects_events_for_that_parser_id():
+def test_parser_summary_reflects_events_for_that_parser_id(run_log: RunLog) -> None:
     """discovered(parser_id) updates per-parser entry AND aggregate independently."""
 
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     started = time.monotonic()
@@ -891,11 +892,11 @@ def test_parser_summary_reflects_events_for_that_parser_id():
     assert run_summary.discovered == 3
 
 
-def test_parser_summary_key_set_is_exact():
+def test_parser_summary_key_set_is_exact(run_log: RunLog) -> None:
     """parser_summary returns exactly the required keys."""
 
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     started = time.monotonic()
     metrics.discovered("p")
@@ -913,11 +914,11 @@ def test_parser_summary_key_set_is_exact():
     }
 
 
-def test_parser_summary_all_events_tracked():
+def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
     """All six per-parser event methods update the right counter in parser_summary."""
 
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     started = time.monotonic()
@@ -940,11 +941,11 @@ def test_parser_summary_all_events_tracked():
     assert s["duration"] >= 0.0
 
 
-def test_parser_summary_duration_rounded_to_one_decimal():
+def test_parser_summary_duration_rounded_to_one_decimal(run_log: RunLog) -> None:
     """duration = round(end - start, 1)."""
 
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.discovered("p")
 
     started = 1000.0
@@ -954,11 +955,13 @@ def test_parser_summary_duration_rounded_to_one_decimal():
     assert s["duration"] == round(end - started, 1)
 
 
-def test_interleaved_parsers_produce_independent_per_parser_totals():
+def test_interleaved_parsers_produce_independent_per_parser_totals(
+    run_log: RunLog,
+) -> None:
     """Events for two parsers are tracked independently; aggregate is their sum."""
 
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     started = time.monotonic()
@@ -986,11 +989,11 @@ def test_interleaved_parsers_produce_independent_per_parser_totals():
     assert summary.external_redirects == 5
 
 
-def test_parser_summary_unknown_parser_id_returns_zeros():
+def test_parser_summary_unknown_parser_id_returns_zeros(run_log: RunLog) -> None:
     """parser_summary for a never-seen parser_id returns all-zero counts."""
 
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
 
     started = time.monotonic()
     end = time.monotonic()
@@ -1013,9 +1016,9 @@ def test_summarize_to_parser_log_prefilter_blacklist_keyword_hits(
     tmp_path: Path,
 ) -> None:
     """prefilter SUMMARY block contains blacklist_keyword_hits: with per-term counts."""
-    _parser_log.configure(tmp_path)
+    run_log = RunLog(tmp_path)
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_prefilter_keywords(blacklist=["excluded", "banned"])
 
     metrics.prefilter_dropped(
@@ -1027,19 +1030,19 @@ def test_summarize_to_parser_log_prefilter_blacklist_keyword_hits(
 
     metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
 
-    run_log = (tmp_path / "run.log").read_text()
-    assert "blacklist_keyword_hits:" in run_log
-    assert "excluded=1" in run_log
-    assert "banned=0" in run_log
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "blacklist_keyword_hits:" in run_log_text
+    assert "excluded=1" in run_log_text
+    assert "banned=0" in run_log_text
 
 
 def test_prefilter_blacklist_count_is_one_per_position_not_per_occurrence(
     tmp_path: Path,
 ) -> None:
     """A position whose title matches a term contributes 1 to the title count."""
-    _parser_log.configure(tmp_path)
+    run_log = RunLog(tmp_path)
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_prefilter_keywords(blacklist=["pfleg"])
 
     metrics.prefilter_dropped(
@@ -1051,17 +1054,17 @@ def test_prefilter_blacklist_count_is_one_per_position_not_per_occurrence(
 
     metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
 
-    run_log = (tmp_path / "run.log").read_text()
-    assert "pfleg=1" in run_log
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "pfleg=1" in run_log_text
 
 
 def test_summarize_to_parser_log_negative_keywords_dead_list(
     tmp_path: Path,
 ) -> None:
     """NEGATIVE_KEYWORDS_dead: lists zero-match terms; empty when all match."""
-    _parser_log.configure(tmp_path)
+    run_log = RunLog(tmp_path)
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_prefilter_keywords(blacklist=["excluded", "banned"])
 
     # Only "excluded" matches; "banned" is dead
@@ -1074,19 +1077,19 @@ def test_summarize_to_parser_log_negative_keywords_dead_list(
 
     metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
 
-    run_log = (tmp_path / "run.log").read_text()
-    assert "NEGATIVE_KEYWORDS_dead:" in run_log
-    assert "banned" in run_log  # appears in NEGATIVE_KEYWORDS_dead
-    assert "whitelist_dead:" not in run_log
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "NEGATIVE_KEYWORDS_dead:" in run_log_text
+    assert "banned" in run_log_text  # appears in NEGATIVE_KEYWORDS_dead
+    assert "whitelist_dead:" not in run_log_text
 
 
 def test_summarize_to_parser_log_negative_keywords_dead_empty_when_all_match(
     tmp_path: Path,
 ) -> None:
     """NEGATIVE_KEYWORDS_dead: [] when every term matched at least once."""
-    _parser_log.configure(tmp_path)
+    run_log = RunLog(tmp_path)
     display = FakeStatusDisplay()
-    metrics = RunMetrics(display)
+    metrics = RunMetrics(display, run_log=run_log)
     metrics.register_prefilter_keywords(blacklist=["excluded"])
 
     metrics.prefilter_dropped(
@@ -1098,5 +1101,5 @@ def test_summarize_to_parser_log_negative_keywords_dead_empty_when_all_match(
 
     metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
 
-    run_log = (tmp_path / "run.log").read_text()
-    assert "NEGATIVE_KEYWORDS_dead: []" in run_log
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "NEGATIVE_KEYWORDS_dead: []" in run_log_text

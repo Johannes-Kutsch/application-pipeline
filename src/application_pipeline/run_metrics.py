@@ -4,9 +4,9 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 
-from application_pipeline import parser_log
 from application_pipeline.dedup import RunScopedSeenResult
 from application_pipeline.llm.types import CallUsage, MatchTier
+from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter import PreFilterVerdict, TermMatch
 from application_pipeline.status_display import StatusDisplay
 from application_pipeline.text import normalize
@@ -87,8 +87,9 @@ def _prefilter_summary_counts(
 class RunMetrics:
     """Owns all run-level counters and produces Run Divider / RunSummary output."""
 
-    def __init__(self, display: StatusDisplay) -> None:
+    def __init__(self, display: StatusDisplay, *, run_log: RunLog) -> None:
         self._display = display
+        self._run_log = run_log
         self._lock = threading.Lock()
 
         # Parser-side (main) counters
@@ -561,12 +562,12 @@ class RunMetrics:
             bl_terms = list(self._prefilter_blacklist)
             bl_counts = dict(self._prefilter_bl_counts)
 
-        parser_log.summarize(
+        self._run_log.summary(
             "pipeline_prefilter",
             _prefilter_summary_counts(bl_terms, bl_counts),
             started_at,
         )
-        parser_log.summarize(
+        self._run_log.summary(
             "llm_classify_relevance",
             {
                 "batches_sent": classify_calls,
@@ -582,7 +583,7 @@ class RunMetrics:
             },
             started_at,
         )
-        parser_log.summarize(
+        self._run_log.summary(
             "llm_judge_match",
             {
                 "judges_sent": judge_calls,

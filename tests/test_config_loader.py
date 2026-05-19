@@ -742,3 +742,42 @@ def test_valid_locations_and_sources_pass_silently(tmp_path: pathlib.Path) -> No
     config = load(path)
 
     assert config.locations == ["Hamburg"]
+
+
+# --- MAX_LISTING_AGE_DAYS ---
+
+
+def test_max_listing_age_days_defaults_to_180(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.max_listing_age_days == 180
+
+
+def test_max_listing_age_days_accepts_explicit_value(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nMAX_LISTING_AGE_DAYS = 30\n")
+
+    config = load(path)
+
+    assert config.max_listing_age_days == 30
+
+
+@pytest.mark.parametrize("value", [0, -1, -100])
+def test_max_listing_age_days_raises_when_less_than_1(
+    tmp_path: pathlib.Path, value: int
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + f"\nMAX_LISTING_AGE_DAYS = {value}\n")
+
+    with pytest.raises(ConfigError, match="MAX_LISTING_AGE_DAYS"):
+        load(path)
+
+
+@pytest.mark.parametrize("value", ['"90"', "3.5", "True"])
+def test_max_listing_age_days_raises_when_non_int(
+    tmp_path: pathlib.Path, value: str
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + f"\nMAX_LISTING_AGE_DAYS = {value}\n")
+
+    with pytest.raises(ConfigError, match="MAX_LISTING_AGE_DAYS"):
+        load(path)

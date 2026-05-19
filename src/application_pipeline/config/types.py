@@ -65,3 +65,4 @@ class Config:
     judge_match_prompt: pathlib.Path | None = None
     claude_cli_path: str | None = None
     claude_classify_batch_size: int = 100
+    max_listing_age_days: int = 180

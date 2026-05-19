@@ -25,6 +25,7 @@ from .types import (
     MatchTier,
     MatchVerdict,
     RelevanceVerdict,
+    StructuredExtract,
 )
 
 _GERMAN_BOILERPLATE_SENTINELS: list[str] = [
@@ -293,7 +294,7 @@ class ClaudeExtractor:
             )
 
         input_ids = [item.id for item in items]
-        response_by_id: dict[str, bool] = {}
+        response_by_id: dict[str, tuple[bool, StructuredExtract | None]] = {}
         for entry in parsed_result:
             if not isinstance(entry, dict):
                 raise ExtractorBatchMalformedError(
@@ -313,6 +314,39 @@ class ClaudeExtractor:
                 raise ExtractorBatchMalformedError(
                     f"classify_relevance_batch: in_domain must be bool for id {entry_id!r}"
                 )
-            response_by_id[entry_id] = in_domain
+            extract: StructuredExtract | None = None
+            if in_domain:
+                extract = ClaudeExtractor._parse_structured_extract(entry_id, entry)
+            response_by_id[entry_id] = (in_domain, extract)
 
-        return [RelevanceVerdict(in_domain=response_by_id[item.id]) for item in items]
+        return [
+            RelevanceVerdict(
+                in_domain=response_by_id[item.id][0],
+                extract=response_by_id[item.id][1],
+            )
+            for item in items
+        ]
+
+    @staticmethod
+    def _parse_structured_extract(
+        entry_id: str, entry: dict[str, object]
+    ) -> StructuredExtract:
+        raw = entry.get("extract")
+        if not isinstance(raw, dict):
+            raise ExtractorBatchMalformedError(
+                f"classify_relevance_batch: missing or invalid extract for in-domain id {entry_id!r}"
+            )
+        try:
+            return StructuredExtract(
+                seniority=raw.get("seniority"),  # type: ignore[arg-type]
+                work_model=raw.get("work_model"),  # type: ignore[arg-type]
+                contract_type=raw.get("contract_type"),  # type: ignore[arg-type]
+                key_skills=list(raw["key_skills"]),  # type: ignore[arg-type]
+                key_responsibilities=list(raw["key_responsibilities"]),  # type: ignore[arg-type]
+                must_have_requirements=list(raw["must_have_requirements"]),  # type: ignore[arg-type]
+                notable_caveats=str(raw["notable_caveats"]),
+            )
+        except (KeyError, TypeError) as exc:
+            raise ExtractorBatchMalformedError(
+                f"classify_relevance_batch: malformed extract for in-domain id {entry_id!r}: {exc}"
+            ) from exc

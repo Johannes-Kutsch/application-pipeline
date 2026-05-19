@@ -203,6 +203,139 @@ def test_main_logs_land_next_to_config_regardless_of_cwd(
     )
 
 
+# ---------------------------------------------------------------------------
+# RunLog class (direct construction)
+# ---------------------------------------------------------------------------
+
+
+def test_runlog_event_creates_events_jsonl(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    log = RunLog(tmp_path)
+    log.event("myparser", "parser_started")
+
+    events_file = tmp_path / "myparser.events.jsonl"
+    assert events_file.exists()
+    row = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert _ISO8601_RE.match(row["ts"])
+    assert row["event"] == "parser_started"
+
+
+def test_runlog_event_appends_key_value_fields(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    log = RunLog(tmp_path)
+    log.event("p", "enrich_failed", stub_url="https://example.com", reason="timeout")
+
+    row = json.loads((tmp_path / "p.events.jsonl").read_text(encoding="utf-8").strip())
+    assert row["event"] == "enrich_failed"
+    assert row["stub_url"] == "https://example.com"
+    assert row["reason"] == "timeout"
+
+
+def test_runlog_lifecycle_creates_lifecycle_jsonl(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    log = RunLog(tmp_path)
+    log.lifecycle("comp", "phase_changed", phase="running")
+
+    lifecycle_file = tmp_path / "lifecycle.jsonl"
+    assert lifecycle_file.exists()
+    row = json.loads(lifecycle_file.read_text(encoding="utf-8").strip())
+    assert _ISO8601_RE.match(row["ts"])
+    assert row["event"] == "phase_changed"
+    assert row["component"] == "comp"
+    assert row["phase"] == "running"
+
+
+def test_runlog_transcript_creates_transcripts_jsonl(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    log = RunLog(tmp_path)
+    entry = {"role": "user", "content": "hello"}
+    log.transcript("agent", entry)
+
+    transcript_file = tmp_path / "agent.transcripts.jsonl"
+    assert transcript_file.exists()
+    row = json.loads(transcript_file.read_text(encoding="utf-8").strip())
+    assert row["role"] == "user"
+    assert row["content"] == "hello"
+
+
+def test_runlog_traceback_writes_to_run_log_with_header(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    log = RunLog(tmp_path)
+    log.traceback(
+        "p", "Traceback (most recent call last):\n  File ...\nValueError: oops\n"
+    )
+
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
+    assert "=== p" in content
+    assert "traceback" in content
+    assert "Traceback (most recent call last):" in content
+    assert "ValueError: oops" in content
+
+
+def test_runlog_summary_writes_summary_trailer(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    log = RunLog(tmp_path)
+    started = datetime(2026, 5, 12, 15, 30, 0, tzinfo=timezone.utc)
+    log.summary("p", {"discovered": 12, "duration": 47.3}, started)
+
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
+    assert "SUMMARY OF SESSION 2026-05-12T15:30:00Z" in content
+    assert "discovered=12" in content
+    assert "duration=47.3" in content
+
+
+def test_runlog_mkdir_parents_on_construction(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    nested = tmp_path / "a" / "b" / "c"
+    assert not nested.exists()
+    RunLog(nested)
+    assert nested.is_dir()
+
+
+def test_runlog_byte_identical_to_free_functions(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    dir_cls = tmp_path / "cls"
+    dir_fn = tmp_path / "fn"
+
+    log = RunLog(dir_cls)
+    log.event("p", "parser_started", x=1)
+    log.lifecycle("p", "phase_changed", phase="running")
+    log.transcript("p", {"role": "user", "content": "hi"})
+
+    parser_log.configure(dir_fn)
+    parser_log.record("p", "parser_started", x=1)
+    parser_log.record_lifecycle("p", "phase_changed", phase="running")
+    parser_log.record_transcript("p", {"role": "user", "content": "hi"})
+
+    for filename in ["p.events.jsonl", "lifecycle.jsonl", "p.transcripts.jsonl"]:
+        rows_cls = [
+            json.loads(line)
+            for line in (dir_cls / filename).read_text(encoding="utf-8").splitlines()
+        ]
+        rows_fn = [
+            json.loads(line)
+            for line in (dir_fn / filename).read_text(encoding="utf-8").splitlines()
+        ]
+        assert len(rows_cls) == len(rows_fn)
+        for cls_row, fn_row in zip(rows_cls, rows_fn):
+            assert set(cls_row.keys()) == set(fn_row.keys()), (
+                f"key mismatch in {filename}"
+            )
+            for k in cls_row:
+                if k != "ts":
+                    assert cls_row[k] == fn_row[k], (
+                        f"value mismatch for {k} in {filename}"
+                    )
+
+
 def test_main_logs_land_next_to_config_when_path_is_relative(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

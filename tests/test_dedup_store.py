@@ -19,18 +19,16 @@ from application_pipeline.extracts import load as extract_load
 from application_pipeline.llm.types import StructuredExtract
 
 
-def _extract(**overrides: object) -> StructuredExtract:
-    base: dict[str, object] = {
-        "seniority": "senior",
-        "work_model": "remote",
-        "contract_type": "permanent",
-        "key_skills": ["python"],
-        "key_responsibilities": ["ship things"],
-        "must_have_requirements": ["3+ years"],
-        "notable_caveats": "",
-    }
-    base.update(overrides)
-    return StructuredExtract(**base)  # type: ignore[arg-type]
+def _extract() -> StructuredExtract:
+    return StructuredExtract(
+        seniority="senior",
+        work_model="remote",
+        contract_type="permanent",
+        key_skills=["python"],
+        key_responsibilities=["ship things"],
+        must_have_requirements=["3+ years"],
+        notable_caveats="",
+    )
 
 
 @dataclass

@@ -1,0 +1,2 @@
+class ExtractStoreError(Exception):
+    pass

@@ -15,7 +15,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, get_args, runtime_checkable
 
 from application_pipeline.text import normalize
 
@@ -38,17 +38,7 @@ SeenStatus = Literal[
 _LEGACY_STATUSES: frozenset[str] = frozenset(
     {"off_domain", "kept", "classified_in_domain"}
 )
-_KNOWN_STATUSES: frozenset[str] = frozenset(
-    {
-        "not_classified",
-        "out_of_domain",
-        "in_domain",
-        "selected_by_judge",
-        "enrich_failed",
-        "external_redirect",
-        "expired",
-    }
-)
+_KNOWN_STATUSES: frozenset[str] = frozenset(get_args(SeenStatus))
 SeenResult = Literal["url_hit", "tuple_hit", "judge_pending", "miss"]
 RunScopedSeenResult = Literal[
     "url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"
@@ -224,14 +214,14 @@ class DeduplicationStore:
         with self._lock:
             prior = self._records.get(key.url)
             prior_status = prior.get("status") if prior else None
-            overwrite_if: SeenStatus | None = (
-                prior_status  # type: ignore[assignment]
-                if prior_status in ("not_classified", "in_domain")
-                else None
-            )
-            self._mark(key, "expired", overwrite_if=overwrite_if)
-            if prior_status == "in_domain" and self._extract_store is not None:
-                self._extract_store.delete(key.url)
+            if prior_status == "in_domain":
+                self._mark(key, "expired", overwrite_if="in_domain")
+                if self._extract_store is not None:
+                    self._extract_store.delete(key.url)
+            elif prior_status == "not_classified":
+                self._mark(key, "expired", overwrite_if="not_classified")
+            else:
+                self._mark(key, "expired")
 
     def mark_in_domain(self, key: _SeenKey, *, extract: StructuredExtract) -> None:
         with self._lock:

@@ -80,12 +80,10 @@ class ParserHttp:
         if resp.is_success:
             return
         status = resp.status_code
-        if status in (404, 400, 422):
-            raise HttpStubNotRetryableError(
-                f"not found: {url}"
-                if status == 404
-                else f"malformed: {url} status={status}"
-            )
+        if status == 404:
+            raise HttpStubNotRetryableError(f"not found: {url}")
+        if status in (400, 422):
+            raise HttpStubNotRetryableError(f"malformed: {url} status={status}")
         if status in (401, 403):
             raise HttpParserFatalError(f"auth: {url} status={status}")
         if 500 <= status < 600 and status not in RETRY_STATUSES:

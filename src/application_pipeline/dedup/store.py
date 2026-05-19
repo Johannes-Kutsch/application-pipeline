@@ -32,10 +32,22 @@ SeenStatus = Literal[
     "selected_by_judge",
     "enrich_failed",
     "external_redirect",
+    "expired",
 ]
 
 _LEGACY_STATUSES: frozenset[str] = frozenset(
     {"off_domain", "kept", "classified_in_domain"}
+)
+_KNOWN_STATUSES: frozenset[str] = frozenset(
+    {
+        "not_classified",
+        "out_of_domain",
+        "in_domain",
+        "selected_by_judge",
+        "enrich_failed",
+        "external_redirect",
+        "expired",
+    }
 )
 SeenResult = Literal["url_hit", "tuple_hit", "judge_pending", "miss"]
 RunScopedSeenResult = Literal[
@@ -208,6 +220,19 @@ class DeduplicationStore:
         with self._lock:
             self._mark(key, "external_redirect")
 
+    def mark_expired(self, key: _SeenKey) -> None:
+        with self._lock:
+            prior = self._records.get(key.url)
+            prior_status = prior.get("status") if prior else None
+            overwrite_if: SeenStatus | None = (
+                prior_status  # type: ignore[assignment]
+                if prior_status in ("not_classified", "in_domain")
+                else None
+            )
+            self._mark(key, "expired", overwrite_if=overwrite_if)
+            if prior_status == "in_domain" and self._extract_store is not None:
+                self._extract_store.delete(key.url)
+
     def mark_in_domain(self, key: _SeenKey, *, extract: StructuredExtract) -> None:
         with self._lock:
             self._mark(key, "in_domain")
@@ -291,6 +316,12 @@ def load(
             if status in _LEGACY_STATUSES:
                 raise DedupStoreError(
                     f"dedup store at {path} contains legacy status {status!r} "
+                    f"for {url!r}; wipe the store to start fresh "
+                    f"(see wipe instruction in the store migration guide)"
+                )
+            if status is not None and status not in _KNOWN_STATUSES:
+                raise DedupStoreError(
+                    f"dedup store at {path} contains unknown status {status!r} "
                     f"for {url!r}; wipe the store to start fresh "
                     f"(see wipe instruction in the store migration guide)"
                 )

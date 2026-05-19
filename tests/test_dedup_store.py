@@ -828,3 +828,114 @@ def test_in_domain_invariant_extract_exists_iff_status_in_domain(
     assert extract_store.get(out_stub.url) is None
     assert extract_store.get(sel_stub.url) is None
     assert extract_store.get(ef_stub.url) is None
+
+
+# ---------------------------------------------------------------------------
+# mark_expired
+# ---------------------------------------------------------------------------
+
+
+def test_mark_expired_persists_status(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/exp")
+    store.mark_expired(stub)
+
+    assert store.is_seen(stub) == "url_hit"
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    record = on_disk["https://example.com/exp"]
+    assert record["status"] == "expired"
+    assert record["canonical_url"] == "https://example.com/exp"
+    assert record["company_lc"] == "acme"
+    assert record["title_lc"] == "engineer"
+    assert record["location_lc"] == "hamburg"
+    assert record["first_seen"] == date.today().isoformat()
+
+
+def test_mark_expired_on_in_domain_deletes_extract(tmp_path: Path) -> None:
+    extract_path = tmp_path / "extracts.json"
+    extract_store = extract_load(extract_path)
+    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
+
+    stub = StubLike(url="https://example.com/stale")
+    store.mark_in_domain(stub, extract=_extract())
+    assert extract_store.get(stub.url) is not None
+
+    store.mark_expired(stub)
+
+    assert extract_store.get(stub.url) is None
+    assert store.is_seen(stub) == "url_hit"
+
+
+def test_mark_expired_on_not_classified_leaves_extract_untouched(
+    tmp_path: Path,
+) -> None:
+    extract_path = tmp_path / "extracts.json"
+    extract_store = extract_load(extract_path)
+    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
+
+    nc_stub = StubLike(url="https://example.com/nc")
+    other_stub = StubLike(
+        url="https://example.com/other",
+        company="Other",
+        title="Role",
+        location="Berlin",
+    )
+    store.mark_not_classified(nc_stub)
+    store.mark_in_domain(other_stub, extract=_extract())
+
+    store.mark_expired(nc_stub)
+
+    assert store.is_seen(nc_stub) == "url_hit"
+    assert extract_store.get(nc_stub.url) is None
+    assert extract_store.get(other_stub.url) is not None
+
+
+def test_expired_status_survives_reload(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/exp-reload")
+    store.mark_expired(stub)
+
+    reloaded = dedup_load(store_path)
+    assert reloaded.is_seen(stub) == "url_hit"
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk["https://example.com/exp-reload"]["status"] == "expired"
+
+
+def test_expired_status_in_seen_json_does_not_raise_on_load(store_path: Path) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/exp": {
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "expired",
+                    "first_seen": "2025-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path)
+    assert store.is_seen(StubLike(url="https://example.com/exp")) == "url_hit"
+
+
+def test_unknown_status_raises_on_load(store_path: Path) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/unk": {
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "totally_unknown_status",
+                    "first_seen": "2025-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(DedupStoreError, match="totally_unknown_status"):
+        dedup_load(store_path)

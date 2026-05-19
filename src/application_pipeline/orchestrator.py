@@ -697,7 +697,7 @@ def run(
             except PromptError as exc:
                 _log.error("startup failed — prompts: %s", exc)
                 raise
-            extractor = ClaudeExtractor(cfg, prompts)
+            extractor = ClaudeExtractor(cfg, prompts, run_log=run_log)
 
         # Step 4: Domain Pre-Filter
         blacklist = precompute_blacklist(cfg.negative_keywords)

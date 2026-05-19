@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from application_pipeline import parser_log
 from application_pipeline.config import Config
+from application_pipeline.parser_log import RunLog
 from application_pipeline.prompts import Prompts
 
 from .agent_output import AgentOutputProtocolError, extract_json_block
@@ -104,10 +104,12 @@ class ClaudeExtractor:
         config: Config,
         prompts: Prompts,
         *,
+        run_log: RunLog,
         _invoker: ClaudeCliInvoker | None = None,
     ) -> None:
         self._config = config
         self._prompts = prompts
+        self._run_log = run_log
         self._invoker = _invoker or ClaudeCliInvoker(cli_path=config.claude_cli_path)
         self._skills_block = "\n".join(f"- {s}" for s in config.skills)
 
@@ -212,7 +214,7 @@ class ClaudeExtractor:
         }
         if batch_size is not None:
             transcript["batch_size"] = batch_size
-        parser_log.record_transcript(site.component_id, transcript)
+        self._run_log.transcript(site.component_id, transcript)
 
         record_kwargs: dict[str, object] = {
             "cost_usd": response.cost_usd,
@@ -220,12 +222,12 @@ class ClaudeExtractor:
         }
         if batch_size is not None:
             record_kwargs["batch_size"] = batch_size
-        parser_log.record(site.component_id, site.call, **record_kwargs)
+        self._run_log.event(site.component_id, site.call, **record_kwargs)
 
         return parsed, response
 
-    @staticmethod
     def _write_transcript(
+        self,
         *,
         site: _CallSite,
         prompt: str,
@@ -255,7 +257,7 @@ class ClaudeExtractor:
             entry["raw_response"] = raw_response
         if kind is not None:
             entry["envelope_error_class"] = kind
-        parser_log.record_transcript(site.component_id, entry)
+        self._run_log.transcript(site.component_id, entry)
 
     @staticmethod
     def _usage_from(response: ClaudeResponse) -> CallUsage:

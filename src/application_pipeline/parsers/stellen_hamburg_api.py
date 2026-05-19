@@ -7,7 +7,7 @@ import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal, NoReturn
 
-import application_pipeline.parser_log as parser_log
+from application_pipeline.parser_log import RunLog
 from application_pipeline.text import normalize
 
 from ._text import parse_iso_date, strip_html
@@ -111,9 +111,11 @@ class StellenHamburgParser:
     def __init__(
         self,
         *,
+        run_log: RunLog,
         _http: ParserHttp | None = None,
     ) -> None:
-        self._http = _http if _http is not None else ParserHttp()
+        self._run_log = run_log
+        self._http = _http if _http is not None else ParserHttp(run_log=run_log)
 
     def __enter__(self) -> "StellenHamburgParser":
         self._http.__enter__()
@@ -137,7 +139,7 @@ class StellenHamburgParser:
         page_number = 1
         while True:
             url = _search_url(query.keyword, page_number)
-            parser_log.record(
+            self._run_log.event(
                 "parser_" + _PARSER_TYPE,
                 "discover_page",
                 q=query.keyword,
@@ -212,17 +214,22 @@ parser_class = StellenHamburgParser
 
 if __name__ == "__main__":
     import sys
+    import tempfile
+    from pathlib import Path
+
+    from application_pipeline.parser_log import RunLog
 
     query = ParserQuery(
         keyword=sys.argv[1] if len(sys.argv) > 1 else "*",
         location=City("hamburg"),
         max_results=5,
     )
-    with StellenHamburgParser() as p:
+    _run_log = RunLog(Path(tempfile.mkdtemp()))
+    with StellenHamburgParser(run_log=_run_log) as p:
         items = list(p.discover(query))
     stubs = [s for s in items if isinstance(s, PositionStub)]
     print(f"discover: {len(stubs)} stubs")
     if stubs:
-        with StellenHamburgParser() as p:
+        with StellenHamburgParser(run_log=_run_log) as p:
             pos = p.enrich(stubs[0])
         print(f"enrich: {len(pos.raw_description)} chars")

@@ -5,8 +5,8 @@ from collections.abc import Callable, Mapping
 
 import httpx
 
-from application_pipeline import parser_log
 from application_pipeline.http import HttpNotRetryableError, HttpRetryError
+from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 
 HTTP_CONNECT_TIMEOUT: float = 5.0
@@ -48,6 +48,7 @@ class ParserHttp:
     def __init__(
         self,
         *,
+        run_log: RunLog,
         headers: Mapping[str, str] | None = None,
         timeout: float = HTTP_READ_TIMEOUT,
         retries: int = MAX_RETRIES,
@@ -56,6 +57,7 @@ class ParserHttp:
         _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         merged_headers: dict[str, str] = {"User-Agent": USER_AGENT, **(headers or {})}
+        self._run_log = run_log
         self._timeout = timeout
         self._retries = retries
         self._sleep = _sleep
@@ -97,7 +99,7 @@ class ParserHttp:
         last_exc: Exception | None = None
         for attempt in range(self._retries):
             attempt_num = attempt + 1
-            parser_log.record(
+            self._run_log.event(
                 component_id, "http_get_start", url=url, attempt=attempt_num
             )
             t_start = time.monotonic()
@@ -109,7 +111,7 @@ class ParserHttp:
                 last_exc = exc
                 if attempt < self._retries - 1:
                     elapsed_ms = round((time.monotonic() - t_start) * 1000)
-                    parser_log.record(
+                    self._run_log.event(
                         component_id,
                         "http_get_retry",
                         url=url,
@@ -122,7 +124,7 @@ class ParserHttp:
                     )
                 continue
             elapsed_ms = round((time.monotonic() - t_start) * 1000)
-            parser_log.record(
+            self._run_log.event(
                 component_id,
                 "http_get_ok",
                 url=url,

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import application_pipeline.parser_log as parser_log
+from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.stellen_hamburg_api import (
@@ -51,6 +51,11 @@ def _query(**kwargs: object) -> ParserQuery:
 
 
 @pytest.fixture
+def run_log(tmp_path: Path) -> RunLog:
+    return RunLog(tmp_path)
+
+
+@pytest.fixture
 def search_json() -> bytes:
     return _load("search.json")
 
@@ -78,13 +83,13 @@ def test_parser_class_attribute_is_stellen_hamburg_parser() -> None:
     assert parser_class is StellenHamburgParser
 
 
-def test_parser_satisfies_parser_protocol() -> None:
-    p = StellenHamburgParser()
+def test_parser_satisfies_parser_protocol(run_log: RunLog) -> None:
+    p = StellenHamburgParser(run_log=run_log)
     assert isinstance(p, Parser)
 
 
-def test_parser_is_usable_as_context_manager() -> None:
-    with StellenHamburgParser() as p:
+def test_parser_is_usable_as_context_manager(run_log: RunLog) -> None:
+    with StellenHamburgParser(run_log=run_log) as p:
         assert isinstance(p, StellenHamburgParser)
 
 
@@ -93,17 +98,20 @@ def test_parser_is_usable_as_context_manager() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_discover_remote_location_yields_not_served_sentinel() -> None:
+def test_discover_remote_location_yields_not_served_sentinel(run_log: RunLog) -> None:
     def never_called(url: str, timeout: float) -> bytes:
         raise AssertionError("should not GET")
 
-    with StellenHamburgParser(_http=ParserHttp(_http_get=never_called)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=never_called)
+    ) as p:
         stubs = list(p.discover(_query(location=Remote())))
 
     assert stubs == [NotServedQuery()]
 
 
 def test_discover_yields_not_served_sentinel_when_location_unmapped(
+    run_log: RunLog,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     def never_called(url: str, timeout: float) -> bytes:
@@ -112,24 +120,30 @@ def test_discover_yields_not_served_sentinel_when_location_unmapped(
     with caplog.at_level(
         logging.INFO, logger="application_pipeline.parsers.stellen_hamburg_api"
     ):
-        with StellenHamburgParser(_http=ParserHttp(_http_get=never_called)) as p:
+        with StellenHamburgParser(
+            run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=never_called)
+        ) as p:
             stubs = list(p.discover(_query(location=City("berlin"))))
 
     assert stubs == [NotServedQuery()]
     assert not any("not_served" in r.getMessage() for r in caplog.records)
 
 
-def test_discover_unmapped_location_does_not_make_http_request() -> None:
+def test_discover_unmapped_location_does_not_make_http_request(run_log: RunLog) -> None:
     def never_called(url: str, timeout: float) -> bytes:
         raise AssertionError("should not GET")
 
-    with StellenHamburgParser(_http=ParserHttp(_http_get=never_called)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=never_called)
+    ) as p:
         list(p.discover(_query(location=City("munich"))))
 
 
-def test_discover_normalizes_location_case(search_json: bytes) -> None:
+def test_discover_normalizes_location_case(run_log: RunLog, search_json: bytes) -> None:
     get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         stubs = list(p.discover(_query(location=City("Hamburg"))))
     assert len(stubs) == 2
 
@@ -139,48 +153,64 @@ def test_discover_normalizes_location_case(search_json: bytes) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_discover_yields_stubs_from_search_response(search_json: bytes) -> None:
+def test_discover_yields_stubs_from_search_response(
+    run_log: RunLog, search_json: bytes
+) -> None:
     get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 2
 
 
-def test_discover_stub_source_is_display_name(search_json: bytes) -> None:
+def test_discover_stub_source_is_display_name(
+    run_log: RunLog, search_json: bytes
+) -> None:
     get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.source == "stellen.hamburg"
 
 
-def test_discover_stub_title_extracted(search_json: bytes) -> None:
+def test_discover_stub_title_extracted(run_log: RunLog, search_json: bytes) -> None:
     get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.title == "Softwareentwickler/in (m/w/d)"
 
 
-def test_discover_stub_url_extracted(search_json: bytes) -> None:
+def test_discover_stub_url_extracted(run_log: RunLog, search_json: bytes) -> None:
     get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert "jobad/11111" in stub.url
 
 
-def test_discover_stub_company_extracted(search_json: bytes) -> None:
+def test_discover_stub_company_extracted(run_log: RunLog, search_json: bytes) -> None:
     get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company == "Stadtverwaltung Hamburg"
 
 
-def test_discover_stub_location_extracted(search_json: bytes) -> None:
+def test_discover_stub_location_extracted(run_log: RunLog, search_json: bytes) -> None:
     get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
@@ -191,9 +221,11 @@ def test_discover_stub_location_extracted(search_json: bytes) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_discover_respects_max_results(search_json: bytes) -> None:
+def test_discover_respects_max_results(run_log: RunLog, search_json: bytes) -> None:
     get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         stubs = list(p.discover(_query(max_results=1)))
     assert len(stubs) == 1
 
@@ -204,6 +236,7 @@ def test_discover_respects_max_results(search_json: bytes) -> None:
 
 
 def test_discover_issues_get_with_data_param_carrying_search_criteria(
+    run_log: RunLog,
     search_json: bytes,
 ) -> None:
     captured_urls: list[str] = []
@@ -212,7 +245,9 @@ def test_discover_issues_get_with_data_param_carrying_search_criteria(
         captured_urls.append(url)
         return search_json
 
-    with StellenHamburgParser(_http=ParserHttp(_http_get=capturing_get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=capturing_get)
+    ) as p:
         list(p.discover(_query(keyword="python")))
 
     search_calls = [u for u in captured_urls if "api-stellen.hamburg.de" in u]
@@ -230,7 +265,7 @@ def test_discover_issues_get_with_data_param_carrying_search_criteria(
     ]
 
 
-def test_discover_pagination_second_page_sends_page_number_two() -> None:
+def test_discover_pagination_second_page_sends_page_number_two(run_log: RunLog) -> None:
     def _body(items: list[dict], total: int) -> bytes:
         return json.dumps(
             {
@@ -256,7 +291,9 @@ def test_discover_pagination_second_page_sends_page_number_two() -> None:
         captured_urls.append(url)
         return next(responses)
 
-    with StellenHamburgParser(_http=ParserHttp(_http_get=capturing_get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=capturing_get)
+    ) as p:
         list(p.discover(_query()))
 
     search_calls = [u for u in captured_urls if "api-stellen.hamburg.de" in u]
@@ -273,10 +310,8 @@ def test_discover_pagination_second_page_sends_page_number_two() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_discover_emits_discover_page_heartbeat_per_page(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(parser_log, "_logs_dir", tmp_path)
+def test_discover_emits_discover_page_heartbeat_per_page(tmp_path: Path) -> None:
+    run_log = RunLog(tmp_path)
 
     def _sh_item(obj_id: str) -> dict:
         return {
@@ -301,7 +336,9 @@ def test_discover_emits_discover_page_heartbeat_per_page(
     def sequential_get(url: str, timeout: float) -> bytes:
         return next(responses)
 
-    with StellenHamburgParser(_http=ParserHttp(_http_get=sequential_get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=sequential_get)
+    ) as p:
         stubs = list(p.discover(_query()))
 
     assert len(stubs) == 2
@@ -323,13 +360,16 @@ def test_discover_emits_discover_page_heartbeat_per_page(
 # ---------------------------------------------------------------------------
 
 
-def test_discover_raises_parser_error_on_http_failure() -> None:
+def test_discover_raises_parser_error_on_http_failure(run_log: RunLog) -> None:
     from application_pipeline.parsers import ParserError
 
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("connection refused")
 
-    with StellenHamburgParser(_http=ParserHttp(_http_get=failing_get, retries=1)) as p:
+    with StellenHamburgParser(
+        run_log=run_log,
+        _http=ParserHttp(run_log=run_log, _http_get=failing_get, retries=1),
+    ) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
 
@@ -340,62 +380,80 @@ def test_discover_raises_parser_error_on_http_failure() -> None:
 
 
 def test_enrich_returns_position_with_raw_description(
-    stub: PositionStub, detail_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert pos.raw_description != ""
 
 
 def test_enrich_description_has_no_html_tags(
-    stub: PositionStub, detail_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert "<p>" not in pos.raw_description
     assert "<strong>" not in pos.raw_description
 
 
 def test_enrich_description_decodes_html_entities(
-    stub: PositionStub, detail_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert "&uuml;" not in pos.raw_description
     assert "ü" in pos.raw_description
 
 
 def test_enrich_employment_type_full_time(
-    stub: PositionStub, detail_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert pos.employment_type == "full-time"
 
 
-def test_enrich_posted_date_parsed(stub: PositionStub, detail_html: bytes) -> None:
+def test_enrich_posted_date_parsed(
+    run_log: RunLog, stub: PositionStub, detail_html: bytes
+) -> None:
     get = _make_get({"jobad": detail_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert pos.posted_date == date(2026, 4, 1)
 
 
-def test_enrich_deadline_parsed(stub: PositionStub, detail_html: bytes) -> None:
+def test_enrich_deadline_parsed(
+    run_log: RunLog, stub: PositionStub, detail_html: bytes
+) -> None:
     get = _make_get({"jobad": detail_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert pos.deadline == date(2026, 6, 30)
 
 
 def test_enrich_position_references_original_stub(
-    stub: PositionStub, detail_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert pos.stub is stub
 
@@ -405,13 +463,18 @@ def test_enrich_position_references_original_stub(
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_raises_parser_error_on_http_failure(stub: PositionStub) -> None:
+def test_enrich_raises_parser_error_on_http_failure(
+    run_log: RunLog, stub: PositionStub
+) -> None:
     from application_pipeline.parsers import ParserError
 
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("timeout")
 
-    with StellenHamburgParser(_http=ParserHttp(_http_get=failing_get, retries=1)) as p:
+    with StellenHamburgParser(
+        run_log=run_log,
+        _http=ParserHttp(run_log=run_log, _http_get=failing_get, retries=1),
+    ) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
 
@@ -432,39 +495,47 @@ def detail_no_job_posting_html() -> bytes:
 
 
 def test_enrich_list_wrapped_jsonld_returns_nonempty_description(
-    stub: PositionStub, detail_list_wrapped_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_list_wrapped_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_list_wrapped_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert pos.raw_description != ""
 
 
 def test_enrich_list_wrapped_jsonld_description_has_no_html_tags(
-    stub: PositionStub, detail_list_wrapped_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_list_wrapped_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_list_wrapped_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert "<p>" not in pos.raw_description
     assert "<strong>" not in pos.raw_description
 
 
 def test_enrich_list_wrapped_jsonld_decodes_umlauts(
-    stub: PositionStub, detail_list_wrapped_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_list_wrapped_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_list_wrapped_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert "&uuml;" not in pos.raw_description
     assert "ü" in pos.raw_description
 
 
 def test_enrich_list_selects_first_job_posting_entry(
-    stub: PositionStub, detail_list_wrapped_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_list_wrapped_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_list_wrapped_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert pos.posted_date == date(2026, 5, 1)
     assert pos.deadline == date(2026, 7, 31)
@@ -472,9 +543,11 @@ def test_enrich_list_selects_first_job_posting_entry(
 
 
 def test_enrich_list_without_job_posting_yields_empty_description(
-    stub: PositionStub, detail_no_job_posting_html: bytes
+    run_log: RunLog, stub: PositionStub, detail_no_job_posting_html: bytes
 ) -> None:
     get = _make_get({"jobad": detail_no_job_posting_html})
-    with StellenHamburgParser(_http=ParserHttp(_http_get=get)) as p:
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
         pos = p.enrich(stub)
     assert pos.raw_description == ""

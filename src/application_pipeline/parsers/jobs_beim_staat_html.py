@@ -22,7 +22,7 @@ from typing import Any, assert_never
 
 from bs4 import BeautifulSoup, Tag
 
-import application_pipeline.parser_log as parser_log
+from application_pipeline.parser_log import RunLog
 
 from .errors import ParserError
 from .http import ParserHttp
@@ -174,9 +174,11 @@ class JobsBeimStaatParser:
     def __init__(
         self,
         *,
+        run_log: RunLog,
         _http: ParserHttp | None = None,
     ) -> None:
-        self._http = _http if _http is not None else ParserHttp()
+        self._run_log = run_log
+        self._http = _http if _http is not None else ParserHttp(run_log=run_log)
 
     def __enter__(self) -> "JobsBeimStaatParser":
         self._http.__enter__()
@@ -219,7 +221,7 @@ class JobsBeimStaatParser:
             }
             url = f"{_BASE_URL}{_REST_PATH}?{urllib.parse.urlencode(params)}"
 
-            parser_log.record(
+            self._run_log.event(
                 "parser_jobs_beim_staat_html",
                 "discover_page",
                 q=q,
@@ -297,18 +299,23 @@ parser_class = JobsBeimStaatParser
 
 if __name__ == "__main__":
     import sys as _sys
+    import tempfile
+    from pathlib import Path
+
+    from application_pipeline.parser_log import RunLog
 
     query = ParserQuery(
         keyword=_sys.argv[1] if len(_sys.argv) > 1 else "*",
         location=City("hamburg"),
         max_results=5,
     )
-    with JobsBeimStaatParser() as p:
+    _run_log = RunLog(Path(tempfile.mkdtemp()))
+    with JobsBeimStaatParser(run_log=_run_log) as p:
         items = list(p.discover(query))
     stubs = [s for s in items if isinstance(s, PositionStub)]
     print(f"discover: {len(stubs)} stubs")
     if stubs:
-        with JobsBeimStaatParser() as p:
+        with JobsBeimStaatParser(run_log=_run_log) as p:
             result = p.enrich(stubs[0])
         if isinstance(result, Position):
             print(f"enrich: {len(result.raw_description)} chars")

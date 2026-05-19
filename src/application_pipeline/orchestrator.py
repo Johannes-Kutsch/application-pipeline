@@ -754,7 +754,8 @@ def run(
 
         with ExitStack() as stack:
             parsers_list: list[tuple[Parser, SourceEntry]] = [
-                (stack.enter_context(cls()), source) for cls, source in resolved
+                (stack.enter_context(cls(run_log=run_log)), source)  # type: ignore[call-arg]
+                for cls, source in resolved
             ]
             dedup_run = stack.enter_context(dedup_store.run_scope())
 

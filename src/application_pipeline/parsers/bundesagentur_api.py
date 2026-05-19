@@ -7,7 +7,7 @@ import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal
 
-import application_pipeline.parser_log as parser_log
+from application_pipeline.parser_log import RunLog
 
 from ._text import parse_iso_date, strip_html
 from .http import ParserHttp
@@ -102,10 +102,14 @@ class BundesagenturParser:
     def __init__(
         self,
         *,
+        run_log: RunLog,
         _http: ParserHttp | None = None,
     ) -> None:
+        self._run_log = run_log
         self._http = (
-            _http if _http is not None else ParserHttp(headers={"X-API-Key": _API_KEY})
+            _http
+            if _http is not None
+            else ParserHttp(run_log=run_log, headers={"X-API-Key": _API_KEY})
         )
 
     def __enter__(self) -> "BundesagenturParser":
@@ -138,7 +142,7 @@ class BundesagenturParser:
                 **extra_params,
             }
             url = f"{_BASE_URL}/jobs?{urllib.parse.urlencode(params)}"
-            parser_log.record(
+            self._run_log.event(
                 "parser_bundesagentur_api",
                 "discover_page",
                 q=query.keyword,
@@ -160,7 +164,7 @@ class BundesagenturParser:
                 seen.add(ref)
                 title: str = item.get("stellenangebotsTitel") or ""
                 if not title:
-                    parser_log.record(
+                    self._run_log.event(
                         "parser_bundesagentur_api",
                         "missing_title",
                         item=item,
@@ -195,7 +199,7 @@ class BundesagenturParser:
 
         if outbound:
             skipped = body == ""
-            parser_log.record(
+            self._run_log.event(
                 "parser_bundesagentur_api",
                 "external_redirect",
                 stub_url=stub.url,
@@ -227,10 +231,15 @@ parser_class = BundesagenturParser
 
 if __name__ == "__main__":
     import sys
+    import tempfile
+    from pathlib import Path
+
+    from application_pipeline.parser_log import RunLog
 
     keyword = sys.argv[1] if len(sys.argv) > 1 else "Python"
     location = sys.argv[2] if len(sys.argv) > 2 else "Hamburg"
     query = ParserQuery(keyword=keyword, location=City(location), max_results=5)
-    with BundesagenturParser() as p:
+    _run_log = RunLog(Path(tempfile.mkdtemp()))
+    with BundesagenturParser(run_log=_run_log) as p:
         for stub in p.discover(query):
             print(stub)

@@ -44,6 +44,13 @@ from application_pipeline.results import (
 )
 
 
+class _StubParserBase:
+    """Base for all test stub parsers; absorbs the run_log kwarg the orchestrator injects."""
+
+    def __init__(self, **_: object) -> None:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -256,10 +263,10 @@ def test_unknown_parser_type_run_continues(tmp_path: Path) -> None:
 _STUB_URLS = [f"https://stub.example/{i}" for i in range(6)]
 
 
-class _StubParser:
+class _StubParser(_StubParserBase):
     """Returns 3 stubs per discover() call (deterministic URLs), enriches trivially."""
 
-    def __init__(self) -> None:
+    def __init__(self, **_: object) -> None:
         self._call = 0
 
     def __enter__(self) -> "_StubParser":
@@ -345,7 +352,7 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
     """include_remote=True adds one (keyword, None) call per keyword per source."""
     queries_received: list[ParserQuery] = []
 
-    class _TrackingParser:
+    class _TrackingParser(_StubParserBase):
         def __enter__(self) -> "_TrackingParser":
             return self
 
@@ -396,7 +403,7 @@ def test_integration_dedup_counter_breakdown(
 
     _DEDUP_URLS = [f"https://dedup.example/{i}" for i in range(7)]
 
-    class _SevenStubParser:
+    class _SevenStubParser(_StubParserBase):
         def __enter__(self) -> "_SevenStubParser":
             return self
 
@@ -463,7 +470,7 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
     enrich_calls: list[str] = []
     duplicate_url = "https://dup.example/job"
 
-    class _DupParser:
+    class _DupParser(_StubParserBase):
         def __enter__(self) -> "_DupParser":
             return self
 
@@ -508,7 +515,7 @@ def test_consecutive_url_hits_never_trigger_skip_and_end_query(tmp_path: Path) -
         for i in range(100)
     ]
 
-    class _HitOnlyParser:
+    class _HitOnlyParser(_StubParserBase):
         def __enter__(self) -> "_HitOnlyParser":
             return self
 
@@ -564,7 +571,7 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
         for i in range(80)
     ] + [PositionStub(url=unseen_url, title="New Job", source="stub")]
 
-    class _TrailingParser:
+    class _TrailingParser(_StubParserBase):
         def __enter__(self) -> "_TrailingParser":
             return self
 
@@ -610,7 +617,7 @@ def test_in_run_dedup_run_hits_in_log_line(
 
     dup_url = "https://log.example/dup"
 
-    class _DupParser:
+    class _DupParser(_StubParserBase):
         def __enter__(self) -> "_DupParser":
             return self
 
@@ -648,7 +655,7 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
     """A second run() call starts with an empty in-run set; the URL seen in run 1 is not a run_hit in run 2."""
     dup_url = "https://fresh.example/job"
 
-    class _OneStubParser:
+    class _OneStubParser(_StubParserBase):
         def __enter__(self) -> "_OneStubParser":
             return self
 
@@ -704,7 +711,7 @@ _STUB_URLS_PF = [f"https://stub.example/pf/{i}" for i in range(6)]
 _REJECTED_URL = _STUB_URLS_PF[2]
 
 
-class _PreFilterStubParser:
+class _PreFilterStubParser(_StubParserBase):
     """6 stubs; stub at index 2 gets 'excluded' in its title so Pre-Filter drops it."""
 
     def __enter__(self) -> "_PreFilterStubParser":
@@ -768,7 +775,7 @@ _BL_BODY_ONLY_URL = _STUB_URLS_BL[
 _BL_NO_HIT_URL = _STUB_URLS_BL[2]  # no negative keyword anywhere → passes
 
 
-class _BlacklistStubParser:
+class _BlacklistStubParser(_StubParserBase):
     """3 stubs covering the two prefilter outcomes: blacklist_drop and passed."""
 
     def __enter__(self) -> "_BlacklistStubParser":
@@ -828,7 +835,7 @@ _PF_EVENT_BODY_ONLY_URL = _PF_EVENT_URLS[1]  # body-only hit → still passed
 _PF_EVENT_DROP_URL = _PF_EVENT_URLS[2]  # title hit → blacklist_drop
 
 
-class _PreFilterEventStubParser:
+class _PreFilterEventStubParser(_StubParserBase):
     """3 stubs covering the two prefilter reason categories: passed and blacklist_drop."""
 
     def __enter__(self) -> "_PreFilterEventStubParser":
@@ -935,7 +942,7 @@ _LLM_JUDGE_TIERS = {
 }
 
 
-class _LLMStubParser:
+class _LLMStubParser(_StubParserBase):
     """6 stubs; stub 0 has 'excluded' in title so Pre-Filter drops it."""
 
     def __enter__(self) -> "_LLMStubParser":
@@ -1117,7 +1124,7 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
                 _ZERO_USAGE,
             )
 
-    class _MultiStubParser:
+    class _MultiStubParser(_StubParserBase):
         """Emits 5 stubs, all pass prefilter."""
 
         def __enter__(self) -> "_MultiStubParser":
@@ -1172,7 +1179,7 @@ def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
 _ERR_URLS = [f"https://stub.example/err/{i}" for i in range(4)]
 
 
-class _TwoStubParser:
+class _TwoStubParser(_StubParserBase):
     """Yields 2 stubs with fixed URLs; enriches trivially."""
 
     def __enter__(self) -> "_TwoStubParser":
@@ -1294,7 +1301,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
     """ParserError from enrich: stub marked enrich_failed, enrich_failed increments, other stubs proceed."""
     seen_path = tmp_path / ".seen.json"
 
-    class _EnrichFailParser:
+    class _EnrichFailParser(_StubParserBase):
         def __enter__(self) -> "_EnrichFailParser":
             return self
 
@@ -1346,7 +1353,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
 
     seen_path = tmp_path / ".seen.json"
 
-    class _RedirectParser:
+    class _RedirectParser(_StubParserBase):
         def __enter__(self) -> "_RedirectParser":
             return self
 
@@ -1406,7 +1413,7 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
     logs_dir = tmp_path / "synched" / "logs"
     run_log = parser_log.RunLog(logs_dir)
 
-    class _RedirectParser:
+    class _RedirectParser(_StubParserBase):
         def __enter__(self) -> "_RedirectParser":
             return self
 
@@ -1456,7 +1463,7 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
     """ParserError mid-discover: already-yielded stubs processed, run advances to next combination."""
     seen_path = tmp_path / ".seen.json"
 
-    class _MidDiscoverFailParser:
+    class _MidDiscoverFailParser(_StubParserBase):
         def __enter__(self) -> "_MidDiscoverFailParser":
             return self
 
@@ -1497,7 +1504,7 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
 _RESUME_URL = "https://resume.example/job/0"
 
 
-class _OneStubParser:
+class _OneStubParser(_StubParserBase):
     """Single-stub parser used by the judge_pending tests."""
 
     def __enter__(self) -> "_OneStubParser":
@@ -1552,7 +1559,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
     classify_calls: list[object] = []
     enrich_calls: list[str] = []
 
-    class _TrackingParser:
+    class _TrackingParser(_StubParserBase):
         def __enter__(self) -> "_TrackingParser":
             return self
 
@@ -1685,7 +1692,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
     seen_path = tmp_path / ".seen.json"
     enrich_descriptions: list[str] = []
 
-    class _FreshDescParser:
+    class _FreshDescParser(_StubParserBase):
         def __enter__(self) -> "_FreshDescParser":
             return self
 
@@ -1750,7 +1757,7 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
     """If enrich fails on a judge_pending stub, it is marked enrich_failed."""
     seen_path = tmp_path / ".seen.json"
 
-    class _EnrichFailParser:
+    class _EnrichFailParser(_StubParserBase):
         def __enter__(self) -> "_EnrichFailParser":
             return self
 
@@ -1878,7 +1885,7 @@ def test_judge_pending_judge_failure_still_shows_judge_resumed_in_divider(
 def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
     """Uncaught exception in parser thread → parsers_dead==1, run completes (no hang)."""
 
-    class _DeadParser:
+    class _DeadParser(_StubParserBase):
         def __enter__(self) -> "_DeadParser":
             return self
 
@@ -1914,7 +1921,7 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
 def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
     """One dead parser + one healthy parser → dead counted, healthy stubs written."""
 
-    class _DeadParser:
+    class _DeadParser(_StubParserBase):
         def __enter__(self) -> "_DeadParser":
             return self
 
@@ -1928,7 +1935,7 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
         def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
             raise NotImplementedError
 
-    class _HealthyParser:
+    class _HealthyParser(_StubParserBase):
         def __enter__(self) -> "_HealthyParser":
             return self
 
@@ -2071,7 +2078,7 @@ def test_run_divider_carries_dedup_run_hits(tmp_path: Path) -> None:
     results_dir = tmp_path / "results"
     dup_url = "https://divider.example/dup"
 
-    class _DupParser:
+    class _DupParser(_StubParserBase):
         def __enter__(self) -> "_DupParser":
             return self
 
@@ -2268,7 +2275,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
     import application_pipeline.parser_log as parser_log
     from application_pipeline.parsers import NotServedQuery
 
-    class _NotServedParser:
+    class _NotServedParser(_StubParserBase):
         def __enter__(self) -> "_NotServedParser":
             return self
 
@@ -2336,7 +2343,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
         "https://stub.example/1",
     ]
 
-    class _ThreeEventParser:
+    class _ThreeEventParser(_StubParserBase):
         def __enter__(self) -> "_ThreeEventParser":
             return self
 
@@ -2417,7 +2424,7 @@ def test_position_warnings_round_trips_through_construction() -> None:
 # ---------------------------------------------------------------------------
 
 
-class _WarnParser:
+class _WarnParser(_StubParserBase):
     """Returns one stub; enrich returns a Position with an unparseable_date warning."""
 
     def __enter__(self) -> "_WarnParser":
@@ -2553,7 +2560,7 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
         _ZERO_USAGE,
     )
 
-    class _FourStubParser:
+    class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
             return self
 
@@ -2596,7 +2603,7 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
     """
     import time as _time
 
-    class _SlowTwoStubParser:
+    class _SlowTwoStubParser(_StubParserBase):
         def __enter__(self) -> "_SlowTwoStubParser":
             return self
 
@@ -2658,7 +2665,7 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
     _URLS_B = [f"https://ct3b.example/b/{i}" for i in range(4)]
     _ALL_URLS = set(_URLS_A + _URLS_B)
 
-    class _SixStubParser:
+    class _SixStubParser(_StubParserBase):
         def __enter__(self) -> "_SixStubParser":
             return self
 
@@ -2715,7 +2722,7 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
         _ZERO_USAGE,
     )
 
-    class _FourStubParser:
+    class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
             return self
 
@@ -2768,7 +2775,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         _ZERO_USAGE,
     )
 
-    class _TwoLangParser:
+    class _TwoLangParser(_StubParserBase):
         def __enter__(self) -> "_TwoLangParser":
             return self
 
@@ -3027,7 +3034,7 @@ def test_claude_usage_limit_error_exits_zero_no_failure_report(
 
     from application_pipeline.__main__ import main
 
-    class _OneStubParser:
+    class _OneStubParser(_StubParserBase):
         def __enter__(self) -> "_OneStubParser":
             return self
 
@@ -3585,7 +3592,7 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
 def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
     """Parser row body gains '· dead' suffix when parser thread crashes."""
 
-    class _DeadParserForRow:
+    class _DeadParserForRow(_StubParserBase):
         def __enter__(self) -> "_DeadParserForRow":
             return self
 
@@ -3631,7 +3638,7 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
 def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
     """Multiple parsers each get their own row with distinct order values."""
 
-    class _EmptyParser:
+    class _EmptyParser(_StubParserBase):
         def __enter__(self) -> "_EmptyParser":
             return self
 
@@ -3798,7 +3805,7 @@ _DE_DESCRIPTION_199 = (
 )
 
 
-class _MixedLangParser199:
+class _MixedLangParser199(_StubParserBase):
     """1 de stub + 1 en stub per discover call for classify/judge row tests."""
 
     def __enter__(self) -> "_MixedLangParser199":
@@ -3906,7 +3913,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
 
     _THRESHOLD = 0.05  # 50 ms — fast enough for tests
 
-    class _SleepyParser:
+    class _SleepyParser(_StubParserBase):
         def __enter__(self) -> "_SleepyParser":
             return self
 
@@ -3959,7 +3966,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
 
     _THRESHOLD = 0.05
 
-    class _LongSleepParser:
+    class _LongSleepParser(_StubParserBase):
         def __enter__(self) -> "_LongSleepParser":
             return self
 
@@ -4048,7 +4055,7 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
     logs_dir = tmp_path / "synched" / "logs"
     run_log = parser_log.RunLog(logs_dir)
 
-    class _RaisingParser:
+    class _RaisingParser(_StubParserBase):
         def __enter__(self) -> "_RaisingParser":
             return self
 
@@ -4129,7 +4136,7 @@ def test_claude_usage_limit_error_on_judge_degrades_gracefully(
     )
     ext.judge_match.side_effect = _judge
 
-    class _FourStubParser:
+    class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
             return self
 
@@ -4196,7 +4203,7 @@ def test_non_quota_worker_exception_writes_failure_report(
         lambda *a, **kw: _AbortingExtractor(),
     )
 
-    class _OneStubParser:
+    class _OneStubParser(_StubParserBase):
         def __enter__(self) -> "_OneStubParser":
             return self
 

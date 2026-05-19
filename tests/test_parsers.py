@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 from typing import assert_never
 
 import pytest
@@ -174,10 +175,12 @@ def test_registry_get_logs_warning_for_unknown(
     assert "nonexistent_xyz" in caplog.text
 
 
-def test_registry_get_result_is_instantiable() -> None:
+def test_registry_get_result_is_instantiable(tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
     cls = get("bundesagentur_api")
     assert cls is not None
-    assert isinstance(cls(), Parser)
+    assert isinstance(cls(run_log=RunLog(tmp_path)), Parser)  # type: ignore[call-arg]
 
 
 # --- Location types ---

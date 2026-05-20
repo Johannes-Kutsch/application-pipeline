@@ -1,5 +1,6 @@
 from .config import Config, ConfigError, SourceEntry, load
 from .parsers import Position, PositionStub
+from .search_terms import SearchTerms, SearchTermsError, load_search_terms
 from .dedup import DedupStoreError, DeduplicationStore, SeenResult, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
@@ -46,6 +47,8 @@ __all__ = [
     "Prompts",
     "RelevanceVerdict",
     "ResultsFileError",
+    "SearchTerms",
+    "SearchTermsError",
     "StructuredExtract",
     "SeenResult",
     "SeenStatus",
@@ -54,6 +57,7 @@ __all__ = [
     "load",
     "load_layout",
     "load_prompts",
+    "load_search_terms",
     "load_user_module",
     "render",
 ]

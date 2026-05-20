@@ -28,6 +28,7 @@ _USER_INFO_FILES = (
     "self-description.md",
     "domain-fit.md",
     "match-criteria.md",
+    "search-terms.md",
 )
 
 _LATEX_USER_INFO_FILES = (
@@ -256,7 +257,7 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
         assert dest.read_bytes() == _user_info_template_bytes(fname)
 
 
-def test_init_seeds_eight_files_under_user_info(tmp_path: Path) -> None:
+def test_init_seeds_nine_files_under_user_info(tmp_path: Path) -> None:
     init(tmp_path)
 
     user_info = tmp_path / "user-info"

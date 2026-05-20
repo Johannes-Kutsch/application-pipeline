@@ -74,12 +74,54 @@ def test_init_legacy_positional_arg_exits_nonzero(tmp_path: Path) -> None:
     assert exc_info.value.code != 0
 
 
-def test_run_subcommand_exits_nonzero_on_bad_config(tmp_path: Path) -> None:
-    bad_config = tmp_path / "config.py"
-    bad_config.write_text("KEYWORDS = ['python']\n")  # missing SOURCES
+def test_run_without_config_dir_exits_2_with_precheck_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)  # no application-pipeline/ subfolder
 
     with pytest.raises(SystemExit) as exc_info:
-        _run_main(["run", str(bad_config)])
+        _run_main(["run"])
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "no application-pipeline/config.py in" in stderr
+    assert "did you forget to cd, or run init?" in stderr
+
+
+def test_run_with_positional_arg_exits_nonzero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(["run", str(tmp_path / "config.py")])
+
+    assert exc_info.value.code != 0
+    stderr = capsys.readouterr().err
+    assert "usage" in stderr
+
+
+def test_legacy_implicit_run_exits_nonzero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main([str(tmp_path / "config.py")])
+
+    assert exc_info.value.code != 0
+    stderr = capsys.readouterr().err
+    assert "usage" in stderr
+
+
+def test_run_exits_nonzero_on_bad_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "config.py").write_text("KEYWORDS = ['python']\n")  # missing SOURCES
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(["run"])
 
     assert exc_info.value.code != 0
 

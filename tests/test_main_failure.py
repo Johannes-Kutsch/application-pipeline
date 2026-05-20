@@ -1,4 +1,4 @@
-"""Tests that __main__ writes failure reports to <data_dir>/failures/, not under CWD."""
+"""Tests that __main__ writes failure reports to <cwd>/application-pipeline/failures/."""
 
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ LOCATIONS = ["Berlin"]
 """
 
 
-def _run_main(config_path: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run_main(cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "application_pipeline", config_path],
+        [sys.executable, "-m", "application_pipeline", "run"],
         cwd=str(cwd),
         env={**os.environ, "PYTHONPATH": _PYTHONPATH},
         capture_output=True,
@@ -42,18 +42,19 @@ def test_write_failure_writes_directly_into_given_failures_dir(tmp_path: Path) -
     assert path.exists()
 
 
-def test_startup_failure_does_not_write_under_cwd(tmp_path: Path) -> None:
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    (data_dir / "config.py").write_text(_MALFORMED_CONFIG)
+def test_startup_failure_writes_to_home_failures_dir(tmp_path: Path) -> None:
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "config.py").write_text(_MALFORMED_CONFIG)
 
-    cwd = tmp_path / "other"
-    cwd.mkdir()
+    _run_main(tmp_path)
 
-    _run_main(str(data_dir / "config.py"), cwd)
-
-    assert not (cwd / "results").exists(), "Should not create results/ under CWD"
-    assert not (cwd / "failures").exists(), "Should not create failures/ under CWD"
-    failures_dir = data_dir / "failures"
+    assert not (tmp_path / "results").exists(), (
+        "Should not create results/ directly under cwd"
+    )
+    assert not (tmp_path / "failures").exists(), (
+        "Should not create failures/ directly under cwd"
+    )
+    failures_dir = home / "failures"
     assert failures_dir.is_dir()
     assert len(list(failures_dir.glob("*.md"))) == 1

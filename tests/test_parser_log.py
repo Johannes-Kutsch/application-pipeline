@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -126,18 +125,18 @@ def test_two_sessions_produce_two_summary_blocks(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_main_materialises_logs_next_to_config(
+def test_main_materialises_logs_in_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from application_pipeline.orchestrator import RunSummary
 
-    config_dir = tmp_path / "mydata"
-    config_dir.mkdir()
-    config_path = config_dir / "config.toml"
-    config_path.write_text("", encoding="utf-8")
-    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "config.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["app", "run"])
     monkeypatch.setattr(
-        "application_pipeline.__main__.run",
+        "application_pipeline.orchestrator.run",
         lambda *_a, **_kw: RunSummary(),
     )
 
@@ -145,26 +144,21 @@ def test_main_materialises_logs_next_to_config(
 
     main()
 
-    assert (config_dir / "logs").is_dir()
+    assert (home / "logs").is_dir()
 
 
-def test_main_logs_land_next_to_config_regardless_of_cwd(
+def test_main_logs_land_in_home_not_in_cwd_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from application_pipeline.orchestrator import RunSummary
 
-    config_dir = tmp_path / "synched"
-    config_dir.mkdir()
-    config_path = config_dir / "config.toml"
-    config_path.write_text("", encoding="utf-8")
-
-    other_cwd = tmp_path / "workdir"
-    other_cwd.mkdir()
-    monkeypatch.chdir(other_cwd)
-
-    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "config.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["app", "run"])
     monkeypatch.setattr(
-        "application_pipeline.__main__.run",
+        "application_pipeline.orchestrator.run",
         lambda *_a, **_kw: RunSummary(),
     )
 
@@ -172,9 +166,9 @@ def test_main_logs_land_next_to_config_regardless_of_cwd(
 
     main()
 
-    assert (config_dir / "logs").is_dir()
-    assert not (other_cwd / "synched").exists(), (
-        "logs must not be created relative to cwd"
+    assert (home / "logs").is_dir()
+    assert not (tmp_path / "logs").exists(), (
+        "logs must not be created directly under cwd"
     )
 
 
@@ -215,24 +209,18 @@ def test_construction_creates_logs_dir_with_parents(tmp_path: Path) -> None:
     assert nested.is_dir()
 
 
-def test_main_logs_land_next_to_config_when_path_is_relative(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_main_run_prints_summary_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from application_pipeline.orchestrator import RunSummary
 
-    config_dir = tmp_path / "synched"
-    config_dir.mkdir()
-    config_path = config_dir / "config.toml"
-    config_path.write_text("", encoding="utf-8")
-
-    other_cwd = tmp_path / "workdir"
-    other_cwd.mkdir()
-    monkeypatch.chdir(other_cwd)
-
-    rel_path = os.path.relpath(str(config_path), str(other_cwd))
-    monkeypatch.setattr("sys.argv", ["app", rel_path])
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "config.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["app", "run"])
     monkeypatch.setattr(
-        "application_pipeline.__main__.run",
+        "application_pipeline.orchestrator.run",
         lambda *_a, **_kw: RunSummary(),
     )
 
@@ -240,7 +228,5 @@ def test_main_logs_land_next_to_config_when_path_is_relative(
 
     main()
 
-    assert (config_dir / "logs").is_dir()
-    assert not (other_cwd / "synched").exists(), (
-        "logs must not be created relative to cwd"
-    )
+    out = capsys.readouterr().out
+    assert out.startswith("run complete:")

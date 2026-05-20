@@ -2090,8 +2090,9 @@ def test_fatal_error_writes_failure_report_and_exits_one(
 ) -> None:
     """DedupStoreError at startup → failure report written, stage=orchestrator, exit 1."""
     monkeypatch.chdir(tmp_path)
-    config_path = _write_config(tmp_path)
-    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+    (tmp_path / "application-pipeline").mkdir()
+    _write_config(tmp_path / "application-pipeline")
+    monkeypatch.setattr("sys.argv", ["app", "run"])
 
     def _raise(*a: object, **kw: object) -> None:
         raise DedupStoreError("test: store unavailable")
@@ -2108,7 +2109,7 @@ def test_fatal_error_writes_failure_report_and_exits_one(
 
     assert exc_info.value.code == 1
 
-    failures_dir = tmp_path / "failures"
+    failures_dir = tmp_path / "application-pipeline" / "failures"
     reports = list(failures_dir.glob("*.md"))
     assert len(reports) == 1, f"expected one failure report, got {reports}"
 
@@ -3131,8 +3132,9 @@ def test_main_run_complete_line_includes_new_fields(
 ) -> None:
     """__main__ 'run complete:' line includes classify_items, claude_* token and cost fields."""
     monkeypatch.chdir(tmp_path)
-    config_path = _write_config(tmp_path)
-    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+    (tmp_path / "application-pipeline").mkdir()
+    (tmp_path / "application-pipeline" / "config.py").write_text("")
+    monkeypatch.setattr("sys.argv", ["app", "run"])
 
     fake_summary = RunSummary(
         discovered=3,
@@ -3145,7 +3147,7 @@ def test_main_run_complete_line_includes_new_fields(
         duration_seconds=1.5,
     )
     monkeypatch.setattr(
-        "application_pipeline.__main__.run", lambda _path, **_kw: fake_summary
+        "application_pipeline.orchestrator.run", lambda *_a, **_kw: fake_summary
     )
 
     from application_pipeline.__main__ import main
@@ -3940,8 +3942,9 @@ def test_non_quota_worker_exception_writes_failure_report(
 ) -> None:
     """RuntimeError from judge worker → failure report written, exit 1, no Run Divider."""
     monkeypatch.chdir(tmp_path)
-    config_path = _write_config(tmp_path)
-    monkeypatch.setattr("sys.argv", ["app", str(config_path)])
+    (tmp_path / "application-pipeline").mkdir()
+    _write_config(tmp_path / "application-pipeline")
+    monkeypatch.setattr("sys.argv", ["app", "run"])
 
     class _AbortingExtractor:
         def classify_relevance_batch(
@@ -3992,7 +3995,7 @@ def test_non_quota_worker_exception_writes_failure_report(
 
     assert exc_info.value.code == 1
 
-    failures_dir = tmp_path / "failures"
+    failures_dir = tmp_path / "application-pipeline" / "failures"
     reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
     assert len(reports) == 1, f"expected one failure report, got {reports}"
 

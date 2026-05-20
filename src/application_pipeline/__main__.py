@@ -9,12 +9,6 @@ from dotenv import load_dotenv
 
 load_dotenv(Path.home() / ".env")
 
-from application_pipeline.parser_log import RunLog  # noqa: E402
-from application_pipeline.config import resolve_data_paths  # noqa: E402
-from application_pipeline.failure_report import write_failure  # noqa: E402
-from application_pipeline.orchestrator import current_stage, run  # noqa: E402
-from application_pipeline.status_display import PlainStatusDisplay, RichStatusDisplay  # noqa: E402
-
 
 class _TailHandler(logging.Handler):
     def __init__(self, n: int = 20) -> None:
@@ -60,18 +54,33 @@ def main() -> None:
         compile_cv(Path(args[1]))
         return
 
-    if args and args[0] == "run" and len(args) == 2:
-        config_path = Path(args[1])
-    elif len(args) == 1:
-        config_path = Path(args[0])
+    if args and args[0] == "run" and len(args) == 1:
+        cwd = Path.cwd()
+        config_path = cwd / "application-pipeline" / "config.py"
+        if not config_path.exists():
+            print(
+                f"no application-pipeline/config.py in {cwd}"
+                " — did you forget to cd, or run init?",
+                file=sys.stderr,
+            )
+            sys.exit(2)
     else:
-        print("usage: application-pipeline <config>", file=sys.stderr)
-        print("       application-pipeline run <config>", file=sys.stderr)
+        print("usage: application-pipeline run", file=sys.stderr)
         print("       application-pipeline init [--refresh]", file=sys.stderr)
         print("       application-pipeline compile-cv <dir>", file=sys.stderr)
         sys.exit(2)
 
-    run_log = RunLog(config_path.resolve().parent / "logs")
+    from application_pipeline.parser_log import RunLog
+    from application_pipeline.config import resolve_data_paths
+    from application_pipeline.failure_report import write_failure
+    from application_pipeline.orchestrator import current_stage, run
+    from application_pipeline.status_display import (
+        PlainStatusDisplay,
+        RichStatusDisplay,
+    )
+
+    home = config_path.parent
+    run_log = RunLog(home / "logs")
     display = (
         RichStatusDisplay(run_log=run_log)
         if sys.stdout.isatty()
@@ -85,7 +94,7 @@ def main() -> None:
                 current_stage.get(),
                 exc,
                 _tail.tail(),
-                resolve_data_paths(config_path.resolve().parent).failures_path,
+                resolve_data_paths(home).failures_path,
             )
         except Exception:
             pass

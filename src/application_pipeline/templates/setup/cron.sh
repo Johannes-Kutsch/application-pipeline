@@ -32,7 +32,7 @@ EOF
   pip install --upgrade application-pipeline || { fail "ShellError" "pip install --upgrade application-pipeline (second attempt) failed"; exit 1; }
 
   application-pipeline init --refresh || { fail "ShellError" "application-pipeline init --refresh failed"; exit 1; }
-  application-pipeline run "$CONFIG" || { fail "ShellError" "application-pipeline run failed"; exit 1; }
+  application-pipeline run || { fail "ShellError" "application-pipeline run failed"; exit 1; }
 
   tail -n 10000 "$SETTINGS_DIR/logs/cron.log" > "$SETTINGS_DIR/logs/cron.log.tmp" 2>/dev/null \
     && mv "$SETTINGS_DIR/logs/cron.log.tmp" "$SETTINGS_DIR/logs/cron.log" \

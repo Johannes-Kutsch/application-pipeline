@@ -320,26 +320,27 @@ def test_layout_error_produces_failure_artifact_via_main(
 ) -> None:
     from application_pipeline.__main__ import main
 
-    config_path = tmp_path / "config.yaml"
-    config_path.touch()
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "config.py").touch()
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["prog", str(config_path)])
+    monkeypatch.setattr(sys, "argv", ["prog", "run"])
 
     layout_err = LayoutError(
         "smoke-test failed for dense × green",
-        resolved_path=config_path,
+        resolved_path=home / "config.py",
     )
 
     with (
-        patch("application_pipeline.__main__.RunLog"),
-        patch("application_pipeline.__main__.run", side_effect=layout_err),
-        patch("application_pipeline.__main__.current_stage") as mock_stage,
+        patch("application_pipeline.parser_log.RunLog"),
+        patch("application_pipeline.orchestrator.run", side_effect=layout_err),
+        patch("application_pipeline.orchestrator.current_stage") as mock_stage,
         pytest.raises(SystemExit) as exc_info,
     ):
         mock_stage.get.return_value = "load-layout"
         main()
 
     assert exc_info.value.code == 1
-    artifacts = list((tmp_path / "failures").glob("*.md"))
+    artifacts = list((home / "failures").glob("*.md"))
     assert len(artifacts) == 1

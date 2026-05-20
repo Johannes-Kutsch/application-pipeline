@@ -201,8 +201,12 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     (user_info / "self-description.md").write_text("background\n")
     (user_info / "domain-fit.md").write_text("ML roles\n")
     (user_info / "match-criteria.md").write_text("Hamburg\n")
+    (tmp_path / "layout.py").write_text(
+        "PLACEHOLDER_GROUPS = {}\n"
+        'CARD_TEMPLATE = "# {rank} \xb7 {title}\\n\\n{summary}\\n\\n---\\n<{url}>\\n"\n'
+    )
     path = tmp_path / "config.py"
-    path.write_text(REQUIRED_BODY + "\nLAYOUT = None\n")
+    path.write_text(REQUIRED_BODY)
 
     config = load(path)
     prompts = load_prompts(config)

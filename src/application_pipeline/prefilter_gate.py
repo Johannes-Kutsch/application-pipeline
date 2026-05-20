@@ -38,15 +38,10 @@ class _DedupStore(Protocol):
 
 
 @dataclass(frozen=True)
-class _TermMatch:
-    term: str
-
-
-@dataclass(frozen=True)
 class _PreFilterVerdict:
     passes: bool
     reason: Literal["passed", "blacklist_drop"]
-    blacklist_matches: tuple[_TermMatch, ...]
+    blacklist_matches: tuple[str, ...]
 
 
 def _precompute_blacklist(negative_keywords: list[str]) -> list[str]:
@@ -55,14 +50,11 @@ def _precompute_blacklist(negative_keywords: list[str]) -> list[str]:
 
 def _evaluate(position: _Position, blacklist: list[str]) -> _PreFilterVerdict:
     title_hay = normalize(position.title) or ""
-    blacklist_matches = tuple(_TermMatch(term=k) for k in blacklist if k in title_hay)
+    blacklist_matches = tuple(k for k in blacklist if k in title_hay)
     passes = not blacklist_matches
-    reason: Literal["passed", "blacklist_drop"] = (
-        "passed" if passes else "blacklist_drop"
-    )
     return _PreFilterVerdict(
         passes=passes,
-        reason=reason,
+        reason="passed" if passes else "blacklist_drop",
         blacklist_matches=blacklist_matches,
     )
 
@@ -102,13 +94,13 @@ class PreFilterGate:
                 "passes": verdict.passes,
                 "reason": verdict.reason,
                 "blacklist_matches": [
-                    {"term": m.term} for m in verdict.blacklist_matches
+                    {"term": term} for term in verdict.blacklist_matches
                 ],
                 "title_len": len(position.title),
             },
         )
-        for match in verdict.blacklist_matches:
-            self._bl_counts[match.term] += 1
+        for term in verdict.blacklist_matches:
+            self._bl_counts[term] += 1
         if verdict.passes:
             self._metrics.prefilter_passed()
         else:

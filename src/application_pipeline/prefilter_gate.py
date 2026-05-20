@@ -4,12 +4,8 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from application_pipeline.parser_log import RunLog
-from application_pipeline.prefilter import (
-    TermMatch,
-    classify_position,
-    precompute_blacklist,
-)
 from application_pipeline.run_metrics import RunMetrics
+from application_pipeline.text import normalize
 
 
 class _Stub(Protocol):
@@ -42,21 +38,32 @@ class _DedupStore(Protocol):
 
 
 @dataclass(frozen=True)
+class _TermMatch:
+    term: str
+
+
+@dataclass(frozen=True)
 class _PreFilterVerdict:
     passes: bool
     reason: Literal["passed", "blacklist_drop"]
-    blacklist_matches: tuple[TermMatch, ...]
+    blacklist_matches: tuple[_TermMatch, ...]
+
+
+def _precompute_blacklist(negative_keywords: list[str]) -> list[str]:
+    return [n for k in negative_keywords if (n := normalize(k))]
 
 
 def _evaluate(position: _Position, blacklist: list[str]) -> _PreFilterVerdict:
-    verdict = classify_position(position, blacklist)
+    title_hay = normalize(position.title) or ""
+    blacklist_matches = tuple(_TermMatch(term=k) for k in blacklist if k in title_hay)
+    passes = not blacklist_matches
     reason: Literal["passed", "blacklist_drop"] = (
-        "passed" if verdict.passes else "blacklist_drop"
+        "passed" if passes else "blacklist_drop"
     )
     return _PreFilterVerdict(
-        passes=verdict.passes,
+        passes=passes,
         reason=reason,
-        blacklist_matches=verdict.blacklist_matches,
+        blacklist_matches=blacklist_matches,
     )
 
 
@@ -78,7 +85,7 @@ class PreFilterGate:
         metrics: RunMetrics,
         run_log: RunLog,
     ) -> None:
-        self._blacklist = precompute_blacklist(blacklist)
+        self._blacklist = _precompute_blacklist(blacklist)
         self._bl_counts: dict[str, int] = {t: 0 for t in self._blacklist}
         self._dedup = dedup
         self._metrics = metrics

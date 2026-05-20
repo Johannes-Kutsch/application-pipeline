@@ -283,6 +283,14 @@ def test_emit_run_complete_writes_event_row(
     assert ev["NEGATIVE_KEYWORDS_dead"] == "[]"
 
 
+def test_strasse_normalizes_to_straße_match(
+    run_log: RunLog, metrics: RunMetrics, dedup: _FakeDedupStore
+) -> None:
+    gate = _make_gate(run_log, metrics, dedup, blacklist=["straße"])
+    result = gate.admit(_make_position(title="Job in der Hauptstrasse"))
+    assert result is False
+
+
 def test_emit_run_complete_dead_keywords_listed(
     logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup: _FakeDedupStore
 ) -> None:

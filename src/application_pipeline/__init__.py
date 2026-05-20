@@ -1,10 +1,5 @@
 from .config import Config, ConfigError, SourceEntry, load
 from .parsers import Position, PositionStub
-from .prefilter import (
-    PreFilterVerdict,
-    classify_position,
-    precompute_blacklist,
-)
 from .dedup import DedupStoreError, DeduplicationStore, SeenResult, SeenStatus
 from .layout import Layout, LayoutError
 from .layout import load as load_layout
@@ -32,9 +27,6 @@ __all__ = [
     "ClaudeExtractor",
     "Config",
     "ConfigError",
-    "PreFilterVerdict",
-    "classify_position",
-    "precompute_blacklist",
     "DedupStoreError",
     "DeduplicationStore",
     "ExtractorBatchMalformedError",

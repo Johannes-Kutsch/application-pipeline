@@ -39,7 +39,7 @@ class _Position(Protocol):
     def deadline(self) -> date | None: ...
 
 
-class _DeupStore(Protocol):
+class _DedupStore(Protocol):
     def mark_expired(self, key: _Stub) -> None: ...
 
 
@@ -49,7 +49,7 @@ class FreshnessGate:
         *,
         anchored_today: date,
         max_listing_age_days: int,
-        dedup: _DeupStore,
+        dedup: _DedupStore,
         metrics: RunMetrics,
         run_log: RunLog,
     ) -> None:

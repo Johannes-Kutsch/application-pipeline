@@ -3,19 +3,9 @@
 from __future__ import annotations
 
 import importlib.resources
+import re
 
-
-def _latex_template_text(name: str) -> str:
-    return (
-        importlib.resources.files("application_pipeline.templates") / "latex" / name
-    ).read_text(encoding="utf-8")
-
-
-def _user_info_template_text(name: str) -> str:
-    return (
-        importlib.resources.files("application_pipeline.templates") / "user-info" / name
-    ).read_text(encoding="utf-8")
-
+import pytest
 
 _IDENTITY_TOKENS = (
     "<<ADDRESS_STREET>>",
@@ -27,125 +17,61 @@ _IDENTITY_TOKENS = (
 )
 
 _DISPLAY_MACROS = (
-    (r"\addressdisplay", "<<ADDRESS_STREET>>", "<<ADDRESS_CITY>>"),
-    (r"\phonedisplay", "<<PHONE>>"),
-    (r"\emaildisplay", "<<EMAIL>>"),
-    (r"\githubdisplay", "<<GITHUB_URL>>"),
-    (r"\linkedindisplay", "<<LINKEDIN_URL>>"),
+    ("addressdisplay", "<<ADDRESS_STREET>>, <<ADDRESS_CITY>>"),
+    ("phonedisplay", "<<PHONE>>"),
+    ("emaildisplay", "<<EMAIL>>"),
+    ("githubdisplay", "<<GITHUB_URL>>"),
+    ("linkedindisplay", "<<LINKEDIN_URL>>"),
 )
 
 _MODERNCV_SETTERS = (
-    (r"\address{<<ADDRESS_STREET>>}", "<<ADDRESS_CITY>>"),
-    (r"\phone[mobile]{<<PHONE>>}",),
-    (r"\email{<<EMAIL>>}",),
-    (r"\social[github]{<<GITHUB_URL>>}",),
-    (r"\social[linkedin]{<<LINKEDIN_URL>>}",),
+    r"\address{<<ADDRESS_STREET>>}{<<ADDRESS_CITY>>}{}",
+    r"\phone[mobile]{<<PHONE>>}",
+    r"\email{<<EMAIL>>}",
+    r"\social[github]{<<GITHUB_URL>>}",
+    r"\social[linkedin]{<<LINKEDIN_URL>>}",
 )
 
 
-def test_cv_template_contains_no_identity_tokens() -> None:
-    text = _latex_template_text("cv_template.tex")
-    leaked = [t for t in _IDENTITY_TOKENS if t in text]
+@pytest.fixture(scope="module")
+def cv_template() -> str:
+    return (
+        importlib.resources.files("application_pipeline.templates")
+        / "latex"
+        / "cv_template.tex"
+    ).read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def contact_seed() -> str:
+    return (
+        importlib.resources.files("application_pipeline.templates")
+        / "user-info"
+        / "contact.tex"
+    ).read_text(encoding="utf-8")
+
+
+def test_cv_template_contains_no_identity_tokens(cv_template: str) -> None:
+    leaked = [t for t in _IDENTITY_TOKENS if t in cv_template]
     assert leaked == [], f"cv_template.tex leaks identity tokens: {leaked}"
 
 
-def test_contact_tex_defines_addressdisplay_macro() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\def\addressdisplay" in text
+@pytest.mark.parametrize(("macro", "body"), _DISPLAY_MACROS)
+def test_contact_seed_defines_display_macro(
+    contact_seed: str, macro: str, body: str
+) -> None:
+    match = re.search(rf"\\def\\{macro}\{{(.*?)\}}", contact_seed)
+    assert match is not None, f"\\def\\{macro} not found in contact.tex"
+    assert match.group(1) == body
 
 
-def test_contact_tex_defines_phonedisplay_macro() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\def\phonedisplay" in text
+@pytest.mark.parametrize("setter", _MODERNCV_SETTERS)
+def test_contact_seed_retains_moderncv_setter(contact_seed: str, setter: str) -> None:
+    assert setter in contact_seed
 
 
-def test_contact_tex_defines_emaildisplay_macro() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\def\emaildisplay" in text
-
-
-def test_contact_tex_defines_githubdisplay_macro() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\def\githubdisplay" in text
-
-
-def test_contact_tex_defines_linkedindisplay_macro() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\def\linkedindisplay" in text
-
-
-def test_contact_tex_addressdisplay_expands_to_token() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert "<<ADDRESS_STREET>>" in text
-    assert "<<ADDRESS_CITY>>" in text
-
-
-def test_contact_tex_phonedisplay_expands_to_token() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert "<<PHONE>>" in text
-
-
-def test_contact_tex_emaildisplay_expands_to_token() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert "<<EMAIL>>" in text
-
-
-def test_contact_tex_githubdisplay_expands_to_token() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert "<<GITHUB_URL>>" in text
-
-
-def test_contact_tex_linkedindisplay_expands_to_token() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert "<<LINKEDIN_URL>>" in text
-
-
-def test_contact_tex_retains_moderncv_address_setter() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\address{<<ADDRESS_STREET>>}" in text
-    assert "<<ADDRESS_CITY>>" in text
-
-
-def test_contact_tex_retains_moderncv_phone_setter() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\phone[mobile]{<<PHONE>>}" in text
-
-
-def test_contact_tex_retains_moderncv_email_setter() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\email{<<EMAIL>>}" in text
-
-
-def test_contact_tex_retains_moderncv_github_setter() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\social[github]{<<GITHUB_URL>>}" in text
-
-
-def test_contact_tex_retains_moderncv_linkedin_setter() -> None:
-    text = _user_info_template_text("contact.tex")
-    assert r"\social[linkedin]{<<LINKEDIN_URL>>}" in text
-
-
-def test_cv_template_uses_addressdisplay_in_personal_section() -> None:
-    text = _latex_template_text("cv_template.tex")
-    assert r"\addressdisplay" in text
-
-
-def test_cv_template_uses_phonedisplay_in_personal_section() -> None:
-    text = _latex_template_text("cv_template.tex")
-    assert r"\phonedisplay" in text
-
-
-def test_cv_template_uses_emaildisplay_in_personal_section() -> None:
-    text = _latex_template_text("cv_template.tex")
-    assert r"\emaildisplay" in text
-
-
-def test_cv_template_uses_githubdisplay_in_personal_section() -> None:
-    text = _latex_template_text("cv_template.tex")
-    assert r"\githubdisplay" in text
-
-
-def test_cv_template_uses_linkedindisplay_in_personal_section() -> None:
-    text = _latex_template_text("cv_template.tex")
-    assert r"\linkedindisplay" in text
+@pytest.mark.parametrize("macro", [m for m, _ in _DISPLAY_MACROS])
+def test_cv_template_reads_identity_via_display_macro(
+    cv_template: str, macro: str
+) -> None:
+    assert rf"\{macro}" in cv_template

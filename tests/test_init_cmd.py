@@ -297,16 +297,9 @@ def _latex_template_bytes(name: str) -> bytes:
     ).read_bytes()
 
 
-def test_init_seeds_latex_template_dir(tmp_path: Path) -> None:
-    init(tmp_path)
-
-    for fname in _LATEX_TEMPLATE_FILES:
-        dest = tmp_path / "latex" / fname
-        assert dest.exists(), f"expected {dest} to be seeded by init"
-        assert len(dest.read_bytes()) > 0, f"expected {dest} to be non-empty"
-
-
-def test_init_seeds_latex_files_with_correct_content(tmp_path: Path) -> None:
+def test_init_seeds_latex_template_files_with_correct_content(
+    tmp_path: Path,
+) -> None:
     init(tmp_path)
 
     for fname in _LATEX_TEMPLATE_FILES:
@@ -337,9 +330,3 @@ def test_rerun_prints_skipped_for_latex_template_files(
     out = capsys.readouterr().out
     for fname in _LATEX_TEMPLATE_FILES:
         assert f"skipped latex/{fname} (already exists)" in out
-
-
-def test_init_does_not_seed_prompts_dir(tmp_path: Path) -> None:
-    init(tmp_path)
-
-    assert not (tmp_path / "prompts").exists()

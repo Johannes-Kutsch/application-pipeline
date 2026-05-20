@@ -92,8 +92,7 @@ def load(path: pathlib.Path) -> Layout:
     for var_name, keyword in _RETIRED_MODULE_VARS.items():
         if hasattr(module, var_name):
             raise LayoutError(
-                f"'{keyword}' is a retired layout keyword. "
-                f"See the migration note in docs/pi-setup.md.",
+                f"'{keyword}' is a retired layout keyword.",
                 field=var_name,
                 resolved_path=resolved,
             )
@@ -110,8 +109,7 @@ def load(path: pathlib.Path) -> Layout:
     for placeholder in _RETIRED_PLACEHOLDERS:
         if f"{{{placeholder}}}" in card_template:
             raise LayoutError(
-                f"'{placeholder}' is a retired CARD_TEMPLATE placeholder. "
-                f"See the migration note in docs/pi-setup.md.",
+                f"'{placeholder}' is a retired CARD_TEMPLATE placeholder.",
                 field="CARD_TEMPLATE",
                 resolved_path=resolved,
             )

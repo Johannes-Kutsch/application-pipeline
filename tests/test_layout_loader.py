@@ -265,9 +265,7 @@ def test_load_raises_for_tier_emoji_module_variable(tmp_path: pathlib.Path) -> N
     with pytest.raises(LayoutError) as exc_info:
         load_layout(path)
 
-    msg = str(exc_info.value)
-    assert "tier_emoji" in msg
-    assert "docs/pi-setup.md" in msg
+    assert "tier_emoji" in str(exc_info.value)
 
 
 def test_load_raises_for_tier_color_module_variable(tmp_path: pathlib.Path) -> None:
@@ -281,9 +279,7 @@ def test_load_raises_for_tier_color_module_variable(tmp_path: pathlib.Path) -> N
     with pytest.raises(LayoutError) as exc_info:
         load_layout(path)
 
-    msg = str(exc_info.value)
-    assert "tier_color" in msg
-    assert "docs/pi-setup.md" in msg
+    assert "tier_color" in str(exc_info.value)
 
 
 @pytest.mark.parametrize("placeholder", ["emoji", "color", "tier"])

@@ -54,7 +54,7 @@ from application_pipeline.prefilter import (
     classify_position,
     precompute_blacklist,
 )
-from application_pipeline.prefilter.freshness import evaluate as _evaluate_freshness
+from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.renderer import render
 from application_pipeline.results import ResultsFileError, append, ensure_initialized
@@ -501,8 +501,7 @@ class _OutboundDispatcher:
         batch_size: int,
         run_state: _RunState,
         run_log: RunLog,
-        anchored_today: date,
-        max_listing_age_days: int,
+        freshness: FreshnessGate,
     ) -> None:
         self._parser_states = parser_states
         self._dedup = dedup
@@ -515,14 +514,7 @@ class _OutboundDispatcher:
         self._run_log = run_log
         self._classify_buffer: list[Position] = []
         self._batch_id: int = 0
-        self._anchored_today = anchored_today
-        self._max_listing_age_days = max_listing_age_days
-        self._freshness_counts: dict[str, int] = {
-            "passed": 0,
-            "too_old": 0,
-            "deadline_passed": 0,
-            "too_old_and_deadline_passed": 0,
-        }
+        self._freshness = freshness
 
     def dispatch(self, pid: str, payload: object) -> bool:
         """Dispatch a payload to the appropriate handler.
@@ -589,33 +581,10 @@ class _OutboundDispatcher:
                     self._metrics.unparseable_date(pid)
             self._metrics.enriched(pid)
             if wrapper.judge_resume:
-                freshness = _evaluate_freshness(
-                    payload, self._anchored_today, self._max_listing_age_days
-                )
-                self._run_log.transcript(
-                    "pipeline_freshness",
-                    {
-                        "url": payload.stub.url,
-                        "title": payload.title,
-                        "source": payload.stub.source,
-                        "posted_date": payload.posted_date.isoformat()
-                        if payload.posted_date is not None
-                        else None,
-                        "deadline": payload.deadline.isoformat()
-                        if payload.deadline is not None
-                        else None,
-                        "anchored_today": self._anchored_today.isoformat(),
-                        "age_days": freshness.age_days,
-                        "passes": freshness.passes,
-                        "reason": freshness.reason,
-                    },
-                )
-                self._freshness_counts[freshness.reason] += 1
-                if freshness.passes:
+                if self._freshness.admit(payload):
                     self._pool_collector.add_judge_pending(payload)
                 else:
-                    self._dedup.mark_expired(payload.stub)
-                    self._metrics.freshness_dropped()
+                    return
             else:
                 verdict = classify_position(payload, self._blacklist)
                 self._run_log.event(
@@ -631,36 +600,13 @@ class _OutboundDispatcher:
                 )
                 if verdict.passes:
                     self._metrics.prefilter_passed(verdict)
-                    freshness = _evaluate_freshness(
-                        payload, self._anchored_today, self._max_listing_age_days
-                    )
-                    self._run_log.transcript(
-                        "pipeline_freshness",
-                        {
-                            "url": payload.stub.url,
-                            "title": payload.title,
-                            "source": payload.stub.source,
-                            "posted_date": payload.posted_date.isoformat()
-                            if payload.posted_date is not None
-                            else None,
-                            "deadline": payload.deadline.isoformat()
-                            if payload.deadline is not None
-                            else None,
-                            "anchored_today": self._anchored_today.isoformat(),
-                            "age_days": freshness.age_days,
-                            "passes": freshness.passes,
-                            "reason": freshness.reason,
-                        },
-                    )
-                    self._freshness_counts[freshness.reason] += 1
-                    if freshness.passes:
+                    if self._freshness.admit(payload):
                         self._classify_buffer.append(payload)
                         self._metrics.classify_buffered(1)
                         if len(self._classify_buffer) >= self._batch_size:
                             self._flush_classify_batch()
                     else:
-                        self._dedup.mark_expired(payload.stub)
-                        self._metrics.freshness_dropped()
+                        return
                 else:
                     self._dedup.mark_out_of_domain(payload.stub)
                     self._metrics.prefilter_dropped(verdict)
@@ -684,11 +630,6 @@ class _OutboundDispatcher:
             )
             self._dedup.mark_external_redirect(stub)
             self._metrics.external_redirect(pid)
-
-    def emit_freshness_run_complete(self) -> None:
-        self._run_log.event(
-            "pipeline_freshness", "run_complete", **self._freshness_counts
-        )
 
     def _handle_not_served(self, pid: str) -> None:
         self._metrics.not_served_query(pid)
@@ -856,6 +797,14 @@ def run(
             )
             classify_thread.start()
 
+            freshness = FreshnessGate(
+                anchored_today=anchored_today,
+                max_listing_age_days=cfg.max_listing_age_days,
+                dedup=dedup_run,
+                metrics=metrics,
+                run_log=run_log,
+            )
+
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
                 dedup=dedup_run,
@@ -866,8 +815,7 @@ def run(
                 batch_size=cfg.claude_classify_batch_size,
                 run_state=run_state,
                 run_log=run_log,
-                anchored_today=anchored_today,
-                max_listing_age_days=cfg.max_listing_age_days,
+                freshness=freshness,
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())
@@ -926,7 +874,7 @@ def run(
                     pstate.started_at,
                 )
 
-            dispatcher.emit_freshness_run_complete()
+            freshness.emit_run_complete()
             dispatcher.flush_residual()
 
         classify_thread.join()

@@ -20,11 +20,6 @@ def _run_main(args: list[str]) -> None:
         sys.argv = old
 
 
-# ---------------------------------------------------------------------------
-# init --refresh flag
-# ---------------------------------------------------------------------------
-
-
 def test_init_refresh_seeds_files_on_fresh_dir(tmp_path: Path) -> None:
     _run_main(["init", "--refresh", str(tmp_path)])
 
@@ -52,11 +47,6 @@ def test_init_refresh_is_idempotent(tmp_path: Path) -> None:
     assert (tmp_path / "config.py").read_bytes() == first
 
 
-# ---------------------------------------------------------------------------
-# run subcommand
-# ---------------------------------------------------------------------------
-
-
 def test_run_subcommand_exits_nonzero_on_bad_config(tmp_path: Path) -> None:
     bad_config = tmp_path / "config.py"
     bad_config.write_text("KEYWORDS = ['python']\n")  # missing SOURCES
@@ -65,11 +55,6 @@ def test_run_subcommand_exits_nonzero_on_bad_config(tmp_path: Path) -> None:
         _run_main(["run", str(bad_config)])
 
     assert exc_info.value.code != 0
-
-
-# ---------------------------------------------------------------------------
-# console-script registration
-# ---------------------------------------------------------------------------
 
 
 def test_project_scripts_entry_point_registered() -> None:

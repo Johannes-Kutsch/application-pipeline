@@ -52,15 +52,15 @@ def main() -> None:
             return
 
     if args and args[0] == "run" and len(args) == 2:
-        args = [args[1]]
-
-    if len(args) != 1:
+        config_path = Path(args[1])
+    elif len(args) == 1:
+        config_path = Path(args[0])
+    else:
         print("usage: application-pipeline <config>", file=sys.stderr)
         print("       application-pipeline run <config>", file=sys.stderr)
         print("       application-pipeline init [--refresh] <dir>", file=sys.stderr)
         sys.exit(2)
 
-    config_path = Path(args[0])
     run_log = RunLog(config_path.resolve().parent / "logs")
     display = (
         RichStatusDisplay(run_log=run_log)

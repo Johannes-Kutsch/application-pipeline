@@ -23,6 +23,7 @@ _REMOVED_FIELDS = (
     "SEEN_STORE_PATH",
     "CLASSIFY_RELEVANCE_PROMPT",
     "JUDGE_MATCH_PROMPT",
+    "USER_INFO_DIR",
 )
 
 
@@ -50,11 +51,7 @@ def load(path: pathlib.Path) -> Config:
             f"LAYOUT: {layout} does not exist; add layout.py next to config.py"
         )
 
-    user_info_dir = _resolve_dir(
-        "USER_INFO_DIR",
-        config_dir,
-        getattr(module, "USER_INFO_DIR", data_paths.user_info_dir),
-    )
+    user_info_dir = data_paths.user_info_dir
 
     claude_classify_batch_size = int(getattr(module, "CLAUDE_CLASSIFY_BATCH_SIZE", 100))
     if claude_classify_batch_size < 1:
@@ -88,13 +85,6 @@ def load(path: pathlib.Path) -> Config:
     )
     _validate(config)
     return config
-
-
-def _resolve_dir(name: str, config_dir: pathlib.Path, value: object) -> pathlib.Path:
-    path = pathlib.Path(value)  # type: ignore[arg-type]
-    if not path.is_absolute():
-        path = config_dir / path
-    return path
 
 
 def _resolve_parser_modules(sources: list[SourceEntry]) -> list[LocationCoverage]:

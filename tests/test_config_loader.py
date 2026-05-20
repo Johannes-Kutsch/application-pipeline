@@ -224,6 +224,17 @@ def test_layout_knob_raises_when_set_to_path(tmp_path: pathlib.Path) -> None:
 # --- user_info_dir ---
 
 
+def test_user_info_dir_raises_when_set_in_config(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY
+        + "\nimport pathlib\nUSER_INFO_DIR = pathlib.Path('/tmp/custom')\n",
+    )
+
+    with pytest.raises(ConfigError, match="USER_INFO_DIR is no longer supported"):
+        load(path)
+
+
 def test_user_info_dir_defaults_to_user_info_subdir(tmp_path: pathlib.Path) -> None:
     user_info = tmp_path / "user-info"
     user_info.mkdir()
@@ -234,35 +245,14 @@ def test_user_info_dir_defaults_to_user_info_subdir(tmp_path: pathlib.Path) -> N
     assert config.user_info_dir == tmp_path / "user-info"
 
 
-def test_user_info_dir_raises_when_not_a_directory(tmp_path: pathlib.Path) -> None:
-    missing_dir = tmp_path / "no_such_user_info"
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY
-        + f"\nimport pathlib\nUSER_INFO_DIR = pathlib.Path(r'{missing_dir}')\n",
-    )
+def test_user_info_dir_raises_when_canonical_dir_missing(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+    (tmp_path / "user-info").rmdir()
 
     with pytest.raises(ConfigError, match="USER_INFO_DIR"):
         load(path)
-
-
-def test_load_resolves_relative_user_info_dir_against_config_dir(
-    tmp_path: pathlib.Path,
-) -> None:
-    settings = tmp_path / "settings"
-    settings.mkdir()
-    user_info = settings / "my-user-info"
-    user_info.mkdir()
-    path = write_config(
-        settings,
-        REQUIRED_BODY
-        + "\nimport pathlib\n"
-        + 'USER_INFO_DIR = pathlib.Path("my-user-info")\n',
-    )
-
-    config = load(path)
-
-    assert config.user_info_dir == settings / "my-user-info"
 
 
 # --- prompt knobs retired ---

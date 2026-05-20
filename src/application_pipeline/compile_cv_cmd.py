@@ -26,18 +26,11 @@ def compile_cv(app_dir: Path) -> None:
 
     build_dir.mkdir(exist_ok=True)
 
-    # Extract all LaTeX assets from the installed package into .build/
     pkg = importlib.resources.files("application_pipeline.latex")
     for item in pkg.iterdir():
-        name = item.name
-        if name.startswith("__"):
+        if Path(item.name).suffix not in _LATEX_SUFFIXES:
             continue
-        suffix = Path(name).suffix
-        if suffix not in _LATEX_SUFFIXES:
-            continue
-        (build_dir / name).write_bytes(item.read_bytes())
-
-    produced: list[tuple[str, Path]] = []
+        (build_dir / item.name).write_bytes(item.read_bytes())
 
     for build_name in _BUILDS:
         tex_input = (
@@ -60,11 +53,9 @@ def compile_cv(app_dir: Path) -> None:
                 _emit_error_blob(log_file)
             sys.exit(1)
 
-        produced.append((build_name, build_dir / f"{build_name}.pdf"))
-
     # All three succeeded — move PDFs to app_dir and clean up .build/
-    for build_name, src in produced:
-        shutil.copy2(src, app_dir / f"{build_name}.pdf")
+    for build_name in _BUILDS:
+        shutil.copy2(build_dir / f"{build_name}.pdf", app_dir / f"{build_name}.pdf")
     shutil.rmtree(build_dir)
 
 

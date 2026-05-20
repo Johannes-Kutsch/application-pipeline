@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.resources
+import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -337,25 +339,29 @@ def test_rerun_prints_skipped_for_latex_template_files(
 _SETUP_SCRIPTS = ("cron.sh", "cron-install.sh", "cron-uninstall.sh")
 
 
-def test_init_seeds_setup_scripts(tmp_path: Path) -> None:
+def _setup_template_bytes(name: str) -> bytes:
+    return (
+        importlib.resources.files("application_pipeline.templates") / "setup" / name
+    ).read_bytes()
+
+
+def test_init_seeds_setup_scripts_with_correct_content(tmp_path: Path) -> None:
     init(tmp_path)
 
     for fname in _SETUP_SCRIPTS:
-        dest = tmp_path / "setup" / fname
-        assert dest.exists(), f"expected {dest} to be seeded by init"
-        assert dest.stat().st_size > 0, f"expected {dest} to be non-empty"
+        assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
 
 
-def test_init_setup_scripts_are_idempotent(tmp_path: Path) -> None:
+def test_rerun_does_not_overwrite_existing_setup_scripts(tmp_path: Path) -> None:
     init(tmp_path)
-    first_contents = {
+    originals = {
         fname: (tmp_path / "setup" / fname).read_bytes() for fname in _SETUP_SCRIPTS
     }
 
     init(tmp_path)
 
     for fname in _SETUP_SCRIPTS:
-        assert (tmp_path / "setup" / fname).read_bytes() == first_contents[fname]
+        assert (tmp_path / "setup" / fname).read_bytes() == originals[fname]
 
 
 def test_init_skips_existing_setup_scripts(
@@ -377,24 +383,28 @@ def test_init_skips_existing_setup_scripts(
 # --- setup/*.sh integration (smoke) ---
 
 
-@pytest.mark.smoke
-def test_cron_install_adds_crontab_line(tmp_path: Path) -> None:
-    import subprocess
+@pytest.fixture
+def _isolated_crontab() -> Iterator[None]:
+    """Back up the user's crontab around a test and restore it afterwards."""
+    saved = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    had_crontab = saved.returncode == 0
+    subprocess.run(["crontab", "-r"], check=False, capture_output=True)
+    try:
+        yield
+    finally:
+        subprocess.run(["crontab", "-r"], check=False, capture_output=True)
+        if had_crontab:
+            subprocess.run(["crontab", "-"], input=saved.stdout, text=True, check=False)
 
+
+@pytest.mark.smoke
+def test_cron_install_adds_crontab_line(
+    tmp_path: Path, _isolated_crontab: None
+) -> None:
     init(tmp_path)
     cron_install = tmp_path / "setup" / "cron-install.sh"
-    cron_install.chmod(0o755)
 
-    env = {
-        **__import__("os").environ,
-        "CRON_SH": str(tmp_path / "setup" / "cron.sh"),
-    }
-    result = subprocess.run(
-        ["bash", str(cron_install)],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    result = subprocess.run(["bash", str(cron_install)], capture_output=True, text=True)
     assert result.returncode == 0
 
     crontab = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -403,49 +413,37 @@ def test_cron_install_adds_crontab_line(tmp_path: Path) -> None:
     assert str(tmp_path / "setup" / "cron.sh") in line
     assert f"# application-pipeline:{tmp_path}" in line
 
-    # cleanup
-    subprocess.run(["crontab", "-r"], check=False)
-
 
 @pytest.mark.smoke
-def test_cron_uninstall_removes_only_this_marker(tmp_path: Path) -> None:
-    import subprocess
-
+def test_cron_uninstall_removes_only_this_marker(
+    tmp_path: Path, _isolated_crontab: None
+) -> None:
     init(tmp_path)
     cron_install = tmp_path / "setup" / "cron-install.sh"
     cron_uninstall = tmp_path / "setup" / "cron-uninstall.sh"
-    cron_install.chmod(0o755)
-    cron_uninstall.chmod(0o755)
 
+    foreign_line = "0 1 * * * /tmp/other.sh # application-pipeline:/some/other/dir"
+    subprocess.run(["crontab", "-"], input=foreign_line + "\n", text=True, check=True)
     subprocess.run(["bash", str(cron_install)], check=True)
 
     result = subprocess.run(
-        ["bash", str(cron_uninstall)],
-        capture_output=True,
-        text=True,
+        ["bash", str(cron_uninstall)], capture_output=True, text=True
     )
     assert result.returncode == 0
 
     crontab = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
     assert f"# application-pipeline:{tmp_path}" not in crontab.stdout
-
-    # cleanup
-    subprocess.run(["crontab", "-r"], check=False)
+    assert foreign_line in crontab.stdout
 
 
 @pytest.mark.smoke
-def test_cron_uninstall_no_op_on_empty_crontab(tmp_path: Path) -> None:
-    import subprocess
-
+def test_cron_uninstall_no_op_on_empty_crontab(
+    tmp_path: Path, _isolated_crontab: None
+) -> None:
     init(tmp_path)
     cron_uninstall = tmp_path / "setup" / "cron-uninstall.sh"
-    cron_uninstall.chmod(0o755)
-
-    subprocess.run(["crontab", "-r"], check=False)
 
     result = subprocess.run(
-        ["bash", str(cron_uninstall)],
-        capture_output=True,
-        text=True,
+        ["bash", str(cron_uninstall)], capture_output=True, text=True
     )
     assert result.returncode == 0

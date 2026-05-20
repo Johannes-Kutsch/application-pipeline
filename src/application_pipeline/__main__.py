@@ -51,6 +51,12 @@ def main() -> None:
             init(Path(rest[0]))
             return
 
+    if args and args[0] == "compile-cv" and len(args) == 2:
+        from application_pipeline.compile_cv_cmd import compile_cv
+
+        compile_cv(Path(args[1]))
+        return
+
     if args and args[0] == "run" and len(args) == 2:
         config_path = Path(args[1])
     elif len(args) == 1:
@@ -59,6 +65,7 @@ def main() -> None:
         print("usage: application-pipeline <config>", file=sys.stderr)
         print("       application-pipeline run <config>", file=sys.stderr)
         print("       application-pipeline init [--refresh] <dir>", file=sys.stderr)
+        print("       application-pipeline compile-cv <dir>", file=sys.stderr)
         sys.exit(2)
 
     run_log = RunLog(config_path.resolve().parent / "logs")

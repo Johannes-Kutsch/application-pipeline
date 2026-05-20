@@ -1,7 +1,7 @@
 *.idea
 *.claude
 pycastle/
-synched/
+application-pipeline/
 
 # Deduplication store — durability via Syncthing per ADR-0010
 .seen.json

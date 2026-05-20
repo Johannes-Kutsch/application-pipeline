@@ -37,9 +37,23 @@
 \providecommand{\BUILD}{combined}
 \providecommand{\UserDataDir}{../user-info}
 
-% Identity + contact come from \UserDataDir; signature/photo are referenced as files.
-\input{\UserDataDir/identity}
-\input{\UserDataDir/contact}
+% Raw facts (\def\myFirstname etc.) come from \UserDataDir/facts.
+% Moderncv API calls and display-macro derivations live here, not in facts.tex.
+\input{\UserDataDir/facts}
+\firstname{\myFirstname}
+\familyname{\myFamilyname}
+\title{Lebenslauf}
+\photo[120pt][1pt]{\UserDataDir/profile}
+\address{\myStreet}{\myZip}{}
+\phone[mobile]{\myPhone}
+\email{\myEmail}
+\social[github]{\myGithub}
+\social[linkedin]{\myLinkedin}
+\def\addressdisplay{\myStreet, \myZip}
+\def\phonedisplay{\myPhone}
+\def\emaildisplay{\myEmail}
+\def\githubdisplay{\myGithub}
+\def\linkedindisplay{\myLinkedin}
 
 % Override moderncv's letter-closing to inject the signature image automatically,
 % so the applicant never has to print/sign/scan an Anschreiben. This couples to
@@ -114,9 +128,11 @@
 <<SKILLS_BLOCK>>
 
 \section{Sprachen}
+\Languages
 
 \section{Hobbies und Interessen}
 \renewcommand{\listitemsymbol}{-~}
+\Hobbies
 }
 
 \end{document}

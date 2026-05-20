@@ -33,8 +33,7 @@ _USER_INFO_FILES = (
 )
 
 _LATEX_USER_INFO_FILES = (
-    "identity.tex",
-    "contact.tex",
+    "facts.tex",
     "content_pool.tex",
     "profile.png",
     "signature.png",
@@ -256,7 +255,7 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
         assert dest.read_bytes() == _user_info_template_bytes(fname)
 
 
-def test_init_seeds_nine_files_under_user_info(tmp_path: Path) -> None:
+def test_init_seeds_eight_files_under_user_info(tmp_path: Path) -> None:
     init(tmp_path)
 
     user_info = tmp_path / "user-info"
@@ -280,12 +279,27 @@ def test_rerun_skips_existing_latex_files(
 
 def test_rerun_preserves_latex_file_content(tmp_path: Path) -> None:
     init(tmp_path)
-    identity_path = tmp_path / "user-info" / "identity.tex"
-    original = identity_path.read_bytes()
+    facts_path = tmp_path / "user-info" / "facts.tex"
+    original = facts_path.read_bytes()
 
     init(tmp_path)
 
-    assert identity_path.read_bytes() == original
+    assert facts_path.read_bytes() == original
+
+
+def test_init_does_not_auto_migrate_existing_identity_and_contact(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "user-info").mkdir()
+    identity_content = "% user-edited identity\n\\firstname{Alice}\n"
+    contact_content = "% user-edited contact\n\\address{Musterstr}{Berlin}{}\n"
+    (tmp_path / "user-info" / "identity.tex").write_text(identity_content)
+    (tmp_path / "user-info" / "contact.tex").write_text(contact_content)
+
+    init(tmp_path)
+
+    assert (tmp_path / "user-info" / "identity.tex").read_text() == identity_content
+    assert (tmp_path / "user-info" / "contact.tex").read_text() == contact_content
 
 
 # --- LaTeX package (application_pipeline.latex) ---

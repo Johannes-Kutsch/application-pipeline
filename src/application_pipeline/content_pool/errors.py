@@ -1,0 +1,2 @@
+class ContentPoolError(Exception):
+    pass

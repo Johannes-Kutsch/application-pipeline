@@ -1,6 +1,6 @@
-# Cron fires once per day at 00:30 local; deployment wipes prior state
+# Cron fires weekdays at 00:30 local; deployment wipes prior state
 
-Cron for `application_pipeline` fires once per calendar day. Each fire is one logical run — parsers walk every **Source**, classifier processes everything `not_classified`, judge picks the **Daily Top-5**, daily file is written, run ends. The seeded `cron-install.sh` (ADR-0027) hardcodes `30 0 * * *` — 00:30 local, chosen to run before any pycastle cron tick at 01:00 local on the same host. Deployment of the v2 refactor wipes the existing `.seen.json`, `extracts.json`, and `results/{green,amber,red}.md`. Deployment of the PyPI-distribution change (ADR-0027) additionally retires the legacy `~/application-pipeline/{repo,releases,current,data}/` layout — the operator removes those directories and re-runs `application-pipeline init <dir>` + `bash setup/cron-install.sh`. No automatic state migration is provided. Historical kept-records do not survive.
+Cron for `application_pipeline` fires once per **weekday** (Mon–Fri). Each fire is one logical run — parsers walk every **Source**, classifier processes everything `not_classified`, judge picks the **Daily Top-5**, daily file is written, run ends. The seeded `cron-install.sh` (ADR-0027) hardcodes `30 0 * * 1-5` — 00:30 local, chosen to run before any pycastle cron tick at 01:00 local on the same host. Weekends are skipped: hiring teams don't post or respond Sat/Sun, so a Sat/Sun pool would just roll into Monday's pool anyway. Deployment of the v2 refactor wipes the existing `.seen.json`, `extracts.json`, and `results/{green,amber,red}.md`. Deployment of the PyPI-distribution change (ADR-0027) additionally retires the legacy `~/application-pipeline/{repo,releases,current,data}/` layout — the operator removes those directories and re-runs `application-pipeline init <dir>` + `bash setup/cron-install.sh`. No automatic state migration is provided. Historical kept-records do not survive.
 
 ## Why
 
@@ -20,7 +20,7 @@ Cron for `application_pipeline` fires once per calendar day. Each fire is one lo
 
 ## Consequences
 
-- **Cron line** (written by `cron-install.sh` per ADR-0027): `30 0 * * * <repo>/setup/cron.sh >> <logs_dir>/cron.log 2>&1 # application-pipeline:<repo>`.
+- **Cron line** (written by `cron-install.sh` per ADR-0027): `30 0 * * 1-5 <repo>/application-pipeline/setup/cron.sh >> <logs_dir>/cron.log 2>&1 # application-pipeline:<repo>`. `cron.sh` is self-locating via `$(dirname "$0")/../..` (ADR-0029) — the cron line carries only the absolute path to the script.
 - **Deployment includes a state-wipe step** documented in `docs/cron-setup.md` (or the deploy script): `rm -rf ~/application-pipeline-old-layout/` (the legacy `repo/`, `releases/`, `current/`, `data/` tree if migrating from the pre-PyPI deploy), then run `application-pipeline init <dir>` and `bash setup/cron-install.sh`.
 - **No load-time branch for legacy statuses.** Loader assumes the new enum (`not_classified | out_of_domain | in_domain | selected_by_judge | expired | enrich_failed | external_redirect`). A legacy value raises with a wipe-instruction hint.
 - **First-day-after-cutover**: parsers walk every source as if nothing existed; classifier processes the full first-run volume (potentially hitting quota — ADR-0023 handles it). Judge picks 5. By day 3 the pool is steady-state.

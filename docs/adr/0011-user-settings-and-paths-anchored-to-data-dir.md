@@ -1,6 +1,6 @@
 # User settings in a flat settings directory; all output paths anchored to it
 
-The two user-editable Python modules — **Config** (`config.py`) and **Layout** (`layout.py`) — live in a single flat settings directory the user picks at `init` time (conventionally `~/application-pipeline/`). Default contents ship inside the package at `src/application_pipeline/templates/` and are materialised by `application-pipeline init <dir>`. There is no `data/` segment in the path; the settings directory *is* the data directory.
+The two user-editable Python modules — **Config** (`config.py`) and **Layout** (`layout.py`) — live in a single flat settings directory. The directory's **location** is now hardcoded to `<cwd>/application-pipeline/` (ADR-0029, supersedes the original "user picks at init time, conventionally `~/application-pipeline/`" claim); the **shape** below is unchanged. Default contents ship inside the package at `src/application_pipeline/templates/` and are materialised by `application-pipeline init <dir>`. There is no `data/` segment in the path; the settings directory *is* the data directory.
 
 All output and state paths — the **Daily Results File**, `.seen.json`, **Failure Reports**, per-component logs, `extracts.json` — are derived at load time from the parent directory of the loaded `config.py` (`data_dir`). Canonical layout:
 

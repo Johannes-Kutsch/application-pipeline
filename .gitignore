@@ -2,7 +2,6 @@
 *.claude
 pycastle/
 application-pipeline/
-docs/overleaf_files/
 
 # Deduplication store — durability via Syncthing per ADR-0010
 .seen.json

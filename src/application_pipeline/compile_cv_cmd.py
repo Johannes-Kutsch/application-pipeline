@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from application_pipeline.init_cmd import home_dir
+from application_pipeline.latex import slot_map
 
 _BUILDS = ("cover", "resume", "combined")
 
@@ -25,22 +26,46 @@ def compile_cv(app_dir: Path) -> None:
         sys.exit(2)
 
     app_dir = app_dir.resolve()
+    cv_tex = app_dir / "cv.tex"
+    if not cv_tex.exists():
+        print(
+            f"no cv.tex in {app_dir} — did you forget to run /write-cv?",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        slots = slot_map.parse(cv_tex)
+    except slot_map.SlotMapError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
+
     user_info_dir = (home_dir() / "user-info").resolve()
     build_dir = app_dir / ".build"
 
     build_dir.mkdir(exist_ok=True)
 
     pkg = importlib.resources.files("application_pipeline.latex")
+    template_text: str | None = None
     for item in pkg.iterdir():
         if Path(item.name).suffix not in _LATEX_SUFFIXES:
             continue
-        (build_dir / item.name).write_bytes(item.read_bytes())
+        if item.name == "cv_template.tex":
+            template_text = item.read_text(encoding="utf-8")
+        else:
+            (build_dir / item.name).write_bytes(item.read_bytes())
+
+    if template_text is None:
+        raise FileNotFoundError("cv_template.tex not found in package")
+
+    substituted = _substitute_slots(template_text, slots)
+    (build_dir / "cv.tex").write_text(substituted, encoding="utf-8")
 
     for build_name in _BUILDS:
         tex_input = (
-            rf"\def\UserDataDir{{{user_info_dir}}}"
+            rf"\def\UserDataDir{{{user_info_dir.as_posix()}}}"
             rf"\def\BUILD{{{build_name}}}"
-            r"\input{cv_template}"
+            r"\input{cv}"
         )
         cmd = [
             "pdflatex",
@@ -61,6 +86,13 @@ def compile_cv(app_dir: Path) -> None:
     for build_name in _BUILDS:
         shutil.copy2(build_dir / f"{build_name}.pdf", app_dir / f"{build_name}.pdf")
     shutil.rmtree(build_dir)
+
+
+def _substitute_slots(template: str, slots: dict[str, str]) -> str:
+    result = template
+    for name, body in slots.items():
+        result = result.replace(f"<<{name.upper()}>>", body.rstrip("\n"))
+    return result
 
 
 def _emit_error_blob(log_file: Path) -> None:

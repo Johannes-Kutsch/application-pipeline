@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -46,7 +47,7 @@ def _fake_pdflatex_failure(
 def app_dir(tmp_path: Path) -> Path:
     d = tmp_path / "application"
     d.mkdir()
-    (d / "cv.tex").write_text("% application cv\n")
+    (d / "cv.tex").write_text(_valid_cv_tex(), encoding="utf-8")
     return d
 
 
@@ -259,6 +260,139 @@ def test_compile_cv_uses_cwd_relative_user_info(
         (project_root / "application-pipeline" / "user-info").resolve()
     )
     assert any(expected_user_info in arg for cmd in captured_cmds for arg in cmd)
+
+
+def _valid_cv_tex() -> str:
+    slots = [
+        ("recipient_line_1", "Firma GmbH"),
+        ("recipient_line_2", "Musterstraße 1, 12345 Berlin"),
+        ("opening", "Sehr geehrte Damen und Herren,"),
+        ("cover_intro", "Ich bewerbe mich hiermit."),
+        ("cover_pivot", "Mein Hintergrund ist relevant."),
+        ("cover_fit", "Ich passe gut zu Ihrer Firma."),
+        ("cover_closing", "Ich freue mich auf Ihre Antwort."),
+        (
+            "resume_berufserfahrung",
+            r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+        ),
+        ("resume_ausbildung", r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}"),
+        ("resume_projekte", r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}"),
+        ("skills_block", "Python, LaTeX"),
+    ]
+    return "".join(f"%% SLOT: {name}\n{body}\n" for name, body in slots)
+
+
+def test_compile_cv_missing_cv_tex_exits_with_write_cv_message(
+    project_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_dir_no_cv = tmp_path / "app_no_cv"
+    app_dir_no_cv.mkdir()
+
+    with pytest.raises(SystemExit) as exc_info:
+        compile_cv(app_dir_no_cv)
+
+    assert exc_info.value.code != 0
+    err = capsys.readouterr().err
+    assert "/write-cv" in err
+
+
+def test_compile_cv_malformed_cv_tex_exits_naming_missing_slot(
+    project_root: Path,
+    app_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (app_dir / "cv.tex").write_text(
+        "%% SLOT: recipient_line_1\nFirma GmbH\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        compile_cv(app_dir)
+
+    assert exc_info.value.code != 0
+    err = capsys.readouterr().err
+    assert "resume_ausbildung" in err
+
+
+def test_compile_cv_build_cv_tex_has_substituted_content(
+    app_dir: Path,
+    project_root: Path,
+    patch_subprocess: Callable[[RunFn], None],
+) -> None:
+    patch_subprocess(_fake_pdflatex_failure)
+
+    with pytest.raises(SystemExit):
+        compile_cv(app_dir)
+
+    build_cv = app_dir / ".build" / "cv.tex"
+    assert build_cv.exists()
+    content = build_cv.read_text(encoding="utf-8")
+    assert "<<" not in content
+    assert "Firma GmbH" in content
+
+
+def test_compile_cv_userdata_dir_uses_forward_slashes(
+    app_dir: Path,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_cmds: list[list[str]] = []
+
+    def capturing_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        captured_cmds.append(cmd)
+        return _fake_pdflatex_success(cmd, **kwargs)
+
+    monkeypatch.setattr("subprocess.run", capturing_run)
+    compile_cv(app_dir)
+
+    userdata_args = [
+        arg for cmd in captured_cmds for arg in cmd if "UserDataDir" in arg
+    ]
+    assert userdata_args, "no UserDataDir arg found in pdflatex commands"
+    for arg in userdata_args:
+        m = re.search(r"\\def\\UserDataDir\{([^}]+)\}", arg)
+        assert m is not None, f"could not parse UserDataDir from: {arg}"
+        assert "\\" not in m.group(1), "path must use forward slashes"
+
+
+def test_compile_cv_three_resume_slots_independently_substituted(
+    project_root: Path,
+    tmp_path: Path,
+    patch_subprocess: Callable[[RunFn], None],
+) -> None:
+    app_dir = tmp_path / "app_resume"
+    app_dir.mkdir()
+    slots = [
+        ("recipient_line_1", "Firma GmbH"),
+        ("recipient_line_2", "Berlin"),
+        ("opening", "Sehr geehrte Damen und Herren,"),
+        ("cover_intro", "Intro."),
+        ("cover_pivot", "Pivot."),
+        ("cover_fit", "Fit."),
+        ("cover_closing", "Closing."),
+        ("resume_berufserfahrung", "BERUFSINHALT"),
+        ("resume_ausbildung", "AUSBILDUNGSINHALT"),
+        ("resume_projekte", "PROJEKTINHALT"),
+        ("skills_block", "KENNTNISSE"),
+    ]
+    (app_dir / "cv.tex").write_text(
+        "".join(f"%% SLOT: {n}\n{b}\n" for n, b in slots), encoding="utf-8"
+    )
+    patch_subprocess(_fake_pdflatex_failure)
+
+    with pytest.raises(SystemExit):
+        compile_cv(app_dir)
+
+    content = (app_dir / ".build" / "cv.tex").read_text(encoding="utf-8")
+    assert "BERUFSINHALT" in content
+    assert "AUSBILDUNGSINHALT" in content
+    assert "PROJEKTINHALT" in content
+    assert "<<RESUME_BERUFSERFAHRUNG>>" not in content
+    assert "<<RESUME_AUSBILDUNG>>" not in content
+    assert "<<RESUME_PROJEKTE>>" not in content
 
 
 def test_compile_cv_missing_config_exits_2_without_build_dir(

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SETTINGS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$SETTINGS_DIR/.."
+cd "$(dirname "$0")/../.."
 
 (
   flock -n 9 || exit 0
@@ -14,15 +13,15 @@ cd "$SETTINGS_DIR/.."
     ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     local fname
     fname="$(echo "$ts" | tr ':' '-').md"
-    mkdir -p "$SETTINGS_DIR/failures"
-    cat > "$SETTINGS_DIR/failures/$fname" <<EOF
+    mkdir -p "application-pipeline/failures"
+    cat > "application-pipeline/failures/$fname" <<EOF
 # Run failed at $ts
 
 **Stage:** $stage
 **Error:** ShellError: $msg
 **Last 20 log lines:**
 \`\`\`
-$(tail -20 "$SETTINGS_DIR/logs/cron.log" 2>/dev/null || true)
+$(tail -20 "application-pipeline/logs/cron.log" 2>/dev/null || true)
 \`\`\`
 EOF
   }
@@ -33,8 +32,8 @@ EOF
   application-pipeline init --refresh || { fail "ShellError" "application-pipeline init --refresh failed"; exit 1; }
   application-pipeline run || { fail "ShellError" "application-pipeline run failed"; exit 1; }
 
-  tail -n 10000 "$SETTINGS_DIR/logs/cron.log" > "$SETTINGS_DIR/logs/cron.log.tmp" 2>/dev/null \
-    && mv "$SETTINGS_DIR/logs/cron.log.tmp" "$SETTINGS_DIR/logs/cron.log" \
+  tail -n 10000 "application-pipeline/logs/cron.log" > "application-pipeline/logs/cron.log.tmp" 2>/dev/null \
+    && mv "application-pipeline/logs/cron.log.tmp" "application-pipeline/logs/cron.log" \
     || true
 
-) 9>"$SETTINGS_DIR/.cron.lock"
+) 9>application-pipeline/.cron.lock

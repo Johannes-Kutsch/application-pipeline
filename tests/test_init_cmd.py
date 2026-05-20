@@ -363,6 +363,37 @@ def test_cron_sh_invokes_init_refresh_without_path_arg(tmp_path: Path) -> None:
     assert match.group(1) == ""
 
 
+def test_cron_sh_self_locates_via_dirname(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    assert 'cd "$(dirname "$0")/../.."' in cron_sh
+    cd_pos = cron_sh.index('cd "$(dirname "$0")/../.."')
+    assert cd_pos < cron_sh.index("pip ")
+    assert cd_pos < cron_sh.index("application-pipeline ")
+
+
+def test_cron_sh_flock_uses_project_root_relative_path(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    assert "application-pipeline/.cron.lock" in cron_sh
+
+
+def test_cron_install_writes_weekday_only_schedule(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_install = (tmp_path / "setup" / "cron-install.sh").read_text()
+    assert "30 0 * * 1-5" in cron_install
+    assert "30 0 * * *" not in cron_install
+
+
+def test_cron_install_command_is_absolute_path_only(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_install = (tmp_path / "setup" / "cron-install.sh").read_text()
+    match = re.search(r"CRON_LINE=(.+)", cron_install)
+    assert match is not None
+    line = match.group(1)
+    assert "cd " not in line
+
+
 # --- setup/*.sh integration (smoke) ---
 
 
@@ -392,7 +423,7 @@ def test_cron_install_adds_crontab_line(
 
     crontab = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
     line = crontab.stdout
-    assert "30 0 * * *" in line
+    assert "30 0 * * 1-5" in line
     assert str(tmp_path / "setup" / "cron.sh") in line
     assert f"# application-pipeline:{tmp_path}" in line
 

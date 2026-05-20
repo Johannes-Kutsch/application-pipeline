@@ -23,6 +23,8 @@ LaTeX class files (`moderncv.cls`, `.sty`s) ship inside the package at `src/appl
 
 No `SEEN_STORE_PATH`/`RESULTS_PATH`/`FAILURES_PATH` override knobs. `.seen.json` sits at the root — sibling to `results/`, not inside it, so it survives a `mv results results.archive` reset gesture.
 
+**Amendment (2026-05-20): no path override knobs at all.** The override surface is extended from data paths to *every* path the Config Loader used to resolve: `USER_INFO_DIR`, `LAYOUT`, `CLASSIFY_RELEVANCE_PROMPT`, `JUDGE_MATCH_PROMPT` all retire. `user-info/` is canonical under the settings dir; `layout.py` sits next to `config.py` (no `LAYOUT = None` stub arm — supersedes ADR-0004); the two prompt-path knobs were never read in production and leave with the others. All four go into `_REMOVED_FIELDS` for loud-fail on stray knobs (matching the `OLLAMA_*` / `SEEN_STORE_PATH` precedent). `Config.user_info_dir` survives as a derived public field, populated from `DataPaths.user_info_dir` (symmetric with `seen_store_path`, `results_dir`, etc.). Rationale: once ADR-0029 hardcoded the settings dir, an override knob that lets the user point a single subpath elsewhere was dead weight — one deployment shape, one anchor.
+
 ## Why
 
 - **Edit on the laptop, propagate to the host.** Settings can ride a Syncthing folder if the user wants two-host editing; nothing in the layout forces this.

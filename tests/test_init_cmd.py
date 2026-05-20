@@ -540,3 +540,66 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
     assert (
         tmp_path / "user-info" / "self-description.md"
     ).read_text() == custom_user_info
+
+
+# --- skills/cv_skeleton.tex seeding ---
+
+
+def _skills_template_bytes(name: str) -> bytes:
+    return (
+        importlib.resources.files("application_pipeline.templates") / "skills" / name
+    ).read_bytes()
+
+
+def test_fresh_init_creates_cv_skeleton(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    dest = tmp_path / "skills" / "cv_skeleton.tex"
+    assert dest.exists()
+    assert dest.read_bytes() == _skills_template_bytes("cv_skeleton.tex")
+
+
+def test_init_skips_existing_cv_skeleton(tmp_path: Path) -> None:
+    (tmp_path / "skills").mkdir()
+    original = "% user-edited skeleton\n"
+    (tmp_path / "skills" / "cv_skeleton.tex").write_text(original)
+
+    init(tmp_path)
+
+    assert (tmp_path / "skills" / "cv_skeleton.tex").read_text() == original
+
+
+def test_refresh_overwrites_cv_skeleton(tmp_path: Path) -> None:
+    init(tmp_path)
+    (tmp_path / "skills" / "cv_skeleton.tex").write_text("% user-edited\n")
+
+    init(tmp_path, refresh=True)
+
+    assert (
+        tmp_path / "skills" / "cv_skeleton.tex"
+    ).read_bytes() == _skills_template_bytes("cv_skeleton.tex")
+
+
+def test_refresh_prints_overwrote_for_cv_skeleton(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    (tmp_path / "skills" / "cv_skeleton.tex").write_text("% user-edited\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    out = capsys.readouterr().out
+    assert "overwrote skills/cv_skeleton.tex" in out
+
+
+def test_refresh_preserves_user_info_when_skills_exist(tmp_path: Path) -> None:
+    init(tmp_path)
+    custom_user_info = "# my self-description\n"
+    (tmp_path / "user-info" / "self-description.md").write_text(custom_user_info)
+
+    init(tmp_path, refresh=True)
+
+    assert (
+        tmp_path / "user-info" / "self-description.md"
+    ).read_text() == custom_user_info

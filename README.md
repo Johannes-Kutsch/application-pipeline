@@ -41,6 +41,8 @@ Position through the following phases in order:
   the settings folder.
 - **[docs/cron-setup.md](docs/cron-setup.md)** — unattended operation via cron, flock semantics,
   optional Syncthing, migration from a legacy layout, and PyPI release procedure.
+- **[docs/latex.md](docs/latex.md)** — compiling the CV/cover-letter template, required user-data
+  files, and MiKTeX setup on Windows.
 
 ## Acknowledgements
 

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
-from typing import Protocol
+from typing import Literal, Protocol
 
 from application_pipeline.parser_log import RunLog
-from application_pipeline.prefilter.freshness import evaluate
 from application_pipeline.run_metrics import RunMetrics
 
 
@@ -43,6 +43,44 @@ class _DedupStore(Protocol):
     def mark_expired(self, key: _Stub) -> None: ...
 
 
+@dataclass(frozen=True)
+class _FreshnessVerdict:
+    passes: bool
+    reason: Literal[
+        "passed", "too_old", "deadline_passed", "too_old_and_deadline_passed"
+    ]
+    age_days: int | None
+
+
+def _evaluate(
+    position: _Position,
+    anchored_today: date,
+    max_listing_age_days: int,
+) -> _FreshnessVerdict:
+    age_days: int | None = None
+    too_old = False
+    deadline_passed = False
+
+    if position.posted_date is not None:
+        age_days = (anchored_today - position.posted_date).days
+        too_old = age_days > max_listing_age_days
+
+    if position.deadline is not None:
+        deadline_passed = position.deadline <= anchored_today
+
+    if too_old and deadline_passed:
+        return _FreshnessVerdict(
+            passes=False, reason="too_old_and_deadline_passed", age_days=age_days
+        )
+    if too_old:
+        return _FreshnessVerdict(passes=False, reason="too_old", age_days=age_days)
+    if deadline_passed:
+        return _FreshnessVerdict(
+            passes=False, reason="deadline_passed", age_days=age_days
+        )
+    return _FreshnessVerdict(passes=True, reason="passed", age_days=age_days)
+
+
 class FreshnessGate:
     def __init__(
         self,
@@ -66,7 +104,7 @@ class FreshnessGate:
         }
 
     def admit(self, position: _Position) -> bool:
-        verdict = evaluate(position, self._anchored_today, self._max_listing_age_days)
+        verdict = _evaluate(position, self._anchored_today, self._max_listing_age_days)
         self._run_log.transcript(
             "pipeline_freshness",
             {

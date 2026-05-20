@@ -42,12 +42,11 @@ def load(path: pathlib.Path) -> Config:
 
     seen_store_path = data_paths.seen_store_path
 
-    layout_path = config_dir / "layout.py"
-    if not layout_path.is_file():
+    layout = config_dir / "layout.py"
+    if not layout.is_file():
         raise ConfigError(
-            f"LAYOUT: {layout_path} does not exist; add layout.py next to config.py"
+            f"LAYOUT: {layout} does not exist; add layout.py next to config.py"
         )
-    layout: pathlib.Path | None = layout_path
 
     user_info_dir = _resolve_dir(
         "USER_INFO_DIR",

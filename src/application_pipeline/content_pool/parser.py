@@ -22,57 +22,44 @@ class PoolItem(TypedDict):
 
 
 def parse(path: Path) -> dict[str, PoolItem]:
-    lines = path.read_text(encoding="utf-8").splitlines()
     result: dict[str, PoolItem] = {}
     current_section = ""
+    current_item: str | None = None
+    always = False
+    group: str | None = None
+    relevance: dict[str, str] = {}
 
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-
-        section_m = _SECTION_RE.match(line)
-        if section_m:
-            current_section = section_m.group(1)
-            i += 1
-            continue
-
-        item_m = _ITEM_RE.match(line)
-        if item_m:
-            macro_name = item_m.group(1)
-            always: bool = False
-            group: str | None = None
-            relevance: dict[str, str] = {}
-
-            i += 1
-            while i < len(lines):
-                meta_line = lines[i]
-                always_m = _ALWAYS_RE.match(meta_line)
-                if always_m:
-                    always = always_m.group(1) == "true"
-                    i += 1
-                    continue
-                group_m = _GROUP_RE.match(meta_line)
-                if group_m:
-                    group = group_m.group(1)
-                    i += 1
-                    continue
-                rel_m = _RELEVANCE_RE.match(meta_line)
-                if rel_m:
-                    relevance = _parse_relevance(rel_m.group(1), macro_name)
-                    i += 1
-                    continue
-                break
-
-            result[macro_name] = PoolItem(
+    def commit() -> None:
+        nonlocal current_item
+        if current_item is not None:
+            result[current_item] = PoolItem(
                 section=current_section,
                 always=always,
                 group=group,
                 relevance=relevance,
             )
+            current_item = None
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if m := _SECTION_RE.match(line):
+            commit()
+            current_section = m.group(1)
+        elif m := _ITEM_RE.match(line):
+            commit()
+            current_item = m.group(1)
+            always, group, relevance = False, None, {}
+        elif current_item is None:
             continue
+        elif m := _ALWAYS_RE.match(line):
+            always = m.group(1) == "true"
+        elif m := _GROUP_RE.match(line):
+            group = m.group(1)
+        elif m := _RELEVANCE_RE.match(line):
+            relevance = _parse_relevance(m.group(1), current_item)
+        else:
+            commit()
 
-        i += 1
-
+    commit()
     return result
 
 

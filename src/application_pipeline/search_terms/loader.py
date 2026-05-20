@@ -6,7 +6,7 @@ import re
 from .types import SearchTerms, SearchTermsError
 
 _FILENAME = "search-terms.md"
-_SECTION_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+_SECTION_RE = re.compile(r"^##\s+(.+)$")
 _BULLET_RE = re.compile(r"^-\s+(.+)$")
 
 _SECTION_KEYWORDS = "keywords"

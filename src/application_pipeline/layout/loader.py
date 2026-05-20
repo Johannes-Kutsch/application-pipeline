@@ -43,9 +43,6 @@ _GROUPABLE_FIELDS = frozenset(
         "deadline",
         # Renderer-derived groupable field (ADR-0004)
         "location_segment",
-        # Renderer-added list variants
-        "matched_bullets",
-        "missing_bullets",
     }
 )
 

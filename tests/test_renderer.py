@@ -1,18 +1,11 @@
-from dataclasses import replace
+import re
+from datetime import date
 
 import pytest
 
 from application_pipeline import Layout, MatchVerdict
 from application_pipeline.parsers.types import Position, PositionStub
 from application_pipeline.renderer import render
-
-
-@pytest.fixture
-def layout() -> Layout:
-    return Layout(
-        placeholder_groups={},
-        card_template="",
-    )
 
 
 @pytest.fixture
@@ -61,6 +54,28 @@ def red_verdict() -> MatchVerdict:
     )
 
 
+# --- template-driven output (tracer bullet) ---
+
+
+def test_card_template_drives_output() -> None:
+    layout = Layout(
+        placeholder_groups={},
+        card_template="{title} at {company}",
+    )
+    pos = Position(
+        stub=PositionStub(
+            url="https://example.com/job/1",
+            title="Senior Engineer",
+            source="s",
+            company="Acme",
+        ),
+        raw_description="",
+    )
+    verdict = MatchVerdict(matched=[], missing=[], summary="Good.")
+    result = render(pos, verdict, layout)
+    assert result == "Senior Engineer at Acme"
+
+
 # --- Layout has no headline_template attribute ---
 
 
@@ -80,27 +95,29 @@ def test_layout_has_no_headline_template() -> None:
 def test_card_h1_is_location_led(
     position: Position, green_verdict: MatchVerdict
 ) -> None:
-    result = render(
-        position,
-        green_verdict,
-        Layout(
-            placeholder_groups={},
-            card_template="",
-        ),
+    layout = Layout(
+        placeholder_groups={
+            "title_line": (" · ", ["company", "title", "location_segment"])
+        },
+        card_template="# {title_line}",
     )
-    first_line = result.splitlines()[0]
-    assert first_line == "# Acme GmbH · Senior Engineer · Berlin"
-    assert "<span" not in first_line
-    assert "🟢" not in first_line
+    result = render(position, green_verdict, layout)
+    assert result == "# Acme GmbH · Senior Engineer · Berlin"
+    assert "<span" not in result
+    assert "🟢" not in result
 
 
 def test_card_h1_contains_no_number_prefix(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
+    position: Position, green_verdict: MatchVerdict
 ) -> None:
+    layout = Layout(
+        placeholder_groups={
+            "title_line": (" · ", ["company", "title", "location_segment"])
+        },
+        card_template="# {title_line}",
+    )
     result = render(position, green_verdict, layout)
     first_line = result.splitlines()[0]
-    import re
-
     assert not re.match(r".*\d+\.", first_line)
 
 
@@ -108,8 +125,9 @@ def test_card_h1_contains_no_number_prefix(
 
 
 def test_location_segment_location_only_when_work_model_none(
-    layout: Layout, green_verdict: MatchVerdict
+    green_verdict: MatchVerdict,
 ) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{location_segment}")
     pos = Position(
         stub=PositionStub(
             url="https://example.com/job/1", title="Dev", source="s", location="Munich"
@@ -117,13 +135,13 @@ def test_location_segment_location_only_when_work_model_none(
         raw_description="",
         work_model=None,
     )
-    result = render(pos, green_verdict, layout)
-    assert result.startswith("# Dev · Munich")
+    assert render(pos, green_verdict, layout) == "Munich"
 
 
 def test_location_segment_location_only_when_work_model_on_site(
-    layout: Layout, green_verdict: MatchVerdict
+    green_verdict: MatchVerdict,
 ) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{location_segment}")
     pos = Position(
         stub=PositionStub(
             url="https://example.com/job/1", title="Dev", source="s", location="Munich"
@@ -132,14 +150,13 @@ def test_location_segment_location_only_when_work_model_on_site(
         work_model="on-site",
     )
     result = render(pos, green_verdict, layout)
-    assert result.startswith("# Dev · Munich")
-    assert "Hybrid" not in result.splitlines()[0]
-    assert "Remote" not in result.splitlines()[0]
+    assert result == "Munich"
+    assert "Hybrid" not in result
+    assert "Remote" not in result
 
 
-def test_location_segment_hybrid_appended(
-    layout: Layout, green_verdict: MatchVerdict
-) -> None:
+def test_location_segment_hybrid_appended(green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{location_segment}")
     pos = Position(
         stub=PositionStub(
             url="https://example.com/job/1", title="Dev", source="s", location="Munich"
@@ -147,13 +164,11 @@ def test_location_segment_hybrid_appended(
         raw_description="",
         work_model="hybrid",
     )
-    result = render(pos, green_verdict, layout)
-    assert result.startswith("# Dev · Munich (Hybrid)")
+    assert render(pos, green_verdict, layout) == "Munich (Hybrid)"
 
 
-def test_location_segment_remote_appended(
-    layout: Layout, green_verdict: MatchVerdict
-) -> None:
+def test_location_segment_remote_appended(green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{location_segment}")
     pos = Position(
         stub=PositionStub(
             url="https://example.com/job/1", title="Dev", source="s", location="Munich"
@@ -161,13 +176,13 @@ def test_location_segment_remote_appended(
         raw_description="",
         work_model="remote",
     )
-    result = render(pos, green_verdict, layout)
-    assert result.startswith("# Dev · Munich (Remote)")
+    assert render(pos, green_verdict, layout) == "Munich (Remote)"
 
 
-def test_location_segment_unknown_when_location_none_work_model_none(
-    layout: Layout, green_verdict: MatchVerdict
+def test_location_segment_empty_when_location_none_work_model_none(
+    green_verdict: MatchVerdict,
 ) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{location_segment}")
     pos = Position(
         stub=PositionStub(
             url="https://example.com/job/1", title="Dev", source="s", location=None
@@ -175,15 +190,13 @@ def test_location_segment_unknown_when_location_none_work_model_none(
         raw_description="",
         work_model=None,
     )
-    result = render(pos, green_verdict, layout)
-    assert result.startswith("# Dev · Unknown Location")
-    assert "(Hybrid)" not in result.splitlines()[0]
-    assert "(Remote)" not in result.splitlines()[0]
+    assert render(pos, green_verdict, layout) == ""
 
 
-def test_location_segment_unknown_hybrid_when_location_none(
-    layout: Layout, green_verdict: MatchVerdict
+def test_location_segment_hybrid_only_when_location_none(
+    green_verdict: MatchVerdict,
 ) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{location_segment}")
     pos = Position(
         stub=PositionStub(
             url="https://example.com/job/1", title="Dev", source="s", location=None
@@ -191,253 +204,226 @@ def test_location_segment_unknown_hybrid_when_location_none(
         raw_description="",
         work_model="hybrid",
     )
-    result = render(pos, green_verdict, layout)
-    assert result.startswith("# Dev · Unknown Location (Hybrid)")
+    assert render(pos, green_verdict, layout) == "(Hybrid)"
 
 
-# --- meta line: hide-if-empty ---
-
-
-def test_meta_line_absent_when_all_three_none(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+def test_location_segment_remote_only_when_location_none(
+    green_verdict: MatchVerdict,
 ) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{location_segment}")
     pos = Position(
-        stub=stub,
+        stub=PositionStub(
+            url="https://example.com/job/1", title="Dev", source="s", location=None
+        ),
         raw_description="",
-        posted_date=None,
-        contract_type=None,
-        employment_type=None,
+        work_model="remote",
     )
-    result = render(pos, green_verdict, layout)
-    lines = result.splitlines()
-    assert lines[0].startswith("# ")
-    assert lines[1] == ""
-    assert lines[2] == "## AI Assessment"
+    assert render(pos, green_verdict, layout) == "(Remote)"
 
 
-def test_meta_line_present_when_posted_date_set(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+def test_location_segment_dropped_from_group_when_location_none_work_model_none(
+    green_verdict: MatchVerdict,
 ) -> None:
-    from datetime import date
-
-    pos = Position(stub=stub, raw_description="", posted_date=date(2026, 1, 15))
-    result = render(pos, green_verdict, layout)
-    assert "2026-01-15" in result
-
-
-def test_meta_line_joins_set_fields_only(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
-) -> None:
+    layout = Layout(
+        placeholder_groups={"title_line": (" · ", ["title", "location_segment"])},
+        card_template="{title_line}",
+    )
     pos = Position(
-        stub=stub,
+        stub=PositionStub(
+            url="https://example.com/job/1", title="Dev", source="s", location=None
+        ),
+        raw_description="",
+        work_model=None,
+    )
+    assert render(pos, green_verdict, layout) == "Dev"
+
+
+# --- null policy: None scalar → "" ---
+
+
+def test_none_scalar_renders_as_empty_string(green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{salary}")
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
+        raw_description="",
+        salary=None,
+    )
+    assert render(pos, green_verdict, layout) == ""
+
+
+def test_none_not_rendered_as_literal_none(green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{salary}|{contract_type}")
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
+        raw_description="",
+    )
+    assert "None" not in render(pos, green_verdict, layout)
+
+
+# --- null policy: empty list → "" ---
+
+
+def test_empty_matched_list_renders_as_empty_string(
+    green_verdict: MatchVerdict,
+) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{matched}")
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
+        raw_description="",
+    )
+    verdict = MatchVerdict(matched=[], missing=[], summary="ok.")
+    assert render(pos, verdict, layout) == ""
+
+
+def test_empty_missing_list_renders_as_empty_string(
+    green_verdict: MatchVerdict,
+) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{missing}")
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
+        raw_description="",
+    )
+    verdict = MatchVerdict(matched=[], missing=[], summary="ok.")
+    assert render(pos, verdict, layout) == ""
+
+
+def test_matched_comma_joined_when_non_empty(green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{matched}")
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
+        raw_description="",
+    )
+    assert render(pos, green_verdict, layout) == "Python, Data Engineering"
+
+
+def test_missing_comma_joined_when_non_empty(green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{missing}")
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
+        raw_description="",
+    )
+    assert render(pos, green_verdict, layout) == "Rust"
+
+
+# --- PLACEHOLDER_GROUPS: mixed Some/None members ---
+
+
+def test_group_with_mixed_none_members_joins_non_none(
+    green_verdict: MatchVerdict,
+) -> None:
+    layout = Layout(
+        placeholder_groups={
+            "meta_line": (" · ", ["contract_type", "employment_type", "salary"])
+        },
+        card_template="{meta_line}",
+    )
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
         raw_description="",
         contract_type="permanent",
         employment_type=None,
+        salary=None,
     )
-    result = render(pos, green_verdict, layout)
-    assert "permanent" in result
-    assert "None" not in result
+    assert render(pos, green_verdict, layout) == "permanent"
 
 
-def test_meta_line_all_three_present(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+def test_group_with_all_none_members_renders_empty_string(
+    green_verdict: MatchVerdict,
 ) -> None:
-    from datetime import date
-
+    layout = Layout(
+        placeholder_groups={"meta_line": (" · ", ["contract_type", "employment_type"])},
+        card_template="{meta_line}",
+    )
     pos = Position(
-        stub=stub,
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
+        raw_description="",
+        contract_type=None,
+        employment_type=None,
+    )
+    assert render(pos, green_verdict, layout) == ""
+
+
+def test_group_joins_all_present_members(green_verdict: MatchVerdict) -> None:
+    layout = Layout(
+        placeholder_groups={
+            "meta_line": (" · ", ["posted_date", "contract_type", "employment_type"])
+        },
+        card_template="{meta_line}",
+    )
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
         raw_description="",
         posted_date=date(2026, 3, 1),
         contract_type="freelance",
         employment_type="part-time",
     )
-    result = render(pos, green_verdict, layout)
-    assert "2026-03-01 · freelance · part-time" in result
+    assert render(pos, green_verdict, layout) == "2026-03-01 · freelance · part-time"
 
 
-# --- salary: hide-if-empty ---
+# --- salary ---
 
 
-def test_salary_line_absent_when_none(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    pos = replace(position, salary=None)
-    result = render(pos, green_verdict, layout)
-    assert "**Salary:**" not in result
-
-
-def test_salary_line_present_when_set(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
-) -> None:
-    pos = Position(stub=stub, raw_description="", salary="€80 000")
-    result = render(pos, green_verdict, layout)
-    assert "**Salary:** €80 000" in result
-
-
-# --- AI Assessment section ---
-
-
-def test_ai_assessment_heading_present(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, layout)
-    assert "## AI Assessment" in result
-
-
-def test_summary_follows_ai_assessment_heading(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, layout)
-    lines = result.splitlines()
-    ai_idx = lines.index("## AI Assessment")
-    assert lines[ai_idx + 1] == ""
-    assert lines[ai_idx + 2] == "Strong fit overall."
-
-
-# --- matched / missing: bullet lists, hide-if-empty ---
-
-
-def test_matched_rendered_as_bullet_list(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, layout)
-    assert "- Python\n- Data Engineering" in result
-
-
-def test_missing_rendered_as_bullet_list(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, layout)
-    assert "- Rust" in result
-
-
-def test_matched_label_and_bullets_absent_when_list_empty(
-    layout: Layout, position: Position, red_verdict: MatchVerdict
-) -> None:
-    result = render(position, red_verdict, layout)
-    assert "**Matched:**" not in result
-
-
-def test_missing_label_and_bullets_absent_when_list_empty(
-    layout: Layout, green_verdict: MatchVerdict
-) -> None:
-    verdict = replace(green_verdict, missing=[])
+def test_salary_renders_when_set(green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{salary}")
     pos = Position(
         stub=PositionStub(url="https://example.com/job/1", title="Dev", source="s"),
         raw_description="",
+        salary="€80 000",
     )
-    result = render(pos, verdict, layout)
-    assert "**Missing:**" not in result
+    assert render(pos, green_verdict, layout) == "€80 000"
 
 
-def test_matched_label_present_with_non_empty_list(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, layout)
-    assert "**Matched:**" in result
+# --- summary ---
 
 
-def test_missing_label_present_with_non_empty_list(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, layout)
-    assert "**Missing:**" in result
+def test_summary_rendered(position: Position, green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{summary}")
+    assert render(position, green_verdict, layout) == "Strong fit overall."
 
 
-# --- job description: hide-if-empty ---
+# --- rank ---
 
 
-def test_job_description_section_absent_when_raw_description_empty(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
-) -> None:
-    pos = Position(stub=stub, raw_description="")
-    result = render(pos, green_verdict, layout)
-    assert "## Job Description" not in result
+def test_rank_rendered(position: Position, green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{rank}")
+    assert render(position, green_verdict, layout) == "1"
 
 
-def test_job_description_section_present_when_raw_description_set(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
-) -> None:
-    result = render(position, green_verdict, layout)
-    assert "## Job Description" in result
-    assert "Some description here." in result
+def test_render_reflects_explicit_rank(position: Position) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{rank}")
+    verdict = MatchVerdict(matched=[], missing=[], summary="ok", rank=4)
+    assert render(position, verdict, layout) == "4"
+
+
+# --- url ---
+
+
+def test_url_rendered(position: Position, green_verdict: MatchVerdict) -> None:
+    layout = Layout(placeholder_groups={}, card_template="<{url}>")
+    assert render(position, green_verdict, layout) == "<https://example.com/job/1>"
+
+
+# --- raw_description ---
 
 
 def test_raw_description_rendered_verbatim(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
+    stub: PositionStub, green_verdict: MatchVerdict
 ) -> None:
     raw = "Line one.\n\nLine two with **bold**."
+    layout = Layout(placeholder_groups={}, card_template="{raw_description}")
     pos = Position(stub=stub, raw_description=raw)
-    result = render(pos, green_verdict, layout)
-    assert raw in result
+    assert render(pos, green_verdict, layout) == raw
 
 
-# --- URL footer ---
+# --- typo in CARD_TEMPLATE raises KeyError ---
 
 
-def test_card_ends_with_horizontal_rule_and_url(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
+def test_typo_in_card_template_raises_key_error(
+    position: Position, green_verdict: MatchVerdict
 ) -> None:
-    result = render(position, green_verdict, layout)
-    lines = result.splitlines()
-    assert lines[-2] == "---"
-    assert lines[-1] == "<https://example.com/job/1>"
-
-
-def test_url_autolinked_in_footer(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
-) -> None:
-    pos = Position(stub=stub, raw_description="")
-    result = render(pos, green_verdict, layout)
-    assert "<https://example.com/job/1>" in result
-
-
-# --- full card integration: all fields present ---
-
-
-def test_dense_card_structure(
-    layout: Layout, stub: PositionStub, green_verdict: MatchVerdict
-) -> None:
-    from datetime import date
-
-    pos = Position(
-        stub=stub,
-        raw_description="Full description.",
-        salary="€90 000",
-        contract_type="permanent",
-        employment_type="full-time",
-        work_model="hybrid",
-        posted_date=date(2026, 2, 1),
-    )
-    result = render(pos, green_verdict, layout)
-
-    assert result.startswith("# Acme GmbH · Senior Engineer · Berlin (Hybrid)")
-    assert "2026-02-01 · permanent · full-time" in result
-    assert "**Salary:** €90 000" in result
-    assert "## AI Assessment" in result
-    assert "**Matched:**" in result
-    assert "**Missing:**" in result
-    assert "## Job Description" in result
-    assert "Full description." in result
-    assert result.endswith("---\n<https://example.com/job/1>\n")
-
-
-# --- sparse card integration: minimal fields ---
-
-
-def test_sparse_card_omits_optional_sections(
-    layout: Layout, green_verdict: MatchVerdict
-) -> None:
-    pos = Position(
-        stub=PositionStub(url="https://example.com/job/2", title="Dev", source="s"),
-        raw_description="",
-    )
-    result = render(pos, green_verdict, layout)
-
-    assert "## Job Description" not in result
-    assert "**Salary:**" not in result
-    assert "Unknown Location" in result
-    assert result.endswith("---\n<https://example.com/job/2>\n")
+    layout = Layout(placeholder_groups={}, card_template="{titel}")
+    with pytest.raises(KeyError):
+        render(position, green_verdict, layout)
 
 
 # --- render() takes no number parameter ---
@@ -451,51 +437,100 @@ def test_render_signature_has_no_number_parameter() -> None:
     assert list(sig.parameters.keys()) == ["position", "verdict", "layout"]
 
 
-# --- all three tiers produce a card ---
+# --- all three verdict types produce a card ---
 
 
-def test_green_tier_renders_card(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
+def test_green_verdict_renders_summary(
+    position: Position, green_verdict: MatchVerdict
 ) -> None:
-    result = render(position, green_verdict, layout)
-    assert "## AI Assessment" in result
-    assert "Strong fit overall." in result
+    layout = Layout(placeholder_groups={}, card_template="{summary}")
+    assert render(position, green_verdict, layout) == "Strong fit overall."
 
 
-def test_amber_tier_renders_card(
-    layout: Layout, position: Position, amber_verdict: MatchVerdict
+def test_amber_verdict_renders_summary(
+    position: Position, amber_verdict: MatchVerdict
 ) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{title}|{summary}")
     result = render(position, amber_verdict, layout)
-    assert "## AI Assessment" in result
     assert "Partial fit." in result
-    assert "Acme GmbH" in result
+    assert "Senior Engineer" in result
 
 
-def test_red_tier_renders_card(
-    layout: Layout, position: Position, red_verdict: MatchVerdict
+def test_red_verdict_renders_summary(
+    position: Position, red_verdict: MatchVerdict
 ) -> None:
+    layout = Layout(placeholder_groups={}, card_template="{title}|{summary}")
     result = render(position, red_verdict, layout)
-    assert "## AI Assessment" in result
     assert "Poor fit." in result
     assert "Senior Engineer" in result
 
 
-# --- Rank rendering ---
+# --- full card integration: dense ---
+
+_DENSE_TEMPLATE = """\
+# {rank}: {title_line}
+
+{meta_line}
+
+## AI Assessment
+
+{summary}
+
+{matched}
+
+## Job Description
+
+{raw_description}
+
+---
+<{url}>"""
 
 
-def test_render_includes_default_rank(
-    layout: Layout, position: Position, green_verdict: MatchVerdict
+def test_dense_card_renders_all_fields(
+    stub: PositionStub, green_verdict: MatchVerdict
 ) -> None:
-    result = render(position, green_verdict, layout)
-    assert "**Rank:** 1" in result
-
-
-def test_render_reflects_explicit_rank(layout: Layout, position: Position) -> None:
-    verdict = MatchVerdict(
-        matched=[],
-        missing=[],
-        summary="ok",
-        rank=4,
+    layout = Layout(
+        placeholder_groups={
+            "title_line": (" · ", ["company", "title", "location_segment"]),
+            "meta_line": (" · ", ["posted_date", "contract_type", "employment_type"]),
+        },
+        card_template=_DENSE_TEMPLATE,
     )
-    result = render(position, verdict, layout)
-    assert "**Rank:** 4" in result
+    pos = Position(
+        stub=stub,
+        raw_description="Full description.",
+        contract_type="permanent",
+        employment_type="full-time",
+        work_model="hybrid",
+        posted_date=date(2026, 2, 1),
+    )
+    result = render(pos, green_verdict, layout)
+
+    assert "# 1: Acme GmbH · Senior Engineer · Berlin (Hybrid)" in result
+    assert "2026-02-01 · permanent · full-time" in result
+    assert "Strong fit overall." in result
+    assert "Python, Data Engineering" in result
+    assert "Full description." in result
+    assert result.endswith("---\n<https://example.com/job/1>")
+
+
+# --- sparse card integration: minimal fields ---
+
+
+def test_sparse_card_renders_without_error(green_verdict: MatchVerdict) -> None:
+    layout = Layout(
+        placeholder_groups={
+            "title_line": (" · ", ["company", "title", "location_segment"]),
+            "meta_line": (" · ", ["salary", "posted_date", "contract_type"]),
+        },
+        card_template="# {title_line}\n{meta_line}\n{summary}\n---\n<{url}>",
+    )
+    pos = Position(
+        stub=PositionStub(url="https://example.com/job/2", title="Dev", source="s"),
+        raw_description="",
+    )
+    result = render(pos, green_verdict, layout)
+
+    assert result.startswith("# Dev")
+    assert "None" not in result
+    assert result.endswith("---\n<https://example.com/job/2>")

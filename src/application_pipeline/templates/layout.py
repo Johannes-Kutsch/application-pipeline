@@ -6,14 +6,13 @@ PLACEHOLDER_GROUPS = {
 }
 
 # Live placeholders substituted by the renderer:
-#   {company}, {title}, {location_segment} — position header fields
-#   {posted_date}, {contract_type}, {employment_type} — meta line (grouped via PLACEHOLDER_GROUPS)
-#   {salary} — optional salary field
+#   {company}, {title}, {location}, {location_segment}, {source}, {url}
+#   {salary}, {posted_date}, {contract_type}, {employment_type}, {work_model}, {deadline}
+#   {raw_description}
+#   {matched}, {missing} — comma-joined lists; "" when empty
 #   {summary} — verdict AI assessment summary
-#   {matched_bullets}, {missing_bullets} — bullet lists of matched/missing requirements
-#   {raw_description} — full job description text
 #   {rank} — verdict rank (1–5)
-#   {url} — position URL
+#   Plus any keys defined in PLACEHOLDER_GROUPS above.
 CARD_TEMPLATE = """\
 # **{rank}:** {title_line}
 

@@ -33,6 +33,7 @@ where = ["src"]
 "application_pipeline.templates.prompts" = ["*.md"]
 "application_pipeline.templates.latex" = ["*.tex", "*.cls", "*.sty", "*.md"]
 "application_pipeline.templates.user-info" = ["*"]
+"application_pipeline.templates.setup" = ["*.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

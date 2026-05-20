@@ -1,27 +1,31 @@
 from __future__ import annotations
 
 import importlib.resources
-import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from application_pipeline.init_cmd import home_dir
 
 _BUILDS = ("cover", "resume", "combined")
 
 _LATEX_SUFFIXES = frozenset({".tex", ".cls", ".sty"})
 
 
-def _settings_dir() -> Path:
-    home = os.environ.get("APPLICATION_PIPELINE_HOME")
-    if home:
-        return Path(home)
-    return Path.home() / "application-pipeline"
-
-
 def compile_cv(app_dir: Path) -> None:
+    config_path = home_dir() / "config.py"
+    if not config_path.exists():
+        cwd = Path.cwd()
+        print(
+            f"no application-pipeline/config.py in {cwd}"
+            " — did you forget to cd, or run init?",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     app_dir = app_dir.resolve()
-    user_info_dir = (_settings_dir() / "user-info").resolve()
+    user_info_dir = (home_dir() / "user-info").resolve()
     build_dir = app_dir / ".build"
 
     build_dir.mkdir(exist_ok=True)

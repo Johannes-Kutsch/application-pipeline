@@ -34,7 +34,7 @@ This removes the tagged crontab line without affecting any other crontab entries
 
 ## Flock serialisation
 
-`cron.sh` acquires a global flock at `$APPLICATION_PIPELINE_HOME/.cron.lock` before running. If a
+`cron.sh` acquires a global flock at `$SETTINGS_DIR/.cron.lock` before running. If a
 previous tick is still executing — for example because it is sleeping through a Claude quota window
 (ADR-0023) — the next cron fire waits at the lock rather than spawning a parallel run. The waiting
 fire will proceed as soon as the lock is released.

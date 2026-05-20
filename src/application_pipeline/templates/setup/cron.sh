@@ -37,4 +37,4 @@ EOF
     && mv "$SETTINGS_DIR/logs/cron.log.tmp" "$SETTINGS_DIR/logs/cron.log" \
     || true
 
-) 9>"${APPLICATION_PIPELINE_HOME:-$SETTINGS_DIR}/.cron.lock"
+) 9>"$SETTINGS_DIR/.cron.lock"

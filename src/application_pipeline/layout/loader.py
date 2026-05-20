@@ -25,6 +25,7 @@ _RETIRED_PLACEHOLDERS = ("emoji", "color", "tier")
 # Fields that may appear in PLACEHOLDER_GROUPS.
 # Excludes renderer-derived fields (emoji, color, tier, number),
 # verdict aggregates (matched, missing, summary), and raw_description.
+# Exception: location_segment is renderer-derived but declared groupable by ADR-0004.
 _GROUPABLE_FIELDS = frozenset(
     {
         # PositionStub fields
@@ -40,6 +41,8 @@ _GROUPABLE_FIELDS = frozenset(
         "work_model",
         "posted_date",
         "deadline",
+        # Renderer-derived groupable field (ADR-0004)
+        "location_segment",
         # Renderer-added list variants
         "matched_bullets",
         "missing_bullets",

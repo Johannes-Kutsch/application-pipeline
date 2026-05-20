@@ -44,11 +44,12 @@ def main() -> None:
     args = sys.argv[1:]
 
     if args and args[0] == "init":
+        refresh = "--refresh" in args[1:]
         rest = [a for a in args[1:] if a != "--refresh"]
         if len(rest) == 1:
             from application_pipeline.init_cmd import init
 
-            init(Path(rest[0]))
+            init(Path(rest[0]), refresh=refresh)
             return
 
     if args and args[0] == "run" and len(args) == 2:

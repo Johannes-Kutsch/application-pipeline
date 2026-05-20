@@ -1,6 +1,6 @@
 # Layout as a user-editable Python module in the synced folder
 
-`settings/layout.py` lives alongside `config.py` in the synced folder (see ADR-0011). Plain Python: tier emoji/color (retired per ADR-0020), named placeholder groups, full `CARD_TEMPLATE` / `HEADLINE_TEMPLATE`. Loaded at runtime by the same `load_user_module` machinery as **Config**, validated into a frozen `Layout` dataclass, consumed by a pure **Renderer** via `str.format_map`.
+`settings/layout.py` lives alongside `config.py` in the synced folder (see ADR-0011). Plain Python: named placeholder groups, full `CARD_TEMPLATE` / `HEADLINE_TEMPLATE`. Loaded at runtime by the same `load_user_module` machinery as **Config**, validated into a frozen `Layout` dataclass, consumed by a pure **Renderer** via `str.format_map`.
 
 When `LAYOUT` is unset, the loader defaults to `"layout.py"` next to `config.py` and **errors if missing** — matching how `USER_INFO_DIR` resolves. An explicit `LAYOUT = None` selects the built-in `layout.default()` stub (reserved for tests).
 
@@ -18,4 +18,3 @@ When `LAYOUT` is unset, the loader defaults to `"layout.py"` next to `config.py`
 - `LayoutError` joins `ConfigError` under `UserSettingsError`.
 - Typo in placeholder name raises `KeyError` from `str.format_map` at render time — fail-loud is intentional.
 - Validation at startup: `layout_loader` checks every `placeholder_groups` entry references a known field; missing/invalid `layout.py` fails before the first fetch.
-- Per ADR-0020, the placeholder set excludes `emoji`/`color`/`tier` and includes `rank`.

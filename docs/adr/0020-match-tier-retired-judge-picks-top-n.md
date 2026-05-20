@@ -14,7 +14,7 @@ Companion ADRs: ADR-0021 (daily file), ADR-0022 (extracts/pool), ADR-0023 (quota
 ## Considered alternatives
 
 - **Keep tier alongside rank.** Rejected: tier carries no information not in rank.
-- **Top-N as a `Config` field.** Rejected for v1: 5 is right for "what the applicant reads over morning coffee"; lift it later if needed.
+- **Top-N as a `Config` field.** Rejected: N is a code constant (5, "what the applicant reads over morning coffee"); reconsider if usage proves otherwise.
 - **Two-stage judge (rank pass + per-winner detail pass on full descriptions).** Rejected: extracts carry enough signal for `matched`/`missing`/`summary`; second pass re-pays description tokens for no observable fidelity gain.
 - **Tier-based file split kept; judge picks top-N per tier.** Rejected: re-introduces the trio's surface for a ranking model that no longer needs it.
 

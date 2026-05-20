@@ -12,7 +12,7 @@ In the same change, the pipeline drops per-language prompts and all language thr
 - **Drift caused a silent production failure.** A single editable prompt file lost its `<verdicts>`-tag instruction during user edits, producing `tag_missing` on every classify call. Separating protocol (hardcoded) from content (user-editable) makes this class of drift structurally impossible.
 - **The protocol is generic; the content isn't.** Output-tag contract, JSON shape, wrapping convention are properties of the **Agent Output Protocol** (ADR-0015). The applicant's self-description and domain rules are personal.
 - **Three files, three concerns.** `self-description.md` is shared. `domain-fit.md` is classify-only. `match-criteria.md` is judge-only. Splitting along consumer boundaries means each call site gets only what it needs.
-- **`SKILLS` stays in `config.py`.** Two consumers — judge's `{skills}` slot and (formerly, until ADR-0019) the prefilter whitelist. A flat list of strings; extracting to `skills.md` would force markdown→list parsing.
+- **`SKILLS` stays in `config.py`.** Consumed by the judge's `{skills}` slot. A flat list of strings; extracting to `skills.md` would force markdown→list parsing.
 - **Per-language separation was costing more than it bought.** Claude is bilingual at parity for these tasks; threading `language` everywhere was paying real maintenance cost. Applicant traffic is German-dominant; English listings remain classifiable by a German-framed prompt.
 
 ## Considered alternatives

@@ -2,14 +2,14 @@
 
 `ClaudeExtractor` pins `--model` (and `--effort` where applicable) per call site, and treats every `claude -p` response as agent prose with a structured payload wrapped in a semantic XML tag — `<verdicts>` for the **Relevance Classifier**, `<verdict>` for the **Match Judge** (`<verdicts>` since ADR-0020 collapsed judge to top-N).
 
-Model/effort live as `ClaudeExtractor` module-level constants — `_CLASSIFY_MODEL = "haiku"` (no `--effort`), `_JUDGE_MODEL = "haiku"`, `_JUDGE_EFFORT = "medium"` — not as fields on user-editable `Config`. (Judge was pinned to `sonnet` in this ADR's first incarnation; moved to `haiku` for cost — see Why.)
+Model/effort live as `ClaudeExtractor` module-level constants — `_CLASSIFY_MODEL = "haiku"` (no `--effort`), `_JUDGE_MODEL = "haiku"`, `_JUDGE_EFFORT = "medium"` — not as fields on user-editable `Config`.
 
 A small project-agnostic **Agent Output Protocol** module extracts the payload via tag-anchored walk-back and regex fence-strip, then `json.loads`.
 
 ## Why
 
 - **Incident #240: default-CLI orchestration changes broke parsing.** The CLI began routing through a Sonnet stage that wrapped output in ` ```json … ``` `; `json.loads` died at char 0. `--model` makes the responder deterministic across future CLI updates.
-- **Per-call-site reasoning load drives the choice.** Classify is yes/no over 100 items — Haiku, no `--effort` (extended thinking is wasted on a binary task). Judge is open-vocabulary ranking + structured matched/missing + 2–3 sentence summary — initially Sonnet with `--effort medium`. After the token-cost grilling (issue #319) the judge moved to Haiku to capture the dominant cost lever (judge per-call cost ~15× classify); `--effort medium` was kept so a quality regression after the model-class step is attributable. Dropping `--effort` is a clean follow-up if quality holds.
+- **Per-call-site reasoning load drives the choice.** Classify is yes/no over 100 items — Haiku, no `--effort` (extended thinking is wasted on a binary task). Judge is open-vocabulary ranking + structured matched/missing + 2–3 sentence summary — initially Sonnet with `--effort medium`. After the token-cost grilling (issue #319) the judge moved to Haiku to capture the dominant cost lever (judge per-call cost ~15× classify); `--effort medium` is kept so a quality regression after the model-class step is attributable.
 - **Bare aliases over dated IDs.** `haiku`, `sonnet` so point-release renames are transparent.
 - **Tag-anchored parsing is the durable defense.** Telling the model "respond with JSON" anchors parsing at character 0 — any preamble or fence kills it. A semantic tag gives both ends a named handle: find rightmost `</verdicts>`, walk back through `<verdicts>` openers until one parses; strip an optional surrounding fence inside each candidate. Stray substrings inside the JSON payload don't derail extraction.
 - **Fence-strip is recovery, not prompt instruction.** Negative instructions to the model ("don't wrap in fences") are unreliable across model updates.

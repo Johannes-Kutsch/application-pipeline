@@ -448,19 +448,15 @@ def test_empty_locations_with_include_remote_true_is_valid(
     assert config.include_remote is True
 
 
-@pytest.mark.parametrize("field", ["LOCATIONS"])
-def test_load_raises_on_duplicate_strings(tmp_path: pathlib.Path, field: str) -> None:
-    fields = {
-        "SOURCES": '[SourceEntry(parser_type="bundesagentur_api")]',
-        "LOCATIONS": '["Hamburg"]',
-    }
-    fields[field] = '["dup", "dup"]'
-    body = "from application_pipeline import SourceEntry\n" + "\n".join(
-        f"{name} = {value}" for name, value in fields.items()
+def test_load_raises_on_duplicate_locations(tmp_path: pathlib.Path) -> None:
+    body = (
+        "from application_pipeline import SourceEntry\n"
+        'SOURCES = [SourceEntry(parser_type="bundesagentur_api")]\n'
+        'LOCATIONS = ["dup", "dup"]\n'
     )
     path = write_config(tmp_path, body)
 
-    with pytest.raises(ConfigError, match=field) as exc_info:
+    with pytest.raises(ConfigError, match="LOCATIONS") as exc_info:
         load(path)
     assert "dup" in str(exc_info.value)
 

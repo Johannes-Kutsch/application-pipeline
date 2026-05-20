@@ -3,14 +3,13 @@ import logging
 import pathlib
 
 from application_pipeline.parsers.location import LocationCoverage, validate_coverage
-from application_pipeline.text.normalize import normalize
 from application_pipeline.user_settings import load_user_module
 
 from .types import Config, ConfigError, SourceEntry, resolve_data_paths
 
 _log = logging.getLogger(__name__)
 
-_REQUIRED_FIELDS = ("KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS")
+_REQUIRED_FIELDS = ("SOURCES", "LOCATIONS")
 
 _MISSING = object()
 
@@ -82,12 +81,9 @@ def load(path: pathlib.Path) -> Config:
         )
 
     config = Config(
-        keywords=module.KEYWORDS,
-        skills=module.SKILLS,
         sources=module.SOURCES,
         locations=module.LOCATIONS,
         include_remote=getattr(module, "INCLUDE_REMOTE", True),
-        negative_keywords=getattr(module, "NEGATIVE_KEYWORDS", []),
         seen_store_path=seen_store_path,
         results_dir=data_paths.results_dir,
         failures_path=data_paths.failures_path,
@@ -161,8 +157,6 @@ def _resolve_parser_modules(sources: list[SourceEntry]) -> list[LocationCoverage
 
 
 def _validate(config: Config) -> None:
-    if not config.keywords:
-        raise ConfigError("KEYWORDS must be non-empty")
     if not config.sources:
         raise ConfigError("SOURCES must be non-empty")
     if not config.locations and not config.include_remote:
@@ -173,30 +167,17 @@ def _validate(config: Config) -> None:
             f"USER_INFO_DIR: {config.user_info_dir} does not exist or is not a directory"
         )
 
-    _check_unique("KEYWORDS", config.keywords, item_label="value")
-    _check_unique("SKILLS", config.skills, item_label="value")
     _check_unique("LOCATIONS", config.locations, item_label="value")
     _check_unique(
         "SOURCES",
         [entry.parser_type for entry in config.sources],
         item_label="parser_type",
     )
-    _check_keyword_entries("NEGATIVE_KEYWORDS", config.negative_keywords)
     validate_coverage(
         _resolve_parser_modules(config.sources),
         config.locations,
         config.include_remote,
     )
-
-
-def _check_keyword_entries(name: str, values: list[str]) -> None:
-    for entry in values:
-        normalized = normalize(entry)
-        if normalized is None or len(normalized) < 3:
-            raise ConfigError(
-                f"{name} entries must be at least 3 characters; got {entry!r}"
-            )
-    _check_unique(name, values, item_label="value")
 
 
 def _check_unique(name: str, values: list[str], *, item_label: str) -> None:

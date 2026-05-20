@@ -32,8 +32,6 @@ def make_config_with_user_info(tmp_path: pathlib.Path) -> Config:
     (user_info / "domain-fit.md").write_text("ML roles\n")
     (user_info / "match-criteria.md").write_text("Hamburg, remote\n")
     return Config(
-        keywords=["k"],
-        skills=[],
         sources=[SourceEntry(parser_type="bundesagentur")],
         locations=["Hamburg"],
         user_info_dir=user_info,

@@ -13,8 +13,6 @@ REQUIRED_BODY = textwrap.dedent(
     """
     from application_pipeline import SourceEntry
 
-    KEYWORDS = ["python"]
-    SKILLS = ["python"]
     SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
     LOCATIONS = ["Hamburg"]
     """
@@ -39,8 +37,6 @@ def test_load_returns_populated_config(tmp_path: pathlib.Path) -> None:
         """
         from application_pipeline import SourceEntry
 
-        KEYWORDS = ["python", "ml engineer"]
-        SKILLS = ["python", "pytorch"]
         SOURCES = [SourceEntry(parser_type="bundesagentur_api", max_results=500)]
         LOCATIONS = ["Hamburg"]
         """,
@@ -49,21 +45,17 @@ def test_load_returns_populated_config(tmp_path: pathlib.Path) -> None:
     config = load(path)
 
     assert isinstance(config, Config)
-    assert config.keywords == ["python", "ml engineer"]
-    assert config.skills == ["python", "pytorch"]
     assert config.sources == [
         SourceEntry(parser_type="bundesagentur_api", max_results=500)
     ]
     assert config.locations == ["Hamburg"]
 
 
-@pytest.mark.parametrize("missing", ["KEYWORDS", "SKILLS", "SOURCES", "LOCATIONS"])
+@pytest.mark.parametrize("missing", ["SOURCES", "LOCATIONS"])
 def test_load_raises_when_required_field_missing(
     tmp_path: pathlib.Path, missing: str
 ) -> None:
     fields = {
-        "KEYWORDS": '["python"]',
-        "SKILLS": '["python"]',
         "SOURCES": "[]",
         "LOCATIONS": '["Hamburg"]',
     }
@@ -82,9 +74,9 @@ def test_source_entry_is_frozen() -> None:
 
 
 def test_config_is_frozen() -> None:
-    config = Config(keywords=[], skills=[], sources=[], locations=[])
+    config = Config(sources=[], locations=[])
     with pytest.raises(dataclasses.FrozenInstanceError):
-        config.keywords = ["x"]  # type: ignore[misc]
+        config.sources = []  # type: ignore[misc]
 
 
 def test_source_entry_max_results_defaults_to_1000() -> None:
@@ -380,88 +372,41 @@ def test_load_raises_when_ollama_field_present(
         load(path)
 
 
-# --- keyword normalize length check ---
-
-
-def test_load_raises_when_negative_keyword_entry_too_short(
-    tmp_path: pathlib.Path,
-) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY + "\nNEGATIVE_KEYWORDS = ['ab']\n")
-
-    with pytest.raises(ConfigError, match="NEGATIVE_KEYWORDS"):
-        load(path)
-
-
-def test_keyword_length_uses_normalized_value(tmp_path: pathlib.Path) -> None:
-    # "  ab  " normalizes to "ab" (length 2) — must still be rejected
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + "\nNEGATIVE_KEYWORDS = ['  ab  ']\n",
-    )
-
-    with pytest.raises(ConfigError, match="NEGATIVE_KEYWORDS"):
-        load(path)
-
-
-def test_load_raises_on_duplicate_negative_keyword_entries(
-    tmp_path: pathlib.Path,
-) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + "\nNEGATIVE_KEYWORDS = ['Python', 'Python']\n",
-    )
-
-    with pytest.raises(ConfigError, match="NEGATIVE_KEYWORDS"):
-        load(path)
-
-
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:
     path = write_config(
         tmp_path,
         """
         from application_pipeline import SourceEntry
 
-        KEYWORDS = ["first"]
-        SKILLS = []
         SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
         LOCATIONS = ["Hamburg"]
         """,
     )
     first = load(path)
-    assert first.keywords == ["first"]
+    assert first.locations == ["Hamburg"]
 
     write_config(
         tmp_path,
         """
         from application_pipeline import SourceEntry
 
-        KEYWORDS = ["second"]
-        SKILLS = []
         SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
-        LOCATIONS = ["Hamburg"]
+        LOCATIONS = ["Berlin"]
         """,
     )
     second = load(path)
-    assert second.keywords == ["second"]
+    assert second.locations == ["Berlin"]
 
 
-@pytest.mark.parametrize("empty_field", ["KEYWORDS", "SOURCES"])
-def test_load_raises_when_required_list_is_empty(
-    tmp_path: pathlib.Path, empty_field: str
-) -> None:
-    fields = {
-        "KEYWORDS": '["python"]',
-        "SKILLS": '["python"]',
-        "SOURCES": '[SourceEntry(parser_type="bundesagentur_api")]',
-        "LOCATIONS": '["Hamburg"]',
-    }
-    fields[empty_field] = "[]"
-    body = "from application_pipeline import SourceEntry\n" + "\n".join(
-        f"{name} = {value}" for name, value in fields.items()
+def test_load_raises_when_sources_is_empty(tmp_path: pathlib.Path) -> None:
+    body = (
+        "from application_pipeline import SourceEntry\n"
+        "SOURCES = []\n"
+        'LOCATIONS = ["Hamburg"]\n'
     )
     path = write_config(tmp_path, body)
 
-    with pytest.raises(ConfigError, match=empty_field):
+    with pytest.raises(ConfigError, match="SOURCES"):
         load(path)
 
 
@@ -473,8 +418,6 @@ def test_empty_locations_with_include_remote_false_raises(
         """
         from application_pipeline import SourceEntry
 
-        KEYWORDS = ["python"]
-        SKILLS = []
         SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
         LOCATIONS = []
         INCLUDE_REMOTE = False
@@ -493,8 +436,6 @@ def test_empty_locations_with_include_remote_true_is_valid(
         """
         from application_pipeline import SourceEntry
 
-        KEYWORDS = ["python"]
-        SKILLS = []
         SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
         LOCATIONS = []
         INCLUDE_REMOTE = True
@@ -507,29 +448,9 @@ def test_empty_locations_with_include_remote_true_is_valid(
     assert config.include_remote is True
 
 
-def test_load_accepts_empty_skills(tmp_path: pathlib.Path) -> None:
-    path = write_config(
-        tmp_path,
-        """
-        from application_pipeline import SourceEntry
-
-        KEYWORDS = ["python"]
-        SKILLS = []
-        SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
-        LOCATIONS = ["Hamburg"]
-        """,
-    )
-
-    config = load(path)
-
-    assert config.skills == []
-
-
-@pytest.mark.parametrize("field", ["KEYWORDS", "SKILLS", "LOCATIONS"])
+@pytest.mark.parametrize("field", ["LOCATIONS"])
 def test_load_raises_on_duplicate_strings(tmp_path: pathlib.Path, field: str) -> None:
     fields = {
-        "KEYWORDS": '["python"]',
-        "SKILLS": '["python"]',
         "SOURCES": '[SourceEntry(parser_type="bundesagentur_api")]',
         "LOCATIONS": '["Hamburg"]',
     }
@@ -550,8 +471,6 @@ def test_load_raises_on_duplicate_parser_type(tmp_path: pathlib.Path) -> None:
         """
         from application_pipeline import SourceEntry
 
-        KEYWORDS = ["python"]
-        SKILLS = []
         SOURCES = [
             SourceEntry(parser_type="bundesagentur_api"),
             SourceEntry(parser_type="bundesagentur_api", max_results=10),
@@ -578,23 +497,18 @@ def test_source_entry_rejects_non_positive_max_results(
         SourceEntry(parser_type="bundesagentur_api", max_results=bad_max_results)
 
 
-def test_negative_keywords_defaults_to_empty(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY)
-
-    config = load(path)
-
-    assert config.negative_keywords == []
-
-
-def test_load_reads_negative_keywords(tmp_path: pathlib.Path) -> None:
+def test_legacy_keywords_silently_ignored(tmp_path: pathlib.Path) -> None:
     path = write_config(
         tmp_path,
-        REQUIRED_BODY + "\nNEGATIVE_KEYWORDS = ['Pflege', 'Reinigung']\n",
+        REQUIRED_BODY
+        + "\nKEYWORDS = ['python']\nSKILLS = ['Python']\nNEGATIVE_KEYWORDS = ['Pflege']\n",
     )
 
     config = load(path)
 
-    assert config.negative_keywords == ["Pflege", "Reinigung"]
+    assert not hasattr(config, "keywords")
+    assert not hasattr(config, "skills")
+    assert not hasattr(config, "negative_keywords")
 
 
 def test_load_silently_ignores_inclusion_keywords(
@@ -623,7 +537,7 @@ def test_load_ignores_unknown_top_level_names(tmp_path: pathlib.Path) -> None:
 
     config = load(path)
 
-    assert config.keywords == ["python"]
+    assert config.locations == ["Hamburg"]
 
 
 def test_load_raises_config_error_when_path_missing(tmp_path: pathlib.Path) -> None:

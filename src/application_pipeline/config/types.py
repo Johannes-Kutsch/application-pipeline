@@ -43,12 +43,9 @@ class SourceEntry:
 
 @dataclass(frozen=True)
 class Config:
-    keywords: list[str]
-    skills: list[str]
     sources: list[SourceEntry]
     locations: list[str]
     include_remote: bool = True
-    negative_keywords: list[str] = field(default_factory=list)
     seen_store_path: pathlib.Path = field(
         default_factory=lambda: pathlib.Path(".seen.json")
     )

@@ -109,8 +109,6 @@ def test_config_template_loads_successfully(tmp_path: Path) -> None:
     config = load(tmp_path / "config.py")
 
     assert isinstance(config, Config)
-    assert config.keywords
-    assert config.skills
     assert config.sources
     assert config.include_remote is True
 

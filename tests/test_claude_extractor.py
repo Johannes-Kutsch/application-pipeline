@@ -58,8 +58,6 @@ def run_log(tmp_path: Path) -> RunLog:
 
 def _config(**kwargs: object) -> Config:
     defaults: dict[str, object] = dict(
-        keywords=["python"],
-        skills=[],
         sources=[SourceEntry(parser_type="bundesagentur")],
         locations=["Hamburg"],
         claude_cli_path="claude",

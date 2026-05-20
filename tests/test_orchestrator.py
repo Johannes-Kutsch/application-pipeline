@@ -2981,8 +2981,6 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
     (user_info_dir / "match-criteria.md").write_text("Hamburg, remote\n")
 
     cfg = Config(
-        keywords=["python"],
-        skills=["python"],
         sources=[SourceEntry(parser_type="bundesagentur_api")],
         locations=["Hamburg"],
         user_info_dir=user_info_dir,

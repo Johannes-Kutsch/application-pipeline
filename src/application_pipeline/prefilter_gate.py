@@ -5,7 +5,6 @@ from typing import Literal, Protocol
 
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter import (
-    PreFilterVerdict,
     TermMatch,
     classify_position,
     precompute_blacklist,
@@ -103,13 +102,12 @@ class PreFilterGate:
         )
         for match in verdict.blacklist_matches:
             self._bl_counts[match.term] += 1
-        pf_verdict = PreFilterVerdict(
-            passes=verdict.passes, blacklist_matches=verdict.blacklist_matches
-        )
         if verdict.passes:
-            self._metrics.prefilter_passed(pf_verdict)
+            self._metrics.prefilter_passed()
         else:
-            self._metrics.prefilter_dropped(pf_verdict)
+            self._metrics.prefilter_dropped(
+                blacklist_hit=bool(verdict.blacklist_matches)
+            )
             self._dedup.mark_out_of_domain(position.stub)
         return verdict.passes
 

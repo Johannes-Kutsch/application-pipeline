@@ -7,7 +7,6 @@ from datetime import datetime
 from application_pipeline.dedup import RunScopedSeenResult
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.parser_log import RunLog
-from application_pipeline.prefilter import PreFilterVerdict
 from application_pipeline.status_display import StatusDisplay
 
 
@@ -195,18 +194,18 @@ class RunMetrics:
             body = self._dedup_body()
         self._display.update_body("pipeline_dedup", body=body)
 
-    def prefilter_passed(self, verdict: PreFilterVerdict) -> None:
+    def prefilter_passed(self) -> None:
         with self._lock:
             self._prefilter_considered += 1
             self._prefilter_passed += 1
             body = self._prefilter_body()
         self._display.update_body("pipeline_prefilter", body=body)
 
-    def prefilter_dropped(self, verdict: PreFilterVerdict) -> None:
+    def prefilter_dropped(self, *, blacklist_hit: bool) -> None:
         with self._lock:
             self._prefilter_considered += 1
             self._prefilter_dropped += 1
-            if verdict.blacklist_matches:
+            if blacklist_hit:
                 self._prefilter_blacklist_hits += 1
             body = self._prefilter_body()
         self._display.update_body("pipeline_prefilter", body=body)

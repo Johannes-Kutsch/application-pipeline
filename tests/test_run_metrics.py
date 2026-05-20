@@ -12,7 +12,6 @@ from fake_status_display import FakeStatusDisplay
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.orchestrator import RunSummary
 from application_pipeline.parser_log import RunLog
-from application_pipeline.prefilter import PreFilterVerdict, TermMatch
 from application_pipeline.run_metrics import RunMetrics
 
 
@@ -41,12 +40,6 @@ def _make_usage(
         cost_usd=cost_usd,
         duration_s=duration_s,
     )
-
-
-def _verdict(
-    passes: bool, blacklist_matches: tuple[TermMatch, ...] = ()
-) -> PreFilterVerdict:
-    return PreFilterVerdict(passes=passes, blacklist_matches=blacklist_matches)
 
 
 def _registers(display: FakeStatusDisplay) -> list[tuple[str, int, str]]:
@@ -155,13 +148,12 @@ def test_prefilter_body_matches_main_stats_format(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
-    bl_match = (TermMatch(term="pfleg"),)
     # blacklist hit → dropped
-    metrics.prefilter_dropped(_verdict(passes=False, blacklist_matches=bl_match))
+    metrics.prefilter_dropped(blacklist_hit=True)
     # no blacklist hit → passes
-    metrics.prefilter_passed(_verdict(passes=True))
+    metrics.prefilter_passed()
     # another pass
-    metrics.prefilter_passed(_verdict(passes=True))
+    metrics.prefilter_passed()
 
     body = _last_body(display, "pipeline_prefilter")
     assert body == "considered=3 passed=2 dropped=1 (bl=1)"
@@ -172,7 +164,7 @@ def test_prefilter_body_clean_pass_shows_zero_blacklist_hits(run_log: RunLog) ->
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
-    metrics.prefilter_passed(_verdict(passes=True))
+    metrics.prefilter_passed()
     body = _last_body(display, "pipeline_prefilter")
     assert "bl=0" in body
     assert "wl=" not in body
@@ -474,10 +466,9 @@ def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> Run
     metrics.record_dedup("run_hit")
     metrics.record_dedup("miss")
     metrics.record_dedup("miss")
-    bl_match = (TermMatch(term="pfleg"),)
-    metrics.prefilter_passed(_verdict(passes=True))
-    metrics.prefilter_passed(_verdict(passes=True))
-    metrics.prefilter_dropped(_verdict(passes=False, blacklist_matches=bl_match))
+    metrics.prefilter_passed()
+    metrics.prefilter_passed()
+    metrics.prefilter_dropped(blacklist_hit=True)
     metrics.enrich_failed()
     metrics.external_redirect()
     metrics.parser_dead()
@@ -814,17 +805,14 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
         cost_usd=0.001,
         duration_s=0.1,
     )
-    bl_match = (TermMatch(term="pfleg"),)
-    verdict_pass = _verdict(passes=True)
-    verdict_drop = _verdict(passes=False, blacklist_matches=bl_match)
 
     def worker() -> None:
         for _ in range(iters):
             metrics.discovered()
             metrics.record_dedup("url_hit")
             metrics.record_dedup("miss")
-            metrics.prefilter_passed(verdict_pass)
-            metrics.prefilter_dropped(verdict_drop)
+            metrics.prefilter_passed()
+            metrics.prefilter_dropped(blacklist_hit=True)
             metrics.enrich_failed()
             metrics.classify_buffered(1)
             metrics.classify_batch_enqueued(1)

@@ -3,13 +3,52 @@ from .llm.types import MatchVerdict
 from .parsers.types import Position
 
 
-def _location_segment(location: str | None, work_model: str | None) -> str:
-    suffix = {
-        "hybrid": " (Hybrid)",
-        "remote": " (Remote)",
-    }.get(work_model or "", "")
-    base = location if location is not None else "Unknown Location"
-    return base + suffix
+def _location_segment(location: str | None, work_model: str | None) -> str | None:
+    if work_model == "hybrid":
+        return f"{location} (Hybrid)" if location is not None else "(Hybrid)"
+    if work_model == "remote":
+        return f"{location} (Remote)" if location is not None else "(Remote)"
+    return location  # None when location is None (on-site / unset)
+
+
+def _build_placeholders(
+    position: Position,
+    verdict: MatchVerdict,
+    layout: Layout,
+) -> dict[str, str]:
+    stub = position.stub
+
+    raw: dict[str, str | None] = {
+        "company": stub.company,
+        "title": stub.title,
+        "location": stub.location,
+        "location_segment": _location_segment(stub.location, position.work_model),
+        "source": stub.source,
+        "url": stub.url,
+        "salary": position.salary,
+        "posted_date": str(position.posted_date)
+        if position.posted_date is not None
+        else None,
+        "contract_type": position.contract_type,
+        "employment_type": position.employment_type,
+        "work_model": position.work_model,
+        "deadline": str(position.deadline) if position.deadline is not None else None,
+        "raw_description": position.raw_description,
+        "matched": ", ".join(verdict.matched) if verdict.matched else None,
+        "missing": ", ".join(verdict.missing) if verdict.missing else None,
+        "summary": verdict.summary,
+        "rank": str(verdict.rank),
+    }
+
+    # Direct placeholders: None → ""
+    out: dict[str, str] = {k: v if v is not None else "" for k, v in raw.items()}
+
+    # Group placeholders: None entries dropped; all-None collapses to ""
+    for group_name, (separator, fields) in layout.placeholder_groups.items():
+        parts = [v for f in fields if (v := raw.get(f)) is not None]
+        out[group_name] = separator.join(parts) if parts else ""
+
+    return out
 
 
 def render(
@@ -17,66 +56,6 @@ def render(
     verdict: MatchVerdict,
     layout: Layout,
 ) -> str:
-    stub = position.stub
-    loc_seg = _location_segment(stub.location, position.work_model)
-
-    parts = []
-
-    # H1
-    company_prefix = f"{stub.company} · " if stub.company is not None else ""
-    parts.append(f"# {company_prefix}{stub.title} · {loc_seg}")
-    parts.append("")
-
-    # Meta line: posted_date · contract_type · employment_type
-    meta_fields = [
-        position.posted_date,
-        position.contract_type,
-        position.employment_type,
-    ]
-    meta_parts = [str(f) for f in meta_fields if f is not None]
-    if meta_parts:
-        parts.append(" · ".join(meta_parts))
-        parts.append("")
-
-    # Salary
-    if position.salary is not None:
-        parts.append(f"**Salary:** {position.salary}")
-        parts.append("")
-
-    # AI Assessment
-    parts.append("## AI Assessment")
-    parts.append("")
-    parts.append(verdict.summary)
-    parts.append("")
-
-    # Matched
-    if verdict.matched:
-        parts.append("**Matched:**")
-        for item in verdict.matched:
-            parts.append(f"- {item}")
-        parts.append("")
-
-    # Missing
-    if verdict.missing:
-        parts.append("**Missing:**")
-        for item in verdict.missing:
-            parts.append(f"- {item}")
-        parts.append("")
-
-    # Job Description
-    if position.raw_description:
-        parts.append("## Job Description")
-        parts.append("")
-        parts.append(position.raw_description)
-        parts.append("")
-
-    # Rank
-    parts.append(f"**Rank:** {verdict.rank}")
-    parts.append("")
-
-    # Footer
-    parts.append("---")
-    parts.append(f"<{stub.url}>")
-    parts.append("")
-
-    return "\n".join(parts)
+    return layout.card_template.format_map(
+        _build_placeholders(position, verdict, layout)
+    )

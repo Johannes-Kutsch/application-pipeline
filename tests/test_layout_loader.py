@@ -13,7 +13,7 @@ from application_pipeline import Layout, LayoutError, UserSettingsError, load_la
 _MINIMAL_BODY = textwrap.dedent(
     """
     PLACEHOLDER_GROUPS = {"meta": (" · ", ["location", "url"])}
-    CARD_TEMPLATE = "## {number}. {company}\\n"
+    CARD_TEMPLATE = "## {rank}. {company}\\n"
     """
 )
 
@@ -34,7 +34,7 @@ def test_load_returns_populated_layout(tmp_path: pathlib.Path) -> None:
 
     assert isinstance(layout, Layout)
     assert layout.placeholder_groups == {"meta": (" · ", ["location", "url"])}
-    assert layout.card_template == "## {number}. {company}\n"
+    assert layout.card_template == "## {rank}. {company}\n"
 
 
 # --- Layout dataclass properties ---
@@ -134,7 +134,7 @@ def test_load_wraps_syntax_error(tmp_path: pathlib.Path) -> None:
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:
     path = write_layout(tmp_path, _MINIMAL_BODY)
     first = load_layout(path)
-    assert first.card_template == "## {number}. {company}\n"
+    assert first.card_template == "## {rank}. {company}\n"
 
     second_body = textwrap.dedent(
         """
@@ -226,18 +226,32 @@ def test_load_raises_when_placeholder_group_references_non_groupable_field(
         load_layout(path)
 
 
-def test_load_accepts_matched_bullets_in_placeholder_group(
+@pytest.mark.parametrize("retired_field", ["matched_bullets", "missing_bullets"])
+def test_load_raises_for_matched_missing_bullets_in_placeholder_group(
+    tmp_path: pathlib.Path, retired_field: str
+) -> None:
+    body = (
+        f'PLACEHOLDER_GROUPS = {{"skills": ("\\n", ["{retired_field}"])}}\n'
+        'CARD_TEMPLATE = ""\n'
+    )
+    path = write_layout(tmp_path, body)
+
+    with pytest.raises(LayoutError, match=retired_field):
+        load_layout(path)
+
+
+def test_load_accepts_location_segment_in_placeholder_group(
     tmp_path: pathlib.Path,
 ) -> None:
     body = (
-        'PLACEHOLDER_GROUPS = {"skills": ("\\n", ["matched_bullets", "missing_bullets"])}\n'
-        'CARD_TEMPLATE = ""\n'
+        'PLACEHOLDER_GROUPS = {"title_line": (" · ", ["title", "location_segment"])}\n'
+        'CARD_TEMPLATE = "{title_line}"\n'
     )
     path = write_layout(tmp_path, body)
 
     layout = load_layout(path)
 
-    assert "skills" in layout.placeholder_groups
+    assert "title_line" in layout.placeholder_groups
 
 
 # --- Smoke-test: valid layout passes ---

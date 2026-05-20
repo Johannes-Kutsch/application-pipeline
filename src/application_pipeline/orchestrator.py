@@ -51,6 +51,7 @@ from application_pipeline.parsers.errors import ParserError
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
+from application_pipeline.search_terms import SearchTerms, load_search_terms
 from application_pipeline.renderer import render
 from application_pipeline.results import ResultsFileError, append, ensure_initialized
 
@@ -615,6 +616,7 @@ class _OutboundDispatcher:
 def run(
     config_path: Path,
     *,
+    search_terms: SearchTerms | None = None,
     extractor: LLMExtractor | None = None,
     parser_registry: Callable[[str], type[Parser] | None] | None = None,
     dedup_store: DeduplicationStore | None = None,
@@ -651,7 +653,13 @@ def run(
             except PromptError as exc:
                 _log.error("startup failed — prompts: %s", exc)
                 raise
-            extractor = ClaudeExtractor(cfg, prompts, run_log=run_log)
+            if search_terms is None:
+                search_terms = load_search_terms(cfg.user_info_dir)
+            extractor = ClaudeExtractor(
+                cfg, prompts, search_terms=search_terms, run_log=run_log
+            )
+        elif search_terms is None:
+            search_terms = load_search_terms(cfg.user_info_dir)
 
         # Step 6: Resolve parser classes; unknown types are skipped (registry logs WARNING)
         _resolve = (
@@ -719,7 +727,7 @@ def run(
                     ParserQuery(
                         keyword=kw, location=loc, max_results=source.max_results
                     )
-                    for kw in cfg.keywords
+                    for kw in search_terms.keywords
                     for loc in locations
                 ]
                 parser_states[parser_id] = _ParserState(
@@ -768,7 +776,7 @@ def run(
                 run_log=run_log,
             )
             prefilter = PreFilterGate(
-                blacklist=cfg.negative_keywords,
+                blacklist=list(search_terms.negative_keywords),
                 dedup=dedup_run,
                 metrics=metrics,
                 run_log=run_log,

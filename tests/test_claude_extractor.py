@@ -40,6 +40,10 @@ from application_pipeline.prompts import (
     PromptTemplate,
     Prompts,
 )
+from application_pipeline.search_terms.types import SearchTerms
+
+
+_SEARCH_TERMS = SearchTerms(keywords=("python",), skills=(), negative_keywords=())
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +155,7 @@ def test_classify_relevance_batch_returns_in_domain_true(run_log: RunLog) -> Non
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_batch_response(items, {"0": True})),
     )
@@ -167,6 +172,7 @@ def test_classify_relevance_batch_returns_in_domain_false(run_log: RunLog) -> No
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_batch_response(items, {"0": False})),
     )
@@ -179,7 +185,11 @@ def test_classify_relevance_batch_n3_items_framed_in_prompt(run_log: RunLog) -> 
     items = _items(3)
     invoker = _fake_invoker(_batch_response(items))
     extractor = ClaudeExtractor(
-        _config(), _prompts(classify="EN: {ITEMS}"), run_log=run_log, _invoker=invoker
+        _config(),
+        _prompts(classify="EN: {ITEMS}"),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
     )
     extractor.classify_relevance_batch(items)
     prompt_sent = invoker.call.call_args.args[0]
@@ -213,7 +223,11 @@ def test_classify_relevance_batch_returns_verdicts_in_input_order(
         session_id="s",
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=_fake_invoker(response),
     )
     results, _ = extractor.classify_relevance_batch(items)
     assert len(results) == 3
@@ -247,6 +261,7 @@ def test_classify_in_domain_verdict_carries_structured_extract(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_classify_response(raw_result)),
     )
@@ -268,6 +283,7 @@ def test_classify_out_of_domain_verdict_has_extract_none(run_log: RunLog) -> Non
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_classify_response(raw_result)),
     )
@@ -284,6 +300,7 @@ def test_classify_in_domain_missing_extract_raises_batch_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_classify_response(raw_result)),
     )
@@ -299,6 +316,7 @@ def test_classify_in_domain_malformed_extract_raises_batch_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_classify_response(raw_result)),
     )
@@ -315,6 +333,7 @@ def test_classify_in_domain_extract_missing_required_field_raises_batch_malforme
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_classify_response(raw_result)),
     )
@@ -338,6 +357,7 @@ def test_classify_mixed_batch_in_domain_gets_extract_out_of_domain_gets_none(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_classify_response(raw_result)),
     )
@@ -362,7 +382,11 @@ def test_classify_relevance_batch_records_events_row_to_call_site_file(
     items = _items(2)
     invoker = _fake_invoker(_batch_response(items))
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
     )
 
     extractor.classify_relevance_batch(items)
@@ -381,7 +405,11 @@ def test_classify_relevance_batch_records_transcript(tmp_path: Path) -> None:
     items = _items(2)
     invoker = _fake_invoker(_batch_response(items))
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
     )
 
     extractor.classify_relevance_batch(items)
@@ -409,7 +437,11 @@ def test_classify_batch_usage_limit_propagates(run_log: RunLog) -> None:
         "rate limit", returncode=1, stdout="", stderr="rate limit", envelope=None
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
     )
     with pytest.raises(ClaudeUsageLimitError):
         extractor.classify_relevance_batch(_items(1))
@@ -427,7 +459,11 @@ def test_classify_batch_length_mismatch_raises_batch_malformed(run_log: RunLog) 
         session_id="s",
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=_fake_invoker(response),
     )
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.classify_relevance_batch(items)
@@ -445,7 +481,11 @@ def test_classify_batch_missing_id_raises_batch_malformed(run_log: RunLog) -> No
         session_id="s",
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=_fake_invoker(response),
     )
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.classify_relevance_batch(items)
@@ -464,7 +504,11 @@ def test_classify_batch_extra_id_raises_batch_malformed(run_log: RunLog) -> None
         session_id="s",
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=_fake_invoker(response),
     )
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.classify_relevance_batch(items)
@@ -482,7 +526,11 @@ def test_classify_batch_non_list_response_raises_batch_malformed(
         session_id="s",
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=_fake_invoker(response),
     )
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.classify_relevance_batch(_items(1))
@@ -501,6 +549,7 @@ def test_successful_classify_does_not_write_claude_extractor_files(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_batch_response(items)),
     )
@@ -529,7 +578,11 @@ def test_classify_failure_transcript_does_not_write_to_extractor_file(
         envelope_error_class="cli_nonzero_exit",
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
     )
 
     with pytest.raises(ExtractorUnreachableError):
@@ -554,7 +607,11 @@ def test_classify_relevance_batch_passes_haiku_model_to_invoker(
     items = _items(1)
     invoker = _fake_invoker(_batch_response(items))
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
     )
     extractor.classify_relevance_batch(items)
     call_kwargs = invoker.call.call_args.kwargs
@@ -566,6 +623,7 @@ def test_claude_extractor_is_llm_extractor(run_log: RunLog) -> None:
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=MagicMock(spec=ClaudeCliInvoker),
     )
@@ -583,6 +641,7 @@ def test_classify_slots_match_inventory(run_log: RunLog) -> None:
     extractor = ClaudeExtractor(
         _config(),
         _prompts(classify="content={ITEMS}"),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -628,7 +687,11 @@ def test_cli_error(
         envelope_error_class="empty_result",
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
     )
 
     with pytest.raises(ExtractorUnreachableError) as exc_info:
@@ -675,7 +738,11 @@ def test_malformed_envelope(
         envelope_error_class="envelope_not_json",
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
     )
 
     with pytest.raises(ExtractorMalformedJSONError):
@@ -711,7 +778,11 @@ def test_tag_missing(
         raw_response=raw, usage=_usage(), cost_usd=0.0, duration_s=0.1, session_id="s"
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=_fake_invoker(response),
     )
 
     with pytest.raises(expected_error_cls):
@@ -746,7 +817,11 @@ def test_json_malformed(
         raw_response=raw, usage=_usage(), cost_usd=0.0, duration_s=0.1, session_id="s"
     )
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=_fake_invoker(response)
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=_fake_invoker(response),
     )
 
     with pytest.raises(expected_error_cls):
@@ -821,6 +896,7 @@ def test_judge_top_n_with_10_candidates_returns_5_verdicts(run_log: RunLog) -> N
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_top_n_response(verdicts_raw)),
     )
@@ -836,6 +912,7 @@ def test_judge_top_n_empty_candidates_returns_empty_list(run_log: RunLog) -> Non
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -861,6 +938,7 @@ def test_judge_top_n_response_with_unknown_id_raises_batch_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_top_n_response(bad_verdicts)),
     )
@@ -878,6 +956,7 @@ def test_judge_top_n_response_with_rank_out_of_range_raises_batch_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_top_n_response(bad_verdicts)),
     )
@@ -896,6 +975,7 @@ def test_judge_top_n_response_with_duplicate_rank_raises_batch_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=_fake_invoker(_top_n_response(bad_verdicts)),
     )
@@ -909,6 +989,7 @@ def test_claude_extractor_judge_top_n_satisfies_llm_extractor_protocol(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
+        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=MagicMock(spec=ClaudeCliInvoker),
     )

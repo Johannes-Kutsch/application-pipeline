@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 import textwrap
@@ -84,6 +85,14 @@ def _write_config(
         (user_info_dir / "self-description.md").write_text("dev background\n")
         (user_info_dir / "domain-fit.md").write_text("ML roles\n")
         (user_info_dir / "match-criteria.md").write_text("Hamburg, remote\n")
+        kws: list[str] = ast.literal_eval(keywords)
+        nkws: list[str] = ast.literal_eval(negative_keywords)
+        st_lines = ["## Keywords"] + [f"- {kw}" for kw in kws]
+        st_lines += ["", "## Skills", "- django", "", "## Negative Keywords"]
+        st_lines += [f"- {nk}" for nk in nkws]
+        (user_info_dir / "search-terms.md").write_text(
+            "\n".join(st_lines) + "\n", encoding="utf-8"
+        )
     return config_path
 
 

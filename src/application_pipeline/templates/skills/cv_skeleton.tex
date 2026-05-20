@@ -3,35 +3,77 @@
 % Edit slot bodies below to guide the /write-cv skill.
 
 %% SLOT: recipient_line_1
-Frau Maria Mustermann
+% Name der Ansprechperson (Vorname Nachname) oder Abteilungsbezeichnung.
+% Wenn kein Name bekannt: "Personalabteilung" oder leer lassen.
+Frau Dr. Müller
 
 %% SLOT: recipient_line_2
-Musterstraße 1, 12345 Musterstadt
+% Straße, Hausnummer, Postleitzahl und Stadt — alles in einer Zeile.
+Musterstraße 42, 20095 Hamburg
 
 %% SLOT: opening
-Sehr geehrte Frau Mustermann,
+% Förmliche Anrede passend zum Empfänger in recipient_line_1.
+% Bei unbekanntem Empfänger: "Sehr geehrte Damen und Herren,"
+Sehr geehrte Frau Dr. Müller,
 
 %% SLOT: cover_intro
-2-3 sentences introducing yourself and hooking the reader with your strongest fit for this role.
+% 2–3 Sätze: Wer bin ich, welche Stelle interessiert mich, warum dieses Unternehmen?
+% Direkte Ansprache, keine Floskeln. Stärksten Bezugspunkt zur Stelle als Aufhänger.
+mit großem Interesse habe ich Ihre Stellenausschreibung als Senior Data Engineer gelesen.
+Die Verbindung von skalierbaren Datenpipelines und \textit{maschinellem Lernen} entspricht
+genau meinem Schwerpunkt der letzten fünf Jahre --- und Ihr Fokus auf öffentliche Dateninfrastruktur
+spricht mich besonders an.
 
 %% SLOT: cover_pivot
-1-2 sentences bridging from your background to why this role is the natural next step.
+% 1–2 Sätze: Brücke vom bisherigen Werdegang zur neuen Stelle.
+% Warum ist dieser Wechsel der logische nächste Schritt?
+Nach meiner Tätigkeit bei der Muster GmbH, wo ich vollständige ETL-Strecken von der
+Rohdatenerfassung bis zum Reporting verantwortet habe, möchte ich dieses Know-how
+nun in einem stärker forschungsnahen Umfeld einsetzen.
 
 %% SLOT: cover_fit
-2-3 sentences showing concrete evidence of fit (skills, achievements, domain knowledge).
+% 2–3 Sätze: Konkrete Belege für den Fit — Zahlen, Technologien, Erfolge.
+% Bezug auf die Anforderungen der Stellenausschreibung herstellen.
+Mein Open-Source-Beitrag \href{https://github.com/beispiel/pipeline-lib}{pipeline-lib}
+wird von über 300 Teams produktiv genutzt und zeigt, dass ich nicht nur implementiere,
+sondern auch dokumentiere und community-tauglich designt. Umlaute wie Ü, Ö, Ä und ß
+sind in meinen deutschen Texten selbstverständlich korrekt gesetzt.
 
 %% SLOT: cover_closing
-1-2 sentences closing with a call to action and expression of enthusiasm.
+% 1–2 Sätze: Gesprächswunsch äußern, Verfügbarkeit andeuten, freundlicher Abschluss.
+Über die Möglichkeit, meine Erfahrungen in einem persönlichen Gespräch vorzustellen,
+würde ich mich sehr freuen --- idealerweise ab dem 1. Juni.
 
 %% SLOT: resume_berufserfahrung
-\cventry{2022--heute}{Senior Software Engineer}{Muster GmbH}{Hamburg}{}{}
+% Listet relevante Berufsstationen in umgekehrter chronologischer Reihenfolge.
+% Je Station ein \cventry. Schwerpunkt auf Aufgaben mit Stellenbezug.
+\cventry{2021--heute}{Senior Data Engineer}{\textit{Muster GmbH}}{Hamburg}{}{%
+  Aufbau einer Echtzeit-Datenpipeline für 50\,Mio. Ereignisse/Tag;
+  Einführung von dbt und Apache Kafka --- Laufzeit um 40\,\% reduziert.}
+\cventry{2018--2021}{Data Engineer}{Beispiel AG}{Berlin}{}{%
+  Entwicklung von ETL-Prozessen in Python; Anbindung externer APIs über
+  \href{https://beispiel.de/api}{REST-Schnittstellen}.}
 
 %% SLOT: resume_ausbildung
-\cventry{2015--2019}{B.Sc. Informatik}{Universität Hamburg}{Hamburg}{}{}
+% Akademische Abschlüsse und relevante Zertifikate, neuestes zuerst.
+% Promotion, Master, Bachelor; Berufsausbildung nur wenn fachlich relevant.
+\cventry{2015--2018}{M.\,Sc.\ Informatik}{Universität Hamburg}{Hamburg}{}{%
+  Schwerpunkt: Verteilte Systeme und maschinelles Lernen;
+  Abschlussnote \textit{sehr gut} (1,2).}
+\cventry{2012--2015}{B.\,Sc.\ Wirtschaftsinformatik}{FH Lübeck}{Lübeck}{}{}
 
 %% SLOT: resume_projekte
-\cventry{2023}{Beispielprojekt}{Open Source}{}{}{}
+% Eigenprojekte, Open-Source-Beiträge oder Nebenarbeiten mit technischem Belang.
+% Projekttitel verlinken wenn öffentlich zugänglich (\href).
+\cventry{2023}{pipeline-lib}{Open Source}{}{}{%
+  Python-Bibliothek für deklarative Datenpipelines ---
+  \href{https://github.com/beispiel/pipeline-lib}{github.com/beispiel/pipeline-lib};
+  300\,+ produktive Installationen, MIT-Lizenz.}
 
 %% SLOT: skills_block
-\cvitem{Sprachen}{Python, TypeScript, Rust}
-\cvitem{Tools}{Docker, Kubernetes, Terraform}
+% Kompakte Auflistung technischer Kernkompetenzen in Kategorien (\cvitem).
+% Nur Technologien nennen, die wirklich beherrscht werden --- keine Füllwörter.
+\cvitem{Sprachen}{Python, SQL, TypeScript, Rust}
+\cvitem{Daten}{Apache Kafka, dbt, Airflow, Spark, PostgreSQL}
+\cvitem{Cloud \& Infra}{AWS (S3, Glue, Lambda), Docker, Kubernetes, Terraform}
+\cvitem{ML}{scikit-learn, \textit{PyTorch} (Grundkenntnisse), MLflow}

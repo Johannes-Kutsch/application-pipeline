@@ -75,9 +75,12 @@ def _write_config(
             LOCATIONS = {locations}
             INCLUDE_REMOTE = {include_remote!r}
             NEGATIVE_KEYWORDS = {negative_keywords}
-            LAYOUT = None
         """),
         encoding="utf-8",
+    )
+    (tmp_path / "layout.py").write_text(
+        "PLACEHOLDER_GROUPS = {}\n"
+        'CARD_TEMPLATE = "# {rank} \xb7 {title}\\n\\n{summary}\\n\\n---\\n<{url}>\\n"\n'
     )
     user_info_dir = tmp_path / "user-info"
     user_info_dir.mkdir(exist_ok=True)

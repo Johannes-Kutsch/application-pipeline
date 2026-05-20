@@ -20,13 +20,12 @@ REQUIRED_BODY = textwrap.dedent(
 
 
 def write_config(
-    tmp_path: pathlib.Path, body: str, *, layout_none: bool = True
+    tmp_path: pathlib.Path, body: str, *, with_layout: bool = True
 ) -> pathlib.Path:
     path = tmp_path / "config.py"
-    text = textwrap.dedent(body)
-    if layout_none:
-        text += "\nLAYOUT = None\n"
-    path.write_text(text)
+    path.write_text(textwrap.dedent(body))
+    if with_layout:
+        (tmp_path / "layout.py").write_text("# layout stub\n")
     (tmp_path / "user-info").mkdir(exist_ok=True)
     return path
 
@@ -173,65 +172,53 @@ def test_resolve_data_paths_anchors_to_data_dir() -> None:
 
 
 def test_layout_auto_discovers_sibling_layout_py(tmp_path: pathlib.Path) -> None:
-    sibling = tmp_path / "layout.py"
-    sibling.write_text("# layout\n")
-    path = write_config(tmp_path, REQUIRED_BODY, layout_none=False)
-
-    config = load(path)
-
-    assert config.layout == sibling
-
-
-def test_layout_errors_when_omitted_and_sibling_missing(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY, layout_none=False)
-
-    with pytest.raises(ConfigError, match="LAYOUT"):
-        load(path)
-
-
-def test_layout_none_explicit_opts_out(tmp_path: pathlib.Path) -> None:
     path = write_config(tmp_path, REQUIRED_BODY)
 
     config = load(path)
 
-    assert config.layout is None
+    assert config.layout == tmp_path / "layout.py"
 
 
-def test_layout_accepted_when_valid_file(tmp_path: pathlib.Path) -> None:
+def test_layout_errors_when_sibling_missing(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY, with_layout=False)
+
+    with pytest.raises(ConfigError, match="LAYOUT"):
+        load(path)
+
+
+def test_layout_knob_raises_when_set_to_none(tmp_path: pathlib.Path) -> None:
+    config_path = tmp_path / "config.py"
+    config_path.write_text(
+        textwrap.dedent("""
+            from application_pipeline import SourceEntry
+            SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
+            LOCATIONS = ["Hamburg"]
+            LAYOUT = None
+        """)
+    )
+    (tmp_path / "user-info").mkdir()
+
+    with pytest.raises(ConfigError, match="LAYOUT is no longer supported"):
+        load(config_path)
+
+
+def test_layout_knob_raises_when_set_to_path(tmp_path: pathlib.Path) -> None:
     layout_file = tmp_path / "layout.py"
     layout_file.write_text("# layout\n")
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + f"\nimport pathlib\nLAYOUT = pathlib.Path(r'{layout_file}')\n",
-        layout_none=False,
+    config_path = tmp_path / "config.py"
+    config_path.write_text(
+        textwrap.dedent(f"""
+            import pathlib
+            from application_pipeline import SourceEntry
+            SOURCES = [SourceEntry(parser_type="bundesagentur_api")]
+            LOCATIONS = ["Hamburg"]
+            LAYOUT = pathlib.Path(r"{layout_file}")
+        """)
     )
+    (tmp_path / "user-info").mkdir()
 
-    config = load(path)
-
-    assert config.layout == layout_file
-
-
-def test_layout_raises_when_file_missing(tmp_path: pathlib.Path) -> None:
-    missing = tmp_path / "no_layout.py"
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + f"\nimport pathlib\nLAYOUT = pathlib.Path(r'{missing}')\n",
-        layout_none=False,
-    )
-
-    with pytest.raises(ConfigError, match="LAYOUT"):
-        load(path)
-
-
-def test_layout_raises_when_path_is_directory(tmp_path: pathlib.Path) -> None:
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY + f"\nimport pathlib\nLAYOUT = pathlib.Path(r'{tmp_path}')\n",
-        layout_none=False,
-    )
-
-    with pytest.raises(ConfigError, match="LAYOUT"):
-        load(path)
+    with pytest.raises(ConfigError, match="LAYOUT is no longer supported"):
+        load(config_path)
 
 
 # --- user_info_dir ---

@@ -51,11 +51,12 @@ def app_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def settings_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    s = tmp_path / "settings"
-    (s / "user-info").mkdir(parents=True)
-    monkeypatch.setenv("APPLICATION_PIPELINE_HOME", str(s))
-    return s
+def project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "project"
+    (root / "application-pipeline" / "user-info").mkdir(parents=True)
+    (root / "application-pipeline" / "config.py").write_text("")
+    monkeypatch.chdir(root)
+    return root
 
 
 @pytest.fixture()
@@ -70,7 +71,7 @@ def patch_subprocess(
 
 def test_compile_cv_produces_three_pdfs(
     app_dir: Path,
-    settings_dir: Path,
+    project_root: Path,
     patch_subprocess: Callable[[RunFn], None],
 ) -> None:
     patch_subprocess(_fake_pdflatex_success)
@@ -84,7 +85,7 @@ def test_compile_cv_produces_three_pdfs(
 
 def test_compile_cv_removes_build_dir_on_success(
     app_dir: Path,
-    settings_dir: Path,
+    project_root: Path,
     patch_subprocess: Callable[[RunFn], None],
 ) -> None:
     patch_subprocess(_fake_pdflatex_success)
@@ -96,7 +97,7 @@ def test_compile_cv_removes_build_dir_on_success(
 
 def test_compile_cv_overwrites_existing_pdfs(
     app_dir: Path,
-    settings_dir: Path,
+    project_root: Path,
     patch_subprocess: Callable[[RunFn], None],
 ) -> None:
     for name in ("cover", "resume", "combined"):
@@ -109,15 +110,14 @@ def test_compile_cv_overwrites_existing_pdfs(
         assert (app_dir / f"{name}.pdf").read_bytes() == b"%PDF-1.4 fake\n"
 
 
-def test_compile_cv_uses_env_var_settings_dir(
+def test_compile_cv_ignores_application_pipeline_home(
     app_dir: Path,
-    tmp_path: Path,
+    project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    custom_settings = tmp_path / "custom-settings"
-    user_info = custom_settings / "user-info"
-    user_info.mkdir(parents=True)
-    monkeypatch.setenv("APPLICATION_PIPELINE_HOME", str(custom_settings))
+    irrelevant = project_root / "irrelevant"
+    (irrelevant / "user-info").mkdir(parents=True)
+    monkeypatch.setenv("APPLICATION_PIPELINE_HOME", str(irrelevant))
 
     captured_cmds: list[list[str]] = []
 
@@ -131,12 +131,16 @@ def test_compile_cv_uses_env_var_settings_dir(
 
     compile_cv(app_dir)
 
-    assert any(str(user_info) in arg for cmd in captured_cmds for arg in cmd)
+    expected_user_info = str(
+        (project_root / "application-pipeline" / "user-info").resolve()
+    )
+    assert any(expected_user_info in arg for cmd in captured_cmds for arg in cmd)
+    assert not any(str(irrelevant) in arg for cmd in captured_cmds for arg in cmd)
 
 
 def test_compile_cv_exits_nonzero_on_first_failure(
     app_dir: Path,
-    settings_dir: Path,
+    project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     call_count = 0
@@ -159,7 +163,7 @@ def test_compile_cv_exits_nonzero_on_first_failure(
 
 def test_compile_cv_leaves_build_dir_on_failure(
     app_dir: Path,
-    settings_dir: Path,
+    project_root: Path,
     patch_subprocess: Callable[[RunFn], None],
 ) -> None:
     patch_subprocess(_fake_pdflatex_failure)
@@ -172,7 +176,7 @@ def test_compile_cv_leaves_build_dir_on_failure(
 
 def test_compile_cv_does_not_write_pdfs_to_dir_on_failure(
     app_dir: Path,
-    settings_dir: Path,
+    project_root: Path,
     patch_subprocess: Callable[[RunFn], None],
 ) -> None:
     patch_subprocess(_fake_pdflatex_failure)
@@ -186,7 +190,7 @@ def test_compile_cv_does_not_write_pdfs_to_dir_on_failure(
 
 def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     app_dir: Path,
-    settings_dir: Path,
+    project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -218,7 +222,7 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
 
 def test_compile_cv_via_cli_dispatch(
     app_dir: Path,
-    settings_dir: Path,
+    project_root: Path,
     patch_subprocess: Callable[[RunFn], None],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -232,3 +236,52 @@ def test_compile_cv_via_cli_dispatch(
     assert (app_dir / "cover.pdf").exists()
     assert (app_dir / "resume.pdf").exists()
     assert (app_dir / "combined.pdf").exists()
+
+
+def test_compile_cv_uses_cwd_relative_user_info(
+    app_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "application-pipeline" / "user-info").mkdir(parents=True)
+    (project_root / "application-pipeline" / "config.py").write_text("")
+    monkeypatch.chdir(project_root)
+
+    captured_cmds: list[list[str]] = []
+
+    def capturing_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        captured_cmds.append(cmd)
+        return _fake_pdflatex_success(cmd, **kwargs)
+
+    monkeypatch.setattr("subprocess.run", capturing_run)
+
+    compile_cv(app_dir)
+
+    expected_user_info = str(
+        (project_root / "application-pipeline" / "user-info").resolve()
+    )
+    assert any(expected_user_info in arg for cmd in captured_cmds for arg in cmd)
+
+
+def test_compile_cv_missing_config_exits_2_without_build_dir(
+    app_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    monkeypatch.chdir(empty_root)
+
+    with pytest.raises(SystemExit) as exc_info:
+        compile_cv(app_dir)
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "no application-pipeline/config.py in" in err
+    assert "did you forget to cd, or run init?" in err
+    assert not (app_dir / ".build").exists()

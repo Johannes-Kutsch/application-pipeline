@@ -37,17 +37,18 @@ class _DedupStore(Protocol):
 class _PreFilterVerdict:
     passes: bool
     reason: Literal["passed", "blacklist_drop"]
-    blacklist_matches: list[dict[str, str]]
+    blacklist_matches: tuple[TermMatch, ...]
 
 
 def _evaluate(position: _Position, blacklist: list[str]) -> _PreFilterVerdict:
     verdict = classify_position(position, blacklist)
-    if verdict.passes:
-        return _PreFilterVerdict(passes=True, reason="passed", blacklist_matches=[])
+    reason: Literal["passed", "blacklist_drop"] = (
+        "passed" if verdict.passes else "blacklist_drop"
+    )
     return _PreFilterVerdict(
-        passes=False,
-        reason="blacklist_drop",
-        blacklist_matches=[{"term": m.term} for m in verdict.blacklist_matches],
+        passes=verdict.passes,
+        reason=reason,
+        blacklist_matches=verdict.blacklist_matches,
     )
 
 
@@ -85,25 +86,20 @@ class PreFilterGate:
                 "source": position.stub.source,
                 "passes": verdict.passes,
                 "reason": verdict.reason,
-                "blacklist_matches": verdict.blacklist_matches,
+                "blacklist_matches": [
+                    {"term": m.term} for m in verdict.blacklist_matches
+                ],
                 "title_len": len(position.title),
             },
         )
         for match in verdict.blacklist_matches:
-            term = match["term"]
-            if term in self._bl_counts:
-                self._bl_counts[term] += 1
+            self._bl_counts[match.term] += 1
+        pf_verdict = PreFilterVerdict(
+            passes=verdict.passes, blacklist_matches=verdict.blacklist_matches
+        )
         if verdict.passes:
-            self._metrics.prefilter_passed(
-                PreFilterVerdict(passes=True, blacklist_matches=())
-            )
+            self._metrics.prefilter_passed(pf_verdict)
         else:
-            pf_verdict = PreFilterVerdict(
-                passes=False,
-                blacklist_matches=tuple(
-                    TermMatch(term=m["term"]) for m in verdict.blacklist_matches
-                ),
-            )
             self._metrics.prefilter_dropped(pf_verdict)
             self._dedup.mark_out_of_domain(position.stub)
         return verdict.passes

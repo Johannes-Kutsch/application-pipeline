@@ -423,3 +423,102 @@ def test_cron_uninstall_no_op_on_empty_crontab(
         ["bash", str(cron_uninstall)], capture_output=True, text=True
     )
     assert result.returncode == 0
+
+
+# --- --refresh: overwrite global files, preserve user files ---
+
+
+def test_main_refresh_flag_wired_through(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import sys
+
+    from application_pipeline.__main__ import main
+
+    # Seed initial files
+    init(tmp_path)
+    for fname in _SETUP_SCRIPTS:
+        (tmp_path / "setup" / fname).write_text("# custom\n")
+    capsys.readouterr()
+
+    sys.argv = ["application-pipeline", "init", "--refresh", str(tmp_path)]
+    main()
+
+    out = capsys.readouterr().out
+    assert "overwrote setup/cron.sh" in out
+
+
+def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    # Modify all files
+    for fname in _SETUP_SCRIPTS:
+        (tmp_path / "setup" / fname).write_text("# custom\n")
+    (tmp_path / "config.py").write_text("# custom\n")
+    (tmp_path / "layout.py").write_text("# custom\n")
+    (tmp_path / "user-info" / "self-description.md").write_text("# custom\n")
+    # Delete a global file to trigger "wrote"
+    (tmp_path / "setup" / "cron-install.sh").unlink()
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    out = capsys.readouterr().out
+    assert "overwrote setup/cron.sh" in out
+    assert "overwrote setup/cron-uninstall.sh" in out
+    assert "wrote setup/cron-install.sh" in out
+    assert "skipped config.py (preserved)" in out
+    assert "skipped layout.py (preserved)" in out
+    assert "skipped user-info/self-description.md (preserved)" in out
+
+
+def test_refresh_self_heals_missing_global_file(tmp_path: Path) -> None:
+    init(tmp_path)
+    (tmp_path / "layout.py").unlink()
+
+    init(tmp_path, refresh=True)
+
+    assert (tmp_path / "layout.py").read_bytes() == _template_bytes("layout.py")
+
+
+def test_refresh_on_empty_dir_writes_all_files(tmp_path: Path) -> None:
+    init(tmp_path, refresh=True)
+
+    assert (tmp_path / "config.py").read_bytes() == _template_bytes("config.py")
+    assert (tmp_path / "layout.py").read_bytes() == _template_bytes("layout.py")
+    for fname in _SETUP_SCRIPTS:
+        assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
+    for fname in _USER_INFO_FILES:
+        assert (
+            tmp_path / "user-info" / fname
+        ).read_bytes() == _user_info_template_bytes(fname)
+
+
+def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    # Modify all files to simulate user edits
+    custom_setup = "# user-modified setup\n"
+    custom_config = "# user-modified config\n"
+    custom_layout = "# user-modified layout\n"
+    custom_user_info = "# user-modified self-description\n"
+    for fname in _SETUP_SCRIPTS:
+        (tmp_path / "setup" / fname).write_text(custom_setup)
+    (tmp_path / "config.py").write_text(custom_config)
+    (tmp_path / "layout.py").write_text(custom_layout)
+    (tmp_path / "user-info" / "self-description.md").write_text(custom_user_info)
+
+    init(tmp_path, refresh=True)
+
+    # setup/ files must match package templates
+    for fname in _SETUP_SCRIPTS:
+        assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
+    # user files must retain user-modified content
+    assert (tmp_path / "config.py").read_text() == custom_config
+    assert (tmp_path / "layout.py").read_text() == custom_layout
+    assert (
+        tmp_path / "user-info" / "self-description.md"
+    ).read_text() == custom_user_info

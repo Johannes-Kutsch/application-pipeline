@@ -27,7 +27,7 @@ def test_init_refresh_seeds_files_on_fresh_dir(tmp_path: Path) -> None:
     assert (tmp_path / "layout.py").exists()
 
 
-def test_init_refresh_skips_existing_files(
+def test_init_refresh_preserves_user_files(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / "config.py").write_text("# custom\n")
@@ -35,7 +35,7 @@ def test_init_refresh_skips_existing_files(
     _run_main(["init", "--refresh", str(tmp_path)])
 
     out = capsys.readouterr().out
-    assert "skipped config.py (already exists)" in out
+    assert "skipped config.py (preserved)" in out
 
 
 def test_init_refresh_is_idempotent(tmp_path: Path) -> None:

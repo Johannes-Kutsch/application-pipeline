@@ -142,6 +142,12 @@ def test_fresh_seed_does_not_create_prompts_dir(tmp_path: Path) -> None:
     assert not (tmp_path / "prompts").exists()
 
 
+def test_fresh_seed_does_not_create_latex_dir(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    assert not (tmp_path / "latex").exists()
+
+
 def test_fresh_seed_prints_all_five_files(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -282,56 +288,26 @@ def test_rerun_preserves_latex_file_content(tmp_path: Path) -> None:
     assert identity_path.read_bytes() == original
 
 
-# --- LaTeX template file seeding ---
+# --- LaTeX package (application_pipeline.latex) ---
 
-_LATEX_TEMPLATE_FILES = (
+_LATEX_PACKAGE_FILES = (
     "cv_template.tex",
     "moderncv.cls",
     "moderncvcolorblue.sty",
     "moderncvstylecasual.sty",
     "tweaklist.sty",
+    "README.md",
 )
 
 
-def _latex_template_bytes(name: str) -> bytes:
-    return (
-        importlib.resources.files("application_pipeline.templates") / "latex" / name
-    ).read_bytes()
+def _latex_pkg_bytes(name: str) -> bytes:
+    return (importlib.resources.files("application_pipeline.latex") / name).read_bytes()
 
 
-def test_init_seeds_latex_template_files_with_correct_content(
-    tmp_path: Path,
-) -> None:
-    init(tmp_path)
-
-    for fname in _LATEX_TEMPLATE_FILES:
-        dest = tmp_path / "latex" / fname
-        assert dest.read_bytes() == _latex_template_bytes(fname)
-
-
-def test_rerun_does_not_overwrite_existing_latex_template_files(
-    tmp_path: Path,
-) -> None:
-    init(tmp_path)
-    cv_path = tmp_path / "latex" / "cv_template.tex"
-    original = cv_path.read_bytes()
-
-    init(tmp_path)
-
-    assert cv_path.read_bytes() == original
-
-
-def test_rerun_prints_skipped_for_latex_template_files(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    init(tmp_path)
-    capsys.readouterr()
-
-    init(tmp_path)
-
-    out = capsys.readouterr().out
-    for fname in _LATEX_TEMPLATE_FILES:
-        assert f"skipped latex/{fname} (already exists)" in out
+def test_latex_package_files_are_accessible() -> None:
+    for fname in _LATEX_PACKAGE_FILES:
+        data = _latex_pkg_bytes(fname)
+        assert len(data) > 0, f"expected non-empty content for {fname}"
 
 
 # --- setup/*.sh seeding ---

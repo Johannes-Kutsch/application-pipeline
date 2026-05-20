@@ -36,9 +36,7 @@ _MODERNCV_SETTERS = (
 @pytest.fixture(scope="module")
 def cv_template() -> str:
     return (
-        importlib.resources.files("application_pipeline.templates")
-        / "latex"
-        / "cv_template.tex"
+        importlib.resources.files("application_pipeline.latex") / "cv_template.tex"
     ).read_text(encoding="utf-8")
 
 

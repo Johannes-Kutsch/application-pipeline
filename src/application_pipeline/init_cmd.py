@@ -10,7 +10,7 @@ def init(target_dir: Path) -> None:
     _seed(pkg, target_dir, Path())
 
 
-_EXCLUDE_DIRS = frozenset({"prompts"})
+_EXCLUDE_DIRS = frozenset({"prompts", "latex"})
 
 
 def _seed(

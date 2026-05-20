@@ -265,73 +265,24 @@ def test_load_resolves_relative_user_info_dir_against_config_dir(
     assert config.user_info_dir == settings / "my-user-info"
 
 
-# --- per-prompt-file fields ---
+# --- prompt knobs retired ---
 
 
-def test_classify_relevance_prompt_defaults_to_none(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY)
-
-    config = load(path)
-
-    assert config.classify_relevance_prompt is None
-
-
-def test_judge_match_prompt_defaults_to_none(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY)
-
-    config = load(path)
-
-    assert config.judge_match_prompt is None
-
-
-def test_classify_relevance_prompt_accepted_when_valid(tmp_path: pathlib.Path) -> None:
-    prompt_file = tmp_path / "classify.md"
-    prompt_file.write_text("prompt content\n")
+def test_load_raises_when_classify_relevance_prompt_set(tmp_path: pathlib.Path) -> None:
     path = write_config(
-        tmp_path,
-        REQUIRED_BODY
-        + f"\nimport pathlib\nCLASSIFY_RELEVANCE_PROMPT = pathlib.Path(r'{prompt_file}')\n",
+        tmp_path, REQUIRED_BODY + '\nCLASSIFY_RELEVANCE_PROMPT = "anything"\n'
     )
 
-    config = load(path)
-
-    assert config.classify_relevance_prompt == prompt_file
-
-
-def test_classify_relevance_prompt_raises_when_missing(tmp_path: pathlib.Path) -> None:
-    missing = tmp_path / "missing.md"
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY
-        + f"\nimport pathlib\nCLASSIFY_RELEVANCE_PROMPT = pathlib.Path(r'{missing}')\n",
-    )
-
-    with pytest.raises(ConfigError, match="CLASSIFY_RELEVANCE_PROMPT"):
+    with pytest.raises(
+        ConfigError, match="CLASSIFY_RELEVANCE_PROMPT is no longer supported"
+    ):
         load(path)
 
 
-def test_classify_relevance_prompt_raises_when_empty(tmp_path: pathlib.Path) -> None:
-    empty_file = tmp_path / "empty.md"
-    empty_file.write_text("")
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY
-        + f"\nimport pathlib\nCLASSIFY_RELEVANCE_PROMPT = pathlib.Path(r'{empty_file}')\n",
-    )
+def test_load_raises_when_judge_match_prompt_set(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + '\nJUDGE_MATCH_PROMPT = "anything"\n')
 
-    with pytest.raises(ConfigError, match="CLASSIFY_RELEVANCE_PROMPT"):
-        load(path)
-
-
-def test_judge_match_prompt_raises_when_missing(tmp_path: pathlib.Path) -> None:
-    missing = tmp_path / "missing.md"
-    path = write_config(
-        tmp_path,
-        REQUIRED_BODY
-        + f"\nimport pathlib\nJUDGE_MATCH_PROMPT = pathlib.Path(r'{missing}')\n",
-    )
-
-    with pytest.raises(ConfigError, match="JUDGE_MATCH_PROMPT"):
+    with pytest.raises(ConfigError, match="JUDGE_MATCH_PROMPT is no longer supported"):
         load(path)
 
 

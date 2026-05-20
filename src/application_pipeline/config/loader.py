@@ -48,7 +48,7 @@ def load(path: pathlib.Path) -> Config:
     user_info_dir = _resolve_dir(
         "USER_INFO_DIR",
         config_dir,
-        getattr(module, "USER_INFO_DIR", pathlib.Path("user-info")),
+        getattr(module, "USER_INFO_DIR", data_paths.user_info_dir),
     )
 
     classify_relevance_prompt = _resolve_optional_file(

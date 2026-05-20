@@ -14,6 +14,7 @@ class DataPaths:
     results_dir: pathlib.Path
     failures_path: pathlib.Path
     logs_path: pathlib.Path
+    user_info_dir: pathlib.Path
 
 
 def resolve_data_paths(data_dir: pathlib.Path) -> DataPaths:
@@ -22,6 +23,7 @@ def resolve_data_paths(data_dir: pathlib.Path) -> DataPaths:
         results_dir=data_dir / "results",
         failures_path=data_dir / "failures",
         logs_path=data_dir / "logs",
+        user_info_dir=data_dir / "user-info",
     )
 
 

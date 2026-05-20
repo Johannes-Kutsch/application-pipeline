@@ -280,9 +280,66 @@ def test_rerun_preserves_latex_file_content(tmp_path: Path) -> None:
     assert identity_path.read_bytes() == original
 
 
-def test_init_does_not_seed_latex_template_files(tmp_path: Path) -> None:
+# --- LaTeX template file seeding ---
+
+_LATEX_TEMPLATE_FILES = (
+    "cv_template.tex",
+    "moderncv.cls",
+    "moderncvcolorblue.sty",
+    "moderncvstylecasual.sty",
+    "tweaklist.sty",
+)
+
+
+def _latex_template_bytes(name: str) -> bytes:
+    return (
+        importlib.resources.files("application_pipeline.templates") / "latex" / name
+    ).read_bytes()
+
+
+def test_init_seeds_latex_template_dir(tmp_path: Path) -> None:
     init(tmp_path)
 
-    assert not (tmp_path / "latex").exists()
-    for fname in ("cv_template.tex", "moderncv.cls"):
-        assert not (tmp_path / fname).exists()
+    for fname in _LATEX_TEMPLATE_FILES:
+        dest = tmp_path / "latex" / fname
+        assert dest.exists(), f"expected {dest} to be seeded by init"
+        assert len(dest.read_bytes()) > 0, f"expected {dest} to be non-empty"
+
+
+def test_init_seeds_latex_files_with_correct_content(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    for fname in _LATEX_TEMPLATE_FILES:
+        dest = tmp_path / "latex" / fname
+        assert dest.read_bytes() == _latex_template_bytes(fname)
+
+
+def test_rerun_does_not_overwrite_existing_latex_template_files(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    cv_path = tmp_path / "latex" / "cv_template.tex"
+    original = cv_path.read_bytes()
+
+    init(tmp_path)
+
+    assert cv_path.read_bytes() == original
+
+
+def test_rerun_prints_skipped_for_latex_template_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    capsys.readouterr()
+
+    init(tmp_path)
+
+    out = capsys.readouterr().out
+    for fname in _LATEX_TEMPLATE_FILES:
+        assert f"skipped latex/{fname} (already exists)" in out
+
+
+def test_init_does_not_seed_prompts_dir(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    assert not (tmp_path / "prompts").exists()

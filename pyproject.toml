@@ -31,6 +31,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "application_pipeline.templates.prompts" = ["*.md"]
+"application_pipeline.templates.latex" = ["*.tex", "*.cls", "*.sty", "*.md"]
+"application_pipeline.templates.user-info" = ["*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

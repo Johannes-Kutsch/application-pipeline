@@ -20,31 +20,58 @@ def _run_main(args: list[str]) -> None:
         sys.argv = old
 
 
-def test_init_refresh_seeds_files_on_fresh_dir(tmp_path: Path) -> None:
-    _run_main(["init", "--refresh", str(tmp_path)])
+def test_init_no_arg_seeds_at_cwd_application_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _run_main(["init"])
+    assert (tmp_path / "application-pipeline" / "config.py").exists()
+    assert (tmp_path / "application-pipeline" / "layout.py").exists()
 
-    assert (tmp_path / "config.py").exists()
-    assert (tmp_path / "layout.py").exists()
+
+def test_init_refresh_seeds_files_on_fresh_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _run_main(["init", "--refresh"])
+
+    assert (tmp_path / "application-pipeline" / "config.py").exists()
+    assert (tmp_path / "application-pipeline" / "layout.py").exists()
 
 
 def test_init_refresh_preserves_user_files(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (tmp_path / "config.py").write_text("# custom\n")
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "config.py").write_text("# custom\n")
 
-    _run_main(["init", "--refresh", str(tmp_path)])
+    monkeypatch.chdir(tmp_path)
+    _run_main(["init", "--refresh"])
 
     out = capsys.readouterr().out
     assert "skipped config.py (preserved)" in out
 
 
-def test_init_refresh_is_idempotent(tmp_path: Path) -> None:
-    _run_main(["init", "--refresh", str(tmp_path)])
-    first = (tmp_path / "config.py").read_bytes()
+def test_init_refresh_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _run_main(["init", "--refresh"])
+    first = (tmp_path / "application-pipeline" / "config.py").read_bytes()
 
-    _run_main(["init", "--refresh", str(tmp_path)])
+    _run_main(["init", "--refresh"])
 
-    assert (tmp_path / "config.py").read_bytes() == first
+    assert (tmp_path / "application-pipeline" / "config.py").read_bytes() == first
+
+
+def test_init_legacy_positional_arg_exits_nonzero(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(["init", str(tmp_path)])
+
+    assert exc_info.value.code != 0
 
 
 def test_run_subcommand_exits_nonzero_on_bad_config(tmp_path: Path) -> None:

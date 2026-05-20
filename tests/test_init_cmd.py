@@ -354,6 +354,14 @@ def test_init_skips_existing_setup_scripts(
     assert "wrote setup/cron-uninstall.sh" in out
 
 
+def test_cron_sh_invokes_init_refresh_without_path_arg(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    assert "application-pipeline init --refresh" in cron_sh
+    assert "application-pipeline init --refresh $" not in cron_sh
+    assert 'application-pipeline init --refresh "$' not in cron_sh
+
+
 # --- setup/*.sh integration (smoke) ---
 
 

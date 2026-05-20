@@ -46,11 +46,13 @@ def main() -> None:
     if args and args[0] == "init":
         refresh = "--refresh" in args[1:]
         rest = [a for a in args[1:] if a != "--refresh"]
-        if len(rest) == 1:
-            from application_pipeline.init_cmd import init
+        if rest:
+            print("usage: application-pipeline init [--refresh]", file=sys.stderr)
+            sys.exit(2)
+        from application_pipeline.init_cmd import home_dir, init
 
-            init(Path(rest[0]), refresh=refresh)
-            return
+        init(home_dir(), refresh=refresh)
+        return
 
     if args and args[0] == "compile-cv" and len(args) == 2:
         from application_pipeline.compile_cv_cmd import compile_cv
@@ -65,7 +67,7 @@ def main() -> None:
     else:
         print("usage: application-pipeline <config>", file=sys.stderr)
         print("       application-pipeline run <config>", file=sys.stderr)
-        print("       application-pipeline init [--refresh] <dir>", file=sys.stderr)
+        print("       application-pipeline init [--refresh]", file=sys.stderr)
         print("       application-pipeline compile-cv <dir>", file=sys.stderr)
         sys.exit(2)
 

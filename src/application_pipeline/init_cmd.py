@@ -11,6 +11,10 @@ _PRESERVE_DIRS = frozenset({"user-info"})
 _PRESERVE_FILES = frozenset({"config.py", "layout.py"})
 
 
+def home_dir() -> Path:
+    return Path.cwd() / "application-pipeline"
+
+
 def init(target_dir: Path, *, refresh: bool = False) -> None:
     pkg = importlib.resources.files("application_pipeline.templates")
     _seed(pkg, target_dir, Path(), refresh=refresh)

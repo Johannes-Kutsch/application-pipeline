@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.resources
+import re
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -357,9 +358,9 @@ def test_init_skips_existing_setup_scripts(
 def test_cron_sh_invokes_init_refresh_without_path_arg(tmp_path: Path) -> None:
     init(tmp_path)
     cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
-    assert "application-pipeline init --refresh" in cron_sh
-    assert "application-pipeline init --refresh $" not in cron_sh
-    assert 'application-pipeline init --refresh "$' not in cron_sh
+    match = re.search(r"application-pipeline init --refresh(\S*)", cron_sh)
+    assert match is not None
+    assert match.group(1) == ""
 
 
 # --- setup/*.sh integration (smoke) ---

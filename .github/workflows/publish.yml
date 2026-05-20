@@ -25,6 +25,9 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      - name: Type check
+        run: mypy src
+
       - name: Test
         run: pytest -m "not smoke"
 

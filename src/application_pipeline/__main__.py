@@ -43,15 +43,21 @@ logging.getLogger().addHandler(_tail)
 def main() -> None:
     args = sys.argv[1:]
 
-    if len(args) == 2 and args[0] == "init":
-        from application_pipeline.init_cmd import init
+    if args and args[0] == "init":
+        rest = [a for a in args[1:] if a != "--refresh"]
+        if len(rest) == 1:
+            from application_pipeline.init_cmd import init
 
-        init(Path(args[1]))
-        return
+            init(Path(rest[0]))
+            return
+
+    if args and args[0] == "run" and len(args) == 2:
+        args = [args[1]]
 
     if len(args) != 1:
-        print("usage: python -m application_pipeline <config>", file=sys.stderr)
-        print("       python -m application_pipeline init <dir>", file=sys.stderr)
+        print("usage: application-pipeline <config>", file=sys.stderr)
+        print("       application-pipeline run <config>", file=sys.stderr)
+        print("       application-pipeline init [--refresh] <dir>", file=sys.stderr)
         sys.exit(2)
 
     config_path = Path(args[0])

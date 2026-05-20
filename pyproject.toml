@@ -13,6 +13,9 @@ dependencies = [
     "rich",
 ]
 
+[project.scripts]
+application-pipeline = "application_pipeline.__main__:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",

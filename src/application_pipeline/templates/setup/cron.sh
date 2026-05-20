@@ -2,7 +2,6 @@
 set -euo pipefail
 
 SETTINGS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG="$SETTINGS_DIR/config.py"
 cd "$SETTINGS_DIR/.."
 
 (

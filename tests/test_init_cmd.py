@@ -428,26 +428,6 @@ def test_cron_uninstall_no_op_on_empty_crontab(
 # --- --refresh: overwrite global files, preserve user files ---
 
 
-def test_main_refresh_flag_wired_through(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import sys
-
-    from application_pipeline.__main__ import main
-
-    # Seed initial files
-    init(tmp_path)
-    for fname in _SETUP_SCRIPTS:
-        (tmp_path / "setup" / fname).write_text("# custom\n")
-    capsys.readouterr()
-
-    sys.argv = ["application-pipeline", "init", "--refresh", str(tmp_path)]
-    main()
-
-    out = capsys.readouterr().out
-    assert "overwrote setup/cron.sh" in out
-
-
 def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

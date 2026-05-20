@@ -6,7 +6,7 @@ from pathlib import Path
 
 _EXCLUDE_DIRS = frozenset({"prompts"})
 # Directories whose contents are user-authored and never overwritten on refresh.
-_PRESERVE_DIRS = frozenset({"user-info", "latex"})
+_PRESERVE_DIRS = frozenset({"user-info"})
 # Top-level files that are user-authored and never overwritten on refresh.
 _PRESERVE_FILES = frozenset({"config.py", "layout.py"})
 

@@ -21,7 +21,7 @@ The publish workflow (`.github/workflows/publish.yml`) is modelled on [pycastle'
 ## Consequences
 
 - **Retires the previous git-tag pull model.** The Pi no longer has a `~/application-pipeline/{repo,releases,current}/` tree.
-- **`crontab.example`, `scripts/pi-tick.sh`, and `docs/pi-setup.md` are removed.** The seeded `setup/cron-install.sh` writes the crontab line; `docs/cron-setup.md` documents unattended operation host-agnostically; `docs/usage.md` documents install/CLI/configuration.
+- **Legacy deploy artifacts are removed.** The seeded `setup/cron-install.sh` writes the crontab line; `docs/cron-setup.md` documents unattended operation host-agnostically; `docs/usage.md` documents install/CLI/configuration.
 - **The package's `pyproject.toml` `package-data`** extends to include `templates/latex/*.{tex,cls,sty}`, `templates/user-info/*`, and `templates/setup/*.sh` so the seed files travel with the wheel.
 - **`init_cmd._EXCLUDE_DIRS`** drops `"latex"` so `init` seeds the LaTeX template and moderncv class files alongside `config.py` / `layout.py` / `user-info/`. `"prompts"` stays excluded (prompts are hardcoded per ADR-0016).
 - **`init` gains an `--refresh` mode** so `cron.sh` can self-heal new template files added in a release without manual intervention. Default behaviour (skip-existing) is unchanged.

@@ -20,6 +20,15 @@ class _Stub(Protocol):
     @property
     def source(self) -> str: ...
 
+    @property
+    def company(self) -> str | None: ...
+
+    @property
+    def title(self) -> str | None: ...
+
+    @property
+    def location(self) -> str | None: ...
+
 
 class _Position(Protocol):
     @property

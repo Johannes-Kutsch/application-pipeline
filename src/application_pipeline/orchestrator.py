@@ -48,13 +48,8 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.parsers.errors import ParserError
-from application_pipeline.prefilter import (
-    PreFilterVerdict,
-    TermMatch,
-    classify_position,
-    precompute_blacklist,
-)
 from application_pipeline.freshness_gate import FreshnessGate
+from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.renderer import render
 from application_pipeline.results import ResultsFileError, append, ensure_initialized
@@ -460,16 +455,6 @@ class _ParserState:
     stall_logged: bool = False
 
 
-def _prefilter_reason(verdict: PreFilterVerdict) -> str:
-    if verdict.blacklist_matches:
-        return "blacklist_drop"
-    return "passed"
-
-
-def _serialize_matches(matches: tuple[TermMatch, ...]) -> list[dict[str, object]]:
-    return [{"term": m.term} for m in matches]
-
-
 def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:
     return [
         ClassifyItem(
@@ -494,7 +479,6 @@ class _OutboundDispatcher:
         *,
         parser_states: dict[str, "_ParserState"],
         dedup: DeduplicationStore,
-        blacklist: list[str],
         metrics: "RunMetrics",
         classify_queue: "queue.Queue[object]",
         pool_collector: "_PoolCollector",
@@ -502,10 +486,10 @@ class _OutboundDispatcher:
         run_state: _RunState,
         run_log: RunLog,
         freshness: FreshnessGate,
+        prefilter: PreFilterGate,
     ) -> None:
         self._parser_states = parser_states
         self._dedup = dedup
-        self._blacklist = blacklist
         self._metrics = metrics
         self._classify_queue = classify_queue
         self._pool_collector = pool_collector
@@ -515,6 +499,7 @@ class _OutboundDispatcher:
         self._classify_buffer: list[Position] = []
         self._batch_id: int = 0
         self._freshness = freshness
+        self._prefilter = prefilter
 
     def dispatch(self, pid: str, payload: object) -> bool:
         """Dispatch a payload to the appropriate handler.
@@ -586,30 +571,12 @@ class _OutboundDispatcher:
                 else:
                     return
             else:
-                verdict = classify_position(payload, self._blacklist)
-                self._run_log.event(
-                    "pipeline_prefilter",
-                    "decision",
-                    url=payload.stub.url,
-                    title=payload.title,
-                    source=payload.stub.source,
-                    passes=verdict.passes,
-                    reason=_prefilter_reason(verdict),
-                    blacklist_matches=_serialize_matches(verdict.blacklist_matches),
-                    title_len=len(payload.title),
-                )
-                if verdict.passes:
-                    self._metrics.prefilter_passed(verdict)
+                if self._prefilter.admit(payload):
                     if self._freshness.admit(payload):
                         self._classify_buffer.append(payload)
                         self._metrics.classify_buffered(1)
                         if len(self._classify_buffer) >= self._batch_size:
                             self._flush_classify_batch()
-                    else:
-                        return
-                else:
-                    self._dedup.mark_out_of_domain(payload.stub)
-                    self._metrics.prefilter_dropped(verdict)
         elif isinstance(payload, ParserError):
             self._run_log.event(
                 "parser_" + pid,
@@ -686,9 +653,6 @@ def run(
                 raise
             extractor = ClaudeExtractor(cfg, prompts, run_log=run_log)
 
-        # Step 4: Domain Pre-Filter
-        blacklist = precompute_blacklist(cfg.negative_keywords)
-
         # Step 6: Resolve parser classes; unknown types are skipped (registry logs WARNING)
         _resolve = (
             parser_registry if parser_registry is not None else _default_registry.get
@@ -728,7 +692,6 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display, run_log=run_log)
-        metrics.register_prefilter_keywords(blacklist=cfg.negative_keywords)
         classify_queue: queue.Queue[object] = queue.Queue()
         pool_collector = _PoolCollector()
         _run_started_at = datetime.now(timezone.utc)
@@ -804,11 +767,16 @@ def run(
                 metrics=metrics,
                 run_log=run_log,
             )
+            prefilter = PreFilterGate(
+                blacklist=cfg.negative_keywords,
+                dedup=dedup_run,
+                metrics=metrics,
+                run_log=run_log,
+            )
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
                 dedup=dedup_run,
-                blacklist=blacklist,
                 metrics=metrics,
                 classify_queue=classify_queue,
                 pool_collector=pool_collector,
@@ -816,6 +784,7 @@ def run(
                 run_state=run_state,
                 run_log=run_log,
                 freshness=freshness,
+                prefilter=prefilter,
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())
@@ -875,6 +844,7 @@ def run(
                 )
 
             freshness.emit_run_complete()
+            prefilter.emit_run_complete()
             dispatcher.flush_residual()
 
         classify_thread.join()

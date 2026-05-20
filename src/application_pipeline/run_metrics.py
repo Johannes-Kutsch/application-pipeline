@@ -7,9 +7,8 @@ from datetime import datetime
 from application_pipeline.dedup import RunScopedSeenResult
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.parser_log import RunLog
-from application_pipeline.prefilter import PreFilterVerdict, TermMatch
+from application_pipeline.prefilter import PreFilterVerdict
 from application_pipeline.status_display import StatusDisplay
-from application_pipeline.text import normalize
 
 
 @dataclass
@@ -51,34 +50,6 @@ class RunSummary:
     claude_cache_read_tokens: int = 0
     claude_cost_usd: float = 0.0
     duration_seconds: float = 0.0
-
-
-def _format_keyword_hits(terms: list[str], counts: dict[str, int]) -> str:
-    return " ".join(f"{term}={counts[term]}" for term in terms)
-
-
-def _format_dead_list(terms: list[str], counts: dict[str, int]) -> str:
-    dead = [term for term in terms if counts[term] == 0]
-    return f"[{', '.join(dead)}]"
-
-
-def _bump_keyword_counts(
-    counts: dict[str, int],
-    matches: tuple[TermMatch, ...],
-) -> None:
-    for match in matches:
-        if match.term in counts:
-            counts[match.term] += 1
-
-
-def _prefilter_summary_counts(
-    bl_terms: list[str],
-    bl_counts: dict[str, int],
-) -> dict[str, str]:
-    return {
-        "blacklist_keyword_hits": _format_keyword_hits(bl_terms, bl_counts),
-        "NEGATIVE_KEYWORDS_dead": _format_dead_list(bl_terms, bl_counts),
-    }
 
 
 class RunMetrics:
@@ -138,10 +109,6 @@ class RunMetrics:
 
         self._degraded_reason: str | None = None
 
-        # Per-keyword prefilter counters (populated via register_prefilter_keywords)
-        self._prefilter_blacklist: list[str] = []
-        self._prefilter_bl_counts: dict[str, int] = {}
-
         # Per-parser counters (lazily allocated on first event)
         self._per_parser: dict[str, _ParserCounters] = {}
 
@@ -182,11 +149,6 @@ class RunMetrics:
     def set_degraded_reason(self, reason: str) -> None:
         with self._lock:
             self._degraded_reason = reason
-
-    def register_prefilter_keywords(self, blacklist: list[str]) -> None:
-        with self._lock:
-            self._prefilter_blacklist = [n for k in blacklist if (n := normalize(k))]
-            self._prefilter_bl_counts = {t: 0 for t in self._prefilter_blacklist}
 
     # -----------------------------------------------------------------------
     # Internal per-parser helpers (called under lock)
@@ -237,7 +199,6 @@ class RunMetrics:
         with self._lock:
             self._prefilter_considered += 1
             self._prefilter_passed += 1
-            self._tally_prefilter_verdict(verdict)
             body = self._prefilter_body()
         self._display.update_body("pipeline_prefilter", body=body)
 
@@ -245,7 +206,8 @@ class RunMetrics:
         with self._lock:
             self._prefilter_considered += 1
             self._prefilter_dropped += 1
-            self._tally_prefilter_verdict(verdict)
+            if verdict.blacklist_matches:
+                self._prefilter_blacklist_hits += 1
             body = self._prefilter_body()
         self._display.update_body("pipeline_prefilter", body=body)
 
@@ -613,14 +575,7 @@ class RunMetrics:
             judge_cache_read_tokens = self._judge_cache_read_tokens
             judge_cost_usd = self._judge_cost_usd
             judge_total_s = self._judge_total_s
-            bl_terms = list(self._prefilter_blacklist)
-            bl_counts = dict(self._prefilter_bl_counts)
 
-        self._run_log.summary(
-            "pipeline_prefilter",
-            _prefilter_summary_counts(bl_terms, bl_counts),
-            started_at,
-        )
         self._run_log.summary(
             "llm_classify_relevance",
             {
@@ -715,8 +670,3 @@ class RunMetrics:
         if self._judge_failed > 0:
             result += f" · calls_failed={self._judge_failed}"
         return result
-
-    def _tally_prefilter_verdict(self, verdict: PreFilterVerdict) -> None:
-        if verdict.blacklist_matches:
-            self._prefilter_blacklist_hits += 1
-        _bump_keyword_counts(self._prefilter_bl_counts, verdict.blacklist_matches)

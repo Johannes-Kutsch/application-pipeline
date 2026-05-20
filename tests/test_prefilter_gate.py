@@ -23,6 +23,9 @@ from application_pipeline.run_metrics import RunMetrics
 class _Stub:
     url: str
     source: str = "test-source"
+    company: str | None = None
+    title: str | None = None
+    location: str | None = None
 
 
 @dataclass
@@ -241,6 +244,9 @@ def test_admit_title_only_ignores_other_fields(
         url: str = "https://example.com/extra"
         source: str = "src"
         description: str = "python developer job"
+        company: str | None = None
+        title: str | None = None
+        location: str | None = None
 
     @dataclass
     class _PositionWithExtra:

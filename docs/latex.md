@@ -10,12 +10,12 @@ application-pipeline compile-cv <DIR>
 
 `<DIR>` is the path to your settings directory. The CLI compiles all three jobnames in sequence.
 
-Raw `pdflatex` invocations (jobnames `cover`, `resume`, `combined`):
+Raw `pdflatex` invocations — `-jobname` sets the output PDF filename (`cover.pdf`, `resume.pdf`, `combined.pdf`):
 
 ```
-pdflatex "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{cover}\input{cv_template}"
-pdflatex "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{resume}\input{cv_template}"
-pdflatex "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{combined}\input{cv_template}"
+pdflatex -jobname=cover    "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{cover}\input{cv_template}"
+pdflatex -jobname=resume   "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{resume}\input{cv_template}"
+pdflatex -jobname=combined "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{combined}\input{cv_template}"
 ```
 
 `\UserDataDir` defaults to `../user-info` when omitted. `\BUILD` controls which output is produced: `cover` (1 page), `resume` (2 pages), `combined` (3 pages).

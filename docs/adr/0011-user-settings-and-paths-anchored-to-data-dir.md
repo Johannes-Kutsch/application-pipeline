@@ -8,15 +8,18 @@ All output and state paths — the **Daily Results File**, `.seen.json`, **Failu
 ~/application-pipeline/
 ├── config.py
 ├── layout.py
-├── user-info/        ← Triage Profile markdown + LaTeX content fragments
-├── latex/            ← CV / cover-letter template + moderncv class files
+├── user-info/        ← Triage Profile markdown + LaTeX facts/content fragments
+├── skills/           ← Skill-shipped scaffolding (e.g. cv_skeleton.tex) — refreshable per ADR-0030
 ├── setup/            ← cron.sh, cron-install.sh, cron-uninstall.sh
 ├── .seen.json
 ├── extracts.json
+├── applications/     ← per-listing <app_dir> folders (cv.tex + .build/ + PDFs)
 ├── results/YYYY-MM-DD.md
 ├── failures/
 └── logs/
 ```
+
+LaTeX class files (`moderncv.cls`, `.sty`s) ship inside the package at `src/application_pipeline/latex/` and are copied into the per-listing `<app_dir>/.build/` at compile time; they no longer live in the settings dir.
 
 No `SEEN_STORE_PATH`/`RESULTS_PATH`/`FAILURES_PATH` override knobs. `.seen.json` sits at the root — sibling to `results/`, not inside it, so it survives a `mv results results.archive` reset gesture.
 
@@ -35,6 +38,6 @@ No `SEEN_STORE_PATH`/`RESULTS_PATH`/`FAILURES_PATH` override knobs. `.seen.json`
 
 ## Consequences
 
-- **`application-pipeline init <dir>`** writes `config.py`, `layout.py`, the `user-info/` files, the `latex/` template + class files, and the `setup/*.sh` scripts via `importlib.resources`. Skip-existing per file; prints `wrote <file>` / `skipped <file>`; exits 0 even when all are skipped. Refresh from a newer template: delete and re-run. Per ADR-0027, the cron wrapper invokes `init` on every tick so new template files added in a release self-heal onto the host without manual intervention.
+- **`application-pipeline init`** writes `config.py`, `layout.py`, the `user-info/` files, the `skills/` scaffolding (e.g. `cv_skeleton.tex`), and the `setup/*.sh` scripts via `importlib.resources`. Skip-existing per file; prints `wrote <file>` / `skipped <file>`; exits 0 even when all are skipped. Per ADR-0027, the cron wrapper invokes `init` on every tick so new template files added in a release self-heal onto the host without manual intervention. **`init --refresh` overwrites `setup/*.sh` and `skills/cv_skeleton.tex` unconditionally** (per ADR-0030 — both are package-shipped scaffolding structurally tied to package code); everything else stays seed-if-missing.
 - **Package templates are runnable as shipped** with placeholder SWE keywords/skills so the first cron tick produces a non-empty daily file (proving the plumbing).
 - **Disaster recovery:** `config.py`/`layout.py` ride whichever sync channel the user configures (or a manual restore); `init` skips both on the recovered host.

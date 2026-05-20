@@ -6,12 +6,11 @@ Single committed LaTeX source (`cv_template.tex`) that compiles into a cover let
 
 - `cv_template.tex` — the only template; do not fork it per application.
 - `moderncv.cls`, `moderncvstylecasual.sty`, `moderncvcolorblue.sty`, `tweaklist.sty` — vendored vanilla moderncv v1.2.0 (the only style/color files the template uses).
-- `user-info.example/` — placeholder data so the template compiles standalone. Every textual slot is a literal `<<TOKEN>>` string; `profile.png` and `signature.png` are images containing visible `<<PHOTO>>` / `<<SIGNATURE>>` text.
-- Real data lives in `~/application-pipeline/data/user-info/` (out of repo).
+- Real per-applicant data lives in `../user-info/` (seeded by `application_pipeline init`) and is not committed with the template.
 
 ## Compiling
 
-Standalone (uses `user-info.example/`):
+Standalone (uses `../user-info/`):
 
 ```
 pdflatex cv_template.tex
@@ -29,7 +28,7 @@ Valid `\BUILD` values: `cover` (1 page), `resume` (2 pages), `combined` (3 pages
 
 ## Pointing at real data: `\UserDataDir`
 
-`\UserDataDir` defaults to `user-info.example`. A build orchestrator (the future `/write-cv` skill) overrides it on the command line:
+`\UserDataDir` defaults to `../user-info`. A build orchestrator (the future `/write-cv` skill) overrides it on the command line:
 
 ```
 pdflatex "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{combined}\input{cv_template}"
@@ -41,7 +40,7 @@ The template reads `\UserDataDir/identity.tex`, `\UserDataDir/contact.tex`, `\Us
 
 Every per-Position value is a literal `<<TOKEN>>` string. The orchestrator fills tokens by string replacement before invoking pdflatex.
 
-Identity slots (in `user-info.example/identity.tex` + `contact.tex`):
+Identity slots (in `../user-info/identity.tex` + `contact.tex`):
 `<<FIRST_NAME>>`, `<<LAST_NAME>>`, `<<ADDRESS_STREET>>`, `<<ADDRESS_CITY>>`, `<<PHONE>>`, `<<EMAIL>>`, `<<GITHUB_URL>>`, `<<LINKEDIN_URL>>`.
 
 Cover-letter slots (in `cv_template.tex`):

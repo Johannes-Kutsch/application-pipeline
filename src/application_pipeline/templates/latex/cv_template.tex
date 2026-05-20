@@ -5,7 +5,7 @@
 %   combined → both, separated   (3 pages, default)
 %
 % User-specific data (identity, contact, content pool, photo, signature) is
-% read from \UserDataDir/, which defaults to user-info.example so this
+% read from \UserDataDir/, which defaults to ../user-info so this
 % template compiles standalone. A build orchestrator overrides via
 %   pdflatex "\def\UserDataDir{<abs path>}\def\BUILD{combined}\input{cv_template}"
 %
@@ -35,7 +35,7 @@
 
 % Build flag and user-data directory — both overridable from the command line.
 \providecommand{\BUILD}{combined}
-\providecommand{\UserDataDir}{user-info.example}
+\providecommand{\UserDataDir}{../user-info}
 
 % Identity + contact come from \UserDataDir; signature/photo are referenced as files.
 \input{\UserDataDir/identity}

@@ -28,6 +28,14 @@ _USER_INFO_FILES = (
     "match-criteria.md",
 )
 
+_LATEX_USER_INFO_FILES = (
+    "identity.tex",
+    "contact.tex",
+    "content_pool.tex",
+    "profile.png",
+    "signature.png",
+)
+
 
 def test_first_bootstrap_writes_both_files(tmp_path: Path) -> None:
     init(tmp_path)
@@ -226,3 +234,55 @@ def test_banner_does_not_trigger_prompt_error(tmp_path: Path) -> None:
     # load_prompts injects user-info content into package templates;
     # if any user-info template line uses raw {slot} syntax this would raise PromptError
     load_prompts(config)
+
+
+# --- LaTeX per-applicant file seeding ---
+
+
+def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    for fname in _LATEX_USER_INFO_FILES:
+        dest = tmp_path / "user-info" / fname
+        assert dest.exists(), f"expected {dest} to be seeded by init"
+        assert dest.read_bytes() == _user_info_template_bytes(fname)
+
+
+def test_init_seeds_eight_files_under_user_info(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    user_info = tmp_path / "user-info"
+    seeded = {p.name for p in user_info.iterdir()}
+    expected = set(_USER_INFO_FILES) | set(_LATEX_USER_INFO_FILES)
+    assert seeded == expected
+
+
+def test_rerun_skips_existing_latex_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    capsys.readouterr()
+
+    init(tmp_path)
+
+    out = capsys.readouterr().out
+    for fname in _LATEX_USER_INFO_FILES:
+        assert f"skipped user-info/{fname} (already exists)" in out
+
+
+def test_rerun_preserves_latex_file_content(tmp_path: Path) -> None:
+    init(tmp_path)
+    identity_path = tmp_path / "user-info" / "identity.tex"
+    original = identity_path.read_bytes()
+
+    init(tmp_path)
+
+    assert identity_path.read_bytes() == original
+
+
+def test_init_does_not_seed_latex_template_files(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    assert not (tmp_path / "latex").exists()
+    for fname in ("cv_template.tex", "moderncv.cls"):
+        assert not (tmp_path / fname).exists()

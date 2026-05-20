@@ -240,15 +240,9 @@ def test_compile_cv_via_cli_dispatch(
 
 def test_compile_cv_uses_cwd_relative_user_info(
     app_dir: Path,
-    tmp_path: Path,
+    project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    (project_root / "application-pipeline" / "user-info").mkdir(parents=True)
-    (project_root / "application-pipeline" / "config.py").write_text("")
-    monkeypatch.chdir(project_root)
-
     captured_cmds: list[list[str]] = []
 
     def capturing_run(

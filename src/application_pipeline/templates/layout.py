@@ -1,7 +1,8 @@
 # Each group collapses its fields with the separator, omitting None values.
 # The result replaces the group name as a placeholder in the templates below.
 PLACEHOLDER_GROUPS = {
-    "meta_line": (" · ", ["posted_date", "contract_type", "employment_type"]),
+    "title_line": (" · ", ["company", "title", "location_segment"]),
+    "meta_line": (" · ", ["salary", "posted_date", "contract_type", "employment_type"]),
 }
 
 # Live placeholders substituted by the renderer:
@@ -14,27 +15,17 @@ PLACEHOLDER_GROUPS = {
 #   {rank} — verdict rank (1–5)
 #   {url} — position URL
 CARD_TEMPLATE = """\
-# {company} · {title} · {location_segment}
+# **{rank}:** {title_line}
 
-{posted_date} · {contract_type} · {employment_type}
-
-**Salary:** {salary}
+{meta_line}
 
 ## AI Assessment
 
 {summary}
 
-**Matched:**
-- ...
-
-**Missing:**
-- ...
-
 ## Job Description
 
 {raw_description}
-
-**Rank:** {rank}
 
 ---
 <{url}>

@@ -297,7 +297,6 @@ _LATEX_PACKAGE_FILES = (
     "moderncvcolorblue.sty",
     "moderncvstylecasual.sty",
     "tweaklist.sty",
-    "README.md",
 )
 
 

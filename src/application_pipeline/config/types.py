@@ -60,8 +60,6 @@ class Config:
     user_info_dir: pathlib.Path = field(
         default_factory=lambda: pathlib.Path("user-info")
     )
-    classify_relevance_prompt: pathlib.Path | None = None
-    judge_match_prompt: pathlib.Path | None = None
     claude_cli_path: str | None = None
     claude_classify_batch_size: int = 100
     max_listing_age_days: int = 180

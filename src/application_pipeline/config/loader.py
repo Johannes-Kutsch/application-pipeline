@@ -21,6 +21,8 @@ _REMOVED_FIELDS = (
     "OLLAMA_HTTP_RETRIES",
     "OLLAMA_KEEP_ALIVE",
     "SEEN_STORE_PATH",
+    "CLASSIFY_RELEVANCE_PROMPT",
+    "JUDGE_MATCH_PROMPT",
 )
 
 
@@ -54,19 +56,6 @@ def load(path: pathlib.Path) -> Config:
         getattr(module, "USER_INFO_DIR", data_paths.user_info_dir),
     )
 
-    classify_relevance_prompt = _resolve_optional_file(
-        "CLASSIFY_RELEVANCE_PROMPT",
-        config_dir,
-        getattr(module, "CLASSIFY_RELEVANCE_PROMPT", None),
-        must_be_nonempty=True,
-    )
-    judge_match_prompt = _resolve_optional_file(
-        "JUDGE_MATCH_PROMPT",
-        config_dir,
-        getattr(module, "JUDGE_MATCH_PROMPT", None),
-        must_be_nonempty=True,
-    )
-
     claude_classify_batch_size = int(getattr(module, "CLAUDE_CLASSIFY_BATCH_SIZE", 100))
     if claude_classify_batch_size < 1:
         raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be >= 1")
@@ -93,8 +82,6 @@ def load(path: pathlib.Path) -> Config:
         logs_path=data_paths.logs_path,
         layout=layout,
         user_info_dir=user_info_dir,
-        classify_relevance_prompt=classify_relevance_prompt,
-        judge_match_prompt=judge_match_prompt,
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
         claude_classify_batch_size=claude_classify_batch_size,
         max_listing_age_days=max_listing_age_days,
@@ -107,25 +94,6 @@ def _resolve_dir(name: str, config_dir: pathlib.Path, value: object) -> pathlib.
     path = pathlib.Path(value)  # type: ignore[arg-type]
     if not path.is_absolute():
         path = config_dir / path
-    return path
-
-
-def _resolve_optional_file(
-    name: str,
-    config_dir: pathlib.Path,
-    value: object,
-    *,
-    must_be_nonempty: bool = False,
-) -> pathlib.Path | None:
-    if value is None:
-        return None
-    path = pathlib.Path(value)  # type: ignore[arg-type]
-    if not path.is_absolute():
-        path = config_dir / path
-    if not path.is_file():
-        raise ConfigError(f"{name}: {path} does not exist or is not a file")
-    if must_be_nonempty and path.stat().st_size == 0:
-        raise ConfigError(f"{name}: {path} must not be empty")
     return path
 
 

@@ -14,9 +14,12 @@
 \documentclass[11pt,a4paper,sans]{moderncv}
 
 % Require moderncv >= 2.0.0 (TeX Live 2020+ or MiKTeX rolling).
+% \@ifclasslater needs @ to be a letter — wrap in \makeatletter/\makeatother.
+\makeatletter
 \@ifclasslater{moderncv}{2015/01/01}{}{%
   \PackageError{cv_template}{moderncv >= 2.0.0 required.
   Install a current TeX distribution (TeX Live 2020+ or MiKTeX rolling).}{}}
+\makeatother
 
 \moderncvstyle{casual}
 \moderncvcolor{blue}
@@ -65,11 +68,13 @@
 % Override moderncv's letter-closing to inject the signature image automatically,
 % so the applicant never has to print/sign/scan an Anschreiben. This couples to
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
+\makeatletter
 \renewcommand*{\makeletterclosing}{%
   \vspace{1em}\@closing\\[\medskipamount]%
   \includegraphics[height=2.5em]{\CvDataDir/signature}\\%
   \@firstname~\@familyname%
 }
+\makeatother
 
 \setstretch{1}
 \begin{document}
@@ -123,7 +128,9 @@
 \vspace{-4.3em}
 
 \section{Persönliche Informationen}
+\makeatletter
 \cvitem{Name}{\@firstname{} \@familyname}
+\makeatother
 \cvitem{Adresse}{\addressdisplay}
 \cvitem{Telefon}{\phonedisplay}
 \cvitem{E-Mail}{\emaildisplay}

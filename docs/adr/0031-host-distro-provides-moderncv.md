@@ -1,5 +1,7 @@
 # compile-cv depends on host TeX distro for moderncv ≥ 2.0.0; stop vendoring
 
+> **Superseded by [ADR-0034](0034-re-vendor-moderncv-1-2-0.md).** The host-distro v2.x toolchain is healthy, but the v2.x layout is visually incompatible with the applicant's existing PDFs (head shape, sidebar, section headings — produced by moderncv's style files, not by user code). The package re-vendors a *complete* moderncv 1.2.0 release and isolates `.build/` via `TEXINPUTS`. ADR-0034 captures the "frozen upstream" reasoning that defuses this ADR's main objection (open-ended file-tracking).
+
 `compile-cv` now relies on the host TeX distribution (MiKTeX on Win, TeX Live on Linux) to provide the moderncv class and its style files. The `src/application_pipeline/latex/{moderncv.cls, moderncvstylecasual.sty, moderncvcolorblue.sty, tweaklist.sty}` files added in ADR-0011 / issue #401 are removed; `compile_cv_cmd.py` no longer copies any `.cls`/`.sty` into `<app_dir>/.build/`.
 
 `cv_template.tex` migrates from the v1.2.0 API to the v2.x API and carries a `\@ifclasslater{moderncv}{2015/01/01}{}{\PackageError{...}}` guard that errors with a human-readable "install moderncv ≥ 2.0.0" message when the host class is too old. The required-package list in `docs/latex.md` adds `moderncv` (≥ 2.0.0) alongside the existing `babel` / `xpatch` / `geometry` / etc. entries that have always relied on the host distro.

@@ -51,7 +51,6 @@ pdflatex --version
 
 All available on CTAN; MiKTeX's on-the-fly install fetches them on the first compile:
 
-- `moderncv` (**≥ 2.0.0**) — the CV/cover-letter class. The package no longer vendors this; the host distro must provide it (per ADR-0031).
 - `babel` (with the `ngerman` language)
 - `inputenc` (`utf8x` option) — via the `ucs` package
 - `enumitem`
@@ -62,6 +61,6 @@ All available on CTAN; MiKTeX's on-the-fly install fetches them on the first com
 - `etoolbox`
 - `graphicx`
 
-If "install on the fly" is disabled, install them explicitly from MiKTeX Console → *Packages*.
+`moderncv` is **not** required from the host distro — the package vendors moderncv 1.2.0 under `src/application_pipeline/latex/` and isolates `.build/` from the host TEXMF via `TEXINPUTS` (per ADR-0034, supersedes ADR-0031). The host's moderncv version (typically v2.x on modern TeX Live / MiKTeX) is invisible to `compile-cv`.
 
-`cv_template.tex` carries a `\@ifclasslater` guard that errors with a human-readable "install moderncv ≥ 2.0.0" message if the host class is too old.
+If "install on the fly" is disabled, install the host-side packages explicitly from MiKTeX Console → *Packages*.

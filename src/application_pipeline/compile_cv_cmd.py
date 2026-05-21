@@ -11,7 +11,7 @@ from application_pipeline.latex import slot_map
 
 _BUILDS = ("cover", "resume", "combined")
 
-_LATEX_SUFFIXES = frozenset({".tex", ".cls", ".sty"})
+_LATEX_SUFFIXES = frozenset({".tex"})
 
 
 def compile_cv(app_dir: Path) -> None:

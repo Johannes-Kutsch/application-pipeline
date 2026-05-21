@@ -38,14 +38,6 @@ _IDENTITY_TOKENS = (
     "<<LINKEDIN_URL>>",
 )
 
-_DISPLAY_MACROS = (
-    "addressdisplay",
-    "phonedisplay",
-    "emaildisplay",
-    "githubdisplay",
-    "linkedindisplay",
-)
-
 
 @pytest.fixture(scope="module")
 def cv_template() -> str:
@@ -57,13 +49,6 @@ def cv_template() -> str:
 def test_cv_template_contains_no_identity_tokens(cv_template: str) -> None:
     leaked = [t for t in _IDENTITY_TOKENS if t in cv_template]
     assert leaked == [], f"cv_template.tex leaks identity tokens: {leaked}"
-
-
-@pytest.mark.parametrize("macro", _DISPLAY_MACROS)
-def test_cv_template_reads_identity_via_display_macro(
-    cv_template: str, macro: str
-) -> None:
-    assert rf"\{macro}" in cv_template
 
 
 def test_latex_package_ships_vendored_moderncv_tree() -> None:

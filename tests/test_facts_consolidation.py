@@ -10,12 +10,8 @@ import pytest
 _FACTS_DEFS = (
     r"\def\myFirstname",
     r"\def\myFamilyname",
-    r"\def\myStreet",
-    r"\def\myZip",
-    r"\def\myPhone",
-    r"\def\myEmail",
-    r"\def\myGithub",
-    r"\def\myLinkedin",
+    r"\def\myCity",
+    r"\def\PersonalInfo",
     r"\def\Languages",
     r"\def\Hobbies",
 )
@@ -33,16 +29,12 @@ _CV_TEMPLATE_BRIDGES = (
     r"\input{\CvDataDir/facts}",
     r"\firstname{\myFirstname}",
     r"\familyname{\myFamilyname}",
-    # Identity surfaces in the resume body via the display macros + \cvitem,
-    # not via moderncv's \address / \phone / \email calls — those render the
-    # casual-style letter footer on every cover-letter page.
+    # Identity surfaces in the resume body via \PersonalInfo (defined in
+    # facts.tex), not via moderncv's \address / \phone / \email calls — those
+    # render the casual-style letter footer on every cover-letter page.
     r"\title{Lebenslauf}",
     r"\photo[120pt][1pt]{\CvDataDir/profile}",
-    r"\def\addressdisplay",
-    r"\def\phonedisplay",
-    r"\def\emaildisplay",
-    r"\def\githubdisplay",
-    r"\def\linkedindisplay",
+    r"\PersonalInfo",
 )
 
 _RETIRED_FILENAMES = ("identity.tex", "contact.tex")

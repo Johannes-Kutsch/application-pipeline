@@ -94,12 +94,8 @@ def _facts_tex() -> str:
     return (
         r"\def\myFirstname{Test}" + "\n"
         r"\def\myFamilyname{User}" + "\n"
-        r"\def\myStreet{Teststrasse 1}" + "\n"
-        r"\def\myZip{12345 Berlin}" + "\n"
-        r"\def\myPhone{+49 30 12345678}" + "\n"
-        r"\def\myEmail{test@example.com}" + "\n"
-        r"\def\myGithub{testuser}" + "\n"
-        r"\def\myLinkedin{testuser}" + "\n"
+        r"\def\myCity{Berlin}" + "\n"
+        r"\def\PersonalInfo{\cvitem{Adresse}{Teststrasse 1, 12345 Berlin}}" + "\n"
         r"\def\Languages{\begin{itemize}\item Deutsch\end{itemize}}" + "\n"
         r"\def\Hobbies{\begin{itemize}\item Programmieren\end{itemize}}" + "\n"
     )

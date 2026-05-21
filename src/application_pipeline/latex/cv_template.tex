@@ -33,6 +33,19 @@
 % Ported from cv_7.tex — remove the trailing dot moderncv appends to \cventry.
 \xpatchcmd{\cventry}{.\strut}{\strut}{}{}
 
+% Ported from cv_7.tex's hand-modified casual.sty — extra 2em of vertical space
+% between the recipient/date row and the opening line, so the Anschriftenfeld
+% and the Anrede are not visually crowded.
+\makeatletter
+\xpatchcmd{\makelettertitle}{\@date\\[2em]}{\@date\\[2em]\\[2em]}{}{}
+\makeatother
+
+% Suppress moderncv casual.sty's letter footer (the gray name + optional
+% address/phone/email block centred under every cover-letter page). The
+% identity surfaces in the signed closing block at the bottom of page 1 and
+% on the resume — repeating it in the page footer is redundant.
+\renewcommand*{\makeletterfooter}{}
+
 % Ported from cv_7.tex — tighter itemize spacing.
 \setlist[itemize]{itemsep=-0.2em}
 \setlist[itemize,2]{topsep=-0.4em}
@@ -40,7 +53,13 @@
 % User-level helper macro on top of stock moderncv 1.2.0. Verbatim from the
 % pre-#474 hand-modified moderncv.cls; lives here (not in the vendored class)
 % because ADR-0034 mandates shipping moderncv 1.2.0 verbatim.
+% \nopagebreak[4] keeps the sub-entry glued to its parent \cventry: moderncv
+% inserts a \par between rows, so without it the optimal page-break can land
+% between the title row and the Masterarbeit/Bachelorarbeit body. Items in
+% content_pool.tex are intended to be atomic; splitting one across pages reads
+% as a typo.
 \newcommand*{\subcventry}[3]{
+  \nopagebreak[4]
   \vspace{-0.25em}
   \cvline{}{\textbf{#1:} \textit{#2} \newline #3}
 }
@@ -49,31 +68,25 @@
 \providecommand{\BUILD}{combined}
 \providecommand{\CvDataDir}{../user-info/cv}
 
-% Raw facts (\def\myFirstname etc.) come from \CvDataDir/facts.
-% Moderncv API calls and display-macro derivations live here, not in facts.tex.
+% Raw facts (\def\myFirstname, \def\myFamilyname, \def\myCity, \def\PersonalInfo,
+% \def\Languages, \def\Hobbies) come from \CvDataDir/facts. The template
+% references those macros directly; per-row identity content lives in
+% \PersonalInfo so users add/remove rows without touching this file.
 \input{\CvDataDir/facts}
 \firstname{\myFirstname}
 \familyname{\myFamilyname}
 \title{Lebenslauf}
 \photo[120pt][1pt]{\CvDataDir/profile}
-% Deliberately NOT calling \address / \phone / \email at the moderncv API:
-% in the casual style they render the letter footer ("Name / Street / T ... B ...")
-% on every cover-letter page, which the pre-#474 corpus never had. Identity
-% surfaces only via the resume's \cvitem rows below, fed by the display macros.
-\def\addressdisplay{\myStreet, \myZip}
-\def\phonedisplay{\myPhone}
-\def\emaildisplay{\myEmail}
-\def\githubdisplay{\myGithub}
-\def\linkedindisplay{\myLinkedin}
 
 % Override moderncv's letter-closing to inject the signature image automatically,
 % so the applicant never has to print/sign/scan an Anschreiben. This couples to
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
 \makeatletter
 \renewcommand*{\makeletterclosing}{%
-  \vspace{1em}\@closing\\[\medskipamount]%
-  \includegraphics[height=2.5em]{\CvDataDir/signature}\\%
-  \@firstname~\@familyname%
+  \vspace{1em}\@closing\\[\baselineskip]%
+  \includegraphics[height=2.5em]{\CvDataDir/signature}\\[-0.4em]%
+  \textbf{\@firstname~\@familyname}\\%
+  \myCity{}, \today%
 }
 \makeatother
 
@@ -111,9 +124,11 @@
 
 <<COVER_CLOSING>>
 
+% Reset line stretch BEFORE \makeletterclosing — otherwise the 1.8× baseline
+% from the letter body inflates the gap between signed name and \today line.
+\setstretch{1}
 \makeletterclosing
 
-\setstretch{1}
 \ifdefstring{\BUILD}{combined}{\newpage}{}%
 }
 
@@ -129,25 +144,22 @@
 \vspace{-4.3em}
 
 \section{Persönliche Informationen}
-% Use \myFirstname / \myFamilyname (from facts.tex), not the moderncv-internal
-% @-letter forms: the surrounding \ifdefstring body is tokenised at outer-scope
-% catcodes where @ is "other", so the @-letter forms parse as a control-symbol
-% plus letters and the control-symbol macro fires \spacefactor in vertical mode.
+% Name is template-controlled (uses \myFirstname/\myFamilyname directly; the
+% @-letter forms break here because the surrounding \ifdefstring body is
+% tokenised at outer-scope catcodes). Remaining rows come from \PersonalInfo
+% in facts.tex so the user controls which rows appear (Adresse / Telefon /
+% E-Mail / GitHub / Geboren / …) without editing this file.
 \cvitem{Name}{\myFirstname{} \myFamilyname}
-\cvitem{Adresse}{\addressdisplay}
-\cvitem{Telefon}{\phonedisplay}
-\cvitem{E-Mail}{\emaildisplay}
-\cvitem{GitHub}{\githubdisplay}
-\cvitem{LinkedIn}{\linkedindisplay}
-
-\section{Berufserfahrung}
-<<RESUME_BERUFSERFAHRUNG>>
+\PersonalInfo
 
 \section{Ausbildung}
 <<RESUME_AUSBILDUNG>>
 
 \section{Projekte}
 <<RESUME_PROJEKTE>>
+
+\section{Berufserfahrung}
+<<RESUME_BERUFSERFAHRUNG>>
 
 \section{Kenntnisse}
 <<SKILLS_BLOCK>>
@@ -158,6 +170,16 @@
 \section{Hobbies und Interessen}
 \renewcommand{\listitemsymbol}{-~}
 \Hobbies
+
+% Ported from cv_7.tex — signed-and-dated resume closing block, pushed to the
+% bottom of the last page. Same triple-line layout as the cover-letter close
+% (\makeletterclosing) so the two halves of a combined build read uniformly.
+% \noindent enters horizontal mode (the surrounding context is vertical after
+% \Hobbies) so the \\ line breaks have something to terminate.
+\vfill
+\noindent\includegraphics[height=2.5em]{\CvDataDir/signature}\\[-0.4em]
+\textbf{\myFirstname{} \myFamilyname}\\
+\myCity{}, \today
 }
 
 \end{document}

@@ -40,11 +40,17 @@
 \xpatchcmd{\makelettertitle}{\@date\\[2em]}{\@date\\[2em]\\[2em]}{}{}
 \makeatother
 
-% Suppress moderncv casual.sty's letter footer (the gray name + optional
-% address/phone/email block centred under every cover-letter page). The
-% identity surfaces in the signed closing block at the bottom of page 1 and
-% on the resume — repeating it in the page footer is redundant.
-\renewcommand*{\makeletterfooter}{}
+% Strip only the applicant's name from moderncv casual.sty's letter footer,
+% matching the hand-modified casual.sty shipped with cv_7.tex (see
+% application-pipeline/CV/moderncvstylecasual.sty:165 where the name line is
+% commented out). Contact info and the fancypagestyle setup stay so page
+% numbers and contact lines render normally.
+\makeatletter
+\xpatchcmd{\makeletterfooter}
+  {\vspace{-\baselineskip}}{}{}{}
+\xpatchcmd{\makeletterfooter}
+  {\strut{\bfseries\upshape\@firstname~\@familyname}\\}{}{}{}
+\makeatother
 
 % Ported from cv_7.tex — tighter itemize spacing.
 \setlist[itemize]{itemsep=-0.2em}
@@ -83,9 +89,14 @@
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
 \makeatletter
 \renewcommand*{\makeletterclosing}{%
+  % Mirror the opening's spacing recipe (\setstretch{1.8}\vspace{-1em} at the
+  % top of the cover body) so the gap before \@closing matches the gap after
+  % \opening. Reset stretch to 1 only after \@closing so the signature block
+  % stays tight.
+  \vspace{3em}\@closing\par
   \setstretch{1}%
-  \vspace{1em}\@closing\\[\baselineskip]%
-  \includegraphics[height=3em]{\CvDataDir/signature}\\[-0.4em]%
+  \vspace{\baselineskip}%
+  \noindent\includegraphics[height=3em]{\CvDataDir/signature}\\[-0.4em]%
   \textbf{\@firstname~\@familyname}\\%
   \myCity{}, \today%
 }

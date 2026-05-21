@@ -80,15 +80,18 @@ def compile_cv(app_dir: Path) -> None:
         # we just copied into .build/. os.pathsep keeps this identical across
         # Windows (";") and POSIX (":"); env= is a dict so no shell quoting.
         env = {**os.environ, "TEXINPUTS": f".{os.pathsep}"}
-        result = subprocess.run(
-            cmd, cwd=build_dir, capture_output=True, env=env
-        )
-
-        if result.returncode != 0:
-            log_file = build_dir / f"{build_name}.log"
-            if log_file.exists():
-                _emit_error_blob(log_file)
-            sys.exit(1)
+        # Two passes: first writes \label{lastpage} to .aux; second lets
+        # moderncv.cls's AtBeginDocument hook read \pageref{lastpage} and emit
+        # page numbers in the right footer.
+        for _ in range(2):
+            result = subprocess.run(
+                cmd, cwd=build_dir, capture_output=True, env=env
+            )
+            if result.returncode != 0:
+                log_file = build_dir / f"{build_name}.log"
+                if log_file.exists():
+                    _emit_error_blob(log_file)
+                sys.exit(1)
 
     # All three succeeded — move PDFs to app_dir and clean up .build/
     for build_name in _BUILDS:

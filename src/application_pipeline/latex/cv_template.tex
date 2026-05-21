@@ -83,8 +83,9 @@
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
 \makeatletter
 \renewcommand*{\makeletterclosing}{%
+  \setstretch{1}%
   \vspace{1em}\@closing\\[\baselineskip]%
-  \includegraphics[height=2.5em]{\CvDataDir/signature}\\[-0.4em]%
+  \includegraphics[height=3em]{\CvDataDir/signature}\\[-0.4em]%
   \textbf{\@firstname~\@familyname}\\%
   \myCity{}, \today%
 }
@@ -124,9 +125,6 @@
 
 <<COVER_CLOSING>>
 
-% Reset line stretch BEFORE \makeletterclosing — otherwise the 1.8× baseline
-% from the letter body inflates the gap between signed name and \today line.
-\setstretch{1}
 \makeletterclosing
 
 \ifdefstring{\BUILD}{combined}{\newpage}{}%
@@ -177,7 +175,7 @@
 % \noindent enters horizontal mode (the surrounding context is vertical after
 % \Hobbies) so the \\ line breaks have something to terminate.
 \vfill
-\noindent\includegraphics[height=2.5em]{\CvDataDir/signature}\\[-0.4em]
+\noindent\includegraphics[height=3em]{\CvDataDir/signature}\\[-0.4em]
 \textbf{\myFirstname{} \myFamilyname}\\
 \myCity{}, \today
 }

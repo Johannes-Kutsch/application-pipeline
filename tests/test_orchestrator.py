@@ -80,7 +80,8 @@ def _write_config(
     )
     (tmp_path / "layout.py").write_text(
         "PLACEHOLDER_GROUPS = {}\n"
-        'CARD_TEMPLATE = "# {rank} \xb7 {title}\\n\\n{summary}\\n\\n---\\n<{url}>\\n"\n'
+        'CARD_TEMPLATE = "# {rank} \xb7 {title}\\n\\n{summary}\\n\\n---\\n<{url}>\\n"\n',
+        encoding="utf-8",
     )
     user_info_dir = tmp_path / "user-info"
     user_info_dir.mkdir(exist_ok=True)

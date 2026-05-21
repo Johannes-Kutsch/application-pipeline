@@ -35,6 +35,15 @@ def _triage_profile_template_bytes(name: str) -> bytes:
     ).read_bytes()
 
 
+def _cv_template_bytes(name: str) -> bytes:
+    return (
+        importlib.resources.files("application_pipeline.templates")
+        / "user-info"
+        / "cv"
+        / name
+    ).read_bytes()
+
+
 _TRIAGE_PROFILE_FILES = (
     "self-description.md",
     "domain-fit.md",
@@ -291,23 +300,23 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
     init(tmp_path)
 
     for fname in _LATEX_USER_INFO_FILES:
-        dest = tmp_path / "user-info" / fname
+        dest = tmp_path / "user-info" / "cv" / fname
         assert dest.exists(), f"expected {dest} to be seeded by init"
-        assert dest.read_bytes() == _user_info_template_bytes(fname)
+        assert dest.read_bytes() == _cv_template_bytes(fname)
 
 
-def test_init_seeds_files_under_user_info(tmp_path: Path) -> None:
+def test_init_seeds_subdirs_under_user_info(tmp_path: Path) -> None:
     init(tmp_path)
 
     user_info = tmp_path / "user-info"
-    root_names = {p.name for p in user_info.iterdir()}
-    expected_root = (
-        set(_LATEX_USER_INFO_FILES) | {"triage-profile", "search-terms"}
-    )
-    assert root_names == expected_root
+    top_level = {p.name for p in user_info.iterdir()}
+    assert top_level == {"triage-profile", "search-terms", "cv"}
 
     triage_names = {p.name for p in (user_info / "triage-profile").iterdir()}
     assert triage_names == set(_TRIAGE_PROFILE_FILES)
+
+    cv_seeded = {p.name for p in (user_info / "cv").iterdir()}
+    assert cv_seeded == set(_LATEX_USER_INFO_FILES)
 
 
 def test_rerun_skips_existing_latex_files(
@@ -320,12 +329,12 @@ def test_rerun_skips_existing_latex_files(
 
     out = capsys.readouterr().out
     for fname in _LATEX_USER_INFO_FILES:
-        assert f"skipped user-info/{fname} (already exists)" in out
+        assert f"skipped user-info/cv/{fname} (already exists)" in out
 
 
 def test_rerun_preserves_latex_file_content(tmp_path: Path) -> None:
     init(tmp_path)
-    facts_path = tmp_path / "user-info" / "facts.tex"
+    facts_path = tmp_path / "user-info" / "cv" / "facts.tex"
     original = facts_path.read_bytes()
 
     init(tmp_path)

@@ -8,7 +8,7 @@ _H2_START_RE = re.compile(r"^## (.+)$")
 _BULLET_START_RE = re.compile(r"^- (.+)$")
 _ATTR_BLOCK_RE = re.compile(r"^(.*?)\s*\{([^}]*)\}\s*$")
 _ATTR_TOKEN_RE = re.compile(r"^\s*(\w[\w-]*)(?:=([\w-]+))?\s*$")
-_VALID_RELEVANCE_RE = re.compile(r"^(high|medium|low)$")
+_VALID_RELEVANCE_LEVELS = frozenset({"high", "medium", "low"})
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,7 @@ def _parse_group_attrs(raw: str | None) -> _GroupAttrs:
         key, value = m.group(1), m.group(2)
         if key == "always" and value is None:
             always = True
-        elif value is not None and _VALID_RELEVANCE_RE.match(value):
+        elif value in _VALID_RELEVANCE_LEVELS:
             relevance[key] = value
     return _GroupAttrs(always=always, relevance=relevance)
 

@@ -81,9 +81,8 @@ würde ich mich sehr freuen --- idealerweise ab dem 1. Juni.
   300\,+ produktive Installationen, MIT-Lizenz.}
 
 %% SLOT: skills_block
-% Kompakte Auflistung technischer Kernkompetenzen in Kategorien (\cvitem).
-% Nur Technologien nennen, die wirklich beherrscht werden --- keine Füllwörter.
-\cvitem{Sprachen}{Python, SQL, TypeScript, Rust}
-\cvitem{Daten}{Apache Kafka, dbt, Airflow, Spark, PostgreSQL}
-\cvitem{Cloud \& Infra}{AWS (S3, Glue, Lambda), Docker, Kubernetes, Terraform}
-\cvitem{ML}{scikit-learn, \textit{PyTorch} (Grundkenntnisse), MLflow}
+% Mechanisch zusammengesetzt aus user-info/search-terms/skills.md per ADR-0033.
+% Nicht hier hand-authoren --- /write-cv emittiert die \cvitem-Zeilen anhand
+% der Gruppen-Auswahlregeln (always-Gruppen + LLM-Picks nach Jobtype-Relevanz)
+% und der Item-Auswahlregeln (always-Items + LLM-Picks innerhalb gewählter Gruppen).
+% File-Reihenfolge in skills.md = Render-Reihenfolge.

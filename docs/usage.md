@@ -52,10 +52,11 @@ After `init`, the settings folder contains:
 ├── config.py          # search knobs — keywords, sources, locations, skills
 ├── layout.py          # card template for the Daily Results File
 ├── user-info/
-│   ├── self-description.md   # your background, fed into both classifier and judge
-│   ├── domain-fit.md         # what counts as in-domain for the classifier
-│   ├── match-criteria.md     # what makes a good match for the judge
-│   ├── writing-style.md      # authoring style (future use — not injected in v1)
+│   ├── triage-profile/
+│   │   ├── self-description.md   # your background, fed into both classifier and judge
+│   │   ├── domain-fit.md         # what counts as in-domain for the classifier
+│   │   ├── match-criteria.md     # what makes a good match for the judge
+│   │   └── writing-style.md      # authoring style (future use — not injected in v1)
 │   ├── contact.tex           # LaTeX contact block
 │   ├── content_pool.tex      # LaTeX CV content
 │   └── identity.tex          # LaTeX identity block
@@ -96,25 +97,25 @@ Controls the visual structure of each Card in the Daily Results File.
   `{salary}`, `{summary}`, `{matched_bullets}`, `{missing_bullets}`, `{raw_description}`, `{rank}`,
   `{url}`.
 
-### `user-info/self-description.md`
+### `user-info/triage-profile/self-description.md`
 
 Free-text description of your background, experience, and target roles. Injected into both the
 Relevance Classifier prompt and the Match Judge prompt via the `{USER_INFO}` slot. Keep it
 concise — bullets and fragments are preferred over full sentences.
 
-### `user-info/domain-fit.md`
+### `user-info/triage-profile/domain-fit.md`
 
 Defines the in-domain boundary for the Relevance Classifier. List the role families that should be
 classified `in_domain: true` and those that should be `in_domain: false`. The classifier does not
 see your match criteria or skills — only this file and `self-description.md`.
 
-### `user-info/match-criteria.md`
+### `user-info/triage-profile/match-criteria.md`
 
 Defines what makes a position a strong, partial, or poor match for the Match Judge. Include
 location preferences, seniority level, contract preferences, and any hard disqualifiers. The judge
 uses this alongside `self-description.md` and the `SKILLS` list from `config.py`.
 
-### `user-info/writing-style.md`
+### `user-info/triage-profile/writing-style.md`
 
 Authoring style notes for future CV/cover-letter generation (v2). Not injected into any v1 prompt —
 edit freely without affecting pipeline output.

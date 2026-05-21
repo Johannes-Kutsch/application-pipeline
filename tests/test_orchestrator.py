@@ -3007,7 +3007,9 @@ def test_init_materialises_user_info_files(
 
     init(tmp_path)
 
-    triage_files = {f.name for f in (tmp_path / "user-info" / "triage-profile").glob("*.md")}
+    triage_files = {
+        f.name for f in (tmp_path / "user-info" / "triage-profile").glob("*.md")
+    }
 
     assert "self-description.md" in triage_files
     assert "domain-fit.md" in triage_files

@@ -135,3 +135,66 @@ def test_init_seeds_search_terms_template_that_loads_successfully(
 
     assert isinstance(result, SearchTerms)
     assert result.keywords
+
+
+def test_skills_trailing_attribute_block_is_stripped(tmp_path: pathlib.Path) -> None:
+    user_info = write_search_terms(
+        tmp_path,
+        keywords="- python developer\n",
+        skills="- Pandas {always}\n",
+    )
+
+    result = load_search_terms(user_info)
+
+    assert result.skills == ("Pandas",)
+
+
+def test_skills_without_attribute_block_are_preserved(tmp_path: pathlib.Path) -> None:
+    user_info = write_search_terms(
+        tmp_path,
+        keywords="- python developer\n",
+        skills="- TensorFlow\n",
+    )
+
+    result = load_search_terms(user_info)
+
+    assert result.skills == ("TensorFlow",)
+
+
+def test_skills_h2_headings_ignored_bullets_collected_in_order(
+    tmp_path: pathlib.Path,
+) -> None:
+    user_info = write_search_terms(
+        tmp_path,
+        keywords="- python developer\n",
+        skills="## MLE\n- Pandas {always}\n- TensorFlow\n",
+    )
+
+    result = load_search_terms(user_info)
+
+    assert result.skills == ("Pandas", "TensorFlow")
+
+
+def test_skills_partial_brace_mid_word_preserved_verbatim(
+    tmp_path: pathlib.Path,
+) -> None:
+    user_info = write_search_terms(
+        tmp_path,
+        keywords="- python developer\n",
+        skills="- foo{bar\n",
+    )
+
+    result = load_search_terms(user_info)
+
+    assert result.skills == ("foo{bar",)
+
+
+def test_keywords_attribute_syntax_not_stripped(tmp_path: pathlib.Path) -> None:
+    user_info = write_search_terms(
+        tmp_path,
+        keywords="- python {something}\n",
+    )
+
+    result = load_search_terms(user_info)
+
+    assert result.keywords == ("python {something}",)

@@ -2,17 +2,27 @@
 % This file is package-shipped and refreshed by `init --refresh`.
 % Edit slot bodies below to guide the /write-cv skill.
 
-%% SLOT: recipient_line_1
-% Name der Ansprechperson (Vorname Nachname) oder Abteilungsbezeichnung.
-% Wenn kein Name bekannt: "Personalabteilung" oder leer lassen.
+%% SLOT: recipient_company
+% Empfänger-Firma oder -Organisation (DIN 5008 Zeile 1).
+% Fett gesetzt im Anschriftenfeld. Sollte aus der Stellenanzeige hervorgehen.
+Muster GmbH
+
+%% SLOT: recipient_name
+% Ansprechperson (Vorname Nachname) oder Abteilung (DIN 5008 Zeile 2).
+% Wenn kein Name bekannt: "Personalabteilung" oder ganz leer lassen
+% (leerer Body wird im PDF ohne Lücke übersprungen).
 Frau Dr. Müller
 
-%% SLOT: recipient_line_2
-% Straße, Hausnummer, Postleitzahl und Stadt — alles in einer Zeile.
-Musterstraße 42, 20095 Hamburg
+%% SLOT: recipient_street
+% Straße und Hausnummer (DIN 5008 Zeile 3).
+Musterstraße 42
+
+%% SLOT: recipient_zip_city
+% Postleitzahl und Stadt (DIN 5008 Zeile 4).
+20095 Hamburg
 
 %% SLOT: opening
-% Förmliche Anrede passend zum Empfänger in recipient_line_1.
+% Förmliche Anrede passend zum recipient_name (bzw. recipient_company).
 % Bei unbekanntem Empfänger: "Sehr geehrte Damen und Herren,"
 Sehr geehrte Frau Dr. Müller,
 

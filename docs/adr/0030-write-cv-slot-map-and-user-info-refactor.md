@@ -10,13 +10,15 @@ The CV/cover-letter build has three artifacts with one job each:
 
 ## Slot list (committed)
 
-Eleven slots, all per-listing, all written by `/write-cv`:
+Thirteen slots, all per-listing, all written by `/write-cv`:
 
-- `recipient_line_1`, `recipient_line_2`
+- `recipient_company`, `recipient_name`, `recipient_street`, `recipient_zip_city` (DIN 5008 Anschriftenfeld split into four lines per issue #472 — supersedes the original two-line `recipient_line_1/2` shape, which conflated company and contact person)
 - `opening`
 - `cover_intro`, `cover_pivot`, `cover_fit`, `cover_closing`
 - `resume_berufserfahrung`, `resume_ausbildung`, `resume_projekte` (the three resume blocks; supersedes the single `<<RESUME_BODY>>` slot per issue #453)
 - `skills_block`
+
+The recipient split is "Option 2" from issue #472: extend the canonical slot list (rather than render the company line template-side from a hidden source). Rationale: stays inside the slot-map contract — `/write-cv`'s output is still the only writer of every visible per-listing line. Empty bodies in `recipient_name` (e.g. no contact person known) are valid; `cv_template.tex` uses `\ifstrempty` to skip the line cleanly so a missing name does not leave a vertical gap. Empty `recipient_company` is technically allowed by the parser but produces a blank bold line in the moderncv casual style — `/write-cv` should always populate the company line.
 
 Everything else (name, address, phone, email, social links, photo, languages, hobbies, `\title{Lebenslauf}`) is **listing-invariant** and read directly from `user-info/facts.tex`.
 

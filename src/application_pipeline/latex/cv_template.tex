@@ -72,7 +72,15 @@
 %----------------------------------------------------------------------------------------
 \ifdefstring{\BUILD}{resume}{}{%
 \clearpage
-\recipient{<<RECIPIENT_LINE_1>>}{<<RECIPIENT_LINE_2>>}
+% Four-line DIN 5008 Anschriftenfeld. Each line is its own slot; empty bodies
+% are skipped via \ifstrempty so a missing recipient_name does not leave a gap.
+% Company goes in arg 1 (rendered bold by moderncv's casual style); the other
+% three lines are stacked in arg 2 with \\ between non-empty lines.
+\recipient{<<RECIPIENT_COMPANY>>}{%
+  \ifstrempty{<<RECIPIENT_NAME>>}{}{<<RECIPIENT_NAME>>\\}%
+  \ifstrempty{<<RECIPIENT_STREET>>}{}{<<RECIPIENT_STREET>>\\}%
+  <<RECIPIENT_ZIP_CITY>>%
+}
 \date{\today}
 \opening{<<OPENING>>}
 \closing{Mit freundlichen Grüßen,}

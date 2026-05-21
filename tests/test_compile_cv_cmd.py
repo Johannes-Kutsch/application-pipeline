@@ -264,8 +264,10 @@ def test_compile_cv_uses_cwd_relative_user_info(
 
 def _valid_cv_tex() -> str:
     slots = [
-        ("recipient_line_1", "Firma GmbH"),
-        ("recipient_line_2", "Musterstraße 1, 12345 Berlin"),
+        ("recipient_company", "Firma GmbH"),
+        ("recipient_name", "Frau Dr. Müller"),
+        ("recipient_street", "Musterstraße 1"),
+        ("recipient_zip_city", "12345 Berlin"),
         ("opening", "Sehr geehrte Damen und Herren,"),
         ("cover_intro", "Ich bewerbe mich hiermit."),
         ("cover_pivot", "Mein Hintergrund ist relevant."),
@@ -304,7 +306,7 @@ def test_compile_cv_malformed_cv_tex_exits_naming_missing_slot(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     (app_dir / "cv.tex").write_text(
-        "%% SLOT: recipient_line_1\nFirma GmbH\n", encoding="utf-8"
+        "%% SLOT: recipient_company\nFirma GmbH\n", encoding="utf-8"
     )
 
     with pytest.raises(SystemExit) as exc_info:
@@ -366,8 +368,10 @@ def test_compile_cv_three_resume_slots_independently_substituted(
     app_dir = tmp_path / "app_resume"
     app_dir.mkdir()
     slots = [
-        ("recipient_line_1", "Firma GmbH"),
-        ("recipient_line_2", "Berlin"),
+        ("recipient_company", "Firma GmbH"),
+        ("recipient_name", "Frau Müller"),
+        ("recipient_street", "Musterstraße 1"),
+        ("recipient_zip_city", "12345 Berlin"),
         ("opening", "Sehr geehrte Damen und Herren,"),
         ("cover_intro", "Intro."),
         ("cover_pivot", "Pivot."),

@@ -13,8 +13,10 @@ from application_pipeline.latex.slot_map import (
 )
 
 _CANONICAL_SLOTS = (
-    "recipient_line_1",
-    "recipient_line_2",
+    "recipient_company",
+    "recipient_name",
+    "recipient_street",
+    "recipient_zip_city",
     "opening",
     "cover_intro",
     "cover_pivot",

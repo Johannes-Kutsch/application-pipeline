@@ -54,7 +54,9 @@ def _require_pdflatex_and_moderncv() -> None:
         )
 
     cls_text = Path(result.stdout.strip()).read_text(errors="replace")
-    m = re.search(r"\\ProvidesClass\{moderncv\}\[(\d{4})[/-](\d{2})[/-](\d{2})", cls_text)
+    m = re.search(
+        r"\\ProvidesClass\{moderncv\}\[(\d{4})[/-](\d{2})[/-](\d{2})", cls_text
+    )
     if not m:
         pytest.skip("moderncv .cls found but version date is unreadable")
 

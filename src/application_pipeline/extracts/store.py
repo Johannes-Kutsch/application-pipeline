@@ -6,11 +6,11 @@ Single-writer module (Pi only, per ADR-0002): no cross-process locking.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
 from typing import Any
 
+from application_pipeline.atomic_write import write_atomic
 from application_pipeline.llm.types import StructuredExtract
 
 from .errors import ExtractStoreError
@@ -45,16 +45,11 @@ class ExtractStore:
             self._records = new_records
 
     def _persist(self, records: dict[str, dict[str, Any]]) -> None:
-        tmp = self._path.with_name(self._path.name + ".tmp")
-        payload = json.dumps(records, indent=2, sort_keys=True, ensure_ascii=False)
+        payload = json.dumps(
+            records, indent=2, sort_keys=True, ensure_ascii=False
+        ).encode("utf-8")
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-            try:
-                os.write(fd, payload.encode("utf-8"))
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            os.replace(tmp, self._path)
+            write_atomic(self._path, payload)
         except OSError as exc:
             raise ExtractStoreError(
                 f"could not persist extract store to {self._path}: {exc}"

@@ -304,13 +304,7 @@ def test_init_does_not_auto_migrate_existing_identity_and_contact(
 
 # --- LaTeX package (application_pipeline.latex) ---
 
-_LATEX_PACKAGE_FILES = (
-    "cv_template.tex",
-    "moderncv.cls",
-    "moderncvcolorblue.sty",
-    "moderncvstylecasual.sty",
-    "tweaklist.sty",
-)
+_LATEX_PACKAGE_FILES = ("cv_template.tex",)
 
 
 def _latex_pkg_bytes(name: str) -> bytes:

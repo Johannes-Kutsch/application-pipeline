@@ -13,6 +13,11 @@
 
 \documentclass[11pt,a4paper,sans]{moderncv}
 
+% Require moderncv >= 2.0.0 (TeX Live 2020+ or MiKTeX rolling).
+\@ifclasslater{moderncv}{2015/01/01}{}{%
+  \PackageError{cv_template}{moderncv >= 2.0.0 required.
+  Install a current TeX distribution (TeX Live 2020+ or MiKTeX rolling).}{}}
+
 \moderncvstyle{casual}
 \moderncvcolor{blue}
 
@@ -27,7 +32,9 @@
 \usepackage[scale=0.75]{geometry}
 
 % Ported from cv_7.tex — remove the trailing dot moderncv appends to \cventry.
-\xpatchcmd{\cventry}{.\strut}{\strut}{}{}
+% Wrapped in \AtBeginDocument so the patch fires after the v2.x body style
+% files finish loading (they redefine \cventry via \moderncvstyle).
+\AtBeginDocument{\xpatchcmd{\cventry}{.\strut}{\strut}{}{}}
 
 % Ported from cv_7.tex — tighter itemize spacing.
 \setlist[itemize]{itemsep=-0.2em}
@@ -59,7 +66,7 @@
 % so the applicant never has to print/sign/scan an Anschreiben. This couples to
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
 \renewcommand*{\makeletterclosing}{%
-  \vspace{1em}\closing\\[\medskipamount]%
+  \vspace{1em}\@closing\\[\medskipamount]%
   \includegraphics[height=2.5em]{\UserDataDir/signature}\\%
   \@firstname~\@familyname%
 }

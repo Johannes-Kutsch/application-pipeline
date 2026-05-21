@@ -26,14 +26,29 @@ def _user_info_template_bytes(name: str) -> bytes:
     return node.read_bytes()
 
 
-_USER_INFO_FILES = (
+def _triage_profile_template_bytes(name: str) -> bytes:
+    return (
+        importlib.resources.files("application_pipeline.templates")
+        / "user-info"
+        / "triage-profile"
+        / name
+    ).read_bytes()
+
+
+_TRIAGE_PROFILE_FILES = (
     "self-description.md",
     "domain-fit.md",
     "match-criteria.md",
+    "writing-style.md",
+)
+
+_USER_INFO_ROOT_FILES = (
     "search-terms/keywords.md",
     "search-terms/skills.md",
     "search-terms/negative-keywords.md",
 )
+
+_USER_INFO_FILES = _TRIAGE_PROFILE_FILES + _USER_INFO_ROOT_FILES
 
 _LATEX_USER_INFO_FILES = (
     "facts.tex",
@@ -132,7 +147,11 @@ def test_fresh_seed_creates_user_info_tree(tmp_path: Path) -> None:
 
     assert (tmp_path / "config.py").exists()
     assert (tmp_path / "layout.py").exists()
-    for fname in _USER_INFO_FILES:
+    for fname in _TRIAGE_PROFILE_FILES:
+        dest = tmp_path / "user-info" / "triage-profile" / fname
+        assert dest.exists(), f"expected {dest} to be seeded"
+        assert dest.read_bytes() == _triage_profile_template_bytes(fname)
+    for fname in _USER_INFO_ROOT_FILES:
         dest = tmp_path / "user-info" / fname
         assert dest.exists(), f"expected {dest} to be seeded"
         assert dest.read_bytes() == _user_info_template_bytes(fname)
@@ -158,7 +177,9 @@ def test_fresh_seed_prints_all_five_files(
     out = capsys.readouterr().out
     assert "wrote config.py" in out
     assert "wrote layout.py" in out
-    for fname in _USER_INFO_FILES:
+    for fname in _TRIAGE_PROFILE_FILES:
+        assert f"wrote user-info/triage-profile/{fname}" in out
+    for fname in _USER_INFO_ROOT_FILES:
         assert f"wrote user-info/{fname}" in out
 
 
@@ -176,12 +197,19 @@ def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) 
 
 def test_rerun_is_idempotent(tmp_path: Path) -> None:
     init(tmp_path)
-    first_contents = {
-        p: (tmp_path / p).read_bytes() for p in ["config.py", "layout.py"]
-    } | {
-        f"user-info/{f}": (tmp_path / "user-info" / f).read_bytes()
-        for f in _USER_INFO_FILES
-    }
+    first_contents = (
+        {p: (tmp_path / p).read_bytes() for p in ["config.py", "layout.py"]}
+        | {
+            f"user-info/triage-profile/{f}": (
+                tmp_path / "user-info" / "triage-profile" / f
+            ).read_bytes()
+            for f in _TRIAGE_PROFILE_FILES
+        }
+        | {
+            f"user-info/{f}": (tmp_path / "user-info" / f).read_bytes()
+            for f in _USER_INFO_ROOT_FILES
+        }
+    )
 
     init(tmp_path)
 
@@ -200,41 +228,51 @@ def test_rerun_prints_all_skipped(
     out = capsys.readouterr().out
     assert "skipped config.py (already exists)" in out
     assert "skipped layout.py (already exists)" in out
-    for fname in _USER_INFO_FILES:
+    for fname in _TRIAGE_PROFILE_FILES:
+        assert f"skipped user-info/triage-profile/{fname} (already exists)" in out
+    for fname in _USER_INFO_ROOT_FILES:
         assert f"skipped user-info/{fname} (already exists)" in out
 
 
 def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "user-info").mkdir()
-    existing = tmp_path / "user-info" / "self-description.md"
+    (tmp_path / "user-info" / "triage-profile").mkdir(parents=True)
+    existing = tmp_path / "user-info" / "triage-profile" / "self-description.md"
     original_content = "# operator content\n"
     existing.write_text(original_content)
 
     init(tmp_path)
 
     assert existing.read_text() == original_content
-    for fname in _USER_INFO_FILES:
+    for fname in _TRIAGE_PROFILE_FILES:
         if fname != "self-description.md":
-            assert (tmp_path / "user-info" / fname).exists(), (
+            assert (tmp_path / "user-info" / "triage-profile" / fname).exists(), (
                 f"{fname} should be seeded"
             )
+    for fname in _USER_INFO_ROOT_FILES:
+        assert (tmp_path / "user-info" / fname).exists(), f"{fname} should be seeded"
 
 
 def test_per_file_skip_granular_output(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (tmp_path / "user-info").mkdir()
-    (tmp_path / "user-info" / "self-description.md").write_text("# custom\n")
+    (tmp_path / "user-info" / "triage-profile").mkdir(parents=True)
+    (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
+        "# custom\n"
+    )
 
     init(tmp_path)
 
     out = capsys.readouterr().out
-    assert "skipped user-info/self-description.md (already exists)" in out
-    for fname in _USER_INFO_FILES:
+    assert (
+        "skipped user-info/triage-profile/self-description.md (already exists)" in out
+    )
+    for fname in _TRIAGE_PROFILE_FILES:
         if fname != "self-description.md":
-            assert f"wrote user-info/{fname}" in out
+            assert f"wrote user-info/triage-profile/{fname}" in out
+    for fname in _USER_INFO_ROOT_FILES:
+        assert f"wrote user-info/{fname}" in out
 
 
 def test_banner_does_not_trigger_prompt_error(tmp_path: Path) -> None:
@@ -258,18 +296,18 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
         assert dest.read_bytes() == _user_info_template_bytes(fname)
 
 
-def test_init_seeds_eight_files_under_user_info(tmp_path: Path) -> None:
+def test_init_seeds_files_under_user_info(tmp_path: Path) -> None:
     init(tmp_path)
 
     user_info = tmp_path / "user-info"
-    seeded = {p.name for p in user_info.iterdir()}
-    expected = {
-        "self-description.md",
-        "domain-fit.md",
-        "match-criteria.md",
-        "search-terms",
-    } | set(_LATEX_USER_INFO_FILES)
-    assert seeded == expected
+    root_names = {p.name for p in user_info.iterdir()}
+    expected_root = (
+        set(_LATEX_USER_INFO_FILES) | {"triage-profile", "search-terms"}
+    )
+    assert root_names == expected_root
+
+    triage_names = {p.name for p in (user_info / "triage-profile").iterdir()}
+    assert triage_names == set(_TRIAGE_PROFILE_FILES)
 
 
 def test_rerun_skips_existing_latex_files(
@@ -491,7 +529,9 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
         (tmp_path / "setup" / fname).write_text("# custom\n")
     (tmp_path / "config.py").write_text("# custom\n")
     (tmp_path / "layout.py").write_text("# custom\n")
-    (tmp_path / "user-info" / "self-description.md").write_text("# custom\n")
+    (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
+        "# custom\n"
+    )
     # Delete a global file to trigger "wrote"
     (tmp_path / "setup" / "cron-install.sh").unlink()
     capsys.readouterr()
@@ -504,7 +544,7 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     assert "wrote setup/cron-install.sh" in out
     assert "skipped config.py (preserved)" in out
     assert "skipped layout.py (preserved)" in out
-    assert "skipped user-info/self-description.md (preserved)" in out
+    assert "skipped user-info/triage-profile/self-description.md (preserved)" in out
 
 
 def test_refresh_self_heals_missing_global_file(tmp_path: Path) -> None:
@@ -523,7 +563,11 @@ def test_refresh_on_empty_dir_writes_all_files(tmp_path: Path) -> None:
     assert (tmp_path / "layout.py").read_bytes() == _template_bytes("layout.py")
     for fname in _SETUP_SCRIPTS:
         assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
-    for fname in _USER_INFO_FILES:
+    for fname in _TRIAGE_PROFILE_FILES:
+        assert (
+            tmp_path / "user-info" / "triage-profile" / fname
+        ).read_bytes() == _triage_profile_template_bytes(fname)
+    for fname in _USER_INFO_ROOT_FILES:
         assert (
             tmp_path / "user-info" / fname
         ).read_bytes() == _user_info_template_bytes(fname)
@@ -543,7 +587,9 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
         (tmp_path / "setup" / fname).write_text(custom_setup)
     (tmp_path / "config.py").write_text(custom_config)
     (tmp_path / "layout.py").write_text(custom_layout)
-    (tmp_path / "user-info" / "self-description.md").write_text(custom_user_info)
+    (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
+        custom_user_info
+    )
 
     init(tmp_path, refresh=True)
 
@@ -554,7 +600,7 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
     assert (tmp_path / "config.py").read_text() == custom_config
     assert (tmp_path / "layout.py").read_text() == custom_layout
     assert (
-        tmp_path / "user-info" / "self-description.md"
+        tmp_path / "user-info" / "triage-profile" / "self-description.md"
     ).read_text() == custom_user_info
 
 
@@ -612,10 +658,12 @@ def test_refresh_prints_overwrote_for_cv_skeleton(
 def test_refresh_preserves_user_info_when_skills_exist(tmp_path: Path) -> None:
     init(tmp_path)
     custom_user_info = "# my self-description\n"
-    (tmp_path / "user-info" / "self-description.md").write_text(custom_user_info)
+    (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
+        custom_user_info
+    )
 
     init(tmp_path, refresh=True)
 
     assert (
-        tmp_path / "user-info" / "self-description.md"
+        tmp_path / "user-info" / "triage-profile" / "self-description.md"
     ).read_text() == custom_user_info

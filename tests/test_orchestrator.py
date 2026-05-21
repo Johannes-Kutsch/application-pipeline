@@ -85,9 +85,11 @@ def _write_config(
     user_info_dir = tmp_path / "user-info"
     user_info_dir.mkdir(exist_ok=True)
     if with_user_info_files:
-        (user_info_dir / "self-description.md").write_text("dev background\n")
-        (user_info_dir / "domain-fit.md").write_text("ML roles\n")
-        (user_info_dir / "match-criteria.md").write_text("Hamburg, remote\n")
+        triage_dir = user_info_dir / "triage-profile"
+        triage_dir.mkdir(exist_ok=True)
+        (triage_dir / "self-description.md").write_text("dev background\n")
+        (triage_dir / "domain-fit.md").write_text("ML roles\n")
+        (triage_dir / "match-criteria.md").write_text("Hamburg, remote\n")
         kws: list[str] = ast.literal_eval(keywords)
         nkws: list[str] = ast.literal_eval(negative_keywords)
         st_dir = user_info_dir / "search-terms"
@@ -2983,9 +2985,11 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
 
     user_info_dir = tmp_path / "user-info"
     user_info_dir.mkdir()
-    (user_info_dir / "self-description.md").write_text("dev background\n")
-    (user_info_dir / "domain-fit.md").write_text("ML roles\n")
-    (user_info_dir / "match-criteria.md").write_text("Hamburg, remote\n")
+    triage_dir = user_info_dir / "triage-profile"
+    triage_dir.mkdir()
+    (triage_dir / "self-description.md").write_text("dev background\n")
+    (triage_dir / "domain-fit.md").write_text("ML roles\n")
+    (triage_dir / "match-criteria.md").write_text("Hamburg, remote\n")
 
     cfg = Config(
         sources=[SourceEntry(parser_type="bundesagentur_api")],
@@ -3001,16 +3005,18 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
 def test_init_materialises_user_info_files(
     tmp_path: Path,
 ) -> None:
-    """init command seeds the three user-info template files."""
+    """init command seeds the three triage-profile template files."""
     from application_pipeline.init_cmd import init
 
     init(tmp_path)
 
-    user_info_files = {f.name for f in (tmp_path / "user-info").glob("*.md")}
+    triage_files = {
+        f.name for f in (tmp_path / "user-info" / "triage-profile").glob("*.md")
+    }
 
-    assert "self-description.md" in user_info_files
-    assert "domain-fit.md" in user_info_files
-    assert "match-criteria.md" in user_info_files
+    assert "self-description.md" in triage_files
+    assert "domain-fit.md" in triage_files
+    assert "match-criteria.md" in triage_files
 
 
 # ---------------------------------------------------------------------------

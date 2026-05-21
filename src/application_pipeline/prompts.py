@@ -47,9 +47,10 @@ class Prompts:
 
 
 def load_prompts(config: Config) -> Prompts:
-    self_desc = _read_user_info(config.user_info_dir, "self-description.md")
-    domain_fit = _read_user_info(config.user_info_dir, "domain-fit.md")
-    match_criteria = _read_user_info(config.user_info_dir, "match-criteria.md")
+    triage_dir = config.user_info_dir / "triage-profile"
+    self_desc = _read_user_info(triage_dir, "self-description.md")
+    domain_fit = _read_user_info(triage_dir, "domain-fit.md")
+    match_criteria = _read_user_info(triage_dir, "match-criteria.md")
 
     classify_user_info = f"<user-info>\n{self_desc}\n{domain_fit}\n</user-info>"
     judge_user_info = f"<user-info>\n{self_desc}\n{match_criteria}\n</user-info>"

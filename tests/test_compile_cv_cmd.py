@@ -334,7 +334,7 @@ def test_compile_cv_build_cv_tex_has_substituted_content(
     assert "Firma GmbH" in content
 
 
-def test_compile_cv_userdata_dir_uses_forward_slashes(
+def test_compile_cv_cv_data_dir_uses_forward_slashes(
     app_dir: Path,
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -350,9 +350,9 @@ def test_compile_cv_userdata_dir_uses_forward_slashes(
     monkeypatch.setattr("subprocess.run", capturing_run)
     compile_cv(app_dir)
 
-    userdata_args = [arg for cmd in captured_cmds for arg in cmd if "CvDataDir" in arg]
-    assert userdata_args, "no CvDataDir arg found in pdflatex commands"
-    for arg in userdata_args:
+    cv_data_args = [arg for cmd in captured_cmds for arg in cmd if "CvDataDir" in arg]
+    assert cv_data_args, "no CvDataDir arg found in pdflatex commands"
+    for arg in cv_data_args:
         m = re.search(r"\\def\\CvDataDir\{([^}]+)\}", arg)
         assert m is not None, f"could not parse CvDataDir from: {arg}"
         assert "\\" not in m.group(1), "path must use forward slashes"

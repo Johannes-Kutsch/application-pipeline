@@ -13,16 +13,16 @@ application-pipeline compile-cv <DIR>
 Raw `pdflatex` invocations — `-jobname` sets the output PDF filename (`cover.pdf`, `resume.pdf`, `combined.pdf`):
 
 ```
-pdflatex -jobname=cover    "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{cover}\input{cv_template}"
-pdflatex -jobname=resume   "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{resume}\input{cv_template}"
-pdflatex -jobname=combined "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{combined}\input{cv_template}"
+pdflatex -jobname=cover    "\def\CvDataDir{/abs/path/to/user-info/cv}\def\BUILD{cover}\input{cv_template}"
+pdflatex -jobname=resume   "\def\CvDataDir{/abs/path/to/user-info/cv}\def\BUILD{resume}\input{cv_template}"
+pdflatex -jobname=combined "\def\CvDataDir{/abs/path/to/user-info/cv}\def\BUILD{combined}\input{cv_template}"
 ```
 
-`\UserDataDir` defaults to `../user-info` when omitted. `\BUILD` controls which output is produced: `cover` (1 page), `resume` (2 pages), `combined` (3 pages).
+`\CvDataDir` defaults to `../user-info/cv` when omitted. `\BUILD` controls which output is produced: `cover` (1 page), `resume` (2 pages), `combined` (3 pages).
 
 ## User data files
 
-The template reads the following files from `<settings-dir>/user-info/`. All four must exist before the first compile.
+The template reads the following files from `<settings-dir>/user-info/cv/`. All four must exist before the first compile.
 
 | File | Purpose |
 |---|---|
@@ -31,7 +31,7 @@ The template reads the following files from `<settings-dir>/user-info/`. All fou
 | `profile.png` | Headshot (passport-style) |
 | `signature.png` | Handwritten signature scan |
 
-`application-pipeline init <DIR>` seeds `user-info/` with editable stubs for the `.tex` files and placeholder images.
+`application-pipeline init <DIR>` seeds `user-info/cv/` with editable stubs for the `.tex` files and placeholder images.
 
 ## MiKTeX setup (Windows)
 

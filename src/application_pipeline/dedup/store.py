@@ -9,7 +9,6 @@ cheap URL lookup. See ADR-0004; do not "fix" this back to a pure read.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -17,6 +16,7 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, get_args, runtime_checkable
 
+from application_pipeline.atomic_write import write_atomic
 from application_pipeline.text import normalize
 
 from .errors import DedupStoreError
@@ -256,16 +256,11 @@ class DeduplicationStore:
         self._records = new_records
 
     def _persist(self, records: dict[str, dict[str, Any]]) -> None:
-        tmp = self._path.with_name(self._path.name + ".tmp")
-        payload = json.dumps(records, indent=2, sort_keys=True, ensure_ascii=False)
+        payload = json.dumps(
+            records, indent=2, sort_keys=True, ensure_ascii=False
+        ).encode("utf-8")
         try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-            try:
-                os.write(fd, payload.encode("utf-8"))
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            os.replace(tmp, self._path)
+            write_atomic(self._path, payload)
         except OSError as exc:
             raise DedupStoreError(
                 f"could not persist dedup store to {self._path}: {exc}"

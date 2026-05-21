@@ -22,12 +22,11 @@ pdflatex -jobname=combined "\def\UserDataDir{/abs/path/to/user-info}\def\BUILD{c
 
 ## User data files
 
-The template reads the following files from `<settings-dir>/user-info/`. All five must exist before the first compile.
+The template reads the following files from `<settings-dir>/user-info/`. All four must exist before the first compile.
 
 | File | Purpose |
 |---|---|
-| `identity.tex` | Name and address macros |
-| `contact.tex` | Phone, email, and profile-link macros |
+| `facts.tex` | Raw `\def`s for name, address, phone, email, social links, languages, hobbies (per ADR-0030) |
 | `content_pool.tex` | Career items selected per application |
 | `profile.png` | Headshot (passport-style) |
 | `signature.png` | Handwritten signature scan |
@@ -52,6 +51,7 @@ pdflatex --version
 
 All available on CTAN; MiKTeX's on-the-fly install fetches them on the first compile:
 
+- `moderncv` (**≥ 2.0.0**) — the CV/cover-letter class. The package no longer vendors this; the host distro must provide it (per ADR-0031).
 - `babel` (with the `ngerman` language)
 - `inputenc` (`utf8x` option) — via the `ucs` package
 - `enumitem`
@@ -64,4 +64,4 @@ All available on CTAN; MiKTeX's on-the-fly install fetches them on the first com
 
 If "install on the fly" is disabled, install them explicitly from MiKTeX Console → *Packages*.
 
-The `moderncv.cls`, `moderncvstylecasual.sty`, `moderncvcolorblue.sty`, and `tweaklist.sty` files are vendored inside the package and do **not** need to come from CTAN.
+`cv_template.tex` carries a `\@ifclasslater` guard that errors with a human-readable "install moderncv ≥ 2.0.0" message if the host class is too old.

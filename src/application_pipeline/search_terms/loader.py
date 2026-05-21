@@ -25,21 +25,15 @@ def load_search_terms(user_info_dir: pathlib.Path) -> SearchTerms:
             f"{keywords_path}: file is present but contains no bullet entries"
         )
 
-    skills_path = base / _FILE_SKILLS
-    skills = _parse_bullets(skills_path) if skills_path.exists() else []
-
-    negative_keywords_path = base / _FILE_NEGATIVE_KEYWORDS
-    negative_keywords = (
-        _parse_bullets(negative_keywords_path)
-        if negative_keywords_path.exists()
-        else []
-    )
-
     return SearchTerms(
         keywords=tuple(keywords),
-        skills=tuple(skills),
-        negative_keywords=tuple(negative_keywords),
+        skills=tuple(_parse_optional(base / _FILE_SKILLS)),
+        negative_keywords=tuple(_parse_optional(base / _FILE_NEGATIVE_KEYWORDS)),
     )
+
+
+def _parse_optional(path: pathlib.Path) -> list[str]:
+    return _parse_bullets(path) if path.exists() else []
 
 
 def _parse_bullets(path: pathlib.Path) -> list[str]:

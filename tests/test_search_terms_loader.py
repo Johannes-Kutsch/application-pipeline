@@ -31,7 +31,7 @@ def write_search_terms(
     return user_info
 
 
-def test_valid_file_loads_all_three_sections(tmp_path: pathlib.Path) -> None:
+def test_valid_files_load_all_three_lists(tmp_path: pathlib.Path) -> None:
     user_info = write_search_terms(
         tmp_path,
         keywords="- software engineer\n- python developer\n",
@@ -47,7 +47,7 @@ def test_valid_file_loads_all_three_sections(tmp_path: pathlib.Path) -> None:
     assert result.negative_keywords == ("Manager", "Sales")
 
 
-def test_missing_skills_section_gives_empty_tuple(tmp_path: pathlib.Path) -> None:
+def test_missing_skills_file_gives_empty_tuple(tmp_path: pathlib.Path) -> None:
     user_info = write_search_terms(
         tmp_path,
         keywords="- python developer\n",
@@ -61,7 +61,7 @@ def test_missing_skills_section_gives_empty_tuple(tmp_path: pathlib.Path) -> Non
     assert result.negative_keywords == ("Manager",)
 
 
-def test_missing_negative_keywords_section_gives_empty_tuple(
+def test_missing_negative_keywords_file_gives_empty_tuple(
     tmp_path: pathlib.Path,
 ) -> None:
     user_info = write_search_terms(
@@ -77,7 +77,7 @@ def test_missing_negative_keywords_section_gives_empty_tuple(
     assert result.skills == ("Python",)
 
 
-def test_empty_keywords_section_raises_search_terms_error(
+def test_empty_keywords_file_raises_search_terms_error(
     tmp_path: pathlib.Path,
 ) -> None:
     user_info = write_search_terms(

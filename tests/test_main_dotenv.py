@@ -23,7 +23,12 @@ def _run_probe(home_dir: Path, env: dict[str, str]) -> str:
         "import application_pipeline.__main__; "
         "print(os.environ.get('CLAUDE_CODE_OAUTH_TOKEN', '<missing>'))"
     )
-    probe_env = {**env, "HOME": str(home_dir), "PYTHONPATH": _PYTHONPATH}
+    probe_env = {
+        **env,
+        "HOME": str(home_dir),
+        "USERPROFILE": str(home_dir),
+        "PYTHONPATH": _PYTHONPATH,
+    }
     result = subprocess.run(
         [sys.executable, "-c", script],
         env=probe_env,

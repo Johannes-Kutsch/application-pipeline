@@ -1,5 +1,6 @@
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,10 @@ def test_does_not_create_file(results_path: Path) -> None:
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX chmod does not restrict directory creation on Windows",
+)
 def test_ensure_initialized_wraps_oserror_as_results_file_error(
     results_path: Path,
 ) -> None:

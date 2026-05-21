@@ -132,11 +132,15 @@ def test_compile_cv_ignores_application_pipeline_home(
 
     compile_cv(app_dir)
 
-    expected_user_info = str(
-        (project_root / "application-pipeline" / "user-info").resolve()
-    )
+    expected_user_info = (
+        project_root / "application-pipeline" / "user-info"
+    ).resolve().as_posix()
     assert any(expected_user_info in arg for cmd in captured_cmds for arg in cmd)
-    assert not any(str(irrelevant) in arg for cmd in captured_cmds for arg in cmd)
+    assert not any(
+        irrelevant.resolve().as_posix() in arg
+        for cmd in captured_cmds
+        for arg in cmd
+    )
 
 
 def test_compile_cv_exits_nonzero_on_first_failure(
@@ -256,9 +260,9 @@ def test_compile_cv_uses_cwd_relative_user_info(
 
     compile_cv(app_dir)
 
-    expected_user_info = str(
-        (project_root / "application-pipeline" / "user-info").resolve()
-    )
+    expected_user_info = (
+        project_root / "application-pipeline" / "user-info"
+    ).resolve().as_posix()
     assert any(expected_user_info in arg for cmd in captured_cmds for arg in cmd)
 
 

@@ -37,6 +37,14 @@
 \setlist[itemize]{itemsep=-0.2em}
 \setlist[itemize,2]{topsep=-0.4em}
 
+% User-level helper macro on top of stock moderncv 1.2.0. Verbatim from the
+% pre-#474 hand-modified moderncv.cls; lives here (not in the vendored class)
+% because ADR-0034 mandates shipping moderncv 1.2.0 verbatim.
+\newcommand*{\subcventry}[3]{
+  \vspace{-0.25em}
+  \cvline{}{\textbf{#1:} \textit{#2} \newline #3}
+}
+
 % Build flag and user-data directory — both overridable from the command line.
 \providecommand{\BUILD}{combined}
 \providecommand{\CvDataDir}{../user-info/cv}
@@ -48,12 +56,10 @@
 \familyname{\myFamilyname}
 \title{Lebenslauf}
 \photo[120pt][1pt]{\CvDataDir/profile}
-\address{\myStreet}{\myZip}
-\phone{\myPhone}
-\email{\myEmail}
-% \social and \phone's [type] optional argument were added in moderncv v2.x.
-% v1.2.0's casual head doesn't render social links either way; GitHub/LinkedIn
-% surface in the resume body via the display macros + \cvitem below.
+% Deliberately NOT calling \address / \phone / \email at the moderncv API:
+% in the casual style they render the letter footer ("Name / Street / T ... B ...")
+% on every cover-letter page, which the pre-#474 corpus never had. Identity
+% surfaces only via the resume's \cvitem rows below, fed by the display macros.
 \def\addressdisplay{\myStreet, \myZip}
 \def\phonedisplay{\myPhone}
 \def\emaildisplay{\myEmail}

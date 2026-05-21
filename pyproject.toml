@@ -35,7 +35,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "application_pipeline.templates.prompts" = ["*.md"]
 "application_pipeline.latex" = ["*.tex", "*.cls", "*.sty", "*.md"]
-"application_pipeline.templates.user-info" = ["*"]
+"application_pipeline.templates.user-info" = ["*", "triage-profile/*"]
 "application_pipeline.templates.setup" = ["*.sh"]
 
 [tool.pytest.ini_options]

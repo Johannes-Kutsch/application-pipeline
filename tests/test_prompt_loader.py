@@ -28,9 +28,11 @@ LOCATIONS = ["Hamburg"]
 def make_config_with_user_info(tmp_path: pathlib.Path) -> Config:
     user_info = tmp_path / "user-info"
     user_info.mkdir(exist_ok=True)
-    (user_info / "self-description.md").write_text("I am a developer\n")
-    (user_info / "domain-fit.md").write_text("ML roles\n")
-    (user_info / "match-criteria.md").write_text("Hamburg, remote\n")
+    triage = user_info / "triage-profile"
+    triage.mkdir()
+    (triage / "self-description.md").write_text("I am a developer\n")
+    (triage / "domain-fit.md").write_text("ML roles\n")
+    (triage / "match-criteria.md").write_text("Hamburg, remote\n")
     return Config(
         sources=[SourceEntry(parser_type="bundesagentur")],
         locations=["Hamburg"],
@@ -170,7 +172,7 @@ def test_load_prompts_raises_when_user_info_file_missing(
     tmp_path: pathlib.Path, missing_file: str
 ) -> None:
     config = make_config_with_user_info(tmp_path)
-    (config.user_info_dir / missing_file).unlink()
+    (config.user_info_dir / "triage-profile" / missing_file).unlink()
 
     with pytest.raises(PromptError) as exc_info:
         load_prompts(config)
@@ -185,7 +187,7 @@ def test_load_prompts_raises_when_user_info_file_empty(
     tmp_path: pathlib.Path, empty_file: str
 ) -> None:
     config = make_config_with_user_info(tmp_path)
-    (config.user_info_dir / empty_file).write_text("")
+    (config.user_info_dir / "triage-profile" / empty_file).write_text("")
 
     with pytest.raises(PromptError) as exc_info:
         load_prompts(config)
@@ -198,9 +200,11 @@ def test_load_prompts_raises_when_user_info_file_empty(
 def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     user_info = tmp_path / "user-info"
     user_info.mkdir()
-    (user_info / "self-description.md").write_text("background\n")
-    (user_info / "domain-fit.md").write_text("ML roles\n")
-    (user_info / "match-criteria.md").write_text("Hamburg\n")
+    triage = user_info / "triage-profile"
+    triage.mkdir()
+    (triage / "self-description.md").write_text("background\n")
+    (triage / "domain-fit.md").write_text("ML roles\n")
+    (triage / "match-criteria.md").write_text("Hamburg\n")
     (tmp_path / "layout.py").write_text(
         "PLACEHOLDER_GROUPS = {}\n"
         'CARD_TEMPLATE = "# {rank} \xb7 {title}\\n\\n{summary}\\n\\n---\\n<{url}>\\n"\n'

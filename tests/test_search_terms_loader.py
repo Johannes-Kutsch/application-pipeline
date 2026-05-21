@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
-import textwrap
 
 import pytest
 
@@ -14,32 +13,30 @@ from application_pipeline.search_terms import (
 )
 
 
-def write_search_terms(tmp_path: pathlib.Path, content: str) -> pathlib.Path:
+def write_search_terms(
+    tmp_path: pathlib.Path,
+    *,
+    keywords: str = "",
+    skills: str | None = None,
+    negative_keywords: str | None = None,
+) -> pathlib.Path:
     user_info = tmp_path / "user-info"
-    user_info.mkdir(exist_ok=True)
-    (user_info / "search-terms.md").write_text(textwrap.dedent(content))
+    st_dir = user_info / "search-terms"
+    st_dir.mkdir(parents=True, exist_ok=True)
+    (st_dir / "keywords.md").write_text(keywords)
+    if skills is not None:
+        (st_dir / "skills.md").write_text(skills)
+    if negative_keywords is not None:
+        (st_dir / "negative-keywords.md").write_text(negative_keywords)
     return user_info
 
 
 def test_valid_file_loads_all_three_sections(tmp_path: pathlib.Path) -> None:
     user_info = write_search_terms(
         tmp_path,
-        """
-        ## Keywords
-
-        - software engineer
-        - python developer
-
-        ## Skills
-
-        - Python
-        - SQL
-
-        ## Negative Keywords
-
-        - Manager
-        - Sales
-        """,
+        keywords="- software engineer\n- python developer\n",
+        skills="- Python\n- SQL\n",
+        negative_keywords="- Manager\n- Sales\n",
     )
 
     result = load_search_terms(user_info)
@@ -53,15 +50,8 @@ def test_valid_file_loads_all_three_sections(tmp_path: pathlib.Path) -> None:
 def test_missing_skills_section_gives_empty_tuple(tmp_path: pathlib.Path) -> None:
     user_info = write_search_terms(
         tmp_path,
-        """
-        ## Keywords
-
-        - python developer
-
-        ## Negative Keywords
-
-        - Manager
-        """,
+        keywords="- python developer\n",
+        negative_keywords="- Manager\n",
     )
 
     result = load_search_terms(user_info)
@@ -76,15 +66,8 @@ def test_missing_negative_keywords_section_gives_empty_tuple(
 ) -> None:
     user_info = write_search_terms(
         tmp_path,
-        """
-        ## Keywords
-
-        - python developer
-
-        ## Skills
-
-        - Python
-        """,
+        keywords="- python developer\n",
+        skills="- Python\n",
     )
 
     result = load_search_terms(user_info)
@@ -99,13 +82,8 @@ def test_empty_keywords_section_raises_search_terms_error(
 ) -> None:
     user_info = write_search_terms(
         tmp_path,
-        """
-        ## Keywords
-
-        ## Skills
-
-        - Python
-        """,
+        keywords="",
+        skills="- Python\n",
     )
 
     with pytest.raises(SearchTermsError):
@@ -118,7 +96,7 @@ def test_missing_file_raises_search_terms_error_with_path(
     user_info = tmp_path / "user-info"
     user_info.mkdir()
 
-    with pytest.raises(SearchTermsError, match="search-terms.md"):
+    with pytest.raises(SearchTermsError, match="keywords.md"):
         load_search_terms(user_info)
 
 
@@ -127,16 +105,8 @@ def test_single_char_negative_keywords_load_successfully(
 ) -> None:
     user_info = write_search_terms(
         tmp_path,
-        """
-        ## Keywords
-
-        - python developer
-
-        ## Negative Keywords
-
-        - x
-        - y
-        """,
+        keywords="- python developer\n",
+        negative_keywords="- x\n- y\n",
     )
 
     result = load_search_terms(user_info)
@@ -147,11 +117,7 @@ def test_single_char_negative_keywords_load_successfully(
 def test_search_terms_is_frozen(tmp_path: pathlib.Path) -> None:
     user_info = write_search_terms(
         tmp_path,
-        """
-        ## Keywords
-
-        - python developer
-        """,
+        keywords="- python developer\n",
     )
 
     result = load_search_terms(user_info)

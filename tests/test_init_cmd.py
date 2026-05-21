@@ -20,16 +20,19 @@ def _template_bytes(name: str) -> bytes:
 
 
 def _user_info_template_bytes(name: str) -> bytes:
-    return (
-        importlib.resources.files("application_pipeline.templates") / "user-info" / name
-    ).read_bytes()
+    node = importlib.resources.files("application_pipeline.templates") / "user-info"
+    for part in name.split("/"):
+        node = node / part
+    return node.read_bytes()
 
 
 _USER_INFO_FILES = (
     "self-description.md",
     "domain-fit.md",
     "match-criteria.md",
-    "search-terms.md",
+    "search-terms/keywords.md",
+    "search-terms/skills.md",
+    "search-terms/negative-keywords.md",
 )
 
 _LATEX_USER_INFO_FILES = (
@@ -260,7 +263,12 @@ def test_init_seeds_eight_files_under_user_info(tmp_path: Path) -> None:
 
     user_info = tmp_path / "user-info"
     seeded = {p.name for p in user_info.iterdir()}
-    expected = set(_USER_INFO_FILES) | set(_LATEX_USER_INFO_FILES)
+    expected = {
+        "self-description.md",
+        "domain-fit.md",
+        "match-criteria.md",
+        "search-terms",
+    } | set(_LATEX_USER_INFO_FILES)
     assert seeded == expected
 
 

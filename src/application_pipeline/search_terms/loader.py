@@ -5,31 +5,35 @@ import re
 
 from .types import SearchTerms, SearchTermsError
 
-_FILENAME = "search-terms.md"
-_SECTION_RE = re.compile(r"^##\s+(.+)$")
+_DIR = "search-terms"
+_FILE_KEYWORDS = "keywords.md"
+_FILE_SKILLS = "skills.md"
+_FILE_NEGATIVE_KEYWORDS = "negative-keywords.md"
 _BULLET_RE = re.compile(r"^-\s+(.+)$")
-
-_SECTION_KEYWORDS = "keywords"
-_SECTION_SKILLS = "skills"
-_SECTION_NEGATIVE_KEYWORDS = "negative keywords"
 
 
 def load_search_terms(user_info_dir: pathlib.Path) -> SearchTerms:
-    path = user_info_dir / _FILENAME
-    if not path.exists():
-        raise SearchTermsError(f"Missing required file: {path}")
+    base = user_info_dir / _DIR
+    keywords_path = base / _FILE_KEYWORDS
 
-    text = path.read_text(encoding="utf-8-sig")
-    sections = _parse_sections(text)
+    if not keywords_path.exists():
+        raise SearchTermsError(f"Missing required file: {keywords_path}")
 
-    keywords = sections.get(_SECTION_KEYWORDS, [])
-    skills = sections.get(_SECTION_SKILLS, [])
-    negative_keywords = sections.get(_SECTION_NEGATIVE_KEYWORDS, [])
-
-    if _SECTION_KEYWORDS in sections and not keywords:
+    keywords = _parse_bullets(keywords_path)
+    if not keywords:
         raise SearchTermsError(
-            f"{path}: ## Keywords section is present but contains no bullet entries"
+            f"{keywords_path}: file is present but contains no bullet entries"
         )
+
+    skills_path = base / _FILE_SKILLS
+    skills = _parse_bullets(skills_path) if skills_path.exists() else []
+
+    negative_keywords_path = base / _FILE_NEGATIVE_KEYWORDS
+    negative_keywords = (
+        _parse_bullets(negative_keywords_path)
+        if negative_keywords_path.exists()
+        else []
+    )
 
     return SearchTerms(
         keywords=tuple(keywords),
@@ -38,20 +42,11 @@ def load_search_terms(user_info_dir: pathlib.Path) -> SearchTerms:
     )
 
 
-def _parse_sections(text: str) -> dict[str, list[str]]:
-    sections: dict[str, list[str]] = {}
-    current: str | None = None
-
+def _parse_bullets(path: pathlib.Path) -> list[str]:
+    text = path.read_text(encoding="utf-8-sig")
+    result = []
     for line in text.splitlines():
-        header_match = _SECTION_RE.match(line)
-        if header_match:
-            current = header_match.group(1).strip().lower()
-            sections[current] = []
-            continue
-
-        if current is not None:
-            bullet_match = _BULLET_RE.match(line)
-            if bullet_match:
-                sections[current].append(bullet_match.group(1).strip())
-
-    return sections
+        m = _BULLET_RE.match(line)
+        if m:
+            result.append(m.group(1).strip())
+    return result

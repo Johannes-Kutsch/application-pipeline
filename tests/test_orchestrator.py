@@ -90,11 +90,14 @@ def _write_config(
         (user_info_dir / "match-criteria.md").write_text("Hamburg, remote\n")
         kws: list[str] = ast.literal_eval(keywords)
         nkws: list[str] = ast.literal_eval(negative_keywords)
-        st_lines = ["## Keywords"] + [f"- {kw}" for kw in kws]
-        st_lines += ["", "## Skills", "- django", "", "## Negative Keywords"]
-        st_lines += [f"- {nk}" for nk in nkws]
-        (user_info_dir / "search-terms.md").write_text(
-            "\n".join(st_lines) + "\n", encoding="utf-8"
+        st_dir = user_info_dir / "search-terms"
+        st_dir.mkdir(exist_ok=True)
+        (st_dir / "keywords.md").write_text(
+            "\n".join(f"- {kw}" for kw in kws) + "\n", encoding="utf-8"
+        )
+        (st_dir / "skills.md").write_text("- django\n", encoding="utf-8")
+        (st_dir / "negative-keywords.md").write_text(
+            "\n".join(f"- {nk}" for nk in nkws) + "\n", encoding="utf-8"
         )
     return config_path
 

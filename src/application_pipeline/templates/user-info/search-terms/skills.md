@@ -1,0 +1,4 @@
+- Python
+- SQL
+- Git
+- Docker

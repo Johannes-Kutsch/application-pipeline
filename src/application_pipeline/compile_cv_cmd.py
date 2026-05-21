@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.resources
+import os
 import shutil
 import subprocess
 import sys
@@ -11,7 +12,7 @@ from application_pipeline.latex import slot_map
 
 _BUILDS = ("cover", "resume", "combined")
 
-_LATEX_SUFFIXES = frozenset({".tex"})
+_LATEX_SUFFIXES = frozenset({".tex", ".cls", ".sty"})
 
 
 def compile_cv(app_dir: Path) -> None:
@@ -74,7 +75,14 @@ def compile_cv(app_dir: Path) -> None:
             build_name,
             tex_input,
         ]
-        result = subprocess.run(cmd, cwd=build_dir, capture_output=True)
+        # TEXINPUTS=".<sep>" — search .build/ first, then fall back to host
+        # TEXMF. Hides the host's moderncv v2.x behind the vendored v1.2.0 tree
+        # we just copied into .build/. os.pathsep keeps this identical across
+        # Windows (";") and POSIX (":"); env= is a dict so no shell quoting.
+        env = {**os.environ, "TEXINPUTS": f".{os.pathsep}"}
+        result = subprocess.run(
+            cmd, cwd=build_dir, capture_output=True, env=env
+        )
 
         if result.returncode != 0:
             log_file = build_dir / f"{build_name}.log"

@@ -6,7 +6,28 @@ import importlib.resources
 
 import pytest
 
-_EXPECTED_LATEX_PACKAGE_FILES = frozenset({"cv_template.tex", "slot_map.py"})
+_EXPECTED_LATEX_PACKAGE_FILES = frozenset(
+    {
+        "cv_template.tex",
+        "slot_map.py",
+        # Vendored moderncv 1.2.0 distribution (ADR-0034).
+        "moderncv.cls",
+        "moderncvcolorblack.sty",
+        "moderncvcolorblue.sty",
+        "moderncvcolorgreen.sty",
+        "moderncvcolorgrey.sty",
+        "moderncvcolororange.sty",
+        "moderncvcolorpurple.sty",
+        "moderncvcolorred.sty",
+        "moderncvcompatibility.sty",
+        "moderncvstylebanking.sty",
+        "moderncvstylecasual.sty",
+        "moderncvstyleclassic.sty",
+        "moderncvstyleempty.sty",
+        "moderncvstyleoldstyle.sty",
+        "tweaklist.sty",
+    }
+)
 
 _IDENTITY_TOKENS = (
     "<<ADDRESS_STREET>>",
@@ -45,18 +66,14 @@ def test_cv_template_reads_identity_via_display_macro(
     assert rf"\{macro}" in cv_template
 
 
-def test_latex_package_ships_only_template_and_slot_map() -> None:
-    """Post-migration: no vendored .cls/.sty files; only the template and slot map."""
+def test_latex_package_ships_vendored_moderncv_tree() -> None:
+    """The whole moderncv 1.2.0 distro (per ADR-0034) ships with the package."""
     pkg = importlib.resources.files("application_pipeline.latex")
     actual = {item.name for item in pkg.iterdir() if not item.name.startswith("__")}
+    missing = _EXPECTED_LATEX_PACKAGE_FILES - actual
     unexpected = actual - _EXPECTED_LATEX_PACKAGE_FILES
+    assert missing == set(), f"missing vendored files: {missing}"
     assert unexpected == set(), f"unexpected files in latex package: {unexpected}"
-
-
-def test_cv_template_has_version_guard(cv_template: str) -> None:
-    assert r"\@ifclasslater{moderncv}" in cv_template, (
-        "cv_template.tex must include a \\@ifclasslater version guard"
-    )
 
 
 def test_cv_template_makeletterclosing_uses_at_closing(cv_template: str) -> None:
@@ -65,9 +82,24 @@ def test_cv_template_makeletterclosing_uses_at_closing(cv_template: str) -> None
     )
 
 
-def test_cv_template_cventry_patch_is_wrapped_in_atbegindocument(
-    cv_template: str,
-) -> None:
-    assert r"\AtBeginDocument" in cv_template, (
-        "trailing-dot xpatch must be wrapped in \\AtBeginDocument for v2.x compatibility"
+def test_cv_template_resume_name_uses_my_macros(cv_template: str) -> None:
+    """Resume body must use \\myFirstname/\\myFamilyname, not \\@firstname/\\@familyname.
+
+    The \\ifdefstring{\\BUILD}{cover}{}{...} body is tokenised at outer scope
+    where @ is "other"; \\@firstname inside it parses as \\@ (LaTeX's
+    abbreviation-period macro) followed by letters, firing \\spacefactor in
+    vertical mode. \\myFirstname/\\myFamilyname (from facts.tex) have no @.
+    """
+    assert r"\cvitem{Name}{\myFirstname{} \myFamilyname}" in cv_template
+    resume_marker = r"\ifdefstring{\BUILD}{cover}{}{"
+    idx = cv_template.find(resume_marker)
+    assert idx != -1, "resume \\ifdefstring block not found"
+    resume_body = cv_template[idx:]
+    assert r"\@firstname" not in resume_body, (
+        r"resume body uses \@firstname; tokenisation at outer-scope catcodes "
+        r"breaks it. Use \myFirstname instead."
+    )
+    assert r"\@familyname" not in resume_body, (
+        r"resume body uses \@familyname; tokenisation at outer-scope catcodes "
+        r"breaks it. Use \myFamilyname instead."
     )

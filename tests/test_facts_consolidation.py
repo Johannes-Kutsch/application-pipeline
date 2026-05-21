@@ -33,11 +33,12 @@ _CV_TEMPLATE_BRIDGES = (
     r"\input{\CvDataDir/facts}",
     r"\firstname{\myFirstname}",
     r"\familyname{\myFamilyname}",
-    r"\address{\myStreet}{\myZip}{}",
-    r"\phone[mobile]{\myPhone}",
+    # moderncv 1.2.0 \address takes two args; \phone has no [type] optional arg;
+    # \social does not exist (github/linkedin surface via \cvitem display macros).
+    # See ADR-0034.
+    r"\address{\myStreet}{\myZip}",
+    r"\phone{\myPhone}",
     r"\email{\myEmail}",
-    r"\social[github]{\myGithub}",
-    r"\social[linkedin]{\myLinkedin}",
     r"\title{Lebenslauf}",
     r"\photo[120pt][1pt]{\CvDataDir/profile}",
     r"\def\addressdisplay",

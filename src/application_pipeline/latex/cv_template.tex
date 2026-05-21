@@ -13,13 +13,9 @@
 
 \documentclass[11pt,a4paper,sans]{moderncv}
 
-% Require moderncv >= 2.0.0 (TeX Live 2020+ or MiKTeX rolling).
-% \@ifclasslater needs @ to be a letter — wrap in \makeatletter/\makeatother.
-\makeatletter
-\@ifclasslater{moderncv}{2015/01/01}{}{%
-  \PackageError{cv_template}{moderncv >= 2.0.0 required.
-  Install a current TeX distribution (TeX Live 2020+ or MiKTeX rolling).}{}}
-\makeatother
+% moderncv 1.2.0 is vendored alongside this template (src/application_pipeline/latex/)
+% and copied into .build/ at compile time; TEXINPUTS isolation in compile_cv_cmd.py
+% hides the host's moderncv v2.x. See ADR-0034.
 
 \moderncvstyle{casual}
 \moderncvcolor{blue}
@@ -35,9 +31,7 @@
 \usepackage[scale=0.75]{geometry}
 
 % Ported from cv_7.tex — remove the trailing dot moderncv appends to \cventry.
-% Wrapped in \AtBeginDocument so the patch fires after the v2.x body style
-% files finish loading (they redefine \cventry via \moderncvstyle).
-\AtBeginDocument{\xpatchcmd{\cventry}{.\strut}{\strut}{}{}}
+\xpatchcmd{\cventry}{.\strut}{\strut}{}{}
 
 % Ported from cv_7.tex — tighter itemize spacing.
 \setlist[itemize]{itemsep=-0.2em}
@@ -54,11 +48,12 @@
 \familyname{\myFamilyname}
 \title{Lebenslauf}
 \photo[120pt][1pt]{\CvDataDir/profile}
-\address{\myStreet}{\myZip}{}
-\phone[mobile]{\myPhone}
+\address{\myStreet}{\myZip}
+\phone{\myPhone}
 \email{\myEmail}
-\social[github]{\myGithub}
-\social[linkedin]{\myLinkedin}
+% \social and \phone's [type] optional argument were added in moderncv v2.x.
+% v1.2.0's casual head doesn't render social links either way; GitHub/LinkedIn
+% surface in the resume body via the display macros + \cvitem below.
 \def\addressdisplay{\myStreet, \myZip}
 \def\phonedisplay{\myPhone}
 \def\emaildisplay{\myEmail}
@@ -128,9 +123,11 @@
 \vspace{-4.3em}
 
 \section{Persönliche Informationen}
-\makeatletter
-\cvitem{Name}{\@firstname{} \@familyname}
-\makeatother
+% Use \myFirstname / \myFamilyname (from facts.tex), not the moderncv-internal
+% @-letter forms: the surrounding \ifdefstring body is tokenised at outer-scope
+% catcodes where @ is "other", so the @-letter forms parse as a control-symbol
+% plus letters and the control-symbol macro fires \spacefactor in vertical mode.
+\cvitem{Name}{\myFirstname{} \myFamilyname}
 \cvitem{Adresse}{\addressdisplay}
 \cvitem{Telefon}{\phonedisplay}
 \cvitem{E-Mail}{\emaildisplay}

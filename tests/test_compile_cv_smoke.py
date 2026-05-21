@@ -40,6 +40,8 @@ def _require_pdflatex_and_moderncv() -> None:
     """Skip the test if pdflatex or a sufficiently new moderncv is absent."""
     if not shutil.which("pdflatex"):
         pytest.skip("pdflatex not found — install TeX Live or MiKTeX")
+    if not shutil.which("kpsewhich"):
+        pytest.skip("kpsewhich not found — install TeX Live or MiKTeX")
 
     result = subprocess.run(
         ["kpsewhich", "moderncv.cls"],

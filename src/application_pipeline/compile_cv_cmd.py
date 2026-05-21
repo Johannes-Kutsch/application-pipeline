@@ -40,7 +40,7 @@ def compile_cv(app_dir: Path) -> None:
         print(str(exc), file=sys.stderr)
         sys.exit(1)
 
-    user_info_dir = (home_dir() / "user-info").resolve()
+    cv_data_dir = (home_dir() / "user-info" / "cv").resolve()
     build_dir = app_dir / ".build"
 
     build_dir.mkdir(exist_ok=True)
@@ -63,7 +63,7 @@ def compile_cv(app_dir: Path) -> None:
 
     for build_name in _BUILDS:
         tex_input = (
-            rf"\def\UserDataDir{{{user_info_dir.as_posix()}}}"
+            rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}"
             rf"\def\BUILD{{{build_name}}}"
             r"\input{cv}"
         )

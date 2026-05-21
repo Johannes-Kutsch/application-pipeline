@@ -108,20 +108,20 @@ def smoke_app_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """App dir and project root wired for a real pdflatex compile."""
     project_root = tmp_path / "project"
     app_dir = tmp_path / "application"
-    user_info = project_root / "application-pipeline" / "user-info"
+    cv_dir = project_root / "application-pipeline" / "user-info" / "cv"
 
     (project_root / "application-pipeline").mkdir(parents=True)
     (project_root / "application-pipeline" / "config.py").write_text("")
-    user_info.mkdir(parents=True)
+    cv_dir.mkdir(parents=True)
     app_dir.mkdir()
     monkeypatch.chdir(project_root)
 
-    (user_info / "facts.tex").write_text(_facts_tex(), encoding="utf-8")
-    (user_info / "content_pool.tex").write_text("", encoding="utf-8")
+    (cv_dir / "facts.tex").write_text(_facts_tex(), encoding="utf-8")
+    (cv_dir / "content_pool.tex").write_text("", encoding="utf-8")
 
     png = _minimal_png()
-    (user_info / "profile.png").write_bytes(png)
-    (user_info / "signature.png").write_bytes(png)
+    (cv_dir / "profile.png").write_bytes(png)
+    (cv_dir / "signature.png").write_bytes(png)
 
     (app_dir / "cv.tex").write_text(_cv_tex(), encoding="utf-8")
     return app_dir

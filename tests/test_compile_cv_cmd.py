@@ -350,13 +350,11 @@ def test_compile_cv_userdata_dir_uses_forward_slashes(
     monkeypatch.setattr("subprocess.run", capturing_run)
     compile_cv(app_dir)
 
-    userdata_args = [
-        arg for cmd in captured_cmds for arg in cmd if "UserDataDir" in arg
-    ]
-    assert userdata_args, "no UserDataDir arg found in pdflatex commands"
+    userdata_args = [arg for cmd in captured_cmds for arg in cmd if "CvDataDir" in arg]
+    assert userdata_args, "no CvDataDir arg found in pdflatex commands"
     for arg in userdata_args:
-        m = re.search(r"\\def\\UserDataDir\{([^}]+)\}", arg)
-        assert m is not None, f"could not parse UserDataDir from: {arg}"
+        m = re.search(r"\\def\\CvDataDir\{([^}]+)\}", arg)
+        assert m is not None, f"could not parse CvDataDir from: {arg}"
         assert "\\" not in m.group(1), "path must use forward slashes"
 
 

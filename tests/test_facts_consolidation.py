@@ -30,7 +30,7 @@ _MODERNCV_CALLS = (
 )
 
 _CV_TEMPLATE_BRIDGES = (
-    r"\input{\UserDataDir/facts}",
+    r"\input{\CvDataDir/facts}",
     r"\firstname{\myFirstname}",
     r"\familyname{\myFamilyname}",
     r"\address{\myStreet}{\myZip}{}",
@@ -39,7 +39,7 @@ _CV_TEMPLATE_BRIDGES = (
     r"\social[github]{\myGithub}",
     r"\social[linkedin]{\myLinkedin}",
     r"\title{Lebenslauf}",
-    r"\photo[120pt][1pt]{\UserDataDir/profile}",
+    r"\photo[120pt][1pt]{\CvDataDir/profile}",
     r"\def\addressdisplay",
     r"\def\phonedisplay",
     r"\def\emaildisplay",
@@ -55,6 +55,7 @@ def facts_seed() -> str:
     return (
         importlib.resources.files("application_pipeline.templates")
         / "user-info"
+        / "cv"
         / "facts.tex"
     ).read_text(encoding="utf-8")
 
@@ -78,10 +79,10 @@ def test_facts_tex_contains_no_moderncv_calls(facts_seed: str, call: str) -> Non
 
 @pytest.mark.parametrize("retired", _RETIRED_FILENAMES)
 def test_retired_user_info_file_absent_from_package(retired: str) -> None:
-    user_info = (
-        importlib.resources.files("application_pipeline.templates") / "user-info"
+    user_info_cv = (
+        importlib.resources.files("application_pipeline.templates") / "user-info" / "cv"
     )
-    names = {item.name for item in user_info.iterdir()}
+    names = {item.name for item in user_info_cv.iterdir()}
     assert retired not in names, f"{retired} must be deleted from package"
 
 
@@ -90,7 +91,7 @@ def test_cv_template_does_not_input_retired_file(
     cv_template: str, retired: str
 ) -> None:
     stem = retired.removesuffix(".tex")
-    assert rf"\input{{\UserDataDir/{stem}}}" not in cv_template
+    assert rf"\input{{\CvDataDir/{stem}}}" not in cv_template
 
 
 @pytest.mark.parametrize("bridge", _CV_TEMPLATE_BRIDGES)

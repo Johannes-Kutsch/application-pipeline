@@ -5,9 +5,9 @@
 %   combined → both, separated   (3 pages, default)
 %
 % User-specific data (identity, contact, content pool, photo, signature) is
-% read from \UserDataDir/, which defaults to ../user-info so this
+% read from \CvDataDir/, which defaults to ../user-info/cv so this
 % template compiles standalone. A build orchestrator overrides via
-%   pdflatex "\def\UserDataDir{<abs path>}\def\BUILD{combined}\input{cv_template}"
+%   pdflatex "\def\CvDataDir{<abs path>}\def\BUILD{combined}\input{cv_template}"
 %
 % See templates/README.md for the placeholder convention and content-pool format.
 
@@ -42,15 +42,15 @@
 
 % Build flag and user-data directory — both overridable from the command line.
 \providecommand{\BUILD}{combined}
-\providecommand{\UserDataDir}{../user-info}
+\providecommand{\CvDataDir}{../user-info/cv}
 
-% Raw facts (\def\myFirstname etc.) come from \UserDataDir/facts.
+% Raw facts (\def\myFirstname etc.) come from \CvDataDir/facts.
 % Moderncv API calls and display-macro derivations live here, not in facts.tex.
-\input{\UserDataDir/facts}
+\input{\CvDataDir/facts}
 \firstname{\myFirstname}
 \familyname{\myFamilyname}
 \title{Lebenslauf}
-\photo[120pt][1pt]{\UserDataDir/profile}
+\photo[120pt][1pt]{\CvDataDir/profile}
 \address{\myStreet}{\myZip}{}
 \phone[mobile]{\myPhone}
 \email{\myEmail}
@@ -67,7 +67,7 @@
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
 \renewcommand*{\makeletterclosing}{%
   \vspace{1em}\@closing\\[\medskipamount]%
-  \includegraphics[height=2.5em]{\UserDataDir/signature}\\%
+  \includegraphics[height=2.5em]{\CvDataDir/signature}\\%
   \@firstname~\@familyname%
 }
 
@@ -117,7 +117,7 @@
 \ifdefstring{\BUILD}{cover}{}{%
 
 % Content-pool macros (\itemFoo, \itemBar, ...) — see content_pool format in README.
-\input{\UserDataDir/content_pool}
+\input{\CvDataDir/content_pool}
 
 \makecvtitle
 \vspace{-4.3em}

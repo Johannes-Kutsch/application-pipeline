@@ -6,11 +6,7 @@ import importlib.resources
 
 import pytest
 
-_EXPECTED_LATEX_PACKAGE_FILES = frozenset(
-    {"cv_template.tex", "slot_map.py", "__init__.py"}
-)
-
-_VENDORED_SUFFIXES = frozenset({".cls", ".sty"})
+_EXPECTED_LATEX_PACKAGE_FILES = frozenset({"cv_template.tex", "slot_map.py"})
 
 _IDENTITY_TOKENS = (
     "<<ADDRESS_STREET>>",
@@ -49,17 +45,8 @@ def test_cv_template_reads_identity_via_display_macro(
     assert rf"\{macro}" in cv_template
 
 
-def test_latex_package_contains_no_vendored_cls_or_sty_files() -> None:
-    pkg = importlib.resources.files("application_pipeline.latex")
-    vendored = [
-        item.name
-        for item in pkg.iterdir()
-        if any(item.name.endswith(sfx) for sfx in _VENDORED_SUFFIXES)
-    ]
-    assert vendored == [], f"vendored files must be deleted: {vendored}"
-
-
-def test_latex_package_contains_only_expected_files() -> None:
+def test_latex_package_ships_only_template_and_slot_map() -> None:
+    """Post-migration: no vendored .cls/.sty files; only the template and slot map."""
     pkg = importlib.resources.files("application_pipeline.latex")
     actual = {item.name for item in pkg.iterdir() if not item.name.startswith("__")}
     unexpected = actual - _EXPECTED_LATEX_PACKAGE_FILES

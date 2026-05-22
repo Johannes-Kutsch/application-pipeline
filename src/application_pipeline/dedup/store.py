@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from application_pipeline.llm.types import StructuredExtract
 
 SeenStatus = Literal[
-    "not_classified",
     "out_of_domain",
     "in_domain",
     "selected_by_judge",
@@ -184,10 +183,6 @@ class DeduplicationStore:
         if company_lc and title_lc and location_lc:
             self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
 
-    def mark_not_classified(self, key: _SeenKey) -> None:
-        with self._lock:
-            self._mark(key, "not_classified")
-
     def mark_out_of_domain(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "out_of_domain")
@@ -218,8 +213,6 @@ class DeduplicationStore:
                 self._mark(key, "expired", overwrite_if="in_domain")
                 if self._extract_store is not None:
                     self._extract_store.delete(key.url)
-            elif prior_status == "not_classified":
-                self._mark(key, "expired", overwrite_if="not_classified")
             else:
                 self._mark(key, "expired")
 

@@ -547,19 +547,6 @@ def test_concurrent_marks_produce_valid_store(store_path: Path) -> None:
     assert len(on_disk) == n_threads * marks_per_thread
 
 
-def test_mark_not_classified_persists_status(store_path: Path) -> None:
-    store = dedup_load(store_path)
-    stub = StubLike(url="https://example.com/nc")
-    store.mark_not_classified(stub)
-
-    assert store.is_seen(stub) == "url_hit"
-
-    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    record = on_disk["https://example.com/nc"]
-    assert record["status"] == "not_classified"
-    assert record["canonical_url"] == "https://example.com/nc"
-
-
 def test_mark_in_domain_then_is_seen_returns_judge_pending(
     store_path: Path,
 ) -> None:
@@ -865,30 +852,6 @@ def test_mark_expired_on_in_domain_deletes_extract(tmp_path: Path) -> None:
 
     assert extract_store.get(stub.url) is None
     assert store.is_seen(stub) == "url_hit"
-
-
-def test_mark_expired_on_not_classified_leaves_extract_untouched(
-    tmp_path: Path,
-) -> None:
-    extract_path = tmp_path / "extracts.json"
-    extract_store = extract_load(extract_path)
-    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
-
-    nc_stub = StubLike(url="https://example.com/nc")
-    other_stub = StubLike(
-        url="https://example.com/other",
-        company="Other",
-        title="Role",
-        location="Berlin",
-    )
-    store.mark_not_classified(nc_stub)
-    store.mark_in_domain(other_stub, extract=_extract())
-
-    store.mark_expired(nc_stub)
-
-    assert store.is_seen(nc_stub) == "url_hit"
-    assert extract_store.get(nc_stub.url) is None
-    assert extract_store.get(other_stub.url) is not None
 
 
 def test_expired_status_survives_reload(store_path: Path) -> None:

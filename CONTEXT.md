@@ -77,11 +77,10 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 **Deduplication**: Skipping **Positions** seen in a previous run or earlier in the current run. Three-tier: an in-run ephemeral URL set (`RunScopedDedup`, obtained from the **Deduplication Store** via `run_scope()` context manager, sits in front of the persistent store to absorb the Cartesian overlap without paying duplicate `enrich()` cost) plus the persistent **Deduplication Store** with two tiers: exact-match on URL, plus exact-match on `(company_lc, title_lc, location_lc)`. The tuple tier fires only when **all three fields are non-`None`** on both sides. When the tuple matches under a new URL (syndicated copy), the store records an alias under the new URL — copying `status` and `first_seen` — so subsequent runs hit the cheap URL tier (ADR-0003). `first_seen` answers "when did this *role* first appear", not "when did this URL first appear". `is_seen` returns a `SeenResult`: `url_hit`/`tuple_hit` skip; `in_domain` enriches and routes directly into the **Pool** for today's judge call (no classify pass); `miss` processes from scratch. Alias write is performed inside `is_seen`.
 
 **Dedup status enum** (per ADR-0020 / ADR-0022, supersedes the prior set):
-- `not_classified` — first-contact write; eligible for the classifier next re-discovery.
 - `out_of_domain` — written by **Domain Pre-Filter** (title hit) and **Relevance Classifier** (LLM `in_domain: false`). Terminal-skip.
 - `in_domain` — written by classifier on `in_domain: true`, alongside the **Structured Extract** in `extracts.json`. Means "in the **Pool**"; re-discovery routes directly into today's judge candidates.
 - `selected_by_judge` — written after judge picks the item and the **Card** is appended+fsynced. Terminal-skip; extract deleted.
-- `expired` — written by **Freshness Gate** when `posted_date` exceeds `MAX_LISTING_AGE_DAYS` or `deadline` < anchored date (ADR-0025). Terminal-skip. May transition from `not_classified` or `in_domain` (the latter also deletes the extract).
+- `expired` — written by **Freshness Gate** when `posted_date` exceeds `MAX_LISTING_AGE_DAYS` or `deadline` < anchored date (ADR-0025). Terminal-skip. Transitions from `in_domain` (also deletes the extract) or any other status.
 - `enrich_failed` — parser's `enrich()` raised `ParserError` (incl. per-URL 4xx wrapped by HTTP layer). Terminal-skip.
 - `external_redirect` — parser emitted `ExternalRedirect` (ADR-0013). Terminal-skip.
 

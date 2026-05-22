@@ -23,11 +23,11 @@ This supersedes any prior degraded-success exit on usage limit. Companions: ADR-
 ## Consequences
 
 - **New module `src/application_pipeline/llm/quota.py`** holds the 429 `result`-text parser (regex + month table, ported from `pycastle/services/claude_service.py:88-145`). `parse_reset_time(result_text: str) -> datetime | None`.
-- **`ClaudeUsageLimitError` carries `reset_time: datetime | None`.** The `LLMExtractor` raises it from `classify_relevance_batch` and `judge_top_n` on 429.
+- **`ClaudeUsageLimitError` carries `reset_time: datetime | None`.** The `LLMExtractor` raises it from `classify_relevance` (ADR-0036) and `judge_top_n` on 429.
 - **Sleep at the orchestrator level**, not inside `ClaudeExtractor`. Orchestrator catches `ClaudeUsageLimitError`, computes `wake_time = (reset_time or next_top_of_hour(now)) + timedelta(minutes=2)`, calls `time.sleep((wake_time - now).total_seconds())`, re-issues the failed call.
-- **Classify batch retry**: holds the batch's items unmarked, sleeps, retries the same batch.
+- **Classify retry** (per ADR-0036): holds the single in-flight item unmarked, sleeps, retries the same solo call.
 - **Judge retry**: re-issues with the same `JudgeCandidate` list. The pool is stable during sleep.
-- **Non-quota LLM errors unchanged**: classifier batch errors fail that batch and leave items unmarked; judge errors → Failure Report and no daily file.
+- **Non-quota LLM errors unchanged**: classifier per-call errors fail that one item and leave it unmarked (per ADR-0036); judge errors → Failure Report and no daily file.
 - **`degraded_reason` field is removed entirely.** Runs either complete or fail.
 - **Cron-anchored logical day** (ADR-0021) handles midnight crossings: a 02:00 run that sleeps until 03:00 the next day still writes to the *original* day's file.
 - **Cron overlap accepted.** `flock -n` silently skips an overlapping cron tick. "Yesterday missing, today present" is an acceptable signal.

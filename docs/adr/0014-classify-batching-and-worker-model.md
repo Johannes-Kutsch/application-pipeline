@@ -1,5 +1,8 @@
 # Classify is batched single-turn; classify + judge run as workers; usage-limit handling
 
+> **Superseded by [ADR-0036](./0036-classifier-solo-calls-batching-retired.md).** The batched-single-turn classifier model is retired in favour of one `claude -p` call per **Position**, leaning on Anthropic's automatic prompt cache for prefix amortisation. The worker-thread shape and `DeduplicationStore` lock survive unchanged; only the per-call payload shape and the `claude_classify_batch_size` knob are gone. Read this ADR for the historical "why batching", read 0036 for the current behaviour.
+
+
 The **Relevance Classifier** sends one Claude request per batch of up to `claude_classify_batch_size` (default 100) **Positions**, with each item carrying a stable string `id` and the response shape `[{"id": "...", "in_domain": bool, "extract": {...} | absent}, ...]` (extract added by ADR-0022). The **Match Judge** is one Claude request per run (per ADR-0020), not per item. Each Claude invocation is a fresh `claude -p` subprocess with no `--session-id` reuse — system-prompt savings come from Anthropic's prompt-cache TTL (5 min), not from a long-lived session.
 
 The **Pipeline Orchestrator** may run classify on a dedicated worker thread (pipelined with parsers) or serially after the parser phase — implementation is free either way under the once-per-day cadence (ADR-0024) which removes wall-clock pressure. Where classify is threaded, `.seen.json` is the only artifact with genuinely concurrent writers, guarded by a single `threading.Lock` inside `DeduplicationStore`.

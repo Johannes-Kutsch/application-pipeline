@@ -99,7 +99,9 @@ class SubprocessRunner(Protocol):
 
 
 def _default_runner(args: list[str], stdin: str) -> tuple[int, str, str]:
-    proc = subprocess.run(args, input=stdin, capture_output=True, text=True)
+    proc = subprocess.run(
+        args, input=stdin, capture_output=True, text=True, encoding="utf-8"
+    )
     return proc.returncode, proc.stdout, proc.stderr
 
 

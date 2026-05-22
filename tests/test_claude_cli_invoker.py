@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -9,6 +10,7 @@ from application_pipeline.llm.claude_cli import (
     ClaudeMalformedEnvelopeError,
     ClaudeResponse,
     ClaudeUsageLimitError,
+    _default_runner,
 )
 
 
@@ -412,3 +414,25 @@ def test_cli_error_carries_stdout_and_stderr():
         )
     assert exc_info.value.stdout == stdout_val
     assert exc_info.value.stderr == "oops"
+
+
+# --- UTF-8 encoding (regression: UnicodeEncodeError on Windows cp1252 hosts) ---
+
+
+def test_default_runner_uses_explicit_utf8_encoding():
+    """_default_runner must pass encoding='utf-8' to subprocess.run.
+
+    Without an explicit encoding, Python falls back to locale.getpreferredencoding()
+    which is cp1252 on German Windows hosts, causing UnicodeEncodeError for chars
+    like EM DASH (U+2014) that are outside the cp1252 range.
+    """
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = ""
+    mock_proc.stderr = ""
+    with patch(
+        "application_pipeline.llm.claude_cli.subprocess.run", return_value=mock_proc
+    ) as mock_run:
+        _default_runner(["claude"], "— em dash in prompt „isolation“")
+    _, kwargs = mock_run.call_args
+    assert kwargs.get("encoding") == "utf-8"

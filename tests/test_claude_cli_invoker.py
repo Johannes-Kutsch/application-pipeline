@@ -436,6 +436,7 @@ def test_default_runner_passes_non_cp1252_prompt_through_subprocess_as_utf8():
     arg_payload = "em dash in arg: —"
     echo_script = (
         "import sys; "
+        "sys.stdin.reconfigure(encoding='utf-8'); "
         "sys.stdout.reconfigure(encoding='utf-8'); "
         "sys.stdout.write(sys.argv[1] + '\\n' + sys.stdin.read())"
     )

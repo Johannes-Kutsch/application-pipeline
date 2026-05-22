@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,11 @@ def test_write_atomic_raises_oserror_when_parent_missing(tmp_path: Path) -> None
         write_atomic(target, b"data")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="chmod(0o555) does not block owner writes on a directory on Windows; "
+    "the perm bits only toggle the read-only file attribute, not directory ACLs.",
+)
 def test_write_atomic_raises_oserror_when_parent_readonly(tmp_path: Path) -> None:
     readonly_dir = tmp_path / "readonly"
     readonly_dir.mkdir()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,13 +11,18 @@ class RunLog:
     def __init__(self, logs_dir: Path) -> None:
         logs_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir = logs_dir
+        # Parser threads and the orchestrator main thread both append to the
+        # same per-component files. Without a lock, concurrent append-mode
+        # writes interleave on Windows and corrupt the JSONL stream.
+        self._write_lock = threading.Lock()
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _append(self, filename: str, text: str) -> None:
-        with (self.logs_dir / filename).open("a", encoding="utf-8") as f:
-            f.write(text)
+        with self._write_lock:
+            with (self.logs_dir / filename).open("a", encoding="utf-8") as f:
+                f.write(text)
 
     def _write_jsonl(self, filename: str, row: Mapping[str, object]) -> None:
         self._append(filename, json.dumps(dict(row)) + "\n")

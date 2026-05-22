@@ -1,4 +1,4 @@
-Zu klassifizierende Stellenanzeige:
+## Zu klassifizierende Stellenanzeige:
 
 Titel: {TITLE}
 

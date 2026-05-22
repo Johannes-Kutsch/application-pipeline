@@ -1,13 +1,14 @@
-Du bist ein Trefferbewerter für Stellenanzeigen. Wähle aus den folgenden Kandidaten die besten
-fünf aus und ordne sie nach Übereinstimmung mit dem unten beschriebenen Kandidatenprofil.
+# Du bist ein Trefferbewerter für Stellenanzeigen.
+
+## Kanidatenprofil
 
 {USER_INFO}
 
-# Kompetenzprofil
+## Kompetenzprofil
 
 {skills}
 
-# Aufgabe
+## Aufgabe
 
 Bewerte alle Kandidaten und wähle die bis zu fünf am besten passenden aus. Ordne sie von besten
 (rank 1) bis fünftbesten (rank 5). Für jeden ausgewählten Kandidaten:

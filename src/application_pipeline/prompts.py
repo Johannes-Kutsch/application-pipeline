@@ -10,11 +10,13 @@ class PromptError(Exception):
     pass
 
 
-CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"ITEMS"})
+CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"TITLE", "RAW_DESCRIPTION"})
 JUDGE_MATCH_SLOTS: frozenset[str] = frozenset({"skills", "raw_description"})
 JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"skills", "candidates"})
 
-_PACKAGE_CLASSIFY_SLOTS: frozenset[str] = frozenset({"ITEMS", "USER_INFO"})
+_PACKAGE_CLASSIFY_SLOTS: frozenset[str] = frozenset(
+    {"TITLE", "RAW_DESCRIPTION", "USER_INFO"}
+)
 _PACKAGE_JUDGE_SLOTS: frozenset[str] = frozenset(
     {"skills", "raw_description", "USER_INFO"}
 )

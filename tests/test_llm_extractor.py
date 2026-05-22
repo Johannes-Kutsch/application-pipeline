@@ -71,19 +71,17 @@ def test_relevance_verdict_is_frozen():
 # --- ClassifyItem ---
 
 
-def test_classify_item_fields():
-    item = ClassifyItem(
-        id="abc", title="Software Engineer", raw_description="Python role"
-    )
-    assert item.id == "abc"
+def test_classify_item_has_title_and_raw_description_only():
+    item = ClassifyItem(title="Software Engineer", raw_description="Python role")
     assert item.title == "Software Engineer"
     assert item.raw_description == "Python role"
+    assert not hasattr(item, "id")
 
 
 def test_classify_item_is_frozen():
-    item = ClassifyItem(id="x", title="T", raw_description="D")
+    item = ClassifyItem(title="T", raw_description="D")
     with pytest.raises(dataclasses.FrozenInstanceError):
-        item.id = "y"  # type: ignore[misc]
+        item.title = "changed"  # type: ignore[misc]
 
 
 # --- MatchVerdict ---
@@ -162,13 +160,10 @@ _ZERO_USAGE = CallUsage(
 
 
 class _StubExtractor:
-    def classify_relevance_batch(
-        self, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
-        return (
-            [RelevanceVerdict(in_domain=True, extract=_EMPTY_EXTRACT) for _ in items],
-            _ZERO_USAGE,
-        )
+    def classify_relevance(
+        self, item: ClassifyItem
+    ) -> tuple[RelevanceVerdict, CallUsage]:
+        return RelevanceVerdict(in_domain=True, extract=_EMPTY_EXTRACT), _ZERO_USAGE
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
@@ -180,7 +175,7 @@ def test_conforming_class_is_llm_extractor():
     assert isinstance(_StubExtractor(), LLMExtractor)
 
 
-def test_class_missing_classify_relevance_batch_is_not_llm_extractor():
+def test_class_missing_classify_relevance_is_not_llm_extractor():
     class _Bad:
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
@@ -190,12 +185,9 @@ def test_class_missing_classify_relevance_batch_is_not_llm_extractor():
     assert not isinstance(_Bad(), LLMExtractor)
 
 
-def test_stub_classify_relevance_batch_returns_relevance_verdicts():
+def test_stub_classify_relevance_returns_relevance_verdict():
     extractor: LLMExtractor = _StubExtractor()
-    items = [
-        ClassifyItem(id="0", title="Data Scientist", raw_description="some description")
-    ]
-    results, _ = extractor.classify_relevance_batch(items)
-    assert len(results) == 1
-    assert isinstance(results[0], RelevanceVerdict)
-    assert results[0].in_domain is True
+    item = ClassifyItem(title="Data Scientist", raw_description="some description")
+    result, _ = extractor.classify_relevance(item)
+    assert isinstance(result, RelevanceVerdict)
+    assert result.in_domain is True

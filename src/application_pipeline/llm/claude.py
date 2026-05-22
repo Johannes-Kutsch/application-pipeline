@@ -20,6 +20,7 @@ from .types import (
     ClassifyItem,
     ExtractorBatchMalformedError,
     ExtractorError,
+    ExtractorMalformedError,
     ExtractorMalformedJSONError,
     ExtractorUnreachableError,
     JudgeCandidate,
@@ -81,12 +82,12 @@ class _CallSite:
 
 
 _CLASSIFY_SITE = _CallSite(
-    call="classify_relevance_batch",
+    call="classify_relevance",
     component_id="llm_classify_relevance",
-    tag="verdicts",
+    tag="verdict",
     model=_CLASSIFY_MODEL,
     effort="",
-    protocol_error_cls=ExtractorBatchMalformedError,
+    protocol_error_cls=ExtractorMalformedError,
 )
 
 _JUDGE_TOP_N_SITE = _CallSite(
@@ -115,19 +116,19 @@ class ClaudeExtractor:
         self._invoker = _invoker or ClaudeCliInvoker(cli_path=config.claude_cli_path)
         self._skills_block = "\n".join(f"- {s}" for s in search_terms.skills)
 
-    def classify_relevance_batch(
-        self, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
-        items_block = self._format_classify_items(items)
-        prompt = self._prompts.classify_relevance.render(ITEMS=items_block)
+    def classify_relevance(
+        self, item: ClassifyItem
+    ) -> tuple[RelevanceVerdict, CallUsage]:
+        prompt = self._prompts.classify_relevance.render(
+            TITLE=item.title, RAW_DESCRIPTION=item.raw_description
+        )
         parsed, response = self._invoke(
             _CLASSIFY_SITE,
             prompt,
-            {"item_ids": [item.id for item in items]},
-            batch_size=len(items),
+            {},
         )
         usage = self._usage_from(response)
-        return self._parse_batch_response(parsed, items), usage
+        return self._parse_single_response(parsed), usage
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
@@ -158,8 +159,6 @@ class ClaudeExtractor:
         site: _CallSite,
         prompt: str,
         extra: dict[str, object],
-        *,
-        batch_size: int | None = None,
     ) -> tuple[Any, ClaudeResponse]:
         t0 = time.monotonic()
         try:
@@ -202,29 +201,27 @@ class ClaudeExtractor:
                 f"{site.call}: {exc.kind}: <{site.tag}> block missing or malformed"
             ) from exc
 
-        transcript: dict[str, object] = {
-            "call": site.call,
-            "prompt": prompt,
-            "raw_response": response.raw_response,
-            "usage": {
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-                "cache_read_tokens": response.usage.cache_read_tokens,
+        self._run_log.transcript(
+            site.component_id,
+            {
+                "call": site.call,
+                "prompt": prompt,
+                "raw_response": response.raw_response,
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "cache_read_tokens": response.usage.cache_read_tokens,
+                },
+                "cost_usd": response.cost_usd,
+                "duration_s": response.duration_s,
             },
-            "cost_usd": response.cost_usd,
-            "duration_s": response.duration_s,
-        }
-        if batch_size is not None:
-            transcript["batch_size"] = batch_size
-        self._run_log.transcript(site.component_id, transcript)
-
-        record_kwargs: dict[str, object] = {
-            "cost_usd": response.cost_usd,
-            "duration_s": f"{response.duration_s:.3f}",
-        }
-        if batch_size is not None:
-            record_kwargs["batch_size"] = batch_size
-        self._run_log.event(site.component_id, site.call, **record_kwargs)
+        )
+        self._run_log.event(
+            site.component_id,
+            site.call,
+            cost_usd=response.cost_usd,
+            duration_s=f"{response.duration_s:.3f}",
+        )
 
         return parsed, response
 
@@ -260,6 +257,12 @@ class ClaudeExtractor:
         if kind is not None:
             entry["envelope_error_class"] = kind
         self._run_log.transcript(site.component_id, entry)
+        self._run_log.event(
+            site.component_id,
+            site.call,
+            status=status,
+            duration_s=f"{duration_s:.3f}",
+        )
 
     @staticmethod
     def _usage_from(response: ClaudeResponse) -> CallUsage:
@@ -368,68 +371,27 @@ class ClaudeExtractor:
         return verdicts
 
     @staticmethod
-    def _format_classify_items(items: list[ClassifyItem]) -> str:
-        parts: list[str] = []
-        for item in items:
-            parts.append(
-                f"[Item id={item.id}]\nTitle: {item.title}\nDescription: {item.raw_description}"
+    def _parse_single_response(parsed_result: object) -> RelevanceVerdict:
+        if not isinstance(parsed_result, dict):
+            raise ExtractorMalformedError(
+                f"classify_relevance: expected JSON object, got {type(parsed_result).__name__}"
             )
-        return "\n\n".join(parts)
+        in_domain = parsed_result.get("in_domain")
+        if not isinstance(in_domain, bool):
+            raise ExtractorMalformedError(
+                f"classify_relevance: in_domain must be bool, got {in_domain!r}"
+            )
+        if not in_domain:
+            return RelevanceVerdict(in_domain=False)
+        extract = ClaudeExtractor._parse_structured_extract(parsed_result)
+        return RelevanceVerdict(in_domain=True, extract=extract)
 
     @staticmethod
-    def _parse_batch_response(
-        parsed_result: object, items: list[ClassifyItem]
-    ) -> list[RelevanceVerdict]:
-        if not isinstance(parsed_result, list):
-            raise ExtractorBatchMalformedError(
-                f"classify_relevance_batch: expected JSON array, got {type(parsed_result).__name__}"
-            )
-        if len(parsed_result) != len(items):
-            raise ExtractorBatchMalformedError(
-                f"classify_relevance_batch: length mismatch — "
-                f"sent {len(items)} items, got {len(parsed_result)} verdicts"
-            )
-
-        input_ids = [item.id for item in items]
-        verdicts_by_id: dict[str, RelevanceVerdict] = {}
-        for entry in parsed_result:
-            if not isinstance(entry, dict):
-                raise ExtractorBatchMalformedError(
-                    f"classify_relevance_batch: verdict entry is not a dict: {entry!r}"
-                )
-            entry_id = entry.get("id")
-            if entry_id is None or entry_id not in input_ids:
-                raise ExtractorBatchMalformedError(
-                    f"classify_relevance_batch: unknown or missing id in verdict: {entry_id!r}"
-                )
-            if entry_id in verdicts_by_id:
-                raise ExtractorBatchMalformedError(
-                    f"classify_relevance_batch: duplicate id in response: {entry_id!r}"
-                )
-            in_domain = entry.get("in_domain")
-            if not isinstance(in_domain, bool):
-                raise ExtractorBatchMalformedError(
-                    f"classify_relevance_batch: in_domain must be bool for id {entry_id!r}"
-                )
-            extract = (
-                ClaudeExtractor._parse_structured_extract(entry_id, entry)
-                if in_domain
-                else None
-            )
-            verdicts_by_id[entry_id] = RelevanceVerdict(
-                in_domain=in_domain, extract=extract
-            )
-
-        return [verdicts_by_id[item.id] for item in items]
-
-    @staticmethod
-    def _parse_structured_extract(
-        entry_id: str, entry: dict[str, object]
-    ) -> StructuredExtract:
+    def _parse_structured_extract(entry: dict[str, object]) -> StructuredExtract:
         raw = entry.get("extract")
         if not isinstance(raw, dict):
-            raise ExtractorBatchMalformedError(
-                f"classify_relevance_batch: missing or invalid extract for in-domain id {entry_id!r}"
+            raise ExtractorMalformedError(
+                "classify_relevance: missing or invalid extract for in-domain verdict"
             )
         try:
             return StructuredExtract(
@@ -442,6 +404,6 @@ class ClaudeExtractor:
                 notable_caveats=str(raw["notable_caveats"]),
             )
         except (KeyError, TypeError) as exc:
-            raise ExtractorBatchMalformedError(
-                f"classify_relevance_batch: malformed extract for in-domain id {entry_id!r}: {exc}"
+            raise ExtractorMalformedError(
+                f"classify_relevance: malformed extract: {exc}"
             ) from exc

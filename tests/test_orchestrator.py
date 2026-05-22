@@ -18,7 +18,6 @@ from application_pipeline.dedup import DedupStoreError
 from application_pipeline.llm import (
     CallUsage,
     ClassifyItem,
-    ExtractorBatchMalformedError,
     ExtractorError,
     ExtractorUnreachableError,
     JudgeCandidate,
@@ -122,8 +121,8 @@ _STUB_EXTRACT = StructuredExtract(
 
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = lambda candidates: (
@@ -746,17 +745,17 @@ _FAKE_JUDGE_USAGE = CallUsage(
 class _FakeExtractor:
     """Deterministic extractor: rejects Job 1 at classify, returns fixed tiers at judge."""
 
-    def classify_relevance_batch(
-        self, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
-        verdicts = [
+    def classify_relevance(
+        self, item: ClassifyItem
+    ) -> tuple[RelevanceVerdict, CallUsage]:
+        in_domain = item.title != "Job 1"
+        return (
             RelevanceVerdict(
-                in_domain=(item.title != "Job 1"),
-                extract=_STUB_EXTRACT if item.title != "Job 1" else None,
-            )
-            for item in items
-        ]
-        return verdicts, _FAKE_CLASSIFY_USAGE
+                in_domain=in_domain,
+                extract=_STUB_EXTRACT if in_domain else None,
+            ),
+            _FAKE_CLASSIFY_USAGE,
+        )
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
@@ -856,18 +855,16 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     assert numbers_after_second == numbers_after_first
 
 
-def test_classify_batch_precedes_judge_batch(tmp_path: Path) -> None:
-    """All classify_relevance_batch calls complete before any judge_top_n call."""
+def test_classify_precedes_judge(tmp_path: Path) -> None:
+    """All classify_relevance calls complete before any judge_top_n call."""
     call_log: list[str] = []
 
     class _InstrumentedExtractor:
-        def classify_relevance_batch(
-            self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            call_log.extend(["classify"] * len(items))
-            return [
-                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-            ], _ZERO_USAGE
+        def classify_relevance(
+            self, item: ClassifyItem
+        ) -> tuple[RelevanceVerdict, CallUsage]:
+            call_log.append("classify")
+            return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
@@ -968,24 +965,22 @@ def _two_stub_config(tmp_path: Path) -> Path:
     )
 
 
-def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> None:
-    """ExtractorError on classify_relevance_batch: NO position in batch marked seen, run continues with next batch."""
+def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> None:
+    """ExtractorError on classify_relevance: the failing position is not marked seen; run continues."""
     seen_path = tmp_path / ".seen.json"
 
     call_count = [0]
 
-    def _batch_side_effect(
-        items: list[ClassifyItem],
-    ) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _classify_side_effect(
+        item: ClassifyItem,
+    ) -> tuple[RelevanceVerdict, CallUsage]:
         call_count[0] += 1
         if call_count[0] == 1:
-            raise ExtractorError("classify batch boom")
-        return [
-            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-        ], _ZERO_USAGE
+            raise ExtractorError("classify boom")
+        return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch_side_effect
+    ext.classify_relevance.side_effect = _classify_side_effect
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
@@ -1000,28 +995,14 @@ def test_extractor_error_on_classify_leaves_positions_unseen(tmp_path: Path) -> 
         _ZERO_USAGE,
     )
 
-    # Use batch_size=1 so each position is its own batch
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-    # Write CLAUDE_CLASSIFY_BATCH_SIZE=1 into config
-    config_text = config_path.read_text(encoding="utf-8")
-    config_path.write_text(
-        config_text + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 1\n", encoding="utf-8"
-    )
-
     summary = run(
-        config_path,
+        _two_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # First batch errored (1 position), second batch succeeded (1 position written)
+    # First position errored, second succeeded (1 position written)
     assert summary.errored == 1
     assert summary.written == 1
 
@@ -1035,8 +1016,8 @@ def test_extractor_error_on_judge_leaves_status_in_domain(tmp_path: Path) -> Non
     seen_path = tmp_path / ".seen.json"
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = ExtractorError("judge boom")
@@ -1393,8 +1374,8 @@ def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
     seen_path = tmp_path / ".seen.json"
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = ExtractorError("judge boom")
@@ -1431,13 +1412,11 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
             return Position(stub=stub, raw_description="fresh description from rerun")
 
     class _TrackingExtractor:
-        def classify_relevance_batch(
-            self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            classify_calls.extend(items)
-            return [
-                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-            ], _ZERO_USAGE
+        def classify_relevance(
+            self, item: ClassifyItem
+        ) -> tuple[RelevanceVerdict, CallUsage]:
+            classify_calls.append(item)
+            return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
@@ -1570,8 +1549,8 @@ def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
     )
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = ExtractorError("judge boom again")
@@ -1609,12 +1588,10 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
             return Position(stub=stub, raw_description=desc)
 
     class _CapturingExtractor:
-        def classify_relevance_batch(
-            self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            return [
-                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-            ], _ZERO_USAGE
+        def classify_relevance(
+            self, item: ClassifyItem
+        ) -> tuple[RelevanceVerdict, CallUsage]:
+            return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
@@ -1800,8 +1777,8 @@ def test_judge_pending_judge_failure_stays_in_domain_on_rerun(
     )
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = ExtractorError("judge boom")
@@ -2062,9 +2039,9 @@ def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
     results_dir = tmp_path / "results"
 
     class _CrashingExtractor:
-        def classify_relevance_batch(
-            self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict], CallUsage]:
+        def classify_relevance(
+            self, item: ClassifyItem
+        ) -> tuple[RelevanceVerdict, CallUsage]:
             raise RuntimeError("unexpected crash escaping main path")
 
         def judge_top_n(
@@ -2464,34 +2441,27 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
 # ---------------------------------------------------------------------------
 
 
-def _batch_size_config(tmp_path: Path, batch_size: int) -> Path:
-    config_path = _write_config(
+def _batch_size_config(tmp_path: Path, batch_size: int = 1) -> Path:
+    # batch_size is ignored — solo calls per position, no batching
+    return _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
     )
-    config_text = config_path.read_text(encoding="utf-8")
-    config_path.write_text(
-        config_text + f"\nCLAUDE_CLASSIFY_BATCH_SIZE = {batch_size}\n",
-        encoding="utf-8",
-    )
-    return config_path
 
 
-def test_batch_flush_at_size(tmp_path: Path) -> None:
-    """batch_size=2 with 4 positions → classify_relevance_batch called twice with 2 items each."""
-    batch_sizes_seen: list[int] = []
+def test_four_positions_each_get_solo_classify_call(tmp_path: Path) -> None:
+    """4 positions → classify_relevance called 4 times, once per position."""
+    call_count = [0]
 
-    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
-        batch_sizes_seen.append(len(items))
-        return [
-            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-        ], _ZERO_USAGE
+    def _classify(item: ClassifyItem) -> tuple[RelevanceVerdict, CallUsage]:
+        call_count[0] += 1
+        return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
+    ext.classify_relevance.side_effect = _classify
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
@@ -2527,15 +2497,14 @@ def test_batch_flush_at_size(tmp_path: Path) -> None:
             return Position(stub=stub, raw_description="good description")
 
     summary = run(
-        _batch_size_config(tmp_path, 2),
+        _batch_size_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
     )
 
     assert summary.written == 4
-    # With batch_size=2 and 4 items: 2 batches
-    assert batch_sizes_seen == [2, 2]
+    assert call_count[0] == 4
 
 
 def test_parser_classify_overlap(tmp_path: Path) -> None:
@@ -2596,11 +2565,11 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
     )
 
 
-def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) -> None:
-    """_ClassifyThread happy path: 6 survivors, batch_size=2 → 3 batches total.
+def test_classify_thread_six_positions_happy_path(tmp_path: Path) -> None:
+    """_ClassifyThread happy path: 6 survivors → 6 solo classify calls.
 
     All positions are in-domain and judged green.  Asserts set-equality on the
-    URLs that appear in green.md and on the 'kept' members of .seen.json.
+    URLs that appear in daily results and on the 'kept' members of .seen.json.
     """
     seen_path = tmp_path / ".seen.json"
     results_dir = tmp_path / "results"
@@ -2628,13 +2597,13 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
             return Position(stub=stub, raw_description="Software engineering role.")
 
     summary = run(
-        _batch_size_config(tmp_path, 2),
+        _batch_size_config(tmp_path),
         extractor=_stub_extractor(),
         parser_registry=lambda _: _SixStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # 6 positions → 3 batches of 2; judge_top_n caps at 5
+    # 6 positions → 6 solo calls; judge_top_n caps at 5
     assert summary.written == 5
     assert summary.classify_items == 6
     assert summary.classifier_dropped == 0
@@ -2653,18 +2622,16 @@ def test_classify_thread_six_positions_three_batch_happy_path(tmp_path: Path) ->
     assert len(urls_in_content) == 5
 
 
-def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
-    """Mixed-language listings are all accumulated in a single buffer and classified together."""
-    batch_sizes: list[int] = []
+def test_mixed_listing_set_all_classified(tmp_path: Path) -> None:
+    """Mixed-language listings are all classified individually."""
+    call_count = [0]
 
-    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
-        batch_sizes.append(len(items))
-        return [
-            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-        ], _ZERO_USAGE
+    def _classify(item: ClassifyItem) -> tuple[RelevanceVerdict, CallUsage]:
+        call_count[0] += 1
+        return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
+    ext.classify_relevance.side_effect = _classify
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
@@ -2700,15 +2667,14 @@ def test_mixed_listing_set_routed_through_single_buffer(tmp_path: Path) -> None:
             return Position(stub=stub, raw_description="Software engineering role.")
 
     summary = run(
-        _batch_size_config(tmp_path, 100),
+        _batch_size_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
     )
 
     assert summary.written == 4
-    # All 4 positions accumulated in a single batch (batch_size=100)
-    assert batch_sizes == [4]
+    assert call_count[0] == 4
 
 
 def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
@@ -2717,17 +2683,15 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     _OFF_URL = "https://offdomain.example/0"
     _ON_URL = "https://offdomain.example/1"
 
-    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
-        # First item off-domain, second in-domain
-        return [
+    def _classify(item: ClassifyItem) -> tuple[RelevanceVerdict, CallUsage]:
+        in_domain = item.raw_description != "off domain content"
+        return (
             RelevanceVerdict(
-                in_domain=(item.raw_description != "off domain content"),
-                extract=_STUB_EXTRACT
-                if item.raw_description != "off domain content"
-                else None,
-            )
-            for item in items
-        ], _ZERO_USAGE
+                in_domain=in_domain,
+                extract=_STUB_EXTRACT if in_domain else None,
+            ),
+            _ZERO_USAGE,
+        )
 
     judge_candidate_ids: list[list[str]] = []
 
@@ -2747,7 +2711,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         ], _ZERO_USAGE
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
+    ext.classify_relevance.side_effect = _classify
     ext.judge_top_n.side_effect = _judge_top_n
 
     class _TwoLangParser(_StubParserBase):
@@ -2769,7 +2733,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
             return Position(stub=stub, raw_description="software engineering role")
 
     summary = run(
-        _batch_size_config(tmp_path, 100),
+        _batch_size_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoLangParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
@@ -2786,22 +2750,22 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     assert seen_data[_OFF_URL]["status"] == "out_of_domain"
 
 
-def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
-    """ExtractorBatchMalformedError: none of the batch items are marked seen; run continues."""
+def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
+    """ExtractorError on classify_relevance: the failing position is not marked seen; run continues."""
     seen_path = tmp_path / ".seen.json"
 
     call_count = [0]
 
-    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _classify(item: ClassifyItem) -> tuple[RelevanceVerdict, CallUsage]:
         call_count[0] += 1
         if call_count[0] == 1:
-            raise ExtractorBatchMalformedError("length mismatch")
-        return [
-            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-        ], _ZERO_USAGE
+            from application_pipeline.llm import ExtractorMalformedError
+
+            raise ExtractorMalformedError("bad verdict")
+        return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
+    ext.classify_relevance.side_effect = _classify
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
@@ -2816,26 +2780,14 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
         _ZERO_USAGE,
     )
 
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-    config_text = config_path.read_text(encoding="utf-8")
-    config_path.write_text(
-        config_text + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 1\n", encoding="utf-8"
-    )
-
     summary = run(
-        config_path,
+        _two_stub_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # First batch failed (1 item), second succeeded (1 item written)
+    # First call failed (1 item), second succeeded (1 item written)
     assert summary.errored == 1
     assert summary.written == 1
 
@@ -2846,23 +2798,21 @@ def test_batch_malformed_no_items_marked_seen(tmp_path: Path) -> None:
     assert _ERR_URLS[0] not in seen_data
 
 
-def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
+def test_classify_failure_logs_to_classify_relevance_events(
     tmp_path: Path,
 ) -> None:
-    """ExtractorBatchMalformedError is logged as batch_abandoned (not batch_error) to classify_relevance.log."""
+    """ExtractorError on classify_relevance is logged to classify_relevance.events.jsonl."""
     import application_pipeline.parser_log as pl
+    from application_pipeline.llm import ExtractorMalformedError
 
     logs_dir = tmp_path / "synched" / "logs"
     run_log = pl.RunLog(logs_dir)
 
-    def _batch(items: list[ClassifyItem]) -> list[RelevanceVerdict]:
-        raise ExtractorBatchMalformedError("id mismatch")
-
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
+    ext.classify_relevance.side_effect = ExtractorMalformedError("bad verdict")
 
     run(
-        _batch_size_config(tmp_path, 100),
+        _batch_size_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
@@ -2871,73 +2821,57 @@ def test_batch_malformed_logs_batch_abandoned_to_classify_relevance_log(
 
     events_file = logs_dir / "llm_classify_relevance.events.jsonl"
     assert events_file.exists(), (
-        "classify_relevance.events.jsonl must be created on batch error"
+        "classify_relevance.events.jsonl must be created on classify error"
     )
-    content = events_file.read_text(encoding="utf-8")
-    assert "batch_abandoned" in content
-    assert "batch_error" not in content
 
 
-def test_classify_batch_abandoned_log_includes_urls(tmp_path: Path) -> None:
-    """batch_abandoned event includes the URLs of every position in the failing batch."""
+def test_classify_failure_writes_one_event_per_position(tmp_path: Path) -> None:
+    """ExtractorError on classify_relevance: one event row per failing position."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
     run_log = pl.RunLog(logs_dir)
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
+    ext.classify_relevance.side_effect = ExtractorError("classify boom")
 
     run(
-        _batch_size_config(tmp_path, 100),
+        _batch_size_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         run_log=run_log,
     )
 
+    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
     events_rows = [
         json.loads(line)
-        for line in (logs_dir / "llm_classify_relevance.events.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
+        for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
-    abandoned = [row for row in events_rows if row.get("event") == "batch_abandoned"]
-    assert abandoned, "expected at least one batch_abandoned event"
-    urls_in_log = abandoned[0].get("urls", [])
-    assert _ERR_URLS[0] in urls_in_log, f"expected URL {_ERR_URLS[0]!r} in urls field"
-    assert _ERR_URLS[1] in urls_in_log, f"expected URL {_ERR_URLS[1]!r} in urls field"
+    # 2 positions → 2 classify_relevance failure events (one per position)
+    assert len(events_rows) == 2
 
 
-def test_classify_error_log_includes_forensic_fields(tmp_path: Path) -> None:
-    """ExtractorUnreachableError with forensics → returncode and stderr_excerpt in classify_relevance.log."""
+def test_classify_failure_event_written_on_extractor_error(tmp_path: Path) -> None:
+    """ExtractorError on classify_relevance: events file exists (logged by classify thread)."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
     run_log = pl.RunLog(logs_dir)
 
-    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
-        raise ExtractorUnreachableError("cli gone", returncode=1, stderr="no such file")
-
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
+    ext.classify_relevance.side_effect = ExtractorError("classify gone")
 
     run(
-        _batch_size_config(tmp_path, 100),
+        _batch_size_config(tmp_path),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         run_log=run_log,
     )
 
-    events_rows = [
-        json.loads(line)
-        for line in (logs_dir / "llm_classify_relevance.events.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    assert any(row.get("returncode") == 1 for row in events_rows)
-    assert any(row.get("stderr_excerpt") == "no such file" for row in events_rows)
+    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
+    assert events_file.exists(), "llm_classify_relevance.events.jsonl must be written"
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
@@ -2948,8 +2882,8 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     run_log = pl.RunLog(logs_dir)
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = ExtractorUnreachableError(
@@ -3044,13 +2978,13 @@ def test_run_summary_carries_token_and_cost_totals(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # 5 items pass prefilter → 1 classify batch
+    # 5 items pass prefilter → 5 solo classify calls
     assert summary.classify_items == 5
-    # 1 classify batch × 10 input tokens + 1 judge_top_n call × 8 input tokens
-    assert summary.claude_input_tokens == 10 + 8
-    assert summary.claude_output_tokens == 5 + 4
-    assert summary.claude_cache_read_tokens == 2 + 1
-    assert abs(summary.claude_cost_usd - (0.001 + 0.0008)) < 1e-9
+    # 5 classify calls × 10 input tokens + 1 judge_top_n call × 8 input tokens
+    assert summary.claude_input_tokens == 5 * 10 + 8
+    assert summary.claude_output_tokens == 5 * 5 + 4
+    assert summary.claude_cache_read_tokens == 5 * 2 + 1
+    assert abs(summary.claude_cost_usd - (5 * 0.001 + 0.0008)) < 1e-9
 
 
 def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
@@ -3960,12 +3894,10 @@ def test_non_quota_worker_exception_writes_failure_report(
     monkeypatch.setattr("sys.argv", ["app", "run"])
 
     class _AbortingExtractor:
-        def classify_relevance_batch(
-            self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            return [
-                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-            ], _ZERO_USAGE
+        def classify_relevance(
+            self, item: ClassifyItem
+        ) -> tuple[RelevanceVerdict, CallUsage]:
+            return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
@@ -4024,7 +3956,7 @@ def test_non_quota_worker_exception_writes_failure_report(
 def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     """ExtractorError on classify: classify_relevance row body is refreshed with calls_failed=N items_failed=M."""
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
+    ext.classify_relevance.side_effect = ExtractorError("classify boom")
 
     display = FakeStatusDisplay()
 
@@ -4039,15 +3971,15 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     classify_bodies = display.body_updates_for("llm_classify_relevance")
     assert classify_bodies, "expected at least one classify_relevance body update"
     last_body = classify_bodies[-1]
-    assert "calls_failed=1" in last_body
+    assert "calls_failed=2" in last_body
     assert "items_failed=2" in last_body
 
 
 def test_judge_error_written_is_zero(tmp_path: Path) -> None:
     """ExtractorError on judge_top_n: no positions written, run completes without raising."""
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = ExtractorError("judge boom")
@@ -4089,8 +4021,8 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
 def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
     """judge_top_n success: llm_judge_match body shows 1/1 calls with no error tokens."""
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = lambda candidates: (
@@ -4158,17 +4090,17 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_classify_abandoned_counters_logged_on_batch_failure(
+def test_classify_failure_logs_events_per_position(
     tmp_path: Path,
 ) -> None:
-    """A run with one failing classify batch logs batch_abandoned to classify_relevance.events.jsonl."""
+    """A failing classify_relevance call logs one event per position to classify_relevance.events.jsonl."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "logs"
     run_log = pl.RunLog(logs_dir)
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
+    ext.classify_relevance.side_effect = ExtractorError("classify boom")
 
     run(
         _two_stub_config(tmp_path),
@@ -4184,9 +4116,8 @@ def test_classify_abandoned_counters_logged_on_batch_failure(
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    abandoned = [r for r in events_rows if r.get("event") == "batch_abandoned"]
-    assert len(abandoned) == 1
-    assert abandoned[0]["batch_size"] == 2
+    # 2 positions → 2 failure events
+    assert len(events_rows) == 2
 
 
 def test_judge_top_n_failure_leaves_no_daily_file(
@@ -4198,8 +4129,8 @@ def test_judge_top_n_failure_leaves_no_daily_file(
     today = datetime.now(timezone.utc).date().isoformat()
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = ExtractorError("judge boom")
@@ -4221,8 +4152,8 @@ def test_judge_top_n_failure_leaves_no_daily_file(
         )
 
 
-def test_clean_run_writes_no_abandoned_events(tmp_path: Path) -> None:
-    """A clean run (no LLM failures) does not log any batch_abandoned events."""
+def test_clean_run_writes_classify_success_events(tmp_path: Path) -> None:
+    """A clean run logs one classify_relevance success event per position."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "logs"
@@ -4237,19 +4168,19 @@ def test_clean_run_writes_no_abandoned_events(tmp_path: Path) -> None:
     )
 
     events_file = logs_dir / "llm_classify_relevance.events.jsonl"
-    if events_file.exists():
-        rows = [
-            json.loads(line)
-            for line in events_file.read_text(encoding="utf-8").splitlines()
-        ]
-        abandoned = [r for r in rows if r.get("event") == "batch_abandoned"]
-        assert abandoned == [], f"no batch_abandoned events on clean run: {abandoned}"
+    assert events_file.exists()
+    rows = [
+        json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    success_rows = [r for r in rows if r.get("event") == "classify_relevance"]
+    assert len(success_rows) == 2
 
 
-def test_abandoned_classify_batch_does_not_set_degraded_reason(tmp_path: Path) -> None:
-    """An abandoned classify batch does not cause the run to set degraded_reason."""
+def test_classify_failure_does_not_set_degraded_reason(tmp_path: Path) -> None:
+    """A classify_relevance failure does not cause the run to set degraded_reason."""
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = ExtractorError("classify boom")
+    ext.classify_relevance.side_effect = ExtractorError("classify boom")
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -4433,7 +4364,7 @@ def test_quota_classify_retries_and_completes(
 
     call_count = [0]
 
-    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _classify(item: ClassifyItem) -> tuple[RelevanceVerdict, CallUsage]:
         call_count[0] += 1
         if call_count[0] == 1:
             raise ClaudeUsageLimitError(
@@ -4443,12 +4374,10 @@ def test_quota_classify_retries_and_completes(
                 stderr="subscription cap",
                 envelope=None,
             )
-        return [
-            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-        ], _ZERO_USAGE
+        return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
+    ext.classify_relevance.side_effect = _classify
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
@@ -4487,7 +4416,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
 
     call_count = [0]
 
-    def _batch(items: list[ClassifyItem]) -> tuple[list[RelevanceVerdict], CallUsage]:
+    def _classify(item: ClassifyItem) -> tuple[RelevanceVerdict, CallUsage]:
         call_count[0] += 1
         if call_count[0] == 1:
             raise ClaudeUsageLimitError(
@@ -4497,12 +4426,10 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
                 stderr="cap",
                 envelope=None,
             )
-        return [
-            RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-        ], _ZERO_USAGE
+        return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = _batch
+    ext.classify_relevance.side_effect = _classify
     ext.judge_top_n.side_effect = lambda candidates: (
         [
             MatchVerdict(
@@ -4570,8 +4497,8 @@ def test_quota_judge_retries_and_completes(
         ], _ZERO_USAGE
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.side_effect = _judge_top_n
@@ -4625,8 +4552,8 @@ def test_successful_run_writes_dated_daily_file(tmp_path: Path) -> None:
     today = datetime.now(timezone.utc).date().isoformat()
 
     ext = MagicMock()
-    ext.classify_relevance_batch.side_effect = lambda items: (
-        [RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items],
+    ext.classify_relevance.side_effect = lambda item: (
+        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
         _ZERO_USAGE,
     )
     ext.judge_top_n.return_value = (
@@ -4800,12 +4727,10 @@ def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge
             )
 
     class _JudgeTrackingExtractor:
-        def classify_relevance_batch(
-            self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict], CallUsage]:
-            return [
-                RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT) for _ in items
-            ], _ZERO_USAGE
+        def classify_relevance(
+            self, item: ClassifyItem
+        ) -> tuple[RelevanceVerdict, CallUsage]:
+            return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
 
         def judge_top_n(
             self, candidates: list[JudgeCandidate]

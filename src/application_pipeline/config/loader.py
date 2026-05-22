@@ -24,6 +24,7 @@ _REMOVED_FIELDS = (
     "CLASSIFY_RELEVANCE_PROMPT",
     "JUDGE_MATCH_PROMPT",
     "USER_INFO_DIR",
+    "CLAUDE_CLASSIFY_BATCH_SIZE",
 )
 
 
@@ -53,10 +54,6 @@ def load(path: pathlib.Path) -> Config:
 
     user_info_dir = data_paths.user_info_dir
 
-    claude_classify_batch_size = int(getattr(module, "CLAUDE_CLASSIFY_BATCH_SIZE", 100))
-    if claude_classify_batch_size < 1:
-        raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be >= 1")
-
     raw_max_age = getattr(module, "MAX_LISTING_AGE_DAYS", 180)
     if isinstance(raw_max_age, bool) or not isinstance(raw_max_age, int):
         raise ConfigError("MAX_LISTING_AGE_DAYS must be an integer")
@@ -80,7 +77,6 @@ def load(path: pathlib.Path) -> Config:
         layout=layout,
         user_info_dir=user_info_dir,
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
-        claude_classify_batch_size=claude_classify_batch_size,
         max_listing_age_days=max_listing_age_days,
     )
     _validate(config)

@@ -149,9 +149,6 @@ class ClaudeCliInvoker:
             "json",
             "--model",
             model,
-            "--bare",
-            "--tools",
-            "",
             "--no-session-persistence",
         ]
         if effort:

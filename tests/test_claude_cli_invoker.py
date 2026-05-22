@@ -298,19 +298,18 @@ def test_call_without_model_raises_type_error():
         _invoker(_runner(stdout=_envelope(result={"ok": True}))).call("p")  # type: ignore[call-arg]
 
 
-# --- bare-mode wire shape (ADR-0038) ---
+# --- wire shape (ADR-0039 reverts --bare and --tools from ADR-0038) ---
 
 
-def test_call_always_includes_bare_and_no_tools_and_no_session_persistence():
+def test_call_omits_bare_and_tools_but_keeps_no_session_persistence():
     calls: list[tuple[list[str], str]] = []
     _invoker(_runner(stdout=_envelope(result={"ok": True}), calls=calls)).call(
         "p", model="haiku"
     )
     args, _ = calls[0]
-    assert "--bare" in args
+    assert "--bare" not in args
+    assert "--tools" not in args
     assert "--no-session-persistence" in args
-    assert "--tools" in args
-    assert args[args.index("--tools") + 1] == ""
 
 
 def test_call_with_system_prompt_passes_it_via_flag():

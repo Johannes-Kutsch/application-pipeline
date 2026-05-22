@@ -35,7 +35,6 @@ from application_pipeline.llm.claude_cli import (
 )
 from application_pipeline.prompts import (
     CLASSIFY_RELEVANCE_SLOTS,
-    JUDGE_MATCH_SLOTS,
     JUDGE_TOP_N_SYSTEM_SLOTS,
     JUDGE_TOP_N_USER_SLOTS,
     PromptTemplate,
@@ -76,9 +75,6 @@ def _prompts(
         classify_relevance=SplitPromptTemplate(
             system=PromptTemplate("system", frozenset()),
             user=PromptTemplate(classify, CLASSIFY_RELEVANCE_SLOTS),
-        ),
-        judge_match=PromptTemplate(
-            "judge: {skills} {raw_description}", JUDGE_MATCH_SLOTS
         ),
         judge_top_n=SplitPromptTemplate(
             system=PromptTemplate("{skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
@@ -195,9 +191,6 @@ def test_classify_relevance_passes_system_half_via_system_prompt(
         classify_relevance=SplitPromptTemplate(
             system=PromptTemplate("SYS_BODY", frozenset()),
             user=PromptTemplate("{TITLE}|{RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS),
-        ),
-        judge_match=PromptTemplate(
-            "judge: {skills} {raw_description}", JUDGE_MATCH_SLOTS
         ),
         judge_top_n=SplitPromptTemplate(
             system=PromptTemplate("{skills}", JUDGE_TOP_N_SYSTEM_SLOTS),

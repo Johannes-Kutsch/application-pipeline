@@ -11,13 +11,9 @@ class PromptError(Exception):
 
 
 CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"TITLE", "RAW_DESCRIPTION"})
-JUDGE_MATCH_SLOTS: frozenset[str] = frozenset({"skills", "raw_description"})
 
 _PACKAGE_CLASSIFY_SYSTEM_SLOTS: frozenset[str] = frozenset({"USER_INFO"})
 _PACKAGE_CLASSIFY_USER_SLOTS: frozenset[str] = frozenset({"TITLE", "RAW_DESCRIPTION"})
-_PACKAGE_JUDGE_SLOTS: frozenset[str] = frozenset(
-    {"skills", "raw_description", "USER_INFO"}
-)
 _PACKAGE_JUDGE_TOP_N_SYSTEM_SLOTS: frozenset[str] = frozenset({"USER_INFO", "skills"})
 _PACKAGE_JUDGE_TOP_N_USER_SLOTS: frozenset[str] = frozenset({"candidates"})
 
@@ -56,7 +52,6 @@ class SplitPromptTemplate:
 @dataclass(frozen=True)
 class Prompts:
     classify_relevance: SplitPromptTemplate
-    judge_match: PromptTemplate
     judge_top_n: SplitPromptTemplate
 
 
@@ -79,13 +74,6 @@ def load_prompts(config: Config) -> Prompts:
         CLASSIFY_RELEVANCE_SLOTS,
         classify_user_info,
     )
-    judge = _load_package_template(
-        pkg,
-        "judge_match",
-        _PACKAGE_JUDGE_SLOTS,
-        JUDGE_MATCH_SLOTS,
-        judge_user_info,
-    )
     judge_top_n = _load_split_template(
         pkg,
         "judge_top_n",
@@ -95,9 +83,7 @@ def load_prompts(config: Config) -> Prompts:
         JUDGE_TOP_N_USER_SLOTS,
         judge_user_info,
     )
-    return Prompts(
-        classify_relevance=classify, judge_match=judge, judge_top_n=judge_top_n
-    )
+    return Prompts(classify_relevance=classify, judge_top_n=judge_top_n)
 
 
 def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:
@@ -109,28 +95,6 @@ def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:
     if not text.strip():
         raise PromptError(f"{path}: file is empty")
     return text.rstrip("\n")
-
-
-def _load_package_template(
-    pkg: importlib.resources.abc.Traversable,
-    call_site: str,
-    package_slots: frozenset[str],
-    render_slots: frozenset[str],
-    user_info: str,
-) -> PromptTemplate:
-    filename = f"{call_site}.md"
-    resource = pkg / filename
-    try:
-        raw = resource.read_text(encoding="utf-8-sig")
-    except Exception as exc:
-        raise PromptError(f"{filename}: {exc}") from exc
-
-    _validate_slots(filename, raw, package_slots)
-
-    escaped_user_info = user_info.replace("{", "{{").replace("}", "}}")
-    template_text = raw.replace("{USER_INFO}", escaped_user_info)
-
-    return PromptTemplate(template=template_text, expected_slots=render_slots)
 
 
 def _load_split_template(

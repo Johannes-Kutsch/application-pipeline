@@ -13,7 +13,7 @@ from application_pipeline import (
     load,
     load_prompts,
 )
-from application_pipeline.prompts import CLASSIFY_RELEVANCE_SLOTS, JUDGE_MATCH_SLOTS
+from application_pipeline.prompts import CLASSIFY_RELEVANCE_SLOTS
 
 
 REQUIRED_BODY = """
@@ -81,7 +81,7 @@ def test_prompt_template_preserves_template_verbatim() -> None:
 # --- load_prompts: package-resource templates + user-info injection ---
 
 
-def test_load_prompts_returns_single_template_per_call_site(
+def test_load_prompts_returns_split_template_per_call_site(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
@@ -89,7 +89,7 @@ def test_load_prompts_returns_single_template_per_call_site(
     prompts = load_prompts(config)
 
     assert isinstance(prompts.classify_relevance, SplitPromptTemplate)
-    assert isinstance(prompts.judge_match, PromptTemplate)
+    assert isinstance(prompts.judge_top_n, SplitPromptTemplate)
 
 
 def test_load_prompts_embeds_user_info_in_classify_prompt(
@@ -105,13 +105,13 @@ def test_load_prompts_embeds_user_info_in_classify_prompt(
     assert "ML roles" in rendered
 
 
-def test_load_prompts_embeds_user_info_in_judge_prompt(
+def test_load_prompts_embeds_user_info_in_judge_top_n_prompt(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.judge_match.render(skills="Python", raw_description="some job")
+    rendered = prompts.judge_top_n.render_system(skills="Python")
 
     assert "<user-info>" in rendered
     assert "I am a developer" in rendered
@@ -129,13 +129,13 @@ def test_load_prompts_classify_does_not_embed_match_criteria(
     assert "Hamburg, remote" not in rendered
 
 
-def test_load_prompts_judge_does_not_embed_domain_fit(
+def test_load_prompts_judge_top_n_does_not_embed_domain_fit(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.judge_match.render(skills="Python", raw_description="some job")
+    rendered = prompts.judge_top_n.render_system(skills="Python")
 
     assert "ML roles" not in rendered
 
@@ -147,17 +147,6 @@ def test_load_prompts_classify_contains_verdicts_tag_instruction(
 
     prompts = load_prompts(config)
     rendered = prompts.classify_relevance.render_system()
-
-    assert "<verdict>" in rendered
-
-
-def test_load_prompts_judge_contains_verdict_tag_instruction(
-    tmp_path: pathlib.Path,
-) -> None:
-    config = make_config_with_user_info(tmp_path)
-
-    prompts = load_prompts(config)
-    rendered = prompts.judge_match.render(skills="Python", raw_description="some job")
 
     assert "<verdict>" in rendered
 
@@ -217,7 +206,7 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     prompts = load_prompts(config)
 
     assert isinstance(prompts.classify_relevance, SplitPromptTemplate)
-    assert isinstance(prompts.judge_match, PromptTemplate)
+    assert isinstance(prompts.judge_top_n, SplitPromptTemplate)
 
 
 # --- Prompts dataclass ---
@@ -235,7 +224,6 @@ def test_prompts_is_frozen() -> None:
     )
     prompts = Prompts(
         classify_relevance=split,
-        judge_match=PromptTemplate("{skills} {raw_description}", JUDGE_MATCH_SLOTS),
         judge_top_n=SplitPromptTemplate(
             system=PromptTemplate("{skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
             user=PromptTemplate("{candidates}", JUDGE_TOP_N_USER_SLOTS),

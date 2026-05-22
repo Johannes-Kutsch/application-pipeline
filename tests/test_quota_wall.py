@@ -104,9 +104,6 @@ def test_wait_if_blocked_applies_two_minute_buffer():
     assert len(slept) >= 1
 
 
-# --- concurrent threads all unblock ---
-
-
 # --- wall expiry resets state ---
 
 

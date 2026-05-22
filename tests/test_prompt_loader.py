@@ -97,7 +97,9 @@ def test_load_prompts_embeds_user_info_in_classify_prompt(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(ITEMS="test items")
+    rendered = prompts.classify_relevance.render(
+        TITLE="test title", RAW_DESCRIPTION="test description"
+    )
 
     assert "<user-info>" in rendered
     assert "I am a developer" in rendered
@@ -123,7 +125,9 @@ def test_load_prompts_classify_does_not_embed_match_criteria(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(ITEMS="test items")
+    rendered = prompts.classify_relevance.render(
+        TITLE="test title", RAW_DESCRIPTION="test description"
+    )
 
     assert "Hamburg, remote" not in rendered
 
@@ -145,9 +149,11 @@ def test_load_prompts_classify_contains_verdicts_tag_instruction(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(ITEMS="test items")
+    rendered = prompts.classify_relevance.render(
+        TITLE="test title", RAW_DESCRIPTION="test description"
+    )
 
-    assert "<verdicts>" in rendered
+    assert "<verdict>" in rendered
 
 
 def test_load_prompts_judge_contains_verdict_tag_instruction(

@@ -32,6 +32,10 @@ class ExtractorBatchMalformedError(ExtractorError):
     pass
 
 
+class ExtractorMalformedError(ExtractorError):
+    pass
+
+
 @dataclass(frozen=True)
 class StructuredExtract:
     seniority: str | None
@@ -54,7 +58,6 @@ class JudgeCandidate:
 
 @dataclass(frozen=True)
 class ClassifyItem:
-    id: str
     title: str
     raw_description: str
 
@@ -107,9 +110,9 @@ class CallUsage:
 
 @runtime_checkable
 class LLMExtractor(Protocol):
-    def classify_relevance_batch(
-        self, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict], CallUsage]: ...
+    def classify_relevance(
+        self, item: ClassifyItem
+    ) -> tuple[RelevanceVerdict, CallUsage]: ...
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]

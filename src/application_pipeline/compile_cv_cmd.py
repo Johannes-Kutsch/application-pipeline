@@ -84,9 +84,7 @@ def compile_cv(app_dir: Path) -> None:
         # moderncv.cls's AtBeginDocument hook read \pageref{lastpage} and emit
         # page numbers in the right footer.
         for _ in range(2):
-            result = subprocess.run(
-                cmd, cwd=build_dir, capture_output=True, env=env
-            )
+            result = subprocess.run(cmd, cwd=build_dir, capture_output=True, env=env)
             if result.returncode != 0:
                 log_file = build_dir / f"{build_name}.log"
                 if log_file.exists():

@@ -149,9 +149,8 @@ _QUERY_DONE = _QueryDone()
 
 
 @dataclass
-class _ClassifyBatch:
-    positions: list["Position"]
-    item_id: str
+class _ClassifyPosition:
+    position: "Position"
 
 
 class _NoMoreBatches:
@@ -403,47 +402,49 @@ class _ClassifyThread(_QueueWorker):
         self._run_log = run_log
 
     def _on_dequeue(self, item: object) -> None:
-        assert isinstance(item, _ClassifyBatch)
-        self._metrics.classify_batch_dequeued(len(item.positions))
+        assert isinstance(item, _ClassifyPosition)
+        self._metrics.classify_batch_dequeued(1)
 
     def _process(self, item: object) -> None:
-        assert isinstance(item, _ClassifyBatch)
-        batch = item
-        items = _make_classify_items(batch.positions)
+        assert isinstance(item, _ClassifyPosition)
+        position = item.position
+        classify_item = ClassifyItem(
+            title=position.stub.title,
+            raw_description=position.raw_description,
+        )
         while True:
             try:
-                verdicts, classify_usage = self._extractor.classify_relevance_batch(
-                    items
+                verdict, classify_usage = self._extractor.classify_relevance(
+                    classify_item
                 )
                 break
             except ClaudeUsageLimitError as err:
                 _quota_sleep(err, self._run_log)
             except ExtractorError as exc:
-                _log.warning("classify_relevance_batch failed: %s", exc)
+                _log.warning("classify_relevance failed: %s", exc)
+                self._metrics.classify_batch_failed(1)
                 self._run_log.event(
                     "llm_classify_relevance",
-                    "batch_abandoned",
-                    batch_size=len(batch.positions),
-                    urls=[p.stub.url for p in batch.positions],
-                    returncode=getattr(exc, "returncode", None),
-                    stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
+                    "classify_relevance",
+                    status="error",
                     error=str(exc),
                 )
-                self._metrics.classify_batch_failed(len(batch.positions))
                 return
 
-        classifier_dropped = 0
-        for verdict, position in zip(verdicts, batch.positions):
-            if not verdict.in_domain:
-                self._dedup_store.mark_out_of_domain(position.stub)
-                classifier_dropped += 1
-            else:
-                assert verdict.extract is not None
-                self._dedup_store.mark_in_domain(position.stub, extract=verdict.extract)
-                self._pool_collector.add_classified(position, verdict.extract)
-        self._metrics.classify_batch_complete(
-            classify_usage, len(items), classifier_dropped
+        self._run_log.event(
+            "llm_classify_relevance",
+            "classify_relevance",
+            in_domain=verdict.in_domain,
         )
+        classifier_dropped = 0
+        if not verdict.in_domain:
+            self._dedup_store.mark_out_of_domain(position.stub)
+            classifier_dropped = 1
+        else:
+            assert verdict.extract is not None
+            self._dedup_store.mark_in_domain(position.stub, extract=verdict.extract)
+            self._pool_collector.add_classified(position, verdict.extract)
+        self._metrics.classify_batch_complete(classify_usage, 1, classifier_dropped)
 
 
 @dataclass
@@ -454,17 +455,6 @@ class _ParserState:
     started_monotonic: float = field(default_factory=time.monotonic)
     last_event_monotonic: float = field(default_factory=time.monotonic)
     stall_logged: bool = False
-
-
-def _make_classify_items(batch: list[Position]) -> list[ClassifyItem]:
-    return [
-        ClassifyItem(
-            id=str(idx),
-            title=pos.stub.title,
-            raw_description=pos.raw_description,
-        )
-        for idx, pos in enumerate(batch)
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +473,6 @@ class _OutboundDispatcher:
         metrics: "RunMetrics",
         classify_queue: "queue.Queue[object]",
         pool_collector: "_PoolCollector",
-        batch_size: int,
         run_state: _RunState,
         run_log: RunLog,
         freshness: FreshnessGate,
@@ -494,11 +483,8 @@ class _OutboundDispatcher:
         self._metrics = metrics
         self._classify_queue = classify_queue
         self._pool_collector = pool_collector
-        self._batch_size = batch_size
         self._run_state = run_state
         self._run_log = run_log
-        self._classify_buffer: list[Position] = []
-        self._batch_id: int = 0
         self._freshness = freshness
         self._prefilter = prefilter
 
@@ -525,21 +511,12 @@ class _OutboundDispatcher:
         return False
 
     def flush_residual(self) -> None:
-        """Flush any remaining buffered positions and signal end of batches."""
-        if self._classify_buffer:
-            self._flush_classify_batch()
+        """Signal end of positions to the classify worker."""
         self._classify_queue.put(_NO_MORE_BATCHES)
 
-    def _flush_classify_batch(self) -> None:
-        self._classify_queue.put(
-            _ClassifyBatch(
-                positions=list(self._classify_buffer),
-                item_id=str(self._batch_id),
-            )
-        )
-        self._metrics.classify_batch_enqueued(len(self._classify_buffer))
-        self._batch_id += 1
-        self._classify_buffer.clear()
+    def _enqueue_classify(self, position: Position) -> None:
+        self._classify_queue.put(_ClassifyPosition(position=position))
+        self._metrics.classify_buffered(1)
 
     def _handle_stub(
         self, pid: str, state: _ParserState, payload: PositionStub
@@ -574,10 +551,7 @@ class _OutboundDispatcher:
             else:
                 if self._prefilter.admit(payload):
                     if self._freshness.admit(payload):
-                        self._classify_buffer.append(payload)
-                        self._metrics.classify_buffered(1)
-                        if len(self._classify_buffer) >= self._batch_size:
-                            self._flush_classify_batch()
+                        self._enqueue_classify(payload)
         elif isinstance(payload, ParserError):
             self._run_log.event(
                 "parser_" + pid,
@@ -788,7 +762,6 @@ def run(
                 metrics=metrics,
                 classify_queue=classify_queue,
                 pool_collector=pool_collector,
-                batch_size=cfg.claude_classify_batch_size,
                 run_state=run_state,
                 run_log=run_log,
                 freshness=freshness,

@@ -32,6 +32,9 @@ class RunSummary:
     prefilter_passed: int = 0
     prefilter_dropped: int = 0
     prefilter_blacklist_hits: int = 0
+    content_considered: int = 0
+    content_passed: int = 0
+    content_dropped_empty_body: int = 0
     dedup_url_hits: int = 0
     dedup_tuple_hits: int = 0
     dedup_run_hits: int = 0
@@ -72,6 +75,9 @@ class RunMetrics:
         self._prefilter_dropped = 0
         self._prefilter_blacklist_hits = 0
         self._freshness_dropped = 0
+        self._content_considered = 0
+        self._content_passed = 0
+        self._content_dropped_empty_body = 0
         self._enrich_failed = 0
         self._external_redirects = 0
         self._parsers_dead = 0
@@ -124,10 +130,13 @@ class RunMetrics:
             "pipeline_freshness", order=starting_order + 2, phase="running"
         )
         self._display.register(
-            "llm_classify_relevance", order=starting_order + 3, phase="running"
+            "pipeline_content", order=starting_order + 3, phase="running"
         )
         self._display.register(
-            "llm_judge_match", order=starting_order + 4, phase="running"
+            "llm_classify_relevance", order=starting_order + 4, phase="running"
+        )
+        self._display.register(
+            "llm_judge_match", order=starting_order + 5, phase="running"
         )
 
     def register_parser(
@@ -215,6 +224,20 @@ class RunMetrics:
             self._freshness_dropped += 1
             body = self._freshness_body()
         self._display.update_body("pipeline_freshness", body=body)
+
+    def content_passed(self) -> None:
+        with self._lock:
+            self._content_considered += 1
+            self._content_passed += 1
+            body = self._content_body()
+        self._display.update_body("pipeline_content", body=body)
+
+    def content_dropped(self) -> None:
+        with self._lock:
+            self._content_considered += 1
+            self._content_dropped_empty_body += 1
+            body = self._content_body()
+        self._display.update_body("pipeline_content", body=body)
 
     def enrich_failed(self, parser_id: str = "") -> None:
         with self._lock:
@@ -538,6 +561,9 @@ class RunMetrics:
                 prefilter_passed=self._prefilter_passed,
                 prefilter_dropped=self._prefilter_dropped,
                 prefilter_blacklist_hits=self._prefilter_blacklist_hits,
+                content_considered=self._content_considered,
+                content_passed=self._content_passed,
+                content_dropped_empty_body=self._content_dropped_empty_body,
                 dedup_url_hits=self._dedup_url_hits,
                 dedup_tuple_hits=self._dedup_tuple_hits,
                 dedup_run_hits=self._dedup_run_hits,
@@ -646,6 +672,13 @@ class RunMetrics:
 
     def _freshness_body(self) -> str:
         return f"dropped={self._freshness_dropped}"
+
+    def _content_body(self) -> str:
+        return (
+            f"considered={self._content_considered}"
+            f" passed={self._content_passed}"
+            f" dropped={self._content_dropped_empty_body}"
+        )
 
     def _classify_body(self) -> str:
         numerator = self._classify_calls + self._classify_failed

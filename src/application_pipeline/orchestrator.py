@@ -48,6 +48,7 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.parsers.errors import ParserError
+from application_pipeline.content_gate import ContentGate
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
@@ -477,6 +478,7 @@ class _OutboundDispatcher:
         run_log: RunLog,
         freshness: FreshnessGate,
         prefilter: PreFilterGate,
+        content: ContentGate,
     ) -> None:
         self._parser_states = parser_states
         self._dedup = dedup
@@ -487,6 +489,7 @@ class _OutboundDispatcher:
         self._run_log = run_log
         self._freshness = freshness
         self._prefilter = prefilter
+        self._content = content
 
     def dispatch(self, pid: str, payload: object) -> bool:
         """Dispatch a payload to the appropriate handler.
@@ -545,13 +548,13 @@ class _OutboundDispatcher:
             self._metrics.enriched(pid)
             if wrapper.judge_resume:
                 if self._freshness.admit(payload):
-                    self._pool_collector.add_judge_pending(payload)
-                else:
-                    return
+                    if self._content.admit(payload):
+                        self._pool_collector.add_judge_pending(payload)
             else:
                 if self._prefilter.admit(payload):
                     if self._freshness.admit(payload):
-                        self._enqueue_classify(payload)
+                        if self._content.admit(payload):
+                            self._enqueue_classify(payload)
         elif isinstance(payload, ParserError):
             self._run_log.event(
                 "parser_" + pid,
@@ -755,6 +758,10 @@ def run(
                 metrics=metrics,
                 run_log=run_log,
             )
+            content = ContentGate(
+                metrics=metrics,
+                run_log=run_log,
+            )
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
@@ -766,6 +773,7 @@ def run(
                 run_log=run_log,
                 freshness=freshness,
                 prefilter=prefilter,
+                content=content,
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())
@@ -826,6 +834,7 @@ def run(
 
             freshness.emit_run_complete()
             prefilter.emit_run_complete()
+            content.emit_run_complete()
             dispatcher.flush_residual()
 
         classify_thread.join()
@@ -914,6 +923,7 @@ def run(
             "run complete: discovered=%d skipped=%d "
             "prefilter_considered=%d prefilter_passed=%d prefilter_dropped=%d "
             "prefilter_blacklist_hits=%d "
+            "content_considered=%d content_passed=%d content_dropped_empty_body=%d "
             "dedup_url_hits=%d dedup_tuple_hits=%d dedup_run_hits=%d dedup_misses=%d "
             "classifier_dropped=%d written=%d "
             "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
@@ -923,6 +933,9 @@ def run(
             summary.prefilter_passed,
             summary.prefilter_dropped,
             summary.prefilter_blacklist_hits,
+            summary.content_considered,
+            summary.content_passed,
+            summary.content_dropped_empty_body,
             summary.dedup_url_hits,
             summary.dedup_tuple_hits,
             summary.dedup_run_hits,

@@ -26,8 +26,10 @@ $(tail -20 "application-pipeline/logs/cron.log" 2>/dev/null || true)
 EOF
   }
 
-  pip install --upgrade application-pipeline || { fail "ShellError" "pip install --upgrade application-pipeline (first attempt) failed"; exit 1; }
-  pip install --upgrade application-pipeline || { fail "ShellError" "pip install --upgrade application-pipeline (second attempt) failed"; exit 1; }
+  _pip_stderr="$(pip install --upgrade application-pipeline 2>&1 1>/dev/null)" \
+    || echo "WARNING: pip install --upgrade application-pipeline (attempt 1) failed: $_pip_stderr"
+  _pip_stderr="$(pip install --upgrade application-pipeline 2>&1 1>/dev/null)" \
+    || echo "WARNING: pip install --upgrade application-pipeline (attempt 2) failed: $_pip_stderr"
 
   application-pipeline init --refresh || { fail "ShellError" "application-pipeline init --refresh failed"; exit 1; }
   application-pipeline run || { fail "ShellError" "application-pipeline run failed"; exit 1; }

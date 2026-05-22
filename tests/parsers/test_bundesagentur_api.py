@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
+from application_pipeline.http import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
-from application_pipeline.parsers import Parser, ParserQuery, PositionStub
+from application_pipeline.parsers import Parser, ParserError, ParserQuery, PositionStub
 from application_pipeline.parsers.bundesagentur_api import (
     BundesagenturParser,
     parser_class,
@@ -936,8 +937,6 @@ def test_enrich_no_externe_url_emits_no_external_redirect_event(
 
 
 def _make_redirect_get(status: int, location: str) -> Callable[[str, float], bytes]:
-    from application_pipeline.http import HttpRedirectResponse
-
     def http_get(url: str, timeout: float) -> bytes:
         raise HttpRedirectResponse(status, location)
 
@@ -961,8 +960,6 @@ def test_enrich_3xx_off_host_location_returns_external_redirect(
 def test_enrich_3xx_same_host_location_raises_parser_error(
     run_log: RunLog, stub: PositionStub
 ) -> None:
-    from application_pipeline.parsers import ParserError
-
     http = ParserHttp(
         run_log=run_log,
         _http_get=_make_redirect_get(
@@ -978,8 +975,6 @@ def test_enrich_3xx_same_host_location_raises_parser_error(
 def test_enrich_3xx_missing_location_raises_parser_error(
     run_log: RunLog, stub: PositionStub
 ) -> None:
-    from application_pipeline.parsers import ParserError
-
     http = ParserHttp(
         run_log=run_log,
         _http_get=_make_redirect_get(302, ""),

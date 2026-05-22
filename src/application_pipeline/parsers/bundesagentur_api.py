@@ -6,7 +6,6 @@ import sys
 import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal
-from urllib.parse import urlparse
 
 from application_pipeline.http import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
@@ -197,8 +196,8 @@ class BundesagenturParser:
             )
         except HttpRedirectResponse as exc:
             location = exc.location
-            source_host = urlparse(_DETAIL_BASE_URL).hostname or ""
-            location_host = urlparse(location).hostname or "" if location else ""
+            source_host = urllib.parse.urlparse(_DETAIL_BASE_URL).hostname or ""
+            location_host = urllib.parse.urlparse(location).hostname or ""
             if location_host and location_host != source_host:
                 return ExternalRedirect(stub, location)
             raise ParserError(

@@ -13,13 +13,13 @@ _REQUIRED_FIELDS = (
     "CARD_TEMPLATE",
 )
 
-# Module-level variable names from the pre-ADR-0029 layout format that are no longer supported.
+# Module-level variable names from the pre-ADR-0020 layout format that are no longer supported.
 _RETIRED_MODULE_VARS: dict[str, str] = {
     "TIER_EMOJI": "tier_emoji",
     "TIER_COLOR": "tier_color",
 }
 
-# Placeholders in CARD_TEMPLATE that were retired with ADR-0029.
+# Placeholders in CARD_TEMPLATE that were retired with ADR-0020.
 _RETIRED_PLACEHOLDERS = ("emoji", "color", "tier")
 
 # Fields that may appear in PLACEHOLDER_GROUPS.

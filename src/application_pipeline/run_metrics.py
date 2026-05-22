@@ -58,6 +58,7 @@ class RunMetrics:
         self._display = display
         self._run_log = run_log
         self._lock = threading.Lock()
+        self._classify_lock = threading.Lock()
 
         # Parser-side (main) counters
         self._discovered = 0
@@ -299,18 +300,18 @@ class RunMetrics:
     # -----------------------------------------------------------------------
 
     def classify_buffered(self, n: int) -> None:
-        with self._lock:
+        with self._classify_lock:
             self._pending_classify += n
             body = self._classify_body()
         self._display.update_body("llm_classify_relevance", body=body)
 
     def classify_batch_enqueued(self, n: int) -> None:
-        with self._lock:
+        with self._classify_lock:
             body = self._classify_body()
         self._display.update_body("llm_classify_relevance", body=body)
 
     def classify_batch_dequeued(self, n: int) -> None:
-        with self._lock:
+        with self._classify_lock:
             self._total_batches += 1
             self._pending_classify -= n
             body = self._classify_body()
@@ -319,7 +320,7 @@ class RunMetrics:
     def classify_batch_complete(
         self, usage: CallUsage, items: int, classifier_dropped: int
     ) -> None:
-        with self._lock:
+        with self._classify_lock:
             self._classify_calls += 1
             self._classify_items += items
             self._classify_input_tokens += usage.input_tokens
@@ -332,7 +333,7 @@ class RunMetrics:
         self._display.update_body("llm_classify_relevance", body=body)
 
     def classify_batch_failed(self, items: int) -> None:
-        with self._lock:
+        with self._classify_lock:
             self._classify_failed += 1
             self._classify_items_errored += items
             body = self._classify_body()
@@ -398,17 +399,17 @@ class RunMetrics:
 
     @property
     def classify_calls(self) -> int:
-        with self._lock:
+        with self._classify_lock:
             return self._classify_calls
 
     @property
     def classify_input_tokens(self) -> int:
-        with self._lock:
+        with self._classify_lock:
             return self._classify_input_tokens
 
     @property
     def classify_output_tokens(self) -> int:
-        with self._lock:
+        with self._classify_lock:
             return self._classify_output_tokens
 
     @property
@@ -448,6 +449,17 @@ class RunMetrics:
     def format_run_divider(
         self, timestamp: str, tag: str | None, elapsed_s: float
     ) -> str:
+        with self._classify_lock:
+            classify_calls = self._classify_calls
+            classify_items = self._classify_items
+            classify_total_s = self._classify_total_s
+            classify_input_tokens = self._classify_input_tokens
+            classify_output_tokens = self._classify_output_tokens
+            classify_cache_read_tokens = self._classify_cache_read_tokens
+            classify_cost_usd = self._classify_cost_usd
+            classify_batches_failed = self._classify_failed
+            classify_items_abandoned = self._classify_items_errored
+
         with self._lock:
             sources = dict(self._written_per_source)
             kept = self._written
@@ -456,26 +468,17 @@ class RunMetrics:
             dedup_run_hits = self._dedup_run_hits
             dedup_misses = self._dedup_misses
             judge_resumed = self._judge_resumed
-            classify_calls = self._classify_calls
-            classify_items = self._classify_items
-            classify_total_s = self._classify_total_s
             judge_calls = self._judge_calls
             judge_total_s = self._judge_total_s
-            classify_input_tokens = self._classify_input_tokens
-            classify_output_tokens = self._classify_output_tokens
-            classify_cache_read_tokens = self._classify_cache_read_tokens
-            classify_cost_usd = self._classify_cost_usd
             judge_input_tokens = self._judge_input_tokens
             judge_output_tokens = self._judge_output_tokens
             judge_cache_read_tokens = self._judge_cache_read_tokens
             judge_cost_usd = self._judge_cost_usd
             degraded_reason = self._degraded_reason
-            classify_batches_failed = self._classify_failed
-            classify_items_abandoned = self._classify_items_errored
             # Roll up classify-stage abandons into the judge-stage error total,
             # matching today's `judge_stats.errored += classify_stats.items_errored`
             # step that runs before the divider is formatted.
-            judge_items_abandoned = self._judge_errored + self._classify_items_errored
+            judge_items_abandoned = self._judge_errored + classify_items_abandoned
             errors = judge_items_abandoned
 
         parts = [f"run {timestamp}"]
@@ -521,15 +524,16 @@ class RunMetrics:
         return f"<!-- {' '.join(parts)} -->\n"
 
     def to_run_summary(self, duration_s: float) -> RunSummary:
+        with self._classify_lock:
+            classify_input_tokens = self._classify_input_tokens
+            classify_output_tokens = self._classify_output_tokens
+            classify_cache_read_tokens = self._classify_cache_read_tokens
+            classify_cost_usd = self._classify_cost_usd
+            classify_items = self._classify_items
+            classifier_dropped = self._classifier_dropped
+            classify_items_errored = self._classify_items_errored
+
         with self._lock:
-            claude_input_tokens = self._classify_input_tokens + self._judge_input_tokens
-            claude_output_tokens = (
-                self._classify_output_tokens + self._judge_output_tokens
-            )
-            claude_cache_read_tokens = (
-                self._classify_cache_read_tokens + self._judge_cache_read_tokens
-            )
-            claude_cost_usd = self._classify_cost_usd + self._judge_cost_usd
             return RunSummary(
                 duration_seconds=duration_s,
                 discovered=self._discovered,
@@ -543,21 +547,22 @@ class RunMetrics:
                 dedup_run_hits=self._dedup_run_hits,
                 dedup_misses=self._dedup_misses,
                 judge_resumed=self._judge_resumed,
-                classifier_dropped=self._classifier_dropped,
+                classifier_dropped=classifier_dropped,
                 written=self._written,
                 enrich_failed=self._enrich_failed,
                 external_redirects=self._external_redirects,
-                errored=self._judge_errored + self._classify_items_errored,
+                errored=self._judge_errored + classify_items_errored,
                 parsers_dead=self._parsers_dead,
-                classify_items=self._classify_items,
-                claude_input_tokens=claude_input_tokens,
-                claude_output_tokens=claude_output_tokens,
-                claude_cache_read_tokens=claude_cache_read_tokens,
-                claude_cost_usd=claude_cost_usd,
+                classify_items=classify_items,
+                claude_input_tokens=classify_input_tokens + self._judge_input_tokens,
+                claude_output_tokens=classify_output_tokens + self._judge_output_tokens,
+                claude_cache_read_tokens=classify_cache_read_tokens
+                + self._judge_cache_read_tokens,
+                claude_cost_usd=classify_cost_usd + self._judge_cost_usd,
             )
 
     def summarize_to_parser_log(self, started_at: datetime) -> None:
-        with self._lock:
+        with self._classify_lock:
             classify_calls = self._classify_calls
             classify_items = self._classify_items
             classifier_dropped = self._classifier_dropped
@@ -567,6 +572,8 @@ class RunMetrics:
             classify_cache_read_tokens = self._classify_cache_read_tokens
             classify_cost_usd = self._classify_cost_usd
             classify_total_s = self._classify_total_s
+
+        with self._lock:
             judge_calls = self._judge_calls
             judge_failed = self._judge_failed
             judge_input_tokens = self._judge_input_tokens

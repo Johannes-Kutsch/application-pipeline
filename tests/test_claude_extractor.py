@@ -187,6 +187,38 @@ def test_classify_relevance_prompt_contains_title_and_description(
     assert "MY_DESC" in prompt_sent
 
 
+def test_classify_relevance_passes_system_half_via_system_prompt(
+    run_log: RunLog,
+) -> None:
+    invoker = _fake_invoker(_in_domain_response())
+    prompts = Prompts(
+        classify_relevance=SplitPromptTemplate(
+            system=PromptTemplate("SYS_BODY", frozenset()),
+            user=PromptTemplate("{TITLE}|{RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS),
+        ),
+        judge_match=PromptTemplate(
+            "judge: {skills} {raw_description}", JUDGE_MATCH_SLOTS
+        ),
+        judge_top_n=SplitPromptTemplate(
+            system=PromptTemplate("{skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
+            user=PromptTemplate("{candidates}", JUDGE_TOP_N_USER_SLOTS),
+        ),
+    )
+    extractor = ClaudeExtractor(
+        _config(),
+        prompts,
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
+    )
+    extractor.classify_relevance(_item(title="T", raw_description="D"))
+    kwargs = invoker.call.call_args.kwargs
+    stdin_body = invoker.call.call_args.args[0]
+    assert kwargs["system_prompt"] == "SYS_BODY"
+    assert stdin_body == "T|D"
+    assert "SYS_BODY" not in stdin_body
+
+
 # ---------------------------------------------------------------------------
 # classify_relevance: structured extract on in-domain verdicts
 # ---------------------------------------------------------------------------
@@ -341,6 +373,7 @@ def test_classify_relevance_records_transcript(tmp_path: Path) -> None:
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert entry["call"] == "classify_relevance"
     assert "prompt" in entry
+    assert "system_prompt" in entry
     assert "raw_response" in entry
     assert "usage" in entry
     assert "cost_usd" in entry
@@ -728,6 +761,24 @@ def test_judge_top_n_with_10_candidates_returns_5_verdicts(run_log: RunLog) -> N
     assert {v.rank for v in results} == {1, 2, 3, 4, 5}
     assert all(v.id in {c.id for c in candidates} for v in results)
     assert usage.cost_usd == pytest.approx(0.003)
+
+
+def test_judge_top_n_passes_skills_via_system_prompt(run_log: RunLog) -> None:
+    candidates = _judge_candidates(2)
+    verdicts_raw = _default_top_n_verdicts(candidates, count=2)
+    invoker = _fake_invoker(_top_n_response(verdicts_raw))
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
+    )
+    extractor.judge_top_n(candidates)
+    kwargs = invoker.call.call_args.kwargs
+    stdin_body = invoker.call.call_args.args[0]
+    assert "system_prompt" in kwargs
+    assert candidates[0].id in stdin_body
 
 
 def test_judge_top_n_empty_candidates_returns_empty_list(run_log: RunLog) -> None:

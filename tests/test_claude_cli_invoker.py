@@ -1,6 +1,6 @@
 import json
+import sys
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -419,20 +419,24 @@ def test_cli_error_carries_stdout_and_stderr():
 # --- UTF-8 encoding (regression: UnicodeEncodeError on Windows cp1252 hosts) ---
 
 
-def test_default_runner_uses_explicit_utf8_encoding():
-    """_default_runner must pass encoding='utf-8' to subprocess.run.
+def test_default_runner_passes_non_cp1252_prompt_through_subprocess_as_utf8():
+    """Round-trip a prompt containing non-cp1252 codepoints through a real subprocess.
 
-    Without an explicit encoding, Python falls back to locale.getpreferredencoding()
-    which is cp1252 on German Windows hosts, causing UnicodeEncodeError for chars
-    like EM DASH (U+2014) that are outside the cp1252 range.
+    Without explicit UTF-8 encoding, Python's text-mode subprocess falls back to
+    locale.getpreferredencoding() (cp1252 on German Windows hosts), causing
+    UnicodeEncodeError on chars like EM DASH (U+2014), German low quote (U+201E),
+    and right double quote (U+201C). The runner must encode in UTF-8 on every host.
     """
-    mock_proc = MagicMock()
-    mock_proc.returncode = 0
-    mock_proc.stdout = ""
-    mock_proc.stderr = ""
-    with patch(
-        "application_pipeline.llm.claude_cli.subprocess.run", return_value=mock_proc
-    ) as mock_run:
-        _default_runner(["claude"], "— em dash in prompt „isolation“")
-    _, kwargs = mock_run.call_args
-    assert kwargs.get("encoding") == "utf-8"
+    prompt_via_stdin = "— em dash and „German low quote“ via stdin"
+    arg_payload = "em dash in arg: —"
+    echo_script = (
+        "import sys; "
+        "sys.stdout.reconfigure(encoding='utf-8'); "
+        "sys.stdout.write(sys.argv[1] + '\\n' + sys.stdin.read())"
+    )
+    returncode, stdout, stderr = _default_runner(
+        [sys.executable, "-c", echo_script, arg_payload], prompt_via_stdin
+    )
+    assert returncode == 0, stderr
+    assert arg_payload in stdout
+    assert prompt_via_stdin in stdout

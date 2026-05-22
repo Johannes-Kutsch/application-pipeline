@@ -36,9 +36,11 @@ from application_pipeline.llm.claude_cli import (
 from application_pipeline.prompts import (
     CLASSIFY_RELEVANCE_SLOTS,
     JUDGE_MATCH_SLOTS,
-    JUDGE_TOP_N_SLOTS,
+    JUDGE_TOP_N_SYSTEM_SLOTS,
+    JUDGE_TOP_N_USER_SLOTS,
     PromptTemplate,
     Prompts,
+    SplitPromptTemplate,
 )
 from application_pipeline.search_terms.types import SearchTerms
 
@@ -67,15 +69,21 @@ def _config(**kwargs: object) -> Config:
 
 
 def _prompts(
-    classify: str = "classify: {TITLE} {RAW_DESCRIPTION}",
-    judge_top_n: str = "top-n: {skills} {candidates}",
+    classify: str = "{TITLE} {RAW_DESCRIPTION}",
+    judge_top_n: str = "{candidates}",
 ) -> Prompts:
     return Prompts(
-        classify_relevance=PromptTemplate(classify, CLASSIFY_RELEVANCE_SLOTS),
+        classify_relevance=SplitPromptTemplate(
+            system=PromptTemplate("system", frozenset()),
+            user=PromptTemplate(classify, CLASSIFY_RELEVANCE_SLOTS),
+        ),
         judge_match=PromptTemplate(
             "judge: {skills} {raw_description}", JUDGE_MATCH_SLOTS
         ),
-        judge_top_n=PromptTemplate(judge_top_n, JUDGE_TOP_N_SLOTS),
+        judge_top_n=SplitPromptTemplate(
+            system=PromptTemplate("{skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
+            user=PromptTemplate(judge_top_n, JUDGE_TOP_N_USER_SLOTS),
+        ),
     )
 
 

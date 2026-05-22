@@ -44,6 +44,11 @@ Position through the following phases in order:
 - **[docs/latex.md](docs/latex.md)** — compiling the CV/cover-letter template, required user-data
   files, and MiKTeX setup on Windows.
 
+## Requirements
+
+The `claude` CLI must support the `--bare` flag (introduced in Claude Code 1.0.14 or later).
+Run `claude --version` to verify.
+
 ## Acknowledgements
 
 Install flow, cron wrapper shape, and flock-based serialisation modelled on

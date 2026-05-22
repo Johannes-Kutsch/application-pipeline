@@ -18,7 +18,13 @@ from .llm import (
     RelevanceVerdict,
     StructuredExtract,
 )
-from .prompts import PromptError, PromptTemplate, Prompts, load_prompts
+from .prompts import (
+    PromptError,
+    PromptTemplate,
+    Prompts,
+    SplitPromptTemplate,
+    load_prompts,
+)
 from .renderer import render
 from .results import ResultsFileError
 from .user_settings import UserSettingsError, load_user_module
@@ -45,6 +51,7 @@ __all__ = [
     "PromptError",
     "PromptTemplate",
     "Prompts",
+    "SplitPromptTemplate",
     "RelevanceVerdict",
     "ResultsFileError",
     "SearchTerms",

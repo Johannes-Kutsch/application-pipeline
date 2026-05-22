@@ -8,6 +8,7 @@ from application_pipeline import (
     PromptError,
     PromptTemplate,
     Prompts,
+    SplitPromptTemplate,
     SourceEntry,
     load,
     load_prompts,
@@ -87,7 +88,7 @@ def test_load_prompts_returns_single_template_per_call_site(
 
     prompts = load_prompts(config)
 
-    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.classify_relevance, SplitPromptTemplate)
     assert isinstance(prompts.judge_match, PromptTemplate)
 
 
@@ -97,9 +98,7 @@ def test_load_prompts_embeds_user_info_in_classify_prompt(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(
-        TITLE="test title", RAW_DESCRIPTION="test description"
-    )
+    rendered = prompts.classify_relevance.render_system()
 
     assert "<user-info>" in rendered
     assert "I am a developer" in rendered
@@ -125,9 +124,7 @@ def test_load_prompts_classify_does_not_embed_match_criteria(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(
-        TITLE="test title", RAW_DESCRIPTION="test description"
-    )
+    rendered = prompts.classify_relevance.render_system()
 
     assert "Hamburg, remote" not in rendered
 
@@ -149,9 +146,7 @@ def test_load_prompts_classify_contains_verdicts_tag_instruction(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(
-        TITLE="test title", RAW_DESCRIPTION="test description"
-    )
+    rendered = prompts.classify_relevance.render_system()
 
     assert "<verdict>" in rendered
 
@@ -221,7 +216,7 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     config = load(path)
     prompts = load_prompts(config)
 
-    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.classify_relevance, SplitPromptTemplate)
     assert isinstance(prompts.judge_match, PromptTemplate)
 
 
@@ -229,16 +224,25 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
 
 
 def test_prompts_is_frozen() -> None:
-    from application_pipeline.prompts import JUDGE_TOP_N_SLOTS
+    from application_pipeline.prompts import (
+        JUDGE_TOP_N_SYSTEM_SLOTS,
+        JUDGE_TOP_N_USER_SLOTS,
+    )
 
-    tpl = PromptTemplate("{ITEMS}", CLASSIFY_RELEVANCE_SLOTS)
+    split = SplitPromptTemplate(
+        system=PromptTemplate("system", frozenset()),
+        user=PromptTemplate("{TITLE} {RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS),
+    )
     prompts = Prompts(
-        classify_relevance=tpl,
+        classify_relevance=split,
         judge_match=PromptTemplate("{skills} {raw_description}", JUDGE_MATCH_SLOTS),
-        judge_top_n=PromptTemplate("{skills} {candidates}", JUDGE_TOP_N_SLOTS),
+        judge_top_n=SplitPromptTemplate(
+            system=PromptTemplate("{skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
+            user=PromptTemplate("{candidates}", JUDGE_TOP_N_USER_SLOTS),
+        ),
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
-        prompts.classify_relevance = tpl  # type: ignore[misc]
+        prompts.classify_relevance = split  # type: ignore[misc]
 
 
 # --- error hierarchy ---

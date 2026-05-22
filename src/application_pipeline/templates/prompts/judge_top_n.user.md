@@ -1,0 +1,3 @@
+# Kandidaten
+
+{candidates}

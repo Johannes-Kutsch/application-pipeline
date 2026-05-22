@@ -2914,9 +2914,14 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
 
 def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> None:
-    """load_prompts returns a single PromptTemplate per call site."""
+    """load_prompts returns a SplitPromptTemplate for classify_relevance, PromptTemplate for judge_match."""
     from application_pipeline.prompts import load_prompts
-    from application_pipeline import Config, PromptTemplate, SourceEntry
+    from application_pipeline import (
+        Config,
+        PromptTemplate,
+        SplitPromptTemplate,
+        SourceEntry,
+    )
 
     user_info_dir = tmp_path / "user-info"
     user_info_dir.mkdir()
@@ -2933,7 +2938,7 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
     )
     prompts = load_prompts(cfg)
 
-    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.classify_relevance, SplitPromptTemplate)
     assert isinstance(prompts.judge_match, PromptTemplate)
 
 

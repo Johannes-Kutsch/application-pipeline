@@ -130,11 +130,32 @@ class ClaudeCliInvoker:
         self._cli_path = cli_path
         self._runner: SubprocessRunner = _runner or _default_runner
 
-    def call(self, prompt: str, *, model: str, effort: str = "") -> ClaudeResponse:
+    def call(
+        self,
+        prompt: str,
+        *,
+        model: str,
+        effort: str = "",
+        system_prompt: str = "",
+    ) -> ClaudeResponse:
         cli = self._cli_path or shutil.which("claude") or "claude"
-        args = [cli, "-p", "-", "--output-format", "json", "--model", model]
+        args = [
+            cli,
+            "-p",
+            "-",
+            "--output-format",
+            "json",
+            "--model",
+            model,
+            "--bare",
+            "--tools",
+            "",
+            "--no-session-persistence",
+        ]
         if effort:
             args += ["--effort", effort]
+        if system_prompt:
+            args += ["--system-prompt", system_prompt]
 
         t0 = time.monotonic()
         returncode, stdout, stderr = self._runner(args, prompt)

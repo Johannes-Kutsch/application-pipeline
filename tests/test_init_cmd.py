@@ -198,9 +198,9 @@ def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) 
 
     prompts = load_prompts(config)
 
-    from application_pipeline import PromptTemplate
+    from application_pipeline import PromptTemplate, SplitPromptTemplate
 
-    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.classify_relevance, SplitPromptTemplate)
     assert isinstance(prompts.judge_match, PromptTemplate)
 
 

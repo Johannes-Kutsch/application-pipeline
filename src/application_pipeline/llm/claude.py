@@ -119,11 +119,13 @@ class ClaudeExtractor:
     def classify_relevance(
         self, item: ClassifyItem
     ) -> tuple[RelevanceVerdict, CallUsage]:
-        prompt = self._prompts.classify_relevance.render(
+        system_prompt = self._prompts.classify_relevance.render_system()
+        prompt = self._prompts.classify_relevance.render_user(
             TITLE=item.title, RAW_DESCRIPTION=item.raw_description
         )
         parsed, response = self._invoke(
             _CLASSIFY_SITE,
+            system_prompt,
             prompt,
             {},
         )
@@ -142,12 +144,13 @@ class ClaudeExtractor:
                 duration_s=0.0,
             )
         candidates_block = self._format_candidates(candidates)
-        prompt = self._prompts.judge_top_n.render(
-            skills=self._skills_block,
-            candidates=candidates_block,
+        system_prompt = self._prompts.judge_top_n.render_system(
+            skills=self._skills_block
         )
+        prompt = self._prompts.judge_top_n.render_user(candidates=candidates_block)
         data, response = self._invoke(
             _JUDGE_TOP_N_SITE,
+            system_prompt,
             prompt,
             {"candidate_count": len(candidates)},
         )
@@ -157,18 +160,25 @@ class ClaudeExtractor:
     def _invoke(
         self,
         site: _CallSite,
+        system_prompt: str,
         prompt: str,
         extra: dict[str, object],
     ) -> tuple[Any, ClaudeResponse]:
         t0 = time.monotonic()
         try:
-            response = self._invoker.call(prompt, model=site.model, effort=site.effort)
+            response = self._invoker.call(
+                prompt,
+                system_prompt=system_prompt,
+                model=site.model,
+                effort=site.effort,
+            )
         except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
             status = (
                 "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"
             )
             self._write_transcript(
                 site=site,
+                system_prompt=system_prompt,
                 prompt=prompt,
                 status=status,
                 duration_s=time.monotonic() - t0,
@@ -190,6 +200,7 @@ class ClaudeExtractor:
         except AgentOutputProtocolError as exc:
             self._write_transcript(
                 site=site,
+                system_prompt=system_prompt,
                 prompt=prompt,
                 status="protocol_error",
                 duration_s=time.monotonic() - t0,
@@ -205,6 +216,7 @@ class ClaudeExtractor:
             site.component_id,
             {
                 "call": site.call,
+                "system_prompt": system_prompt,
                 "prompt": prompt,
                 "raw_response": response.raw_response,
                 "usage": {
@@ -229,6 +241,7 @@ class ClaudeExtractor:
         self,
         *,
         site: _CallSite,
+        system_prompt: str,
         prompt: str,
         status: str,
         duration_s: float,
@@ -242,6 +255,7 @@ class ClaudeExtractor:
             "ts": ts,
             "call": site.call,
             "status": status,
+            "system_prompt": system_prompt,
             "prompt": prompt,
             "duration_s": duration_s,
             **extra,

@@ -7,9 +7,11 @@ import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal
 
+from application_pipeline.http import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
 
 from ._text import parse_iso_date, strip_html
+from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
@@ -188,9 +190,19 @@ class BundesagenturParser:
         raw_ref = stub.url.rsplit("/", 1)[-1]
         ref_b64 = base64.b64encode(raw_ref.encode()).decode()
         rest_url = f"{_DETAIL_BASE_URL}/jobdetails/{ref_b64}"
-        raw = self._http.get(
-            rest_url, error_prefix=f"Bundesagentur enrich failed for {stub.url}"
-        )
+        try:
+            raw = self._http.get(
+                rest_url, error_prefix=f"Bundesagentur enrich failed for {stub.url}"
+            )
+        except HttpRedirectResponse as exc:
+            location = exc.location
+            source_host = urllib.parse.urlparse(_DETAIL_BASE_URL).hostname or ""
+            location_host = urllib.parse.urlparse(location).hostname or ""
+            if location_host and location_host != source_host:
+                return ExternalRedirect(stub, location)
+            raise ParserError(
+                f"Bundesagentur enrich 3xx redirect: location={location!r}"
+            ) from exc
         data: dict[str, Any] = json.loads(raw)
 
         outbound: str | None = data.get("externeURL") or None

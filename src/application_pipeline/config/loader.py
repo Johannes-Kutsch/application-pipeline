@@ -61,6 +61,12 @@ def load(path: pathlib.Path) -> Config:
     if max_listing_age_days < 1:
         raise ConfigError("MAX_LISTING_AGE_DAYS must be >= 1")
 
+    raw_parallelism = getattr(module, "CLAUDE_CLASSIFY_PARALLELISM", 4)
+    if isinstance(raw_parallelism, bool) or not isinstance(raw_parallelism, int):
+        raise ConfigError("CLAUDE_CLASSIFY_PARALLELISM must be an integer")
+    if raw_parallelism < 1:
+        raise ConfigError("CLAUDE_CLASSIFY_PARALLELISM must be >= 1")
+
     if hasattr(module, "INCLUSION_KEYWORDS"):
         _log.info(
             "config has unused field 'INCLUSION_KEYWORDS' — safe to remove, see ADR-0026"
@@ -78,6 +84,7 @@ def load(path: pathlib.Path) -> Config:
         user_info_dir=user_info_dir,
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
         max_listing_age_days=max_listing_age_days,
+        claude_classify_parallelism=raw_parallelism,
     )
     _validate(config)
     return config

@@ -3,7 +3,7 @@
 Single-writer module (Pi only, per ADR-0002): no cross-process locking.
 ``is_seen`` is intentionally side-effecting on tuple-tier hits — it writes
 an alias entry under the new URL so subsequent runs short-circuit on the
-cheap URL lookup. See ADR-0004; do not "fix" this back to a pure read.
+cheap URL lookup. See ADR-0003; do not "fix" this back to a pure read.
 """
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ class DeduplicationStore:
     def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
         """Return which dedup tier matched ``key``; on tuple match, write alias.
 
-        Side effect (per ADR-0004): when the URL tier misses but the
+        Side effect (per ADR-0003): when the URL tier misses but the
         ``(company_lc, title_lc, location_lc)`` tuple matches a prior entry,
         an alias entry is written under ``key.url`` carrying the original
         record's ``status`` and ``first_seen`` so future runs short-circuit

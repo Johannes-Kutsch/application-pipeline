@@ -1248,7 +1248,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
 
 
 def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> None:
-    """external_redirect event row must include skipped=True per ADR-0028."""
+    """external_redirect event row must include skipped=True per ADR-0013."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"

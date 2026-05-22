@@ -11,14 +11,14 @@ class PromptError(Exception):
 
 
 CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"TITLE", "RAW_DESCRIPTION"})
+JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"skills", "candidates"})
 
-_PACKAGE_CLASSIFY_SYSTEM_SLOTS: frozenset[str] = frozenset({"USER_INFO"})
-_PACKAGE_CLASSIFY_USER_SLOTS: frozenset[str] = frozenset({"TITLE", "RAW_DESCRIPTION"})
-_PACKAGE_JUDGE_TOP_N_SYSTEM_SLOTS: frozenset[str] = frozenset({"USER_INFO", "skills"})
-_PACKAGE_JUDGE_TOP_N_USER_SLOTS: frozenset[str] = frozenset({"candidates"})
-
-JUDGE_TOP_N_SYSTEM_SLOTS: frozenset[str] = frozenset({"skills"})
-JUDGE_TOP_N_USER_SLOTS: frozenset[str] = frozenset({"candidates"})
+_PACKAGE_CLASSIFY_SLOTS: frozenset[str] = frozenset(
+    {"USER_INFO", "TITLE", "RAW_DESCRIPTION"}
+)
+_PACKAGE_JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset(
+    {"USER_INFO", "skills", "candidates"}
+)
 
 
 @dataclass(frozen=True)
@@ -38,21 +38,9 @@ class PromptTemplate:
 
 
 @dataclass(frozen=True)
-class SplitPromptTemplate:
-    system: PromptTemplate
-    user: PromptTemplate
-
-    def render_system(self, **slots: str) -> str:
-        return self.system.render(**slots)
-
-    def render_user(self, **slots: str) -> str:
-        return self.user.render(**slots)
-
-
-@dataclass(frozen=True)
 class Prompts:
-    classify_relevance: SplitPromptTemplate
-    judge_top_n: SplitPromptTemplate
+    classify_relevance: PromptTemplate
+    judge_top_n: PromptTemplate
 
 
 def load_prompts(config: Config) -> Prompts:
@@ -65,22 +53,18 @@ def load_prompts(config: Config) -> Prompts:
     judge_user_info = f"<user-info>\n{self_desc}\n{match_criteria}\n</user-info>"
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
-    classify = _load_split_template(
+    classify = _load_template(
         pkg,
         "classify_relevance",
-        _PACKAGE_CLASSIFY_SYSTEM_SLOTS,
-        frozenset(),
-        _PACKAGE_CLASSIFY_USER_SLOTS,
+        _PACKAGE_CLASSIFY_SLOTS,
         CLASSIFY_RELEVANCE_SLOTS,
         classify_user_info,
     )
-    judge_top_n = _load_split_template(
+    judge_top_n = _load_template(
         pkg,
         "judge_top_n",
-        _PACKAGE_JUDGE_TOP_N_SYSTEM_SLOTS,
-        JUDGE_TOP_N_SYSTEM_SLOTS,
-        _PACKAGE_JUDGE_TOP_N_USER_SLOTS,
-        JUDGE_TOP_N_USER_SLOTS,
+        _PACKAGE_JUDGE_TOP_N_SLOTS,
+        JUDGE_TOP_N_SLOTS,
         judge_user_info,
     )
     return Prompts(classify_relevance=classify, judge_top_n=judge_top_n)
@@ -97,38 +81,23 @@ def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:
     return text.rstrip("\n")
 
 
-def _load_split_template(
+def _load_template(
     pkg: importlib.resources.abc.Traversable,
     call_site: str,
-    system_package_slots: frozenset[str],
-    system_render_slots: frozenset[str],
-    user_package_slots: frozenset[str],
-    user_render_slots: frozenset[str],
+    package_slots: frozenset[str],
+    render_slots: frozenset[str],
     user_info: str,
-) -> SplitPromptTemplate:
-    system_filename = f"{call_site}.system.md"
-    user_filename = f"{call_site}.user.md"
-
-    system_resource = pkg / system_filename
+) -> PromptTemplate:
+    filename = f"{call_site}.md"
+    resource = pkg / filename
     try:
-        system_raw = system_resource.read_text(encoding="utf-8-sig")
+        raw = resource.read_text(encoding="utf-8-sig")
     except Exception as exc:
-        raise PromptError(f"{system_filename}: {exc}") from exc
-    _validate_slots(system_filename, system_raw, system_package_slots)
+        raise PromptError(f"{filename}: {exc}") from exc
+    _validate_slots(filename, raw, package_slots)
     escaped_user_info = user_info.replace("{", "{{").replace("}", "}}")
-    system_text = system_raw.replace("{USER_INFO}", escaped_user_info)
-
-    user_resource = pkg / user_filename
-    try:
-        user_raw = user_resource.read_text(encoding="utf-8-sig")
-    except Exception as exc:
-        raise PromptError(f"{user_filename}: {exc}") from exc
-    _validate_slots(user_filename, user_raw, user_package_slots)
-
-    return SplitPromptTemplate(
-        system=PromptTemplate(template=system_text, expected_slots=system_render_slots),
-        user=PromptTemplate(template=user_raw, expected_slots=user_render_slots),
-    )
+    text = raw.replace("{USER_INFO}", escaped_user_info)
+    return PromptTemplate(template=text, expected_slots=render_slots)
 
 
 def _validate_slots(filename: str, text: str, expected_slots: frozenset[str]) -> None:

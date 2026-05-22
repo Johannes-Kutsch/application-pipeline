@@ -119,13 +119,11 @@ class ClaudeExtractor:
     def classify_relevance(
         self, item: ClassifyItem
     ) -> tuple[RelevanceVerdict, CallUsage]:
-        user_half = self._prompts.classify_relevance.render_user(
+        prompt = self._prompts.classify_relevance.render(
             TITLE=item.title, RAW_DESCRIPTION=item.raw_description
         )
-        prompt = self._prompts.classify_relevance.render_system() + "\n\n" + user_half
         parsed, response = self._invoke(
             _CLASSIFY_SITE,
-            "",
             prompt,
             {},
         )
@@ -144,15 +142,11 @@ class ClaudeExtractor:
                 duration_s=0.0,
             )
         candidates_block = self._format_candidates(candidates)
-        user_half = self._prompts.judge_top_n.render_user(candidates=candidates_block)
-        prompt = (
-            self._prompts.judge_top_n.render_system(skills=self._skills_block)
-            + "\n\n"
-            + user_half
+        prompt = self._prompts.judge_top_n.render(
+            skills=self._skills_block, candidates=candidates_block
         )
         data, response = self._invoke(
             _JUDGE_TOP_N_SITE,
-            "",
             prompt,
             {"candidate_count": len(candidates)},
         )
@@ -162,7 +156,6 @@ class ClaudeExtractor:
     def _invoke(
         self,
         site: _CallSite,
-        system_prompt: str,
         prompt: str,
         extra: dict[str, object],
     ) -> tuple[Any, ClaudeResponse]:
@@ -170,7 +163,6 @@ class ClaudeExtractor:
         try:
             response = self._invoker.call(
                 prompt,
-                system_prompt=system_prompt,
                 model=site.model,
                 effort=site.effort,
             )
@@ -180,7 +172,6 @@ class ClaudeExtractor:
             )
             self._write_transcript(
                 site=site,
-                system_prompt=system_prompt,
                 prompt=prompt,
                 status=status,
                 duration_s=time.monotonic() - t0,
@@ -202,7 +193,6 @@ class ClaudeExtractor:
         except AgentOutputProtocolError as exc:
             self._write_transcript(
                 site=site,
-                system_prompt=system_prompt,
                 prompt=prompt,
                 status="protocol_error",
                 duration_s=time.monotonic() - t0,
@@ -226,8 +216,6 @@ class ClaudeExtractor:
             "cost_usd": response.cost_usd,
             "duration_s": response.duration_s,
         }
-        if system_prompt:
-            transcript_entry["system_prompt"] = system_prompt
         self._run_log.transcript(site.component_id, transcript_entry)
         self._run_log.event(
             site.component_id,
@@ -242,7 +230,6 @@ class ClaudeExtractor:
         self,
         *,
         site: _CallSite,
-        system_prompt: str,
         prompt: str,
         status: str,
         duration_s: float,
@@ -260,8 +247,6 @@ class ClaudeExtractor:
             "duration_s": duration_s,
             **extra,
         }
-        if system_prompt:
-            entry["system_prompt"] = system_prompt
         if exc is not None:
             entry["stdout"] = exc.stdout
             entry["stderr"] = exc.stderr

@@ -22,7 +22,6 @@ from .prompts import (
     PromptError,
     PromptTemplate,
     Prompts,
-    SplitPromptTemplate,
     load_prompts,
 )
 from .renderer import render
@@ -51,7 +50,6 @@ __all__ = [
     "PromptError",
     "PromptTemplate",
     "Prompts",
-    "SplitPromptTemplate",
     "RelevanceVerdict",
     "ResultsFileError",
     "SearchTerms",

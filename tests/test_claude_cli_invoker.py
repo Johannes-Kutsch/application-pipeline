@@ -298,7 +298,7 @@ def test_call_without_model_raises_type_error():
         _invoker(_runner(stdout=_envelope(result={"ok": True}))).call("p")  # type: ignore[call-arg]
 
 
-# --- wire shape (ADR-0040 strips harness via flags + neutral cwd) ---
+# --- wire shape (ADR-0038 strips harness via flags + neutral cwd) ---
 
 
 def test_call_strips_harness_via_flags():
@@ -307,35 +307,15 @@ def test_call_strips_harness_via_flags():
         "p", model="haiku"
     )
     args, _ = calls[0]
-    # --bare stays out (ADR-0039 — breaks OAuth)
+    # --bare stays out (ADR-0038 — breaks OAuth)
     assert "--bare" not in args
-    # but the harness is stripped via four non-auth flags (ADR-0040)
+    # but the harness is stripped via four non-auth flags (ADR-0038)
     assert "--no-session-persistence" in args
     assert "--disable-slash-commands" in args
     assert "--tools" in args
     assert args[args.index("--tools") + 1] == ""
     assert "--setting-sources" in args
     assert args[args.index("--setting-sources") + 1] == "user"
-
-
-def test_call_with_system_prompt_passes_it_via_flag():
-    calls: list[tuple[list[str], str]] = []
-    _invoker(_runner(stdout=_envelope(result={"ok": True}), calls=calls)).call(
-        "user body", model="haiku", system_prompt="SYS HALF"
-    )
-    args, stdin = calls[0]
-    assert "--system-prompt" in args
-    assert args[args.index("--system-prompt") + 1] == "SYS HALF"
-    assert stdin == "user body"
-
-
-def test_call_without_system_prompt_omits_flag():
-    calls: list[tuple[list[str], str]] = []
-    _invoker(_runner(stdout=_envelope(result={"ok": True}), calls=calls)).call(
-        "p", model="haiku"
-    )
-    args, _ = calls[0]
-    assert "--system-prompt" not in args
 
 
 # --- forensic attributes on exceptions ---

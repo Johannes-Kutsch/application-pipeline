@@ -24,3 +24,10 @@ Andernfalls antworte mit einem JSON-Objekt innerhalb von `<verdict>`-Tags:
   "notable_caveats": "<string>"
 }}}}
 </verdict>
+
+## Zu klassifizierende Stellenanzeige:
+
+Titel: {TITLE}
+
+Beschreibung:
+{RAW_DESCRIPTION}

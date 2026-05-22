@@ -101,7 +101,7 @@ class SubprocessRunner(Protocol):
 
 def _default_runner(args: list[str], stdin: str) -> tuple[int, str, str]:
     # cwd is forced to a neutral tempdir so the harness does not discover the
-    # project CLAUDE.md or auto-memory keyed off the calling cwd. See ADR-0040.
+    # project CLAUDE.md or auto-memory keyed off the calling cwd. See ADR-0038.
     proc = subprocess.run(
         args,
         input=stdin,
@@ -146,7 +146,6 @@ class ClaudeCliInvoker:
         *,
         model: str,
         effort: str = "",
-        system_prompt: str = "",
     ) -> ClaudeResponse:
         cli = self._cli_path or shutil.which("claude") or "claude"
         args = [
@@ -166,8 +165,6 @@ class ClaudeCliInvoker:
         ]
         if effort:
             args += ["--effort", effort]
-        if system_prompt:
-            args += ["--system-prompt", system_prompt]
 
         t0 = time.monotonic()
         returncode, stdout, stderr = self._runner(args, prompt)

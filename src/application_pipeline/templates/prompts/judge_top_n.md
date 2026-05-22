@@ -26,3 +26,7 @@ Antworte ausschließlich mit einem JSON-Array in folgendem Format innerhalb von 
   {{"id": "...", "rank": 1, "matched": ["..."], "missing": ["..."], "summary": "..."}},
   ...
 ]</verdicts>
+
+## Kandidaten
+
+{candidates}

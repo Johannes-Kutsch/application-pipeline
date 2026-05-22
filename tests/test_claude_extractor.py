@@ -35,11 +35,9 @@ from application_pipeline.llm.claude_cli import (
 )
 from application_pipeline.prompts import (
     CLASSIFY_RELEVANCE_SLOTS,
-    JUDGE_TOP_N_SYSTEM_SLOTS,
-    JUDGE_TOP_N_USER_SLOTS,
+    JUDGE_TOP_N_SLOTS,
     PromptTemplate,
     Prompts,
-    SplitPromptTemplate,
 )
 from application_pipeline.search_terms.types import SearchTerms
 
@@ -68,18 +66,12 @@ def _config(**kwargs: object) -> Config:
 
 
 def _prompts(
-    classify: str = "{TITLE} {RAW_DESCRIPTION}",
-    judge_top_n: str = "{candidates}",
+    classify: str = "system\n\n{TITLE} {RAW_DESCRIPTION}",
+    judge_top_n: str = "{skills}\n\n{candidates}",
 ) -> Prompts:
     return Prompts(
-        classify_relevance=SplitPromptTemplate(
-            system=PromptTemplate("system", frozenset()),
-            user=PromptTemplate(classify, CLASSIFY_RELEVANCE_SLOTS),
-        ),
-        judge_top_n=SplitPromptTemplate(
-            system=PromptTemplate("{skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
-            user=PromptTemplate(judge_top_n, JUDGE_TOP_N_USER_SLOTS),
-        ),
+        classify_relevance=PromptTemplate(classify, CLASSIFY_RELEVANCE_SLOTS),
+        judge_top_n=PromptTemplate(judge_top_n, JUDGE_TOP_N_SLOTS),
     )
 
 
@@ -188,14 +180,10 @@ def test_classify_relevance_sends_combined_prompt_via_stdin_no_system_prompt(
 ) -> None:
     invoker = _fake_invoker(_in_domain_response())
     prompts = Prompts(
-        classify_relevance=SplitPromptTemplate(
-            system=PromptTemplate("SYS_BODY", frozenset()),
-            user=PromptTemplate("{TITLE}|{RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS),
+        classify_relevance=PromptTemplate(
+            "SYS_BODY\n\n{TITLE}|{RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS
         ),
-        judge_top_n=SplitPromptTemplate(
-            system=PromptTemplate("{skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
-            user=PromptTemplate("{candidates}", JUDGE_TOP_N_USER_SLOTS),
-        ),
+        judge_top_n=PromptTemplate("{skills}\n\n{candidates}", JUDGE_TOP_N_SLOTS),
     )
     extractor = ClaudeExtractor(
         _config(),
@@ -796,13 +784,11 @@ def test_judge_top_n_sends_combined_prompt_via_stdin_no_system_prompt(
     verdicts_raw = _default_top_n_verdicts(candidates, count=2)
     invoker = _fake_invoker(_top_n_response(verdicts_raw))
     prompts = Prompts(
-        classify_relevance=SplitPromptTemplate(
-            system=PromptTemplate("SYS_BODY", frozenset()),
-            user=PromptTemplate("{TITLE}|{RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS),
+        classify_relevance=PromptTemplate(
+            "SYS_BODY\n\n{TITLE}|{RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS
         ),
-        judge_top_n=SplitPromptTemplate(
-            system=PromptTemplate("JUDGE_SYS {skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
-            user=PromptTemplate("{candidates}", JUDGE_TOP_N_USER_SLOTS),
+        judge_top_n=PromptTemplate(
+            "JUDGE_SYS {skills}\n\n{candidates}", JUDGE_TOP_N_SLOTS
         ),
     )
     search_terms = SearchTerms(

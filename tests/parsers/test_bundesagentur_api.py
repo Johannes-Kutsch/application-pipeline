@@ -928,3 +928,62 @@ def test_enrich_no_externe_url_emits_no_external_redirect_event(
             for line in events_file.read_text(encoding="utf-8").splitlines()
         ]
         assert not any(e.get("event") == "external_redirect" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# enrich — HTTP 3xx redirect classification
+# ---------------------------------------------------------------------------
+
+
+def _make_redirect_get(status: int, location: str) -> Callable[[str, float], bytes]:
+    from application_pipeline.http import HttpRedirectResponse
+
+    def http_get(url: str, timeout: float) -> bytes:
+        raise HttpRedirectResponse(status, location)
+
+    return http_get
+
+
+def test_enrich_3xx_off_host_location_returns_external_redirect(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    http = ParserHttp(
+        run_log=run_log,
+        _http_get=_make_redirect_get(302, "https://external.example.com/job/123"),
+    )
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
+        result = p.enrich(stub)
+    assert isinstance(result, ExternalRedirect)
+    assert result.outbound_url == "https://external.example.com/job/123"
+    assert result.stub is stub
+
+
+def test_enrich_3xx_same_host_location_raises_parser_error(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    from application_pipeline.parsers import ParserError
+
+    http = ParserHttp(
+        run_log=run_log,
+        _http_get=_make_redirect_get(
+            301,
+            "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/other",
+        ),
+    )
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)
+
+
+def test_enrich_3xx_missing_location_raises_parser_error(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    from application_pipeline.parsers import ParserError
+
+    http = ParserHttp(
+        run_log=run_log,
+        _http_get=_make_redirect_get(302, ""),
+    )
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)

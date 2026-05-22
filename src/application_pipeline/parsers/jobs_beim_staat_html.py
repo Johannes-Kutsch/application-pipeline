@@ -22,9 +22,8 @@ from typing import Any, assert_never
 
 from bs4 import BeautifulSoup, Tag
 
-from application_pipeline.parser_log import RunLog
-
 from application_pipeline.http.errors import HttpRedirectResponse
+from application_pipeline.parser_log import RunLog
 
 from .errors import ParserError
 from .http import ParserHttp

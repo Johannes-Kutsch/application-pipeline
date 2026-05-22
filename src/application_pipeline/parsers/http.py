@@ -131,9 +131,7 @@ class ParserHttp:
             t_start = time.monotonic()
             try:
                 result = self._http_get(url, self._timeout)
-            except HttpRedirectResponse:
-                raise
-            except HttpNotRetryableError:
+            except (HttpRedirectResponse, HttpNotRetryableError):
                 raise
             except Exception as exc:
                 last_exc = exc

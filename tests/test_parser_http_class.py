@@ -11,6 +11,7 @@ import respx
 
 from application_pipeline.http import (
     HttpParserFatalError,
+    HttpRedirectResponse,
     HttpStubNotRetryableError,
 )
 from application_pipeline.parser_log import RunLog
@@ -432,3 +433,105 @@ def test_get_raises_parser_fatal_for_unknown_status(run_log: RunLog):
     with ParserHttp(run_log=run_log) as parser:
         with pytest.raises(HttpParserFatalError):
             parser.get("http://example.com/job/1", error_prefix="p")
+
+
+# ---------------------------------------------------------------------------
+# 3xx surfaces as HttpRedirectResponse (ADR-0037)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+@respx.mock
+def test_get_raises_redirect_response_on_3xx(run_log: RunLog, status: int):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(
+            status, headers={"Location": "http://other.example/landing"}
+        )
+    )
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(HttpRedirectResponse) as exc_info:
+            parser.get("http://example.com/job/1", error_prefix="p")
+
+    assert exc_info.value.status == status
+    assert exc_info.value.location == "http://other.example/landing"
+
+
+@respx.mock
+def test_get_redirect_is_not_wrapped_in_parser_error(run_log: RunLog):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(302, headers={"Location": "http://elsewhere/"})
+    )
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(Exception) as exc_info:
+            parser.get("http://example.com/job/1", error_prefix="p")
+    assert isinstance(exc_info.value, HttpRedirectResponse)
+    assert not isinstance(exc_info.value, ParserError)
+
+
+@respx.mock
+def test_get_emits_http_get_redirect_event_on_3xx(run_log: RunLog):
+    respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(302, headers={"Location": "http://elsewhere/x"})
+    )
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(HttpRedirectResponse):
+            parser.get("http://example.com/job/1", error_prefix="p")
+
+    events = _read_events(run_log, "parser_http")
+    redirects = [e for e in events if e["event"] == "http_get_redirect"]
+    assert len(redirects) == 1
+    assert redirects[0]["url"] == "http://example.com/job/1"
+    assert redirects[0]["status"] == 302
+    assert redirects[0]["location"] == "http://elsewhere/x"
+    assert not any(e["event"] == "http_get_fatal" for e in events)
+
+
+@respx.mock
+def test_get_redirect_with_missing_location_header_carries_empty_string(
+    run_log: RunLog,
+):
+    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(302))
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(HttpRedirectResponse) as exc_info:
+            parser.get("http://example.com/job/1", error_prefix="p")
+
+    assert exc_info.value.location == ""
+    redirects = [
+        e
+        for e in _read_events(run_log, "parser_http")
+        if e["event"] == "http_get_redirect"
+    ]
+    assert redirects[0]["location"] == ""
+
+
+@respx.mock
+def test_get_redirect_fires_on_first_attempt_without_retry(run_log: RunLog):
+    route = respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(302, headers={"Location": "http://x/"})
+    )
+
+    with ParserHttp(run_log=run_log, retries=3, _sleep=_NO_SLEEP) as parser:
+        with pytest.raises(HttpRedirectResponse):
+            parser.get("http://example.com/job/1", error_prefix="p")
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_real_httpx_does_not_follow_redirects(run_log: RunLog):
+    redirect_route = respx.get("http://example.com/job/1").mock(
+        return_value=httpx.Response(302, headers={"Location": "http://example.com/x"})
+    )
+    target_route = respx.get("http://example.com/x").mock(
+        return_value=httpx.Response(200, content=b"target")
+    )
+
+    with ParserHttp(run_log=run_log) as parser:
+        with pytest.raises(HttpRedirectResponse):
+            parser.get("http://example.com/job/1", error_prefix="p")
+
+    assert redirect_route.call_count == 1
+    assert target_route.call_count == 0

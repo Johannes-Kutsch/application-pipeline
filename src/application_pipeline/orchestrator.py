@@ -9,7 +9,7 @@ import traceback
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from application_pipeline import config as config_module
@@ -425,15 +425,9 @@ class _ClassifyThread(_QueueWorker):
                 break
             except ClaudeUsageLimitError as err:
                 now = datetime.now(timezone.utc)
-                if err.reset_time is not None:
-                    effective_reset = err.reset_time
-                else:
-                    effective_reset = now.replace(
-                        minute=0, second=0, microsecond=0
-                    ) + timedelta(hours=1)
                 wake = _quota.compute_wake_time(err.reset_time, now)
                 duration_s = max(0.0, (wake - now).total_seconds())
-                is_first = self._quota_wall.raise_wall(effective_reset)
+                is_first = self._quota_wall.raise_wall(wake - _quota._BUFFER)
                 if is_first:
                     self._run_log.event(
                         "pipeline_orchestrator",

@@ -441,6 +441,65 @@ def test_cron_sh_flock_uses_project_root_relative_path(tmp_path: Path) -> None:
     assert "application-pipeline/.cron.lock" in cron_sh
 
 
+def test_cron_sh_pip_upgrade_warns_and_continues_on_failure(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    # pip failures must warn-and-continue, not call fail() or exit
+    pip_lines = [ln for ln in cron_sh.splitlines() if "pip install" in ln]
+    assert len(pip_lines) >= 2, "expected at least two pip install lines"
+    for ln in pip_lines:
+        assert "fail(" not in ln, f"pip line must not call fail(): {ln!r}"
+        assert not re.search(r"\bexit\b", ln), f"pip line must not call exit: {ln!r}"
+
+
+def test_cron_sh_both_pip_upgrade_attempts_run_unconditionally(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    pip_lines = [ln for ln in cron_sh.splitlines() if "pip install" in ln]
+    assert len(pip_lines) >= 2, "expected at least two pip install upgrade lines"
+    # both must target application-pipeline
+    assert all("application-pipeline" in ln for ln in pip_lines)
+
+
+def test_cron_sh_pip_warning_names_attempt_number(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    assert re.search(r"WARNING.*attempt 1", cron_sh)
+    assert re.search(r"WARNING.*attempt 2", cron_sh)
+
+
+def test_cron_sh_pip_warning_includes_captured_stderr(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    # stderr must be captured in a variable and echoed in the warning
+    assert re.search(r"\$\(pip install.*2>&1", cron_sh)
+    # the variable is referenced inside the warning echo
+    assert re.search(r"WARNING.*\$_pip_stderr", cron_sh)
+
+
+def test_cron_sh_pipeline_stages_still_call_fail_on_error(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    assert re.search(
+        r"application-pipeline init --refresh.*\|\|.*\bfail\b", cron_sh, re.DOTALL
+    )
+    assert re.search(r"application-pipeline run.*\|\|.*\bfail\b", cron_sh, re.DOTALL)
+
+
+def test_adr_0027_documents_pip_warn_and_continue_policy() -> None:
+    adr_file = (
+        Path(__file__).parent.parent
+        / "docs/adr/0027-distribution-via-pypi-and-cron-upgrade.md"
+    )
+    text = adr_file.read_text()
+    assert "warn" in text.lower() and "continue" in text.lower(), (
+        "ADR-0027 must document the warn-and-continue policy for pip-upgrade failures"
+    )
+    assert "cron.log" in text, (
+        "ADR-0027 must mention cron.log as the visibility mechanism"
+    )
+
+
 def test_cron_install_writes_weekday_only_schedule(tmp_path: Path) -> None:
     init(tmp_path)
     cron_install = (tmp_path / "setup" / "cron-install.sh").read_text()

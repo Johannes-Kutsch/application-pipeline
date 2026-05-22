@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from application_pipeline.http.errors import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers import jobs_beim_staat_html as parser_module
@@ -854,3 +855,56 @@ def test_discover_filters_mail_teaser_yields_one_stub_from_mixed_page(
     assert len(stubs) == 1
     assert isinstance(stubs[0], PositionStub)
     assert stubs[0].title == "Real Job"
+
+
+# ---------------------------------------------------------------------------
+# enrich — HTTP 3xx redirect handling
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_off_host_3xx_returns_external_redirect(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    def redirecting_get(url: str, timeout: float) -> bytes:
+        raise HttpRedirectResponse(302, "https://external-company.com/jobs/123")
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=redirecting_get)
+    ) as p:
+        result = p.enrich(stub)
+
+    assert isinstance(result, ExternalRedirect)
+    assert result.outbound_url == "https://external-company.com/jobs/123"
+    assert result.stub is stub
+
+
+def test_enrich_same_host_3xx_raises_parser_error(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    from application_pipeline.parsers import ParserError
+
+    def redirecting_get(url: str, timeout: float) -> bytes:
+        raise HttpRedirectResponse(
+            301, "https://www.jobs-beim-staat.de/jobangebote/other"
+        )
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=redirecting_get)
+    ) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)
+
+
+def test_enrich_missing_location_3xx_raises_parser_error(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    from application_pipeline.parsers import ParserError
+
+    def redirecting_get(url: str, timeout: float) -> bytes:
+        raise HttpRedirectResponse(302, "")
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=redirecting_get)
+    ) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)

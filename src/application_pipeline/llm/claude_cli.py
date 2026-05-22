@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -99,8 +100,15 @@ class SubprocessRunner(Protocol):
 
 
 def _default_runner(args: list[str], stdin: str) -> tuple[int, str, str]:
+    # cwd is forced to a neutral tempdir so the harness does not discover the
+    # project CLAUDE.md or auto-memory keyed off the calling cwd. See ADR-0040.
     proc = subprocess.run(
-        args, input=stdin, capture_output=True, text=True, encoding="utf-8"
+        args,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=tempfile.gettempdir(),
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -150,6 +158,11 @@ class ClaudeCliInvoker:
             "--model",
             model,
             "--no-session-persistence",
+            "--disable-slash-commands",
+            "--tools",
+            "",
+            "--setting-sources",
+            "user",
         ]
         if effort:
             args += ["--effort", effort]

@@ -24,6 +24,8 @@ from bs4 import BeautifulSoup, Tag
 
 from application_pipeline.parser_log import RunLog
 
+from application_pipeline.http.errors import HttpRedirectResponse
+
 from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
@@ -265,9 +267,20 @@ class JobsBeimStaatParser:
             start += step
 
     def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
-        wrapper_raw = self._http.get(
-            stub.url, error_prefix=f"jobs-beim-staat enrich failed for {stub.url}"
-        )
+        try:
+            wrapper_raw = self._http.get(
+                stub.url, error_prefix=f"jobs-beim-staat enrich failed for {stub.url}"
+            )
+        except HttpRedirectResponse as exc:
+            location = exc.location
+            location_host = urllib.parse.urlparse(location).netloc
+            base_host = urllib.parse.urlparse(_BASE_URL).netloc
+            if location and location_host != base_host:
+                return ExternalRedirect(stub, location)
+            raise ParserError(
+                f"jobs-beim-staat enrich: 3xx with same-host or missing location"
+                f" for {stub.url} location={location!r}"
+            ) from exc
 
         wrapper_soup = BeautifulSoup(wrapper_raw, "html.parser")
         job_id = _extract_job_id(wrapper_soup)

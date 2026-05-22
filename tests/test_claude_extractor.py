@@ -183,7 +183,7 @@ def test_classify_relevance_prompt_contains_title_and_description(
     assert "MY_DESC" in prompt_sent
 
 
-def test_classify_relevance_passes_system_half_via_system_prompt(
+def test_classify_relevance_sends_combined_prompt_via_stdin_no_system_prompt(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(_in_domain_response())
@@ -207,9 +207,12 @@ def test_classify_relevance_passes_system_half_via_system_prompt(
     extractor.classify_relevance(_item(title="T", raw_description="D"))
     kwargs = invoker.call.call_args.kwargs
     stdin_body = invoker.call.call_args.args[0]
-    assert kwargs["system_prompt"] == "SYS_BODY"
-    assert stdin_body == "T|D"
-    assert "SYS_BODY" not in stdin_body
+    # Classifier must NOT send a system_prompt flag
+    assert not kwargs.get("system_prompt"), (
+        "system_prompt must be absent/empty for classifier"
+    )
+    # stdin must carry the full combined prompt (system half + blank line + user half)
+    assert stdin_body == "SYS_BODY\n\nT|D"
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +369,7 @@ def test_classify_relevance_records_transcript(tmp_path: Path) -> None:
     entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
     assert entry["call"] == "classify_relevance"
     assert "prompt" in entry
-    assert "system_prompt" in entry
+    assert "system_prompt" not in entry
     assert "raw_response" in entry
     assert "usage" in entry
     assert "cost_usd" in entry
@@ -426,6 +429,36 @@ def test_classify_failure_transcript_does_not_write_to_extractor_file(
         extractor.classify_relevance(_item())
 
     assert not (tmp_path / "claude_extractor.transcripts.jsonl").exists()
+
+
+def test_classify_failure_transcript_has_no_system_prompt_field(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    invoker = MagicMock(spec=ClaudeCliInvoker)
+    invoker.call.side_effect = ClaudeCliError(
+        "exit 1",
+        returncode=1,
+        stdout="",
+        stderr="",
+        envelope=None,
+        envelope_error_class="cli_nonzero_exit",
+    )
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
+    )
+
+    with pytest.raises(ExtractorUnreachableError):
+        extractor.classify_relevance(_item())
+
+    transcript_file = tmp_path / "llm_classify_relevance.transcripts.jsonl"
+    entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
+    assert "system_prompt" not in entry
+    assert "prompt" in entry
 
 
 # ---------------------------------------------------------------------------

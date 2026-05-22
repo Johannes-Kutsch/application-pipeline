@@ -119,13 +119,13 @@ class ClaudeExtractor:
     def classify_relevance(
         self, item: ClassifyItem
     ) -> tuple[RelevanceVerdict, CallUsage]:
-        system_prompt = self._prompts.classify_relevance.render_system()
-        prompt = self._prompts.classify_relevance.render_user(
+        user_half = self._prompts.classify_relevance.render_user(
             TITLE=item.title, RAW_DESCRIPTION=item.raw_description
         )
+        prompt = self._prompts.classify_relevance.render_system() + "\n\n" + user_half
         parsed, response = self._invoke(
             _CLASSIFY_SITE,
-            system_prompt,
+            "",
             prompt,
             {},
         )
@@ -212,22 +212,21 @@ class ClaudeExtractor:
                 f"{site.call}: {exc.kind}: <{site.tag}> block missing or malformed"
             ) from exc
 
-        self._run_log.transcript(
-            site.component_id,
-            {
-                "call": site.call,
-                "system_prompt": system_prompt,
-                "prompt": prompt,
-                "raw_response": response.raw_response,
-                "usage": {
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens,
-                    "cache_read_tokens": response.usage.cache_read_tokens,
-                },
-                "cost_usd": response.cost_usd,
-                "duration_s": response.duration_s,
+        transcript_entry: dict[str, object] = {
+            "call": site.call,
+            "prompt": prompt,
+            "raw_response": response.raw_response,
+            "usage": {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "cache_read_tokens": response.usage.cache_read_tokens,
             },
-        )
+            "cost_usd": response.cost_usd,
+            "duration_s": response.duration_s,
+        }
+        if system_prompt:
+            transcript_entry["system_prompt"] = system_prompt
+        self._run_log.transcript(site.component_id, transcript_entry)
         self._run_log.event(
             site.component_id,
             site.call,
@@ -255,11 +254,12 @@ class ClaudeExtractor:
             "ts": ts,
             "call": site.call,
             "status": status,
-            "system_prompt": system_prompt,
             "prompt": prompt,
             "duration_s": duration_s,
             **extra,
         }
+        if system_prompt:
+            entry["system_prompt"] = system_prompt
         if exc is not None:
             entry["stdout"] = exc.stdout
             entry["stderr"] = exc.stderr

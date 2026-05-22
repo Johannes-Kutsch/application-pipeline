@@ -144,13 +144,15 @@ class ClaudeExtractor:
                 duration_s=0.0,
             )
         candidates_block = self._format_candidates(candidates)
-        system_prompt = self._prompts.judge_top_n.render_system(
-            skills=self._skills_block
+        user_half = self._prompts.judge_top_n.render_user(candidates=candidates_block)
+        prompt = (
+            self._prompts.judge_top_n.render_system(skills=self._skills_block)
+            + "\n\n"
+            + user_half
         )
-        prompt = self._prompts.judge_top_n.render_user(candidates=candidates_block)
         data, response = self._invoke(
             _JUDGE_TOP_N_SITE,
-            system_prompt,
+            "",
             prompt,
             {"candidate_count": len(candidates)},
         )

@@ -789,21 +789,41 @@ def test_judge_top_n_with_10_candidates_returns_5_verdicts(run_log: RunLog) -> N
     assert usage.cost_usd == pytest.approx(0.003)
 
 
-def test_judge_top_n_passes_skills_via_system_prompt(run_log: RunLog) -> None:
+def test_judge_top_n_sends_combined_prompt_via_stdin_no_system_prompt(
+    run_log: RunLog,
+) -> None:
     candidates = _judge_candidates(2)
     verdicts_raw = _default_top_n_verdicts(candidates, count=2)
     invoker = _fake_invoker(_top_n_response(verdicts_raw))
+    prompts = Prompts(
+        classify_relevance=SplitPromptTemplate(
+            system=PromptTemplate("SYS_BODY", frozenset()),
+            user=PromptTemplate("{TITLE}|{RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS),
+        ),
+        judge_top_n=SplitPromptTemplate(
+            system=PromptTemplate("JUDGE_SYS {skills}", JUDGE_TOP_N_SYSTEM_SLOTS),
+            user=PromptTemplate("{candidates}", JUDGE_TOP_N_USER_SLOTS),
+        ),
+    )
+    search_terms = SearchTerms(
+        keywords=("python",), skills=("Python",), negative_keywords=()
+    )
     extractor = ClaudeExtractor(
         _config(),
-        _prompts(),
-        search_terms=_SEARCH_TERMS,
+        prompts,
+        search_terms=search_terms,
         run_log=run_log,
         _invoker=invoker,
     )
     extractor.judge_top_n(candidates)
     kwargs = invoker.call.call_args.kwargs
     stdin_body = invoker.call.call_args.args[0]
-    assert "system_prompt" in kwargs
+    assert not kwargs.get("system_prompt"), (
+        "system_prompt must be absent/empty for judge"
+    )
+    assert stdin_body.startswith("JUDGE_SYS - Python\n\n"), (
+        "stdin must carry combined prompt: system half + blank line + user half"
+    )
     assert candidates[0].id in stdin_body
 
 
@@ -820,6 +840,26 @@ def test_judge_top_n_empty_candidates_returns_empty_list(run_log: RunLog) -> Non
     assert results == []
     assert usage.cost_usd == pytest.approx(0.0)
     invoker.call.assert_not_called()
+
+
+def test_judge_top_n_transcript_has_no_system_prompt_field(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    candidates = _judge_candidates(2)
+    verdicts_raw = _default_top_n_verdicts(candidates, count=2)
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=_fake_invoker(_top_n_response(verdicts_raw)),
+    )
+    extractor.judge_top_n(candidates)
+    transcript_file = tmp_path / "llm_judge_match.transcripts.jsonl"
+    entry = json.loads(transcript_file.read_text(encoding="utf-8").strip())
+    assert "system_prompt" not in entry
+    assert "prompt" in entry
 
 
 def test_judge_top_n_response_with_unknown_id_raises_batch_malformed(

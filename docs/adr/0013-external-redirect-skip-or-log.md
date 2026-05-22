@@ -1,5 +1,7 @@
 # External-redirect detection: skip-and-log or keep-and-log
 
+> **RETIRED** by ADR-0041. Redirects are followed silently inside the **LLM Enricher**'s body fetch; the destination's HTML is stripped and extracted by the same path as any other listing. The `ExternalRedirect` payload, the `external_redirect` `SeenStatus`, and the `external_redirects` run counter all retire. If a redirect destination has no usable body, **Content Gate** drops it.
+
 When a **Parser** detects that the detail page's body content has been replaced by (or augmented with) an outbound URL to a third-party board, it records one `external_redirect` row to its component event log with a `skipped: bool` field. Two outcomes share the same call site:
 
 - **`skipped=true`** — no usable body. Parser returns `ExternalRedirect(stub, outbound_url)` to the orchestrator; orchestrator marks the stub `external_redirect` in `.seen.json` and bumps the `external_redirects` count in the run-end events row.

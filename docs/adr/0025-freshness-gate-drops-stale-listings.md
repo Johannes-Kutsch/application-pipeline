@@ -1,5 +1,7 @@
 # Freshness Gate drops stale listings post-enrich
 
+> **AMENDED** by ADR-0041. The Freshness Gate now runs **twice** — once after `discover()` when `PositionStub.posted_date` is present (cheap pre-LLM drop), once after the **LLM Enricher** when `posted_date` was inferred by the LLM. Per-position transcript gains a `gate_arm: "discover" | "post_enrich"` field. The `expired` status transition and Pool-member extract cleanup behavior are unchanged; the cleanup target shape changed from `StructuredExtract` to `{header, summary}` per ADR-0041 / ADR-0022 retirement.
+
 A new deterministic stage, the **Freshness Gate**, runs after `Parser.enrich()` and before the **Relevance Classifier**. It drops a **Position** when either `posted_date` is older than `Config.MAX_LISTING_AGE_DAYS` (default 180) or `deadline` is before the cron-anchored logical date. Drops write a new terminal-skip dedup status `expired` and, when the source was a pool member, delete the **Structured Extract** from `data/extracts.json`. The gate re-runs on every enrich including Pool re-discovery, so `in_domain → expired` transitions are possible.
 
 ## Why

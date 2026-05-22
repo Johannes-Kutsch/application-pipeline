@@ -1,5 +1,7 @@
 # HTTP 3xx during `enrich()` is a second detection shape for External Redirect
 
+> **RETIRED** by ADR-0041. Per-parser `enrich()` retires; body fetch moves to the shared **LLM Enricher** which follows redirects silently via `httpx`'s default redirect handling. No host-classification, no `ExternalRedirect` payload, no parser-side fatal/non-fatal distinction. Destinations with no usable body are caught by **Content Gate**; oversized destinations are caught by the token cap and stashed.
+
 When a **Parser**'s `enrich()` call receives an HTTP 3xx response (`301`, `302`, `303`, `307`, `308`), the **ParserHttp** layer surfaces the response to the parser instead of crashing the parser thread. The parser classifies by the `Location` header's host:
 
 - **Off-host `Location`** — parser returns `ExternalRedirect(stub, location_url)`. Orchestrator marks `external_redirect`, bumps the counter (ADR-0013).

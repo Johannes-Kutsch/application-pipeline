@@ -1,6 +1,6 @@
 # Layout as a user-editable Python module in the synced folder
 
-> **SUPERSEDED** by ADR-0011 amendment (see "No path override knobs" addendum). `layout.py` is now invariant — sits at `<settings-dir>/layout.py`, no `LAYOUT` config knob, no `LAYOUT = None` stub arm. The renderer-as-pure-module and `str.format_map` decisions still apply; only the loader contract changed.
+> **RETIRED** by ADR-0042. `layout.py`, the `Layout` dataclass, the placeholder vocabulary, and the `str.format_map` plumbing are all gone — Card structure is hardcoded in the Renderer, Header content is LLM-authored at classify time (ADR-0041). Previously partially superseded by ADR-0011 amendment ("no path override knobs").
 
 `settings/layout.py` lives alongside `config.py` in the synced folder (see ADR-0011). Plain Python: named placeholder groups, full `CARD_TEMPLATE` / `HEADLINE_TEMPLATE`. Loaded at runtime by the same `load_user_module` machinery as **Config**, validated into a frozen `Layout` dataclass, consumed by a pure **Renderer** via `str.format_map`.
 

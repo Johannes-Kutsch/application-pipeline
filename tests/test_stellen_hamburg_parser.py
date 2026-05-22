@@ -14,7 +14,7 @@ from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
 )
-from application_pipeline.parsers.types import City
+from application_pipeline.parsers.types import City, Position
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -355,6 +355,7 @@ def test_enrich_returns_position_with_raw_description(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.raw_description == "We are hiring."
 
 
@@ -366,6 +367,7 @@ def test_enrich_strips_html_tags_from_description(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "<p>" not in pos.raw_description
     assert "Hello" in pos.raw_description
     assert "World" in pos.raw_description
@@ -379,6 +381,7 @@ def test_enrich_decodes_html_entities_in_description(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "Gehälter" in pos.raw_description
     assert "&amp;" not in pos.raw_description
 
@@ -391,6 +394,7 @@ def test_enrich_empty_description_when_no_jsonld(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.raw_description == ""
 
 
@@ -405,6 +409,7 @@ def test_enrich_parses_posted_date(run_log: RunLog, stub: PositionStub) -> None:
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.posted_date == date(2026, 3, 15)
 
 
@@ -414,6 +419,7 @@ def test_enrich_parses_deadline(run_log: RunLog, stub: PositionStub) -> None:
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.deadline == date(2026, 5, 30)
 
 
@@ -425,6 +431,7 @@ def test_enrich_posted_date_none_when_field_absent(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.posted_date is None
 
 
@@ -436,6 +443,7 @@ def test_enrich_deadline_none_when_field_absent(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.deadline is None
 
 
@@ -452,6 +460,7 @@ def test_enrich_maps_full_time_employment_type(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type == "full-time"
 
 
@@ -463,6 +472,7 @@ def test_enrich_maps_part_time_employment_type(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type == "part-time"
 
 
@@ -474,6 +484,7 @@ def test_enrich_employment_type_none_when_absent(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type is None
 
 

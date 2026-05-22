@@ -7,13 +7,22 @@ import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Literal, NoReturn
 
+from application_pipeline.http import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
 from application_pipeline.text import normalize
 
 from ._text import parse_iso_date, strip_html
+from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
-from .types import City, NotServedQuery, ParserQuery, Position, PositionStub
+from .types import (
+    City,
+    ExternalRedirect,
+    NotServedQuery,
+    ParserQuery,
+    Position,
+    PositionStub,
+)
 
 _PARSER_TYPE = "stellen_hamburg_api"
 _DISPLAY_NAME = "stellen.hamburg"
@@ -190,10 +199,23 @@ class StellenHamburgParser:
             location=location,
         )
 
-    def enrich(self, stub: PositionStub) -> Position:
-        raw = self._http.get(
-            stub.url, error_prefix=f"StellenHamburg enrich failed for {stub.url}"
-        )
+    def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
+        try:
+            raw = self._http.get(
+                stub.url, error_prefix=f"StellenHamburg enrich failed for {stub.url}"
+            )
+        except HttpRedirectResponse as exc:
+            if not exc.location:
+                raise ParserError(
+                    f"StellenHamburg enrich: 3xx with no Location for {stub.url}"
+                ) from exc
+            stub_host = urllib.parse.urlparse(stub.url).netloc
+            location_host = urllib.parse.urlparse(exc.location).netloc
+            if location_host == stub_host:
+                raise ParserError(
+                    f"StellenHamburg enrich: same-host redirect to {exc.location} for {stub.url}"
+                ) from exc
+            return ExternalRedirect(stub, exc.location)
 
         job_data = _extract_jsonld(raw)
         raw_description = strip_html(job_data.get("description") or "")
@@ -231,5 +253,8 @@ if __name__ == "__main__":
     print(f"discover: {len(stubs)} stubs")
     if stubs:
         with StellenHamburgParser(run_log=_run_log) as p:
-            pos = p.enrich(stubs[0])
-        print(f"enrich: {len(pos.raw_description)} chars")
+            result = p.enrich(stubs[0])
+        if isinstance(result, Position):
+            print(f"enrich: {len(result.raw_description)} chars")
+        else:
+            print(f"enrich: external redirect to {result.outbound_url}")

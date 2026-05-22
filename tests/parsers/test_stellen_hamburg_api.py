@@ -16,7 +16,7 @@ from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
 )
-from application_pipeline.parsers.types import City, NotServedQuery, Remote
+from application_pipeline.parsers.types import City, NotServedQuery, Position, Remote
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "stellen_hamburg"
 
@@ -387,6 +387,7 @@ def test_enrich_returns_position_with_raw_description(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.raw_description != ""
 
 
@@ -398,6 +399,7 @@ def test_enrich_description_has_no_html_tags(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "<p>" not in pos.raw_description
     assert "<strong>" not in pos.raw_description
 
@@ -410,6 +412,7 @@ def test_enrich_description_decodes_html_entities(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "&uuml;" not in pos.raw_description
     assert "ü" in pos.raw_description
 
@@ -422,6 +425,7 @@ def test_enrich_employment_type_full_time(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.employment_type == "full-time"
 
 
@@ -433,6 +437,7 @@ def test_enrich_posted_date_parsed(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.posted_date == date(2026, 4, 1)
 
 
@@ -444,6 +449,7 @@ def test_enrich_deadline_parsed(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.deadline == date(2026, 6, 30)
 
 
@@ -461,6 +467,61 @@ def test_enrich_position_references_original_stub(
 # ---------------------------------------------------------------------------
 # enrich — error handling
 # ---------------------------------------------------------------------------
+
+
+def test_enrich_off_host_redirect_returns_external_redirect(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    from application_pipeline.http import HttpRedirectResponse
+    from application_pipeline.parsers.types import ExternalRedirect
+
+    location = "https://external.example.com/job/123"
+
+    def redirecting_get(url: str, timeout: float) -> bytes:
+        raise HttpRedirectResponse(302, location)
+
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=redirecting_get)
+    ) as p:
+        result = p.enrich(stub)
+
+    assert isinstance(result, ExternalRedirect)
+    assert result.outbound_url == location
+    assert result.stub is stub
+
+
+def test_enrich_same_host_redirect_raises_parser_error(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    from application_pipeline.http import HttpRedirectResponse
+    from application_pipeline.parsers import ParserError
+
+    same_host_location = "https://stellen.hamburg.de/other-page"
+
+    def redirecting_get(url: str, timeout: float) -> bytes:
+        raise HttpRedirectResponse(301, same_host_location)
+
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=redirecting_get)
+    ) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)
+
+
+def test_enrich_redirect_with_no_location_raises_parser_error(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    from application_pipeline.http import HttpRedirectResponse
+    from application_pipeline.parsers import ParserError
+
+    def redirecting_get(url: str, timeout: float) -> bytes:
+        raise HttpRedirectResponse(302, "")
+
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=redirecting_get)
+    ) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)
 
 
 def test_enrich_raises_parser_error_on_http_failure(
@@ -502,6 +563,7 @@ def test_enrich_list_wrapped_jsonld_returns_nonempty_description(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.raw_description != ""
 
 
@@ -513,6 +575,7 @@ def test_enrich_list_wrapped_jsonld_description_has_no_html_tags(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "<p>" not in pos.raw_description
     assert "<strong>" not in pos.raw_description
 
@@ -525,6 +588,7 @@ def test_enrich_list_wrapped_jsonld_decodes_umlauts(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert "&uuml;" not in pos.raw_description
     assert "ü" in pos.raw_description
 
@@ -537,6 +601,7 @@ def test_enrich_list_selects_first_job_posting_entry(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.posted_date == date(2026, 5, 1)
     assert pos.deadline == date(2026, 7, 31)
     assert pos.employment_type == "full-time"
@@ -550,4 +615,5 @@ def test_enrich_list_without_job_posting_yields_empty_description(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         pos = p.enrich(stub)
+    assert isinstance(pos, Position)
     assert pos.raw_description == ""

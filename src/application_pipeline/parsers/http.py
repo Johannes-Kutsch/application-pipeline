@@ -8,6 +8,7 @@ import httpx
 from application_pipeline.http import (
     HttpNotRetryableError,
     HttpParserFatalError,
+    HttpRedirectResponse,
     HttpRetryError,
     HttpStubNotRetryableError,
 )
@@ -80,6 +81,16 @@ class ParserHttp:
         if resp.is_success:
             return resp.content
         status = resp.status_code
+        if 300 <= status < 400:
+            location = resp.headers.get("location", "")
+            self._run_log.event(
+                "parser_http",
+                "http_get_redirect",
+                url=url,
+                status=status,
+                location=location,
+            )
+            raise HttpRedirectResponse(status, location)
         classified = self._classify_failure(status, url)
         if classified is None:
             # Retryable — let httpx raise so the retry loop handles it.
@@ -101,7 +112,7 @@ class ParserHttp:
             return f"auth: {url} status={status}", True
         if 500 <= status < 600 and status not in RETRY_STATUSES:
             return f"upstream: {url} status={status}", True
-        if status not in RETRY_STATUSES:
+        if status not in RETRY_STATUSES and not (300 <= status < 400):
             return f"unexpected: {url} status={status}", True
         return None
 
@@ -120,6 +131,8 @@ class ParserHttp:
             t_start = time.monotonic()
             try:
                 result = self._http_get(url, self._timeout)
+            except HttpRedirectResponse:
+                raise
             except HttpNotRetryableError:
                 raise
             except Exception as exc:

@@ -15,3 +15,12 @@ class HttpStubNotRetryableError(HttpNotRetryableError):
 
 class HttpParserFatalError(HttpNotRetryableError):
     """This parser cannot continue (auth failure, unexpected server error)."""
+
+
+class HttpRedirectResponse(Exception):
+    """HTTP 3xx response — caller must decide how to handle the redirect."""
+
+    def __init__(self, status: int, location: str) -> None:
+        self.status = status
+        self.location = location
+        super().__init__(f"redirect: status={status} location={location}")

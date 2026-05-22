@@ -3,6 +3,7 @@ from __future__ import annotations
 from .errors import (
     HttpNotRetryableError,
     HttpParserFatalError,
+    HttpRedirectResponse,
     HttpRetryError,
     HttpStubNotRetryableError,
 )
@@ -12,4 +13,5 @@ __all__ = [
     "HttpNotRetryableError",
     "HttpStubNotRetryableError",
     "HttpParserFatalError",
+    "HttpRedirectResponse",
 ]

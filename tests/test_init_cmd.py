@@ -74,6 +74,13 @@ def test_first_bootstrap_writes_both_files(tmp_path: Path) -> None:
     assert (tmp_path / "layout.py").read_bytes() == _template_bytes("layout.py")
 
 
+def test_config_template_contains_claude_classify_parallelism(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    config_text = (tmp_path / "config.py").read_text()
+    assert "CLAUDE_CLASSIFY_PARALLELISM = 4" in config_text
+
+
 def test_first_bootstrap_prints_wrote_for_both(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

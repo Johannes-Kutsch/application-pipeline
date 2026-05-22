@@ -619,3 +619,34 @@ def test_max_listing_age_days_raises_when_non_int(
 
     with pytest.raises(ConfigError, match="MAX_LISTING_AGE_DAYS"):
         load(path)
+
+
+# --- claude_classify_parallelism ---
+
+
+def test_claude_classify_parallelism_defaults_to_4(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.claude_classify_parallelism == 4
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_claude_classify_parallelism_raises_when_less_than_1(
+    tmp_path: pathlib.Path, value: int
+) -> None:
+    path = write_config(
+        tmp_path, REQUIRED_BODY + f"\nCLAUDE_CLASSIFY_PARALLELISM = {value}\n"
+    )
+
+    with pytest.raises(ConfigError, match="CLAUDE_CLASSIFY_PARALLELISM"):
+        load(path)
+
+
+def test_claude_classify_parallelism_accepts_1(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLAUDE_CLASSIFY_PARALLELISM = 1\n")
+
+    config = load(path)
+
+    assert config.claude_classify_parallelism == 1

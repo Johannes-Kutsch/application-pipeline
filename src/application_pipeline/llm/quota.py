@@ -1,4 +1,7 @@
 import re
+import threading
+import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 _MONTHS: dict[str, int] = {
@@ -78,8 +81,47 @@ def parse_reset_time(result_text: str) -> datetime | None:
     return dt
 
 
+_BUFFER = timedelta(minutes=2)
+
+
 def compute_wake_time(reset_time: datetime | None, now: datetime) -> datetime:
     if reset_time is not None:
-        return reset_time + timedelta(minutes=2)
+        return reset_time + _BUFFER
     next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    return next_hour + timedelta(minutes=2)
+    return next_hour + _BUFFER
+
+
+class QuotaWall:
+    def __init__(
+        self,
+        now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        sleep_fn: Callable[[float], None] | None = None,
+    ) -> None:
+        self._now = now_fn
+        self._sleep = sleep_fn if sleep_fn is not None else time.sleep
+        self._cond = threading.Condition()
+        self._wake_time: datetime | None = None
+
+    def raise_wall(self, reset_time: datetime) -> bool:
+        wake = reset_time + _BUFFER
+        with self._cond:
+            if self._wake_time is not None and self._now() < self._wake_time:
+                return False
+            self._wake_time = wake
+            return True
+
+    def wait_if_blocked(self) -> None:
+        while True:
+            with self._cond:
+                if self._wake_time is None or self._now() >= self._wake_time:
+                    self._wake_time = None
+                    self._cond.notify_all()
+                    return
+                deadline = self._wake_time
+            remaining = (deadline - self._now()).total_seconds()
+            if remaining > 0:
+                self._sleep(remaining)
+
+    def is_active(self) -> bool:
+        with self._cond:
+            return self._wake_time is not None and self._now() < self._wake_time

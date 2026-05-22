@@ -596,8 +596,6 @@ def test_enrich_list_wrapped_jsonld_decodes_umlauts(
 def test_enrich_list_selects_first_job_posting_entry(
     run_log: RunLog, stub: PositionStub, detail_list_wrapped_html: bytes
 ) -> None:
-    from application_pipeline.parsers.types import Position
-
     get = _make_get({"jobad": detail_list_wrapped_html})
     with StellenHamburgParser(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
@@ -612,8 +610,6 @@ def test_enrich_list_selects_first_job_posting_entry(
 def test_enrich_list_without_job_posting_yields_empty_description(
     run_log: RunLog, stub: PositionStub, detail_no_job_posting_html: bytes
 ) -> None:
-    from application_pipeline.parsers.types import Position
-
     get = _make_get({"jobad": detail_no_job_posting_html})
     with StellenHamburgParser(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)

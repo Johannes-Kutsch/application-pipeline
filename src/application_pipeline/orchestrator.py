@@ -9,7 +9,7 @@ import traceback
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from application_pipeline import config as config_module
@@ -388,6 +388,8 @@ class _ClassifyThread(_QueueWorker):
         metrics: "RunMetrics",
         run_state: _RunState,
         run_log: RunLog,
+        quota_wall: "_quota.QuotaWall",
+        worker_index: int = 0,
     ) -> None:
         super().__init__(
             input_queue=classify_queue,
@@ -395,12 +397,13 @@ class _ClassifyThread(_QueueWorker):
             stage_name="classify",
             run_state=run_state,
         )
-        self.name = "classify-worker"
+        self.name = f"classify-worker-{worker_index}"
         self._pool_collector = pool_collector
         self._extractor = extractor
         self._dedup_store = dedup_store
         self._metrics = metrics
         self._run_log = run_log
+        self._quota_wall = quota_wall
 
     def _on_dequeue(self, item: object) -> None:
         assert isinstance(item, _ClassifyPosition)
@@ -414,13 +417,35 @@ class _ClassifyThread(_QueueWorker):
             raw_description=position.raw_description,
         )
         while True:
+            self._quota_wall.wait_if_blocked()
             try:
                 verdict, classify_usage = self._extractor.classify_relevance(
                     classify_item
                 )
                 break
             except ClaudeUsageLimitError as err:
-                _quota_sleep(err, self._run_log)
+                now = datetime.now(timezone.utc)
+                if err.reset_time is not None:
+                    effective_reset = err.reset_time
+                else:
+                    effective_reset = now.replace(
+                        minute=0, second=0, microsecond=0
+                    ) + timedelta(hours=1)
+                wake = _quota.compute_wake_time(err.reset_time, now)
+                duration_s = max(0.0, (wake - now).total_seconds())
+                is_first = self._quota_wall.raise_wall(effective_reset)
+                if is_first:
+                    self._run_log.event(
+                        "pipeline_orchestrator",
+                        "quota_sleep",
+                        reset_time=(
+                            err.reset_time.isoformat()
+                            if err.reset_time is not None
+                            else None
+                        ),
+                        wake_time=wake.isoformat(),
+                        duration_s=duration_s,
+                    )
             except ExtractorError as exc:
                 _log.warning("classify_relevance failed: %s", exc)
                 self._metrics.classify_batch_failed(1)
@@ -513,9 +538,10 @@ class _OutboundDispatcher:
             return True
         return False
 
-    def flush_residual(self) -> None:
-        """Signal end of positions to the classify worker."""
-        self._classify_queue.put(_NO_MORE_BATCHES)
+    def flush_residual(self, n: int = 1) -> None:
+        """Signal end of positions to n classify workers."""
+        for _ in range(n):
+            self._classify_queue.put(_NO_MORE_BATCHES)
 
     def _enqueue_classify(self, position: Position) -> None:
         self._classify_queue.put(_ClassifyPosition(position=position))
@@ -601,6 +627,7 @@ def run(
     status_display: StatusDisplay | None = None,
     run_log: RunLog | None = None,
     stall_threshold_s: float = _STALL_THRESHOLD_S,
+    quota_wall: "_quota.QuotaWall | None" = None,
 ) -> RunSummary:
     anchored_today: date = datetime.now(timezone.utc).date()
     cron_anchored_date = anchored_today.isoformat()
@@ -734,16 +761,24 @@ def run(
 
             metrics.register_rows(starting_order=2 + len(threads))
 
-            classify_thread = _ClassifyThread(
-                classify_queue=classify_queue,
-                pool_collector=pool_collector,
-                extractor=extractor,
-                dedup_store=dedup_store,
-                metrics=metrics,
-                run_state=run_state,
-                run_log=run_log,
-            )
-            classify_thread.start()
+            if quota_wall is None:
+                quota_wall = _quota.QuotaWall()
+            classify_threads = [
+                _ClassifyThread(
+                    classify_queue=classify_queue,
+                    pool_collector=pool_collector,
+                    extractor=extractor,
+                    dedup_store=dedup_store,
+                    metrics=metrics,
+                    run_state=run_state,
+                    run_log=run_log,
+                    quota_wall=quota_wall,
+                    worker_index=i,
+                )
+                for i in range(cfg.claude_classify_parallelism)
+            ]
+            for ct in classify_threads:
+                ct.start()
 
             freshness = FreshnessGate(
                 anchored_today=anchored_today,
@@ -835,12 +870,16 @@ def run(
             freshness.emit_run_complete()
             prefilter.emit_run_complete()
             content.emit_run_complete()
-            dispatcher.flush_residual()
+            dispatcher.flush_residual(n=cfg.claude_classify_parallelism)
 
-        classify_thread.join()
+        first_exc: BaseException | None = None
+        for ct in classify_threads:
+            ct.join()
+            if first_exc is None and ct.exc is not None:
+                first_exc = ct.exc
 
-        if classify_thread.exc is not None:
-            raise classify_thread.exc
+        if first_exc is not None:
+            raise first_exc
 
         # Emit per-call-site SUMMARY OF SESSION trailers
         metrics.summarize_to_parser_log(_run_started_at)

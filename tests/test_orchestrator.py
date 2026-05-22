@@ -62,9 +62,15 @@ def _write_config(
     locations: str = '["Hamburg"]',
     include_remote: bool = True,
     negative_keywords: str = "[]",
+    claude_classify_parallelism: int | None = None,
 ) -> Path:
     """Write a minimal valid config.py and a user-info dir into tmp_path."""
     config_path = tmp_path / "config.py"
+    parallelism_line = (
+        f"CLAUDE_CLASSIFY_PARALLELISM = {claude_classify_parallelism}\n"
+        if claude_classify_parallelism is not None
+        else ""
+    )
     config_path.write_text(
         textwrap.dedent(f"""
             from application_pipeline import SourceEntry
@@ -74,7 +80,8 @@ def _write_config(
             LOCATIONS = {locations}
             INCLUDE_REMOTE = {include_remote!r}
             NEGATIVE_KEYWORDS = {negative_keywords}
-        """),
+        """)
+        + parallelism_line,
         encoding="utf-8",
     )
     (tmp_path / "layout.py").write_text(
@@ -4357,14 +4364,31 @@ def test_old_md_files_ignored_in_results_dir(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_quota_classify_retries_and_completes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """ClaudeUsageLimitError on classify → orchestrator sleeps and retries; run completes."""
-    seen_path = tmp_path / ".seen.json"
+def _make_advancing_quota_wall():  # type: ignore[return]
+    """Return (slept_list, wall) where wall terminates after one sleep by advancing its clock."""
+    from datetime import datetime, timedelta, timezone
+
+    from application_pipeline.llm.quota import QuotaWall
 
     slept: list[float] = []
-    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
+    slept_total = [0.0]
+    base_now = [datetime.now(timezone.utc)]
+
+    def _now() -> datetime:
+        return base_now[0] + timedelta(seconds=slept_total[0])
+
+    def _sleep(s: float) -> None:
+        slept.append(s)
+        slept_total[0] += s + 1.0  # jump past the wall in one step
+
+    return slept, QuotaWall(now_fn=_now, sleep_fn=_sleep)
+
+
+def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
+    """ClaudeUsageLimitError on classify → orchestrator sleeps via QuotaWall and retries; run completes."""
+    seen_path = tmp_path / ".seen.json"
+
+    slept, wall = _make_advancing_quota_wall()
 
     call_count = [0]
 
@@ -4397,10 +4421,18 @@ def test_quota_classify_retries_and_completes(
     )
 
     summary = run(
-        _two_stub_config(tmp_path),
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_parallelism=1,
+        ),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
+        quota_wall=wall,
     )
 
     assert summary.written == 2
@@ -4409,14 +4441,15 @@ def test_quota_classify_retries_and_completes(
 
 
 def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """quota_sleep event is written to pipeline_orchestrator.events.jsonl with required fields."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "logs"
     run_log = parser_log.RunLog(logs_dir)
-    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", lambda _: None)
+
+    _, wall = _make_advancing_quota_wall()
 
     call_count = [0]
 
@@ -4449,11 +4482,19 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
     )
 
     run(
-        _two_stub_config(tmp_path),
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_parallelism=1,
+        ),
         extractor=ext,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         run_log=run_log,
+        quota_wall=wall,
     )
 
     events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
@@ -4760,3 +4801,297 @@ def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge
     seen_data_after = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data_after[fresh_url]["status"] != "expired"
     assert any(c.id == fresh_url for c in judge_candidates)
+
+
+# ---------------------------------------------------------------------------
+# Parallel classify pool (issue #521 / ADR-0040)
+# ---------------------------------------------------------------------------
+
+
+def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
+    """With claude_classify_parallelism=4 and 4 positions, at least 2 classify calls run concurrently."""
+    import threading
+    import time as _time
+
+    call_log: list[tuple[float, float]] = []
+    log_lock = threading.Lock()
+
+    class _TimedExtractor:
+        def classify_relevance(
+            self, item: ClassifyItem
+        ) -> tuple[RelevanceVerdict, CallUsage]:
+            start = _time.monotonic()
+            _time.sleep(0.05)
+            end = _time.monotonic()
+            with log_lock:
+                call_log.append((start, end))
+            return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            return [
+                MatchVerdict(matched=[], missing=[], summary="ok", rank=i + 1, id=c.id)
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
+
+    class _FourStubParser(_StubParserBase):
+        def __enter__(self) -> "_FourStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://par521.example/{i}", title=f"Job {i}", source="s"
+                )
+                for i in range(4)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_parallelism=4,
+        ),
+        extractor=_TimedExtractor(),
+        parser_registry=lambda _: _FourStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert len(call_log) == 4, f"Expected 4 classify calls, got {len(call_log)}"
+    overlapping = any(
+        s2 < e1 and s1 < e2
+        for i, (s1, e1) in enumerate(call_log)
+        for j, (s2, e2) in enumerate(call_log)
+        if i != j
+    )
+    assert overlapping, (
+        "Expected at least 2 classify calls to overlap in time — "
+        f"call intervals: {call_log}"
+    )
+
+
+def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
+    tmp_path: Path,
+) -> None:
+    """With N workers, exactly one quota_sleep event is logged when one worker raises the wall."""
+    import application_pipeline.parser_log as parser_log
+    import threading
+
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
+
+    _, wall = _make_advancing_quota_wall()
+
+    call_count = [0]
+    call_lock = threading.Lock()
+
+    def _classify(item: ClassifyItem) -> tuple[RelevanceVerdict, CallUsage]:
+        with call_lock:
+            call_count[0] += 1
+            current = call_count[0]
+        if current == 1:
+            raise ClaudeUsageLimitError(
+                "cap",
+                returncode=1,
+                stdout="",
+                stderr="cap",
+                envelope=None,
+            )
+        return RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT), _ZERO_USAGE
+
+    ext = MagicMock()
+    ext.classify_relevance.side_effect = _classify
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [
+            MatchVerdict(matched=[], missing=[], summary="ok", rank=i + 1, id=c.id)
+            for i, c in enumerate(candidates[:5])
+        ],
+        _ZERO_USAGE,
+    )
+
+    class _FourStubParser2(_StubParserBase):
+        def __enter__(self) -> "_FourStubParser2":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://qs521.example/{i}", title=f"Job {i}", source="s"
+                )
+                for i in range(4)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_parallelism=4,
+        ),
+        extractor=ext,
+        parser_registry=lambda _: _FourStubParser2,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        run_log=run_log,
+        quota_wall=wall,
+    )
+
+    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    rows = [
+        json.loads(line)
+        for line in events_file.read_text(encoding="utf-8").splitlines()
+    ]
+    quota_rows = [r for r in rows if r.get("event") == "quota_sleep"]
+    assert len(quota_rows) == 1, (
+        f"Expected exactly 1 quota_sleep event, got {len(quota_rows)}: {quota_rows}"
+    )
+
+
+def test_parallel_classify_pool_join_completes_no_live_workers(
+    tmp_path: Path,
+) -> None:
+    """After run() completes, all N classify worker threads have exited."""
+    import threading
+
+    class _FourStubParser3(_StubParserBase):
+        def __enter__(self) -> "_FourStubParser3":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://join521.example/{i}", title=f"Job {i}", source="s"
+                )
+                for i in range(4)
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    threads_before = set(t.name for t in threading.enumerate())
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_parallelism=4,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _FourStubParser3,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    live_worker_threads = [
+        t
+        for t in threading.enumerate()
+        if t.name.startswith("classify-worker-") and t.name not in threads_before
+    ]
+    assert live_worker_threads == [], (
+        f"classify-worker threads still alive after run(): {live_worker_threads}"
+    )
+
+
+def test_parallel_classify_n1_recovers_serial_results(tmp_path: Path) -> None:
+    """With claude_classify_parallelism=1, outcomes match a serial single-worker baseline."""
+    seen_path = tmp_path / ".seen.json"
+    results_dir = tmp_path / "results"
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+        claude_classify_parallelism=1,
+    )
+
+    summary = run(
+        config_path,
+        extractor=_FakeExtractor(),
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.discovered == 6
+    assert summary.prefilter_dropped == 1
+    assert summary.classifier_dropped == 1
+    assert summary.written == 4
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    out_of_domain = [
+        url for url, rec in seen_data.items() if rec["status"] == "out_of_domain"
+    ]
+    assert len(out_of_domain) == 2
+
+    content = _read_all_results(results_dir)
+    cards = re.findall(r"^# .+ · .+", content, re.MULTILINE)
+    assert len(cards) == 4
+
+
+def test_parallel_classify_worker_exception_propagates(tmp_path: Path) -> None:
+    """Uncaught exception in a classify worker thread surfaces as run() exception."""
+
+    class _CrashingExtractor:
+        def classify_relevance(
+            self, item: ClassifyItem
+        ) -> tuple[RelevanceVerdict, CallUsage]:
+            raise RuntimeError("classify crash")
+
+        def judge_top_n(  # pragma: no cover
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            raise NotImplementedError
+
+    class _OneStubParser2(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser2":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url="https://exc521.example/0", title="Job", source="s")
+            ]
+
+        def enrich(self, stub: PositionStub) -> Position:
+            return Position(stub=stub, raw_description="good description")
+
+    with pytest.raises(RuntimeError, match="classify crash"):
+        run(
+            _write_config(
+                tmp_path,
+                sources='[SourceEntry(parser_type="bundesagentur_api")]',
+                keywords='["python"]',
+                locations='["Hamburg"]',
+                include_remote=False,
+                claude_classify_parallelism=2,
+            ),
+            extractor=_CrashingExtractor(),
+            parser_registry=lambda _: _OneStubParser2,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        )

@@ -160,10 +160,10 @@ class FreshnessGate:
         )
         with self._lock:
             self._counts[verdict.reason] += 1
-            body = self._freshness_body()
+            dropped = self._dropped_count()
         if not verdict.passes:
             self._dedup.mark_expired(stub)
-            self._display.update_body("pipeline_freshness", body=body)
+            self._display.update_body("pipeline_freshness", body=f"dropped={dropped}")
         return verdict.passes
 
     def admit(self, position: _Position) -> bool:
@@ -189,28 +189,22 @@ class FreshnessGate:
         )
         with self._lock:
             self._counts[verdict.reason] += 1
-            body = self._freshness_body()
+            dropped = self._dropped_count()
         if not verdict.passes:
             self._dedup.mark_expired(position.stub)
-            self._display.update_body("pipeline_freshness", body=body)
+            self._display.update_body("pipeline_freshness", body=f"dropped={dropped}")
         return verdict.passes
 
     def snapshot(self) -> FreshnessSnapshot:
         with self._lock:
-            dropped = (
-                self._counts["too_old"]
-                + self._counts["deadline_passed"]
-                + self._counts["too_old_and_deadline_passed"]
-            )
-        return FreshnessSnapshot(freshness_dropped=dropped)
+            return FreshnessSnapshot(freshness_dropped=self._dropped_count())
 
     def emit_run_complete(self) -> None:
         self._run_log.event("pipeline_freshness", "run_complete", **self._counts)
 
-    def _freshness_body(self) -> str:
-        dropped = (
+    def _dropped_count(self) -> int:
+        return (
             self._counts["too_old"]
             + self._counts["deadline_passed"]
             + self._counts["too_old_and_deadline_passed"]
         )
-        return f"dropped={dropped}"

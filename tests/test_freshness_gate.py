@@ -27,6 +27,7 @@ class _Stub:
     title: str | None = "Test Job"
     company: str | None = "Acme"
     location: str | None = "Remote"
+    posted_date: date | None = None
 
 
 @dataclass
@@ -371,3 +372,94 @@ def test_emit_run_complete_writes_event_row_with_per_reason_counts(
     assert ev["too_old"] == 1
     assert ev["deadline_passed"] == 1
     assert ev["too_old_and_deadline_passed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# admit_stub() — pre-LLM (discover) arm
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _StubOnly:
+    url: str
+    source: str = "test-source"
+    title: str = "Test Job"
+    company: str | None = "Acme"
+    location: str | None = "Remote"
+    posted_date: date | None = None
+
+
+def test_admit_stub_with_stale_posted_date_returns_false(
+    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    stub = _StubOnly(
+        url="https://example.com/old", posted_date=date(2025, 12, 15)
+    )  # 31 days ago
+    assert gate.admit_stub(stub) is False
+
+
+def test_admit_stub_with_null_posted_date_returns_true(
+    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    stub = _StubOnly(url="https://example.com/no-date", posted_date=None)
+    assert gate.admit_stub(stub) is True
+
+
+def test_admit_stub_with_fresh_posted_date_returns_true(
+    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    stub = _StubOnly(
+        url="https://example.com/fresh", posted_date=date(2026, 1, 10)
+    )  # 5 days ago
+    assert gate.admit_stub(stub) is True
+
+
+def test_admit_stub_stale_writes_transcript_with_discover_arm(
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    stub = _StubOnly(url="https://example.com/old", posted_date=date(2025, 12, 15))
+    gate.admit_stub(stub)
+    rows = _read_transcripts(logs_dir)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["gate_arm"] == "discover"
+    assert row["url"] == "https://example.com/old"
+    assert row["passes"] is False
+    assert row["reason"] == "too_old"
+    assert row["deadline"] is None
+
+
+def test_admit_stub_null_posted_date_writes_no_transcript(
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    stub = _StubOnly(url="https://example.com/no-date", posted_date=None)
+    gate.admit_stub(stub)
+    rows = _read_transcripts(logs_dir)
+    assert len(rows) == 0
+
+
+def test_admit_stub_stale_marks_expired_in_dedup(
+    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    stub = _StubOnly(url="https://example.com/old", posted_date=date(2025, 12, 15))
+    gate.admit_stub(stub)
+    assert dedup.is_seen(stub) == "url_hit"
+
+
+def test_admit_post_enrich_writes_transcript_with_post_enrich_arm(
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    position = _make_position(
+        url="https://example.com/job1", posted_date=date(2026, 1, 10)
+    )
+    gate.admit(position)
+    rows = _read_transcripts(logs_dir)
+    assert len(rows) == 1
+    assert rows[0]["gate_arm"] == "post_enrich"

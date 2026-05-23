@@ -548,6 +548,9 @@ class _OutboundDispatcher:
         if self._run_state.is_aborted:
             state.inbound.put(_SKIP_AND_END_QUERY)
             return
+        if not self._freshness.admit_stub(payload):
+            state.inbound.put(_SKIP)
+            return
         result = self._dedup.is_seen(payload)
         self._metrics.record_dedup(result)
         if result == "miss":

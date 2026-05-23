@@ -24,6 +24,9 @@ class _Stub(Protocol):
     @property
     def location(self) -> str | None: ...
 
+    @property
+    def posted_date(self) -> date | None: ...
+
 
 class _Position(Protocol):
     @property
@@ -81,6 +84,20 @@ def _evaluate(
     return _FreshnessVerdict(passes=True, reason="passed", age_days=age_days)
 
 
+def _evaluate_stub(
+    stub: _Stub,
+    anchored_today: date,
+    max_listing_age_days: int,
+) -> _FreshnessVerdict | None:
+    """Evaluate freshness from stub posted_date only. Returns None if posted_date is absent."""
+    if stub.posted_date is None:
+        return None
+    age_days = (anchored_today - stub.posted_date).days
+    if age_days > max_listing_age_days:
+        return _FreshnessVerdict(passes=False, reason="too_old", age_days=age_days)
+    return _FreshnessVerdict(passes=True, reason="passed", age_days=age_days)
+
+
 class FreshnessGate:
     def __init__(
         self,
@@ -103,6 +120,38 @@ class FreshnessGate:
             "too_old_and_deadline_passed": 0,
         }
 
+    def admit_stub(self, stub: _Stub) -> bool:
+        """Pre-LLM arm: evaluate freshness from stub posted_date.
+
+        Returns True (pass through) when posted_date is absent — the post-enrich
+        arm will evaluate later. Returns False and drops the stub when it is stale.
+        """
+        verdict = _evaluate_stub(stub, self._anchored_today, self._max_listing_age_days)
+        if verdict is None:
+            return True
+        self._run_log.transcript(
+            "pipeline_freshness",
+            {
+                "url": stub.url,
+                "title": stub.title,
+                "source": stub.source,
+                "posted_date": stub.posted_date.isoformat()
+                if stub.posted_date is not None
+                else None,
+                "deadline": None,
+                "anchored_today": self._anchored_today.isoformat(),
+                "age_days": verdict.age_days,
+                "passes": verdict.passes,
+                "reason": verdict.reason,
+                "gate_arm": "discover",
+            },
+        )
+        self._counts[verdict.reason] += 1
+        if not verdict.passes:
+            self._dedup.mark_expired(stub)
+            self._metrics.freshness_dropped()
+        return verdict.passes
+
     def admit(self, position: _Position) -> bool:
         verdict = _evaluate(position, self._anchored_today, self._max_listing_age_days)
         self._run_log.transcript(
@@ -121,6 +170,7 @@ class FreshnessGate:
                 "age_days": verdict.age_days,
                 "passes": verdict.passes,
                 "reason": verdict.reason,
+                "gate_arm": "post_enrich",
             },
         )
         self._counts[verdict.reason] += 1

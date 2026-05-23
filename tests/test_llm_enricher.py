@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -11,7 +13,9 @@ import respx
 
 from fake_status_display import FakeStatusDisplay
 
+from application_pipeline.dedup import load as dedup_load
 from application_pipeline.extracts.card_store import load_card_store
+from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import CallUsage, RelevanceVerdictV2
@@ -19,6 +23,9 @@ from application_pipeline.llm_enricher import LLMEnricher
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
 from application_pipeline.run_metrics import RunMetrics
+
+_ANCHORED_TODAY = date(2026, 1, 15)
+_MAX_AGE = 30
 
 
 # ---------------------------------------------------------------------------
@@ -225,3 +232,222 @@ def test_enricher_follows_http_redirect_and_uses_final_page_content(
     call_args = extractor.classify_relevance_v2.call_args
     item = call_args.args[0]
     assert "Data Engineer at final destination" in item.raw_description
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: post-LLM Freshness Gate arm
+# ---------------------------------------------------------------------------
+
+
+def _make_freshness_gate(
+    tmp_path: Path, run_log: RunLog, run_metrics: RunMetrics
+) -> FreshnessGate:
+    dedup = dedup_load(tmp_path / ".seen.json")
+    return FreshnessGate(
+        anchored_today=_ANCHORED_TODAY,
+        max_listing_age_days=_MAX_AGE,
+        dedup=dedup,
+        metrics=run_metrics,
+        run_log=run_log,
+    )
+
+
+def _read_freshness_transcripts(tmp_path: Path) -> list[dict]:
+    path = tmp_path / "logs" / "pipeline_freshness.transcripts.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+@respx.mock
+def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    html = "<html><body><div class='job'>Python Engineer role, posted months ago.</div></body></html>"
+    respx.get("https://example.com/job/stale").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    # LLM infers a stale posted_date in the header (31 days before ANCHORED_TODAY)
+    stale_header = (
+        "Python Engineer\nAcme · Hamburg · remote\n2025-12-15 · senior · €80k"
+    )
+    extractor = MagicMock()
+    extractor.classify_relevance_v2.return_value = (
+        RelevanceVerdictV2(
+            in_domain=True,
+            header=stale_header,
+            summary="Old ML role.",
+        ),
+        _call_usage(),
+    )
+
+    gate = _make_freshness_gate(tmp_path, run_log, run_metrics)
+    card_store = load_card_store(tmp_path / "extracts.json")
+    enricher = LLMEnricher(
+        extractor=extractor,  # type: ignore[arg-type]
+        quota_wall=QuotaWall(),
+        card_store=card_store,
+        run_log=run_log,
+        run_metrics=run_metrics,
+        failures_dir=tmp_path / "failures",
+        freshness_gate=gate,
+    )
+    stub = PositionStub(
+        url="https://example.com/job/stale",
+        title="Python Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=None,  # no pre-LLM date
+    )
+
+    result = enricher.enrich(stub, ".job")
+
+    assert result is None
+    assert card_store.get(stub.url) is None
+
+
+@respx.mock
+def test_enricher_freshness_drop_records_post_enrich_transcript(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    html = "<html><body><div class='job'>Old role.</div></body></html>"
+    respx.get("https://example.com/job/stale2").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2025-12-15 · mid · —"
+    extractor = MagicMock()
+    extractor.classify_relevance_v2.return_value = (
+        RelevanceVerdictV2(in_domain=True, header=stale_header, summary="Stale role."),
+        _call_usage(),
+    )
+
+    gate = _make_freshness_gate(tmp_path, run_log, run_metrics)
+    card_store = load_card_store(tmp_path / "extracts.json")
+    enricher = LLMEnricher(
+        extractor=extractor,  # type: ignore[arg-type]
+        quota_wall=QuotaWall(),
+        card_store=card_store,
+        run_log=run_log,
+        run_metrics=run_metrics,
+        failures_dir=tmp_path / "failures",
+        freshness_gate=gate,
+    )
+    stub = PositionStub(
+        url="https://example.com/job/stale2",
+        title="ML Engineer",
+        source="test",
+        posted_date=None,
+    )
+
+    enricher.enrich(stub, ".job")
+
+    rows = _read_freshness_transcripts(tmp_path)
+    assert len(rows) == 1
+    assert rows[0]["gate_arm"] == "post_enrich"
+    assert rows[0]["passes"] is False
+    assert rows[0]["posted_date"] == "2025-12-15"
+
+
+@respx.mock
+def test_enricher_fresh_inferred_date_renders_card_normally(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    html = "<html><body><div class='job'>Fresh ML role posted recently.</div></body></html>"
+    respx.get("https://example.com/job/fresh").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    # posted_date 5 days ago — within MAX_AGE=30
+    fresh_header = "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · €90k"
+    extractor = MagicMock()
+    extractor.classify_relevance_v2.return_value = (
+        RelevanceVerdictV2(
+            in_domain=True,
+            header=fresh_header,
+            summary="Good ML role.",
+        ),
+        _call_usage(),
+    )
+
+    gate = _make_freshness_gate(tmp_path, run_log, run_metrics)
+    card_store = load_card_store(tmp_path / "extracts.json")
+    enricher = LLMEnricher(
+        extractor=extractor,  # type: ignore[arg-type]
+        quota_wall=QuotaWall(),
+        card_store=card_store,
+        run_log=run_log,
+        run_metrics=run_metrics,
+        failures_dir=tmp_path / "failures",
+        freshness_gate=gate,
+    )
+    stub = PositionStub(
+        url="https://example.com/job/fresh",
+        title="Data Scientist",
+        source="test",
+        posted_date=None,
+    )
+
+    result = enricher.enrich(stub, ".job")
+
+    assert result is not None
+    assert result.in_domain is True
+    card = card_store.get(stub.url)
+    assert card is not None
+    assert card.header == fresh_header
+
+
+@respx.mock
+def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    html = "<html><body><div class='job'>Undated role.</div></body></html>"
+    respx.get("https://example.com/job/noddate").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    # Header line 3 has no date (LLM dropped the segment)
+    no_date_header = "Backend Engineer\nCorp · Munich · on-site\nseniority: mid · —"
+    extractor = MagicMock()
+    extractor.classify_relevance_v2.return_value = (
+        RelevanceVerdictV2(
+            in_domain=True,
+            header=no_date_header,
+            summary="Undated backend role.",
+        ),
+        _call_usage(),
+    )
+
+    gate = _make_freshness_gate(tmp_path, run_log, run_metrics)
+    card_store = load_card_store(tmp_path / "extracts.json")
+    enricher = LLMEnricher(
+        extractor=extractor,  # type: ignore[arg-type]
+        quota_wall=QuotaWall(),
+        card_store=card_store,
+        run_log=run_log,
+        run_metrics=run_metrics,
+        failures_dir=tmp_path / "failures",
+        freshness_gate=gate,
+    )
+    stub = PositionStub(
+        url="https://example.com/job/noddate",
+        title="Backend Engineer",
+        source="test",
+        posted_date=None,
+    )
+
+    result = enricher.enrich(stub, ".job")
+
+    assert result is not None
+    assert result.in_domain is True
+    assert card_store.get(stub.url) is not None

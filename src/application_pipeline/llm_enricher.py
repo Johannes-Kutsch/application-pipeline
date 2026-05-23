@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 
@@ -16,6 +17,9 @@ from application_pipeline.llm.types import CallUsage, ClassifyItem, RelevanceVer
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
 from application_pipeline.run_metrics import RunMetrics
+
+if TYPE_CHECKING:
+    from application_pipeline.freshness_gate import FreshnessGate
 
 _TOKEN_CAP_DEFAULT = 8_000
 _CHARS_PER_TOKEN = 4
@@ -38,6 +42,33 @@ class _FetchedPosition:
         return self.stub.title
 
 
+@dataclass
+class _EnrichedPosition:
+    stub: PositionStub
+    posted_date: date | None
+    deadline: date | None = None
+
+    @property
+    def title(self) -> str:
+        return self.stub.title
+
+
+def _parse_header_date(header: str) -> date | None:
+    """Extract posted_date from line 3 of the LLM-authored Header string.
+
+    Header format: title / company·location·work_model / posted_date·seniority·salary
+    Returns None when the date segment is absent or unparseable.
+    """
+    lines = header.split("\n")
+    if len(lines) < 3:
+        return None
+    first_segment = lines[2].split(" · ")[0].strip()
+    try:
+        return date.fromisoformat(first_segment)
+    except ValueError:
+        return None
+
+
 class LLMEnricher:
     """Orchestrate HTTP fetch → body strip → content gate → classify → CardStore write."""
 
@@ -51,6 +82,7 @@ class LLMEnricher:
         run_metrics: RunMetrics,
         failures_dir: Path,
         token_cap: int = _TOKEN_CAP_DEFAULT,
+        freshness_gate: "FreshnessGate | None" = None,
     ) -> None:
         self._extractor = extractor
         self._quota_wall = quota_wall
@@ -60,6 +92,7 @@ class LLMEnricher:
         self._failures_dir = failures_dir
         self._token_cap = token_cap
         self._http = httpx.Client(follow_redirects=True)
+        self.freshness_gate: FreshnessGate | None = freshness_gate
 
     def enrich(
         self, stub: PositionStub, body_selector: str | None
@@ -95,6 +128,13 @@ class LLMEnricher:
         if verdict.in_domain:
             assert verdict.header is not None
             assert verdict.summary is not None
+
+            if self.freshness_gate is not None:
+                posted_date = _parse_header_date(verdict.header)
+                enriched = _EnrichedPosition(stub=stub, posted_date=posted_date)
+                if not self.freshness_gate.admit(enriched):
+                    return None
+
             self._card_store.put(
                 stub.url,
                 CardExtract(header=verdict.header, summary=verdict.summary),

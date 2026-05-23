@@ -757,6 +757,8 @@ def run(
                 metrics=metrics,
                 run_log=run_log,
             )
+            if isinstance(llm_enricher, LLMEnricher):
+                llm_enricher.freshness_gate = freshness
             prefilter = PreFilterGate(
                 blacklist=list(search_terms.negative_keywords),
                 dedup=dedup_run,

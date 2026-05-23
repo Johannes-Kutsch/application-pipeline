@@ -11,7 +11,7 @@ _EXCLUDE_FILES = frozenset({"layout.py"})
 _PRESERVE_DIRS = frozenset({"user-info"})
 # Top-level files that are user-authored and never overwritten on refresh.
 # (Applied within the `application-pipeline` bucket only.)
-_PRESERVE_FILES = frozenset({"config.py"})
+_PRESERVE_FILES = frozenset({"config.py", ".gitignore"})
 
 # Templates subdirectories that are NOT routing buckets — package-internal,
 # never seeded onto the host.

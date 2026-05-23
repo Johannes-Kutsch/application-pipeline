@@ -59,7 +59,7 @@ class _EnrichedPosition:
 def _parse_header_date(header: str) -> date | None:
     """Extract posted_date from line 3 of the LLM-authored Header string.
 
-    Header format: title / company/location/work_model / posted_date/seniority/salary
+    Header format: title / company·location·work_model / posted_date·seniority·salary
     Returns None when the date segment is absent or unparseable.
     """
     lines = header.split("\n")

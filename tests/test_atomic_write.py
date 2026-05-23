@@ -34,11 +34,13 @@ def test_write_atomic_leaves_no_tmp_artefact(tmp_path: Path) -> None:
     assert not (tmp_path / "output.json.tmp").exists()
 
 
-def test_write_atomic_raises_oserror_when_parent_missing(tmp_path: Path) -> None:
-    target = tmp_path / "nonexistent" / "output.json"
+def test_write_atomic_creates_missing_parent_dirs(tmp_path: Path) -> None:
+    target = tmp_path / "nonexistent" / "nested" / "output.json"
 
-    with pytest.raises(OSError):
-        write_atomic(target, b"data")
+    write_atomic(target, b"data")
+
+    assert target.exists()
+    assert target.read_bytes() == b"data"
 
 
 @pytest.mark.skipif(

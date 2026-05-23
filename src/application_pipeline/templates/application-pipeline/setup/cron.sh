@@ -3,6 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+mkdir -p "application-pipeline/.runtime-data"
+
 (
   flock -n 9 || exit 0
 
@@ -13,15 +15,15 @@ cd "$(dirname "$0")/../.."
     ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     local fname
     fname="$(echo "$ts" | tr ':' '-').md"
-    mkdir -p "application-pipeline/failures"
-    cat > "application-pipeline/failures/$fname" <<EOF
+    mkdir -p "application-pipeline/.runtime-data/failures"
+    cat > "application-pipeline/.runtime-data/failures/$fname" <<EOF
 # Run failed at $ts
 
 **Stage:** $stage
 **Error:** ShellError: $msg
 **Last 20 log lines:**
 \`\`\`
-$(tail -20 "application-pipeline/logs/cron.log" 2>/dev/null || true)
+$(tail -20 "application-pipeline/.runtime-data/logs/cron.log" 2>/dev/null || true)
 \`\`\`
 EOF
   }
@@ -34,8 +36,8 @@ EOF
   application-pipeline init --refresh || { fail "ShellError" "application-pipeline init --refresh failed"; exit 1; }
   application-pipeline run || { fail "ShellError" "application-pipeline run failed"; exit 1; }
 
-  tail -n 10000 "application-pipeline/logs/cron.log" > "application-pipeline/logs/cron.log.tmp" 2>/dev/null \
-    && mv "application-pipeline/logs/cron.log.tmp" "application-pipeline/logs/cron.log" \
+  tail -n 10000 "application-pipeline/.runtime-data/logs/cron.log" > "application-pipeline/.runtime-data/logs/cron.log.tmp" 2>/dev/null \
+    && mv "application-pipeline/.runtime-data/logs/cron.log.tmp" "application-pipeline/.runtime-data/logs/cron.log" \
     || true
 
-) 9>application-pipeline/.cron.lock
+) 9>application-pipeline/.runtime-data/.cron.lock

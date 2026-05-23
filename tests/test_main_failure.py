@@ -55,6 +55,6 @@ def test_startup_failure_writes_to_home_failures_dir(tmp_path: Path) -> None:
     assert not (tmp_path / "failures").exists(), (
         "Should not create failures/ directly under cwd"
     )
-    failures_dir = home / "failures"
+    failures_dir = home / ".runtime-data" / "failures"
     assert failures_dir.is_dir()
     assert len(list(failures_dir.glob("*.md"))) == 1

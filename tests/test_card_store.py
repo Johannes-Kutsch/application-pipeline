@@ -22,6 +22,14 @@ def store(store_path: Path) -> CardStore:
     return load_card_store(store_path)
 
 
+def test_card_store_creates_parent_dir_on_first_write(tmp_path: Path) -> None:
+    path = tmp_path / ".runtime-data" / "extracts.json"
+    store = load_card_store(path)
+    store.put("k1", CardExtract(header="H", summary="S"))
+    assert path.exists()
+    assert path.parent.is_dir()
+
+
 def test_get_on_unknown_key_returns_none(store: CardStore) -> None:
     assert store.get("missing") is None
 

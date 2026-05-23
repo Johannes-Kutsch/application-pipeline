@@ -144,7 +144,7 @@ def test_main_materialises_logs_in_home(
 
     main()
 
-    assert (home / "logs").is_dir()
+    assert (home / ".runtime-data" / "logs").is_dir()
 
 
 def test_main_logs_land_in_home_not_in_cwd_root(
@@ -166,7 +166,7 @@ def test_main_logs_land_in_home_not_in_cwd_root(
 
     main()
 
-    assert (home / "logs").is_dir()
+    assert (home / ".runtime-data" / "logs").is_dir()
     assert not (tmp_path / "logs").exists(), (
         "logs must not be created directly under cwd"
     )

@@ -241,7 +241,10 @@ def test_prompt_error_propagates(tmp_path: Path) -> None:
 
 
 def test_dedup_store_error_propagates(tmp_path: Path) -> None:
-    (tmp_path / ".seen.json").write_text("not-valid-json", encoding="utf-8")
+    (tmp_path / ".runtime-data").mkdir()
+    (tmp_path / ".runtime-data" / "seen.json").write_text(
+        "not-valid-json", encoding="utf-8"
+    )
     config_path = _write_config(tmp_path)
 
     with pytest.raises(DedupStoreError):
@@ -2047,7 +2050,7 @@ def test_fatal_error_writes_failure_report_and_exits_one(
 
     assert exc_info.value.code == 1
 
-    failures_dir = tmp_path / "application-pipeline" / "failures"
+    failures_dir = tmp_path / "application-pipeline" / ".runtime-data" / "failures"
     reports = list(failures_dir.glob("*.md"))
     assert len(reports) == 1, f"expected one failure report, got {reports}"
 
@@ -3785,7 +3788,7 @@ def test_non_quota_worker_exception_writes_failure_report(
 
     assert exc_info.value.code == 1
 
-    failures_dir = tmp_path / "application-pipeline" / "failures"
+    failures_dir = tmp_path / "application-pipeline" / ".runtime-data" / "failures"
     reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
     assert len(reports) == 1, f"expected one failure report, got {reports}"
 
@@ -4345,8 +4348,9 @@ from datetime import date as _date, timedelta as _timedelta  # noqa: E402
 def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
     """in_domain â†’ expired transition on pool re-discovery removes the entry from extracts.json."""
     stale_url = "https://pool-reentry.example/stale-extract"
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
+    (tmp_path / ".runtime-data").mkdir()
+    seen_path = tmp_path / ".runtime-data" / "seen.json"
+    extracts_path = tmp_path / ".runtime-data" / "extracts.json"
 
     seen_path.write_text(
         json.dumps(

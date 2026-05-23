@@ -44,6 +44,14 @@ def store(store_path: Path) -> DeduplicationStore:
     return dedup_load(store_path)
 
 
+def test_dedup_store_creates_parent_dir_on_first_write(tmp_path: Path) -> None:
+    path = tmp_path / ".runtime-data" / "seen.json"
+    store = dedup_load(path)
+    store.mark_out_of_domain(StubLike(url="https://example.com/x"))
+    assert path.exists()
+    assert path.parent.is_dir()
+
+
 def test_package_reexports_dedup_api() -> None:
     # load is the config loader; ensure dedup names are exposed
     assert callable(load)

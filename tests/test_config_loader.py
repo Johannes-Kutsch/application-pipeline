@@ -121,7 +121,7 @@ def test_seen_store_path_defaults_to_seen_json(tmp_path: pathlib.Path) -> None:
 
     config = load(path)
 
-    assert config.seen_store_path == tmp_path / ".seen.json"
+    assert config.seen_store_path == tmp_path / ".runtime-data" / "seen.json"
 
 
 def test_seen_store_path_env_var_has_no_effect(
@@ -132,7 +132,7 @@ def test_seen_store_path_env_var_has_no_effect(
 
     config = load(path)
 
-    assert config.seen_store_path == tmp_path / ".seen.json"
+    assert config.seen_store_path == tmp_path / ".runtime-data" / "seen.json"
 
 
 def test_load_raises_when_seen_store_path_defined_in_config(
@@ -155,17 +155,17 @@ def test_load_anchors_data_paths_to_config_dir(tmp_path: pathlib.Path) -> None:
     config = load(path)
 
     assert config.results_dir == tmp_path / "results"
-    assert config.failures_path == tmp_path / "failures"
-    assert config.logs_path == tmp_path / "logs"
+    assert config.failures_path == tmp_path / ".runtime-data" / "failures"
+    assert config.logs_path == tmp_path / ".runtime-data" / "logs"
 
 
 def test_resolve_data_paths_anchors_to_data_dir() -> None:
     paths = resolve_data_paths(pathlib.Path("/some/data"))
 
-    assert paths.seen_store_path == pathlib.Path("/some/data/.seen.json")
+    assert paths.seen_store_path == pathlib.Path("/some/data/.runtime-data/seen.json")
     assert paths.results_dir == pathlib.Path("/some/data/results")
-    assert paths.failures_path == pathlib.Path("/some/data/failures")
-    assert paths.logs_path == pathlib.Path("/some/data/logs")
+    assert paths.failures_path == pathlib.Path("/some/data/.runtime-data/failures")
+    assert paths.logs_path == pathlib.Path("/some/data/.runtime-data/logs")
 
 
 # --- layout ---

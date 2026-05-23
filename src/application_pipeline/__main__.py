@@ -80,7 +80,7 @@ def main() -> None:
     )
 
     home = config_path.parent
-    run_log = RunLog(home / "logs")
+    run_log = RunLog(resolve_data_paths(home).logs_path)
     display = (
         RichStatusDisplay(run_log=run_log)
         if sys.stdout.isatty()

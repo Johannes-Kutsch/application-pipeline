@@ -457,7 +457,7 @@ def test_cron_sh_self_locates_via_dirname(tmp_path: Path) -> None:
 def test_cron_sh_flock_uses_project_root_relative_path(tmp_path: Path) -> None:
     init(tmp_path)
     cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
-    assert "application-pipeline/.cron.lock" in cron_sh
+    assert "application-pipeline/.runtime-data/.cron.lock" in cron_sh
 
 
 def test_cron_sh_pip_upgrade_warns_and_continues_on_failure(tmp_path: Path) -> None:

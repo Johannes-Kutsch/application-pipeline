@@ -18,11 +18,12 @@ class DataPaths:
 
 
 def resolve_data_paths(data_dir: pathlib.Path) -> DataPaths:
+    runtime = data_dir / ".runtime-data"
     return DataPaths(
-        seen_store_path=data_dir / ".seen.json",
+        seen_store_path=runtime / "seen.json",
         results_dir=data_dir / "results",
-        failures_path=data_dir / "failures",
-        logs_path=data_dir / "logs",
+        failures_path=runtime / "failures",
+        logs_path=runtime / "logs",
         user_info_dir=data_dir / "user-info",
     )
 
@@ -49,13 +50,15 @@ class Config:
     locations: list[str]
     include_remote: bool = True
     seen_store_path: pathlib.Path = field(
-        default_factory=lambda: pathlib.Path(".seen.json")
+        default_factory=lambda: pathlib.Path(".runtime-data/seen.json")
     )
     results_dir: pathlib.Path = field(default_factory=lambda: pathlib.Path("results"))
     failures_path: pathlib.Path = field(
-        default_factory=lambda: pathlib.Path("failures")
+        default_factory=lambda: pathlib.Path(".runtime-data/failures")
     )
-    logs_path: pathlib.Path = field(default_factory=lambda: pathlib.Path("logs"))
+    logs_path: pathlib.Path = field(
+        default_factory=lambda: pathlib.Path(".runtime-data/logs")
+    )
     layout: pathlib.Path | None = None
     user_info_dir: pathlib.Path = field(
         default_factory=lambda: pathlib.Path("user-info")

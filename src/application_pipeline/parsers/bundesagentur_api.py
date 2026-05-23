@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 import urllib.parse
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 from typing import Any
+
+from bs4 import BeautifulSoup
 
 from application_pipeline.parser_log import RunLog
 
 from .body_fetch import fetch_and_strip
+from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
@@ -68,12 +73,31 @@ def to_wire(name: str) -> str:
 
 
 serves_remote: bool = True
-has_native_enrich: bool = False
+has_native_enrich: bool = True
+
+_DETAIL_URL = f"{_BASE_URL}/jobdetails"
 
 
 def remote_wire() -> dict[str, str]:
     # PRD #51 decision 41: use arbeitszeit=ho for homeoffice
     return {"arbeitszeit": "ho"}
+
+
+def _strip_html(html: str) -> str:
+    return BeautifulSoup(html, "html.parser").get_text(separator="\n", strip=True)
+
+
+def _backfill_posted_date(stub: PositionStub, data: dict[str, Any]) -> PositionStub:
+    if stub.posted_date is not None:
+        return stub
+    zeitraum = data.get("veroeffentlichungszeitraum") or {}
+    von: str | None = zeitraum.get("von") if isinstance(zeitraum, dict) else None
+    if not von:
+        return stub
+    try:
+        return dataclasses.replace(stub, posted_date=date.fromisoformat(von))
+    except ValueError:
+        return stub
 
 
 class BundesagenturParser:
@@ -102,6 +126,20 @@ class BundesagenturParser:
         self._http.__exit__(*args)
 
     def enrich(self, stub: PositionStub) -> EnrichResult:
+        ref = stub.url.rstrip("/").split("/")[-1]
+        try:
+            raw = self._http.get(
+                f"{_DETAIL_URL}/{ref}",
+                error_prefix="Bundesagentur jobdetails failed",
+            )
+            data: dict[str, Any] = json.loads(raw)
+            description_html: str = data.get("stellenangebotsBeschreibung") or ""
+            body = _strip_html(description_html)
+            updated_stub = _backfill_posted_date(stub, data)
+            return EnrichResult(stub=updated_stub, body=body, mode="native")
+        except (ParserError, json.JSONDecodeError):
+            pass
+
         body = fetch_and_strip(
             stub.url,
             body_selector=self._body_selector,

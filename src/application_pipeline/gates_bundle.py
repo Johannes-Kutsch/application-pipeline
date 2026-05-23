@@ -53,11 +53,16 @@ class _ContentLike(Protocol):
     def admit(self, stripped_body: str, stub: Any) -> bool: ...
 
 
+class _DedupCountersLike(Protocol):
+    def record(self, result: RunScopedSeenResult) -> None: ...
+
+
 def run_gates(
     stub: _Stub,
     *,
     run_log: RunLog,
     metrics: RunMetrics,
+    dedup_counters: _DedupCountersLike,
     dedup: _DedupLike,
     prefilter: _PreFilterLike,
     freshness: _FreshnessLike,
@@ -77,7 +82,7 @@ def run_gates(
 
     if gate_arm != "post_enrich":
         result = dedup.is_seen(stub)
-        metrics.record_dedup(result)
+        dedup_counters.record(result)
         if result == "judge_pending":
             return "judge_pending"
         if result != "miss":

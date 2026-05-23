@@ -10,6 +10,7 @@ import pytest
 from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.content_gate import ContentSnapshot
+from application_pipeline.dedup_counters import DedupSnapshot
 from application_pipeline.freshness_gate import FreshnessSnapshot
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.orchestrator import RunSummary
@@ -64,7 +65,7 @@ def _last_body(display: FakeStatusDisplay, row: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_register_rows_creates_six_rows_with_correct_order_and_phase(
+def test_register_rows_creates_five_rows_with_correct_order_and_phase(
     run_log: RunLog,
 ) -> None:
     display = FakeStatusDisplay()
@@ -72,7 +73,6 @@ def test_register_rows_creates_six_rows_with_correct_order_and_phase(
     metrics.register_rows(starting_order=10)
 
     assert _registers(display) == [
-        ("pipeline_dedup", 10, "running"),
         ("pipeline_prefilter", 11, "running"),
         ("pipeline_freshness", 12, "running"),
         ("pipeline_content", 13, "running"),
@@ -87,7 +87,7 @@ def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
     metrics.register_rows(starting_order=0)
 
     orders = [c.kwargs["order"] for c in display.calls if c.method == "register"]
-    assert orders == [0, 1, 2, 3, 4, 5]
+    assert orders == [1, 2, 3, 4, 5]
 
 
 # ---------------------------------------------------------------------------
@@ -119,27 +119,6 @@ def test_pipeline_body_reflects_judge_errored(run_log: RunLog) -> None:
     metrics.judge_failed()
     body = _last_body(display, "pipeline")
     assert "errors=1" in body
-
-
-# ---------------------------------------------------------------------------
-# Parser-side events → dedup row body
-# ---------------------------------------------------------------------------
-
-
-def test_dedup_body_matches_main_stats_format(run_log: RunLog) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
-
-    metrics.record_dedup("url_hit")
-    metrics.record_dedup("url_hit")
-    metrics.record_dedup("tuple_hit")
-    metrics.record_dedup("run_hit")
-    metrics.record_dedup("run_hit")
-    metrics.record_dedup("miss")
-
-    body = _last_body(display, "pipeline_dedup")
-    assert body == "url_hits=2 tuple_hits=1 run_hits=2 misses=1"
 
 
 # ---------------------------------------------------------------------------
@@ -433,11 +412,6 @@ def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> Run
 
     metrics.discovered()
     metrics.discovered()
-    metrics.record_dedup("url_hit")
-    metrics.record_dedup("tuple_hit")
-    metrics.record_dedup("run_hit")
-    metrics.record_dedup("miss")
-    metrics.record_dedup("miss")
     metrics.enrich_failed()
     metrics.parser_dead()
 
@@ -474,8 +448,14 @@ def test_format_run_divider_no_degraded_no_failures(run_log: RunLog) -> None:
     timestamp = "2026-01-01T12:00:00Z"
     tag = "v1.2.3"
     elapsed_s = 42.7
+    dedup = DedupSnapshot(
+        dedup_url_hits=1,
+        dedup_tuple_hits=1,
+        dedup_run_hits=1,
+        dedup_misses=2,
+    )
 
-    result = metrics.format_run_divider(timestamp, tag, elapsed_s)
+    result = metrics.format_run_divider(timestamp, tag, elapsed_s, dedup=dedup)
 
     expected = _format_run_divider(
         timestamp=timestamp,
@@ -509,7 +489,9 @@ def test_format_run_divider_no_tag(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 10.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 10.0, dedup=DedupSnapshot()
+    )
     assert "tag=" not in result
     assert result.startswith("<!-- run 2026-01-01T00:00:00Z")
 
@@ -518,7 +500,9 @@ def test_format_run_divider_no_sources(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 10.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 10.0, dedup=DedupSnapshot()
+    )
     assert "sources=" not in result
 
 
@@ -530,7 +514,9 @@ def test_format_run_divider_with_sources(run_log: RunLog) -> None:
     metrics.judge_dequeued()
     metrics.judge_complete(usage, "linkedin")
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 10.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 10.0, dedup=DedupSnapshot()
+    )
     assert "sources=linkedin:1" in result
 
 
@@ -543,7 +529,9 @@ def test_degraded_reason_absent_by_default(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert "degraded_reason" not in result
 
 
@@ -552,7 +540,9 @@ def test_degraded_reason_present_after_set(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.set_degraded_reason("usage_limit")
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert "degraded_reason=usage_limit" in result
 
 
@@ -560,7 +550,9 @@ def test_classify_batches_failed_absent_when_zero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert "classify_batches_failed" not in result
 
 
@@ -572,7 +564,9 @@ def test_classify_batches_failed_present_when_nonzero(run_log: RunLog) -> None:
     metrics.classify_batch_dequeued(2)
     metrics.classify_batch_failed(items=2)
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert "classify_batches_failed=1" in result
     assert "classify_items_abandoned=2" in result
 
@@ -593,7 +587,9 @@ def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned(
     metrics.judge_dequeued()
     metrics.judge_failed()
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert "errors=4" in result
     assert "judge_items_abandoned=4" in result
     assert "classify_items_abandoned=3" in result
@@ -603,6 +599,7 @@ def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned(
         prefilter=PreFilterSnapshot(),
         freshness=FreshnessSnapshot(),
         content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
     )
     assert summary.errored == 4
 
@@ -611,7 +608,9 @@ def test_judge_items_abandoned_absent_when_zero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert "judge_items_abandoned" not in result
 
 
@@ -622,7 +621,9 @@ def test_judge_items_abandoned_present_when_nonzero(run_log: RunLog) -> None:
     metrics.judge_dequeued()
     metrics.judge_failed()
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert "judge_items_abandoned=1" in result
 
 
@@ -630,17 +631,19 @@ def test_judge_resumed_absent_when_zero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert "judge_resumed" not in result
 
 
 def test_judge_resumed_present_when_nonzero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.record_dedup("judge_pending")
-    metrics.record_dedup("judge_pending")
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot(judge_resumed=2)
+    )
     assert "judge_resumed=2" in result
 
 
@@ -648,7 +651,9 @@ def test_format_run_divider_contains_per_callsite_token_fields(run_log: RunLog) 
     display = FakeStatusDisplay()
     metrics = _build_populated_metrics(display, run_log)
 
-    result = metrics.format_run_divider("2026-01-01T12:00:00Z", "v1", 10.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T12:00:00Z", "v1", 10.0, dedup=DedupSnapshot()
+    )
 
     assert "classify_input_tokens=500" in result
     assert "classify_output_tokens=200" in result
@@ -668,7 +673,9 @@ def test_format_run_divider_zero_callsite_tokens_when_no_calls(run_log: RunLog) 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
 
     assert "classify_input_tokens=0" in result
     assert "classify_output_tokens=0" in result
@@ -699,15 +706,12 @@ def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
         prefilter=prefilter,
         freshness=FreshnessSnapshot(),
         content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
     )
 
     assert isinstance(summary, RunSummary)
     assert summary.duration_seconds == 55.5
     assert summary.discovered == 2
-    assert summary.dedup_url_hits == 1
-    assert summary.dedup_tuple_hits == 1
-    assert summary.dedup_run_hits == 1
-    assert summary.dedup_misses == 2
     assert summary.prefilter_considered == 3
     assert summary.prefilter_passed == 2
     assert summary.prefilter_dropped == 1
@@ -732,6 +736,7 @@ def test_to_run_summary_is_frozen(run_log: RunLog) -> None:
         prefilter=PreFilterSnapshot(),
         freshness=FreshnessSnapshot(),
         content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
     )
 
     with pytest.raises((AttributeError, TypeError)):
@@ -797,8 +802,6 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
     def worker() -> None:
         for _ in range(iters):
             metrics.discovered()
-            metrics.record_dedup("url_hit")
-            metrics.record_dedup("miss")
             metrics.enrich_failed()
             metrics.classify_buffered(1)
             metrics.classify_batch_enqueued(1)
@@ -820,14 +823,15 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
         prefilter=PreFilterSnapshot(),
         freshness=FreshnessSnapshot(),
         content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
     )
     assert summary.discovered == total
-    assert summary.dedup_url_hits == total
-    assert summary.dedup_misses == total
     assert summary.enrich_failed == total
     assert summary.written == total
 
-    result = metrics.format_run_divider("2026-01-01T00:00:00Z", None, 1.0)
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
     assert f"kept={total}" in result
     assert f"classify_calls={total}" in result
     assert f"judge_calls={total}" in result
@@ -863,6 +867,7 @@ def test_parser_summary_reflects_events_for_that_parser_id(run_log: RunLog) -> N
         prefilter=PreFilterSnapshot(),
         freshness=FreshnessSnapshot(),
         content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
     )
     assert run_summary.discovered == 3
 
@@ -957,6 +962,7 @@ def test_interleaved_parsers_produce_independent_per_parser_totals(
         prefilter=PreFilterSnapshot(),
         freshness=FreshnessSnapshot(),
         content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
     )
     assert summary.discovered == 8
     assert summary.enrich_failed == 3

@@ -21,6 +21,7 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline.llm import quota as _quota
 from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
+from application_pipeline.dedup_counters import DedupCounters
 from application_pipeline.run_metrics import RunMetrics, RunSummary
 from application_pipeline.status_display import PlainStatusDisplay, StatusDisplay
 from application_pipeline.config import ConfigError, SourceEntry
@@ -373,6 +374,7 @@ class _EnrichThread(_QueueWorker):
         llm_enricher: "_LLMEnricherLike",
         dedup_store: DeduplicationStore,
         metrics: "RunMetrics",
+        dedup_counters: "DedupCounters",
         run_state: _RunState,
         run_log: RunLog,
         quota_wall: "_quota.QuotaWall",
@@ -392,6 +394,7 @@ class _EnrichThread(_QueueWorker):
         self._llm_enricher = llm_enricher
         self._dedup_store = dedup_store
         self._metrics = metrics
+        self._dedup_counters = dedup_counters
         self._run_log = run_log
         self._quota_wall = quota_wall
         self._freshness = freshness
@@ -437,6 +440,7 @@ class _EnrichThread(_QueueWorker):
             stub,
             run_log=self._run_log,
             metrics=self._metrics,
+            dedup_counters=self._dedup_counters,
             dedup=self._dedup_store,
             prefilter=self._prefilter,
             freshness=self._freshness,
@@ -526,6 +530,7 @@ class _OutboundDispatcher:
         parsers: dict[str, "Parser"],
         dedup: DeduplicationStore,
         metrics: "RunMetrics",
+        dedup_counters: "DedupCounters",
         enrich_queue: "queue.Queue[object]",
         pool_collector: "_PoolCollector",
         run_state: _RunState,
@@ -537,6 +542,7 @@ class _OutboundDispatcher:
         self._parsers = parsers
         self._dedup = dedup
         self._metrics = metrics
+        self._dedup_counters = dedup_counters
         self._enrich_queue = enrich_queue
         self._pool_collector = pool_collector
         self._run_state = run_state
@@ -580,6 +586,7 @@ class _OutboundDispatcher:
             payload,
             run_log=self._run_log,
             metrics=self._metrics,
+            dedup_counters=self._dedup_counters,
             dedup=self._dedup,
             prefilter=self._prefilter,
             freshness=self._freshness,
@@ -796,7 +803,10 @@ def run(
 
             status_display.remove("startup")
 
-            metrics.register_rows(starting_order=2 + len(threads))
+            starting_order = 2 + len(threads)
+            dedup_counters = DedupCounters(display=status_display, run_log=run_log)
+            dedup_counters.register(starting_order)
+            metrics.register_rows(starting_order=starting_order)
 
             freshness = FreshnessGate(
                 anchored_today=anchored_today,
@@ -822,6 +832,7 @@ def run(
                     llm_enricher=llm_enricher,
                     dedup_store=dedup_store,
                     metrics=metrics,
+                    dedup_counters=dedup_counters,
                     run_state=run_state,
                     run_log=run_log,
                     quota_wall=quota_wall,
@@ -840,6 +851,7 @@ def run(
                 parsers=parsers_dict,
                 dedup=dedup_run,
                 metrics=metrics,
+                dedup_counters=dedup_counters,
                 enrich_queue=enrich_queue,
                 pool_collector=pool_collector,
                 run_state=run_state,
@@ -910,6 +922,7 @@ def run(
             prefilter_snapshot = prefilter.snapshot()
             content_gate.emit_run_complete()
             content_snapshot = content_gate.snapshot()
+            dedup_snapshot = dedup_counters.snapshot()
             dispatcher.flush_residual(n=cfg.claude_classify_parallelism)
 
         first_exc: BaseException | None = None
@@ -993,10 +1006,10 @@ def run(
             classify_output_tokens=metrics.classify_output_tokens,
             judge_input_tokens=metrics.judge_input_tokens,
             judge_output_tokens=metrics.judge_output_tokens,
-            dedup_url_hits=metrics.dedup_url_hits,
-            dedup_tuple_hits=metrics.dedup_tuple_hits,
-            dedup_run_hits=metrics.dedup_run_hits,
-            dedup_misses=metrics.dedup_misses,
+            dedup_url_hits=dedup_snapshot.dedup_url_hits,
+            dedup_tuple_hits=dedup_snapshot.dedup_tuple_hits,
+            dedup_run_hits=dedup_snapshot.dedup_run_hits,
+            dedup_misses=dedup_snapshot.dedup_misses,
             pool_size=pool_size,
             daily_top_5_count=daily_top_5_count,
             elapsed_s=round(elapsed_s, 1),
@@ -1007,6 +1020,7 @@ def run(
             prefilter=prefilter_snapshot,
             freshness=freshness_snapshot,
             content=content_snapshot,
+            dedup=dedup_snapshot,
         )
         _log.info(
             "run complete: discovered=%d skipped=%d "

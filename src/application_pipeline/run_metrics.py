@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from application_pipeline.content_gate import ContentSnapshot
-from application_pipeline.dedup import RunScopedSeenResult
+from application_pipeline.dedup_counters import DedupSnapshot
 from application_pipeline.freshness_gate import FreshnessSnapshot
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.parser_log import RunLog
@@ -68,12 +68,6 @@ class RunMetrics:
 
         # Parser-side (main) counters
         self._discovered = 0
-        self._skipped = 0
-        self._dedup_url_hits = 0
-        self._dedup_tuple_hits = 0
-        self._dedup_run_hits = 0
-        self._dedup_misses = 0
-        self._judge_resumed = 0
         self._enrich_failed = 0
         self._parsers_dead = 0
 
@@ -117,7 +111,6 @@ class RunMetrics:
     # -----------------------------------------------------------------------
 
     def register_rows(self, starting_order: int) -> None:
-        self._display.register("pipeline_dedup", order=starting_order, phase="running")
         self._display.register(
             "pipeline_prefilter", order=starting_order + 1, phase="running"
         )
@@ -185,24 +178,6 @@ class RunMetrics:
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
             self._display.update_body("parser_" + parser_id, body=parser_body)
-
-    def record_dedup(self, result: RunScopedSeenResult) -> None:
-        with self._lock:
-            if result == "url_hit":
-                self._dedup_url_hits += 1
-                self._skipped += 1
-            elif result == "tuple_hit":
-                self._dedup_tuple_hits += 1
-                self._skipped += 1
-            elif result == "run_hit":
-                self._dedup_run_hits += 1
-                self._skipped += 1
-            elif result == "judge_pending":
-                self._judge_resumed += 1
-            else:  # miss
-                self._dedup_misses += 1
-            body = self._dedup_body()
-        self._display.update_body("pipeline_dedup", body=body)
 
     def enrich_failed(self, parser_id: str = "") -> None:
         with self._lock:
@@ -402,32 +377,12 @@ class RunMetrics:
         with self._lock:
             return self._judge_output_tokens
 
-    @property
-    def dedup_url_hits(self) -> int:
-        with self._lock:
-            return self._dedup_url_hits
-
-    @property
-    def dedup_tuple_hits(self) -> int:
-        with self._lock:
-            return self._dedup_tuple_hits
-
-    @property
-    def dedup_run_hits(self) -> int:
-        with self._lock:
-            return self._dedup_run_hits
-
-    @property
-    def dedup_misses(self) -> int:
-        with self._lock:
-            return self._dedup_misses
-
     # -----------------------------------------------------------------------
     # Output methods
     # -----------------------------------------------------------------------
 
     def format_run_divider(
-        self, timestamp: str, tag: str | None, elapsed_s: float
+        self, timestamp: str, tag: str | None, elapsed_s: float, *, dedup: DedupSnapshot
     ) -> str:
         with self._classify_lock:
             classify_calls = self._classify_calls
@@ -443,11 +398,6 @@ class RunMetrics:
         with self._lock:
             sources = dict(self._written_per_source)
             kept = self._written
-            dedup_url_hits = self._dedup_url_hits
-            dedup_tuple_hits = self._dedup_tuple_hits
-            dedup_run_hits = self._dedup_run_hits
-            dedup_misses = self._dedup_misses
-            judge_resumed = self._judge_resumed
             judge_calls = self._judge_calls
             judge_total_s = self._judge_total_s
             judge_input_tokens = self._judge_input_tokens
@@ -460,6 +410,12 @@ class RunMetrics:
             # step that runs before the divider is formatted.
             judge_items_abandoned = self._judge_errored + classify_items_abandoned
             errors = judge_items_abandoned
+
+        dedup_url_hits = dedup.dedup_url_hits
+        dedup_tuple_hits = dedup.dedup_tuple_hits
+        dedup_run_hits = dedup.dedup_run_hits
+        dedup_misses = dedup.dedup_misses
+        judge_resumed = dedup.judge_resumed
 
         parts = [f"run {timestamp}"]
         if tag is not None:
@@ -509,6 +465,7 @@ class RunMetrics:
         prefilter: PreFilterSnapshot,
         freshness: FreshnessSnapshot,
         content: ContentSnapshot,
+        dedup: DedupSnapshot,
     ) -> RunSummary:
         with self._classify_lock:
             classify_input_tokens = self._classify_input_tokens
@@ -523,7 +480,7 @@ class RunMetrics:
             return RunSummary(
                 duration_seconds=duration_s,
                 discovered=self._discovered,
-                skipped=self._skipped,
+                skipped=dedup.skipped,
                 prefilter_considered=prefilter.prefilter_considered,
                 prefilter_passed=prefilter.prefilter_passed,
                 prefilter_dropped=prefilter.prefilter_dropped,
@@ -531,11 +488,11 @@ class RunMetrics:
                 content_considered=content.content_considered,
                 content_passed=content.content_passed,
                 content_dropped_empty_body=content.content_dropped_empty_body,
-                dedup_url_hits=self._dedup_url_hits,
-                dedup_tuple_hits=self._dedup_tuple_hits,
-                dedup_run_hits=self._dedup_run_hits,
-                dedup_misses=self._dedup_misses,
-                judge_resumed=self._judge_resumed,
+                dedup_url_hits=dedup.dedup_url_hits,
+                dedup_tuple_hits=dedup.dedup_tuple_hits,
+                dedup_run_hits=dedup.dedup_run_hits,
+                dedup_misses=dedup.dedup_misses,
+                judge_resumed=dedup.judge_resumed,
                 classifier_dropped=classifier_dropped,
                 written=self._written,
                 enrich_failed=self._enrich_failed,
@@ -619,14 +576,6 @@ class RunMetrics:
         return (
             f"discovered={self._discovered} written={self._written}"
             f" errors={self._enrich_failed + self._parsers_dead + self._judge_errored}"
-        )
-
-    def _dedup_body(self) -> str:
-        return (
-            f"url_hits={self._dedup_url_hits}"
-            f" tuple_hits={self._dedup_tuple_hits}"
-            f" run_hits={self._dedup_run_hits}"
-            f" misses={self._dedup_misses}"
         )
 
     def _classify_body(self) -> str:

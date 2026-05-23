@@ -12,9 +12,11 @@ from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
     ClaudeCliInvoker,
     ClaudeExtractor,
+    ClaudeMalformedEnvelopeError,
     ClaudeResponse,
     ClaudeUsage,
     ExtractorMalformedError,
+    ExtractorMalformedJSONError,
 )
 from application_pipeline.llm.types import (
     JudgeCandidate,
@@ -201,6 +203,71 @@ def test_classify_relevance_in_domain_empty_header_raises_malformed(
     )
     with pytest.raises(ExtractorMalformedError):
         extractor.classify_relevance(_item())
+
+
+# ---------------------------------------------------------------------------
+# classify_relevance: malformed exceptions carry prompt and raw_response
+# ---------------------------------------------------------------------------
+
+
+def test_classify_relevance_schema_mismatch_attaches_prompt_and_raw_response(
+    run_log: RunLog,
+) -> None:
+    response = _classify_response({"matches": True, "summary": "ok"})
+    invoker = _fake_invoker(response)
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    with pytest.raises(ExtractorMalformedError) as excinfo:
+        extractor.classify_relevance(_item())
+    sent_prompt = invoker.call.call_args.args[0]
+    assert excinfo.value.prompt == sent_prompt
+    assert excinfo.value.raw_response == response.raw_response
+
+
+def test_classify_relevance_protocol_error_attaches_prompt_and_raw_response(
+    run_log: RunLog,
+) -> None:
+    response = ClaudeResponse(
+        raw_response="no verdict block here",
+        usage=_usage(),
+        cost_usd=0.001,
+        duration_s=0.1,
+        session_id="s",
+    )
+    invoker = _fake_invoker(response)
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    with pytest.raises(ExtractorMalformedError) as excinfo:
+        extractor.classify_relevance(_item())
+    sent_prompt = invoker.call.call_args.args[0]
+    assert excinfo.value.prompt == sent_prompt
+    assert excinfo.value.raw_response == response.raw_response
+
+
+def test_classify_relevance_envelope_malformed_attaches_prompt_and_none_raw_response(
+    run_log: RunLog,
+) -> None:
+    invoker = MagicMock(spec=ClaudeCliInvoker)
+    invoker.call.side_effect = ClaudeMalformedEnvelopeError(
+        "envelope JSON unparseable",
+        returncode=0,
+        stdout="garbage",
+        stderr="",
+        envelope=None,
+        envelope_error_class="envelope_not_json",
+    )
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    with pytest.raises(ExtractorMalformedJSONError) as excinfo:
+        extractor.classify_relevance(_item())
+    sent_prompt = invoker.call.call_args.args[0]
+    assert excinfo.value.prompt == sent_prompt
+    assert excinfo.value.raw_response is None
+    assert excinfo.value.returncode == 0
+    assert excinfo.value.stderr == ""
 
 
 # ---------------------------------------------------------------------------

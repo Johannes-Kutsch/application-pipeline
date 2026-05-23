@@ -10,6 +10,7 @@ from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.parser_log import RunLog
+from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.run_metrics import RunMetrics
 
 
@@ -187,7 +188,7 @@ def test_metrics_content_counters_updated_on_pass(
 ) -> None:
     gate = _make_gate(run_log, metrics)
     gate.admit("has body", _Stub())
-    summary = metrics.to_run_summary(duration_s=0.0)
+    summary = metrics.to_run_summary(duration_s=0.0, prefilter=PreFilterSnapshot())
     assert summary.content_considered == 1
     assert summary.content_passed == 1
     assert summary.content_dropped_empty_body == 0
@@ -198,7 +199,7 @@ def test_metrics_content_counters_updated_on_drop(
 ) -> None:
     gate = _make_gate(run_log, metrics)
     gate.admit("", _Stub())
-    summary = metrics.to_run_summary(duration_s=0.0)
+    summary = metrics.to_run_summary(duration_s=0.0, prefilter=PreFilterSnapshot())
     assert summary.content_considered == 1
     assert summary.content_passed == 0
     assert summary.content_dropped_empty_body == 1

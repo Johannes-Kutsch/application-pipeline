@@ -12,6 +12,7 @@ from fake_status_display import FakeStatusDisplay
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.orchestrator import RunSummary
 from application_pipeline.parser_log import RunLog
+from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.run_metrics import RunMetrics
 
 
@@ -137,38 +138,6 @@ def test_dedup_body_matches_main_stats_format(run_log: RunLog) -> None:
 
     body = _last_body(display, "pipeline_dedup")
     assert body == "url_hits=2 tuple_hits=1 run_hits=2 misses=1"
-
-
-# ---------------------------------------------------------------------------
-# Parser-side events → prefilter row body
-# ---------------------------------------------------------------------------
-
-
-def test_prefilter_body_matches_main_stats_format(run_log: RunLog) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
-
-    # blacklist hit → dropped
-    metrics.prefilter_dropped(blacklist_hit=True)
-    # no blacklist hit → passes
-    metrics.prefilter_passed()
-    # another pass
-    metrics.prefilter_passed()
-
-    body = _last_body(display, "pipeline_prefilter")
-    assert body == "considered=3 passed=2 dropped=1 (bl=1)"
-
-
-def test_prefilter_body_clean_pass_shows_zero_blacklist_hits(run_log: RunLog) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
-
-    metrics.prefilter_passed()
-    body = _last_body(display, "pipeline_prefilter")
-    assert "bl=0" in body
-    assert "wl=" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -467,9 +436,6 @@ def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> Run
     metrics.record_dedup("run_hit")
     metrics.record_dedup("miss")
     metrics.record_dedup("miss")
-    metrics.prefilter_passed()
-    metrics.prefilter_passed()
-    metrics.prefilter_dropped(blacklist_hit=True)
     metrics.enrich_failed()
     metrics.parser_dead()
 
@@ -630,7 +596,7 @@ def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned(
     assert "judge_items_abandoned=4" in result
     assert "classify_items_abandoned=3" in result
 
-    summary = metrics.to_run_summary(duration_s=1.0)
+    summary = metrics.to_run_summary(duration_s=1.0, prefilter=PreFilterSnapshot())
     assert summary.errored == 4
 
 
@@ -715,7 +681,13 @@ def test_format_run_divider_zero_callsite_tokens_when_no_calls(run_log: RunLog) 
 def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = _build_populated_metrics(display, run_log)
-    summary = metrics.to_run_summary(duration_s=55.5)
+    prefilter = PreFilterSnapshot(
+        prefilter_considered=3,
+        prefilter_passed=2,
+        prefilter_dropped=1,
+        prefilter_blacklist_hits=1,
+    )
+    summary = metrics.to_run_summary(duration_s=55.5, prefilter=prefilter)
 
     assert isinstance(summary, RunSummary)
     assert summary.duration_seconds == 55.5
@@ -743,7 +715,7 @@ def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
 def test_to_run_summary_is_frozen(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    summary = metrics.to_run_summary(duration_s=1.0)
+    summary = metrics.to_run_summary(duration_s=1.0, prefilter=PreFilterSnapshot())
 
     with pytest.raises((AttributeError, TypeError)):
         summary.discovered = 99  # type: ignore[misc]
@@ -810,8 +782,6 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
             metrics.discovered()
             metrics.record_dedup("url_hit")
             metrics.record_dedup("miss")
-            metrics.prefilter_passed()
-            metrics.prefilter_dropped(blacklist_hit=True)
             metrics.enrich_failed()
             metrics.classify_buffered(1)
             metrics.classify_batch_enqueued(1)
@@ -828,13 +798,10 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
         t.join()
 
     total = n_threads * iters
-    summary = metrics.to_run_summary(duration_s=1.0)
+    summary = metrics.to_run_summary(duration_s=1.0, prefilter=PreFilterSnapshot())
     assert summary.discovered == total
     assert summary.dedup_url_hits == total
     assert summary.dedup_misses == total
-    assert summary.prefilter_passed == total
-    assert summary.prefilter_dropped == total
-    assert summary.prefilter_considered == total * 2
     assert summary.enrich_failed == total
     assert summary.written == total
 
@@ -869,7 +836,7 @@ def test_parser_summary_reflects_events_for_that_parser_id(run_log: RunLog) -> N
     assert summary_b["discovered"] == 1
 
     # Aggregate is unaffected
-    run_summary = metrics.to_run_summary(1.0)
+    run_summary = metrics.to_run_summary(1.0, prefilter=PreFilterSnapshot())
     assert run_summary.discovered == 3
 
 
@@ -958,7 +925,7 @@ def test_interleaved_parsers_produce_independent_per_parser_totals(
     assert sb["discovered"] == 5
     assert sb["enrich_failed"] == 0
 
-    summary = metrics.to_run_summary(1.0)
+    summary = metrics.to_run_summary(1.0, prefilter=PreFilterSnapshot())
     assert summary.discovered == 8
     assert summary.enrich_failed == 3
 

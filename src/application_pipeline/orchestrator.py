@@ -810,7 +810,7 @@ def run(
             prefilter = PreFilterGate(
                 blacklist=list(search_terms.negative_keywords),
                 dedup=dedup_run,
-                metrics=metrics,
+                display=status_display,
                 run_log=run_log,
             )
             content_gate = ContentGate(metrics=metrics, run_log=run_log)
@@ -906,6 +906,7 @@ def run(
 
             freshness.emit_run_complete()
             prefilter.emit_run_complete()
+            prefilter_snapshot = prefilter.snapshot()
             content_gate.emit_run_complete()
             dispatcher.flush_residual(n=cfg.claude_classify_parallelism)
 
@@ -999,7 +1000,9 @@ def run(
             elapsed_s=round(elapsed_s, 1),
         )
 
-        summary = metrics.to_run_summary(duration_s=elapsed_s)
+        summary = metrics.to_run_summary(
+            duration_s=elapsed_s, prefilter=prefilter_snapshot
+        )
         _log.info(
             "run complete: discovered=%d skipped=%d "
             "prefilter_considered=%d prefilter_passed=%d prefilter_dropped=%d "

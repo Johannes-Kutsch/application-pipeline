@@ -7,6 +7,7 @@ from datetime import datetime
 from application_pipeline.dedup import RunScopedSeenResult
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.parser_log import RunLog
+from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.status_display import StatusDisplay
 
 
@@ -71,10 +72,6 @@ class RunMetrics:
         self._dedup_run_hits = 0
         self._dedup_misses = 0
         self._judge_resumed = 0
-        self._prefilter_considered = 0
-        self._prefilter_passed = 0
-        self._prefilter_dropped = 0
-        self._prefilter_blacklist_hits = 0
         self._freshness_dropped = 0
         self._content_considered = 0
         self._content_passed = 0
@@ -208,22 +205,6 @@ class RunMetrics:
                 self._dedup_misses += 1
             body = self._dedup_body()
         self._display.update_body("pipeline_dedup", body=body)
-
-    def prefilter_passed(self) -> None:
-        with self._lock:
-            self._prefilter_considered += 1
-            self._prefilter_passed += 1
-            body = self._prefilter_body()
-        self._display.update_body("pipeline_prefilter", body=body)
-
-    def prefilter_dropped(self, *, blacklist_hit: bool) -> None:
-        with self._lock:
-            self._prefilter_considered += 1
-            self._prefilter_dropped += 1
-            if blacklist_hit:
-                self._prefilter_blacklist_hits += 1
-            body = self._prefilter_body()
-        self._display.update_body("pipeline_prefilter", body=body)
 
     def freshness_dropped(self) -> None:
         with self._lock:
@@ -544,7 +525,9 @@ class RunMetrics:
             parts.append(f"judge_items_abandoned={judge_items_abandoned}")
         return f"<!-- {' '.join(parts)} -->\n"
 
-    def to_run_summary(self, duration_s: float) -> RunSummary:
+    def to_run_summary(
+        self, duration_s: float, prefilter: PreFilterSnapshot
+    ) -> RunSummary:
         with self._classify_lock:
             classify_input_tokens = self._classify_input_tokens
             classify_output_tokens = self._classify_output_tokens
@@ -559,10 +542,10 @@ class RunMetrics:
                 duration_seconds=duration_s,
                 discovered=self._discovered,
                 skipped=self._skipped,
-                prefilter_considered=self._prefilter_considered,
-                prefilter_passed=self._prefilter_passed,
-                prefilter_dropped=self._prefilter_dropped,
-                prefilter_blacklist_hits=self._prefilter_blacklist_hits,
+                prefilter_considered=prefilter.prefilter_considered,
+                prefilter_passed=prefilter.prefilter_passed,
+                prefilter_dropped=prefilter.prefilter_dropped,
+                prefilter_blacklist_hits=prefilter.prefilter_blacklist_hits,
                 content_considered=self._content_considered,
                 content_passed=self._content_passed,
                 content_dropped_empty_body=self._content_dropped_empty_body,
@@ -662,14 +645,6 @@ class RunMetrics:
             f" tuple_hits={self._dedup_tuple_hits}"
             f" run_hits={self._dedup_run_hits}"
             f" misses={self._dedup_misses}"
-        )
-
-    def _prefilter_body(self) -> str:
-        return (
-            f"considered={self._prefilter_considered}"
-            f" passed={self._prefilter_passed}"
-            f" dropped={self._prefilter_dropped}"
-            f" (bl={self._prefilter_blacklist_hits})"
         )
 
     def _freshness_body(self) -> str:

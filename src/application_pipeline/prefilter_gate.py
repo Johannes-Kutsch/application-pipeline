@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from application_pipeline.parser_log import RunLog
-from application_pipeline.run_metrics import RunMetrics
+from application_pipeline.status_display import StatusDisplay
 from application_pipeline.text import normalize
 
 
@@ -77,20 +78,33 @@ def _format_dead_list(terms: list[str], counts: dict[str, int]) -> str:
     return f"[{', '.join(dead)}]"
 
 
+@dataclass(frozen=True)
+class PreFilterSnapshot:
+    prefilter_considered: int = 0
+    prefilter_passed: int = 0
+    prefilter_dropped: int = 0
+    prefilter_blacklist_hits: int = 0
+
+
 class PreFilterGate:
     def __init__(
         self,
         *,
         blacklist: list[str],
         dedup: _DedupStore,
-        metrics: RunMetrics,
+        display: StatusDisplay,
         run_log: RunLog,
     ) -> None:
         self._blacklist = _precompute_blacklist(blacklist)
         self._bl_counts: dict[str, int] = {t: 0 for t in self._blacklist}
         self._dedup = dedup
-        self._metrics = metrics
+        self._display = display
         self._run_log = run_log
+        self._lock = threading.Lock()
+        self._considered = 0
+        self._passed = 0
+        self._dropped = 0
+        self._blacklist_hits = 0
 
     def admit_stub(self, stub: _Stub) -> bool:
         """Check negative keyword blacklist on stub title, without requiring a Position."""
@@ -114,14 +128,28 @@ class PreFilterGate:
         )
         for term in verdict.blacklist_matches:
             self._bl_counts[term] += 1
-        if verdict.passes:
-            self._metrics.prefilter_passed()
-        else:
-            self._metrics.prefilter_dropped(
-                blacklist_hit=bool(verdict.blacklist_matches)
-            )
+        with self._lock:
+            self._considered += 1
+            if verdict.passes:
+                self._passed += 1
+            else:
+                self._dropped += 1
+                if verdict.blacklist_matches:
+                    self._blacklist_hits += 1
+            body = self._body()
+        self._display.update_body("pipeline_prefilter", body=body)
+        if not verdict.passes:
             self._dedup.mark_out_of_domain(position.stub)
         return verdict.passes
+
+    def snapshot(self) -> PreFilterSnapshot:
+        with self._lock:
+            return PreFilterSnapshot(
+                prefilter_considered=self._considered,
+                prefilter_passed=self._passed,
+                prefilter_dropped=self._dropped,
+                prefilter_blacklist_hits=self._blacklist_hits,
+            )
 
     def emit_run_complete(self) -> None:
         self._run_log.event(
@@ -131,4 +159,12 @@ class PreFilterGate:
                 self._blacklist, self._bl_counts
             ),
             NEGATIVE_KEYWORDS_dead=_format_dead_list(self._blacklist, self._bl_counts),
+        )
+
+    def _body(self) -> str:
+        return (
+            f"considered={self._considered}"
+            f" passed={self._passed}"
+            f" dropped={self._dropped}"
+            f" (bl={self._blacklist_hits})"
         )

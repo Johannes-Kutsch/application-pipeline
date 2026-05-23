@@ -97,11 +97,11 @@ def _item(**kwargs: object) -> ClassifyItem:
 
 
 # ---------------------------------------------------------------------------
-# classify_relevance: in-domain happy path
+# classify_relevance: matched happy path
 # ---------------------------------------------------------------------------
 
 
-def test_classify_relevance_in_domain_returns_header_and_summary(
+def test_classify_relevance_matched_returns_header_and_summary(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(
@@ -159,7 +159,7 @@ def test_classify_relevance_out_of_domain_returns_none_header_and_summary(
 # ---------------------------------------------------------------------------
 
 
-def test_classify_relevance_in_domain_missing_header_raises_malformed(
+def test_classify_relevance_matched_missing_header_raises_malformed(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(_classify_response({"matches": True, "summary": "ok"}))
@@ -173,7 +173,7 @@ def test_classify_relevance_in_domain_missing_header_raises_malformed(
         extractor.classify_relevance(_item())
 
 
-def test_classify_relevance_in_domain_missing_summary_raises_malformed(
+def test_classify_relevance_matched_missing_summary_raises_malformed(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(
@@ -189,7 +189,7 @@ def test_classify_relevance_in_domain_missing_summary_raises_malformed(
         extractor.classify_relevance(_item())
 
 
-def test_classify_relevance_in_domain_empty_header_raises_malformed(
+def test_classify_relevance_matched_empty_header_raises_malformed(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(

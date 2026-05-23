@@ -599,7 +599,7 @@ class RunMetrics:
             {
                 "batches_sent": classify_calls,
                 "items_classified": classify_items,
-                "in_domain": classify_items - classifier_dropped,
+                "matched": classify_items - classifier_dropped,
                 "off_domain": classifier_dropped,
                 "batches_failed": classify_failed,
                 "input_tokens": classify_input_tokens,

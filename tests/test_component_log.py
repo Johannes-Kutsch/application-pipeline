@@ -164,7 +164,7 @@ def test_summarize_with_caller_supplied_counts(tmp_path: Path) -> None:
     counts = {
         "batches_sent": 10,
         "items_classified": 50,
-        "in_domain": 35,
+        "matched": 35,
         "off_domain": 15,
         "batches_failed": 1,
         "input_tokens": 8000,

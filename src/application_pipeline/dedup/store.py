@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 SeenStatus = Literal[
     "out_of_domain",
-    "in_domain",
+    "matched",
     "selected_by_judge",
     "enrich_failed",
     "external_redirect",
@@ -134,7 +134,7 @@ class DeduplicationStore:
                 return "run_hit"
 
             if key.url in self._records:
-                if self._records[key.url].get("status") == "in_domain":
+                if self._records[key.url].get("status") == "matched":
                     return "judge_pending"
                 return "url_hit"
 
@@ -193,27 +193,27 @@ class DeduplicationStore:
 
     def mark_selected_by_judge(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "selected_by_judge", overwrite_if="in_domain")
+            self._mark(key, "selected_by_judge", overwrite_if="matched")
             self._delete_from_stores(key.url)
 
     def mark_enrich_failed(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "enrich_failed", overwrite_if="in_domain")
+            self._mark(key, "enrich_failed", overwrite_if="matched")
             self._delete_from_stores(key.url)
 
     def mark_expired(self, key: _SeenKey) -> None:
         with self._lock:
             prior = self._records.get(key.url)
             prior_status = prior.get("status") if prior else None
-            if prior_status == "in_domain":
-                self._mark(key, "expired", overwrite_if="in_domain")
+            if prior_status == "matched":
+                self._mark(key, "expired", overwrite_if="matched")
                 self._delete_from_stores(key.url)
             else:
                 self._mark(key, "expired")
 
-    def mark_in_domain(self, key: _SeenKey) -> None:
+    def mark_matched(self, key: _SeenKey) -> None:
         with self._lock:
-            self._mark(key, "in_domain")
+            self._mark(key, "matched")
 
     @contextmanager
     def run_scope(self) -> Generator[DeduplicationStore, None, None]:

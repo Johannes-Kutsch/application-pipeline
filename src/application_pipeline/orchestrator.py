@@ -179,7 +179,7 @@ class _PoolCollector:
         self._stubs: dict[str, PositionStub] = {}
         self._lock = threading.Lock()
 
-    def add_in_domain(self, stub: PositionStub) -> None:
+    def add_matched(self, stub: PositionStub) -> None:
         with self._lock:
             self._stubs[stub.url] = stub
 
@@ -431,8 +431,8 @@ class _EnrichThread(_QueueWorker):
             self._dedup_store.mark_out_of_domain(stub)
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 1)
         else:
-            self._dedup_store.mark_in_domain(stub)
-            self._pool_collector.add_in_domain(stub)
+            self._dedup_store.mark_matched(stub)
+            self._pool_collector.add_matched(stub)
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 0)
 
 

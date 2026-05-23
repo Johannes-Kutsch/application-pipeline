@@ -108,7 +108,7 @@ def test_strip_to_text_without_selector_falls_back_to_trafilatura() -> None:
 
 
 @respx.mock
-def test_enricher_in_domain_returns_verdict_and_writes_card_store(
+def test_enricher_matched_returns_verdict_and_writes_card_store(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,

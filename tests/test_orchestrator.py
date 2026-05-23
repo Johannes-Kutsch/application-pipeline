@@ -5329,24 +5329,12 @@ def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [PositionStub(url=url, title="ML Engineer", source="stub")]
 
-    from application_pipeline.llm import CallUsage
-    from application_pipeline.llm.types import RelevanceVerdict
-    from unittest.mock import MagicMock
-
-    _zero_usage = CallUsage(
-        input_tokens=0,
-        output_tokens=0,
-        cache_read_tokens=0,
-        cost_usd=0.0,
-        duration_s=0.0,
-    )
-
     extractor_mock = MagicMock()
     extractor_mock.classify_relevance.return_value = (
         RelevanceVerdict(matches=True, header=stale_header, summary="Old role."),
-        _zero_usage,
+        _ZERO_USAGE,
     )
-    extractor_mock.judge_top_n.return_value = ([], _zero_usage)
+    extractor_mock.judge_top_n.return_value = ([], _ZERO_USAGE)
 
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)

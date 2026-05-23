@@ -20,6 +20,8 @@ class _ParserCounters:
     parsers_dead: int = 0
     unparseable_dates: int = 0
     enriched: int = 0
+    native_enriched: int = 0
+    has_native_enrich: bool = False
     queries_done: int = 0
 
 
@@ -138,11 +140,17 @@ class RunMetrics:
         )
 
     def register_parser(
-        self, parser_id: str, *, order: int, total_queries: int
+        self,
+        parser_id: str,
+        *,
+        order: int,
+        total_queries: int,
+        has_native_enrich: bool = False,
     ) -> None:
         with self._lock:
             entry = self._parser_entry(parser_id)
             entry.total_queries = total_queries
+            entry.has_native_enrich = has_native_enrich
             body = self._parser_body(parser_id)
         self._display.register(
             "parser_" + parser_id, order=order, phase="running", body=body
@@ -285,9 +293,12 @@ class RunMetrics:
             body = self._parser_body(parser_id)
         self._display.update_body("parser_" + parser_id, body=body)
 
-    def enriched(self, parser_id: str) -> None:
+    def enriched(self, parser_id: str, mode: str) -> None:
         with self._lock:
-            self._parser_entry(parser_id).enriched += 1
+            entry = self._parser_entry(parser_id)
+            entry.enriched += 1
+            if mode == "native":
+                entry.native_enriched += 1
             body = self._parser_body(parser_id)
         self._display.update_body("parser_" + parser_id, body=body)
 
@@ -630,11 +641,9 @@ class RunMetrics:
 
     def _parser_body(self, parser_id: str) -> str:
         c = self._per_parser.get(parser_id, _ParserCounters())
-        body = (
-            f"{c.queries_done}/{c.total_queries} queries"
-            f" · {c.discovered} stubs"
-            f" · {c.enriched} enriched"
-        )
+        body = f"{c.queries_done}/{c.total_queries} queries · {c.discovered} stubs"
+        if c.has_native_enrich:
+            body += f" · {c.native_enriched}/{c.enriched} enriched"
         if c.lifecycle == "done":
             body += " · done"
         elif c.lifecycle == "dead":

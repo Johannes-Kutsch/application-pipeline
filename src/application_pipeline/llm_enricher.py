@@ -151,7 +151,7 @@ class LLMEnricher:
             )
             raise
 
-        if verdict.in_domain:
+        if verdict.matches:
             assert verdict.header is not None
             assert verdict.summary is not None
 

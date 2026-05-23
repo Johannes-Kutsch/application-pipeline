@@ -56,22 +56,22 @@ class CallUsage:
 
 @dataclass(frozen=True)
 class RelevanceVerdictV2:
-    in_domain: bool
+    matches: bool
     header: str | None = None
     summary: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.in_domain, bool):
+        if not isinstance(self.matches, bool):
             raise ExtractorSchemaError(
-                f"in_domain must be bool, got {type(self.in_domain).__name__}"
+                f"matches must be bool, got {type(self.matches).__name__}"
             )
-        if self.in_domain and (self.header is None or self.summary is None):
+        if self.matches and (self.header is None or self.summary is None):
             raise ExtractorSchemaError(
-                "header and summary must not be None when in_domain is True"
+                "header and summary must not be None when matches is True"
             )
-        if not self.in_domain and (self.header is not None or self.summary is not None):
+        if not self.matches and (self.header is not None or self.summary is not None):
             raise ExtractorSchemaError(
-                "header and summary must be None when in_domain is False"
+                "header and summary must be None when matches is False"
             )
 
 

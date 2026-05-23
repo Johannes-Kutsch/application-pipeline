@@ -94,7 +94,6 @@ def _write_config(
         triage_dir = user_info_dir / "triage-profile"
         triage_dir.mkdir(exist_ok=True)
         (triage_dir / "self-description.md").write_text("dev background\n")
-        (triage_dir / "domain-fit.md").write_text("ML roles\n")
         (triage_dir / "match-criteria.md").write_text("Hamburg, remote\n")
         kws: list[str] = ast.literal_eval(keywords)
         nkws: list[str] = ast.literal_eval(negative_keywords)
@@ -132,13 +131,13 @@ def _make_card_store(tmp_path: Path, name: str = "card_store.json") -> CardStore
 def _make_fake_llm_enricher(
     card_store: CardStore,
     *,
-    in_domain: bool = True,
+    matches: bool = True,
     header: str = "Test Role · ACME · Hamburg",
     summary: str = "A test role description.",
 ) -> "_FakeLLMEnricherHelper":
     """Create a fake LLMEnricher that writes cards and returns verdicts."""
     return _FakeLLMEnricherHelper(
-        card_store, in_domain=in_domain, header=header, summary=summary
+        card_store, matches=matches, header=header, summary=summary
     )
 
 
@@ -149,27 +148,27 @@ class _FakeLLMEnricherHelper:
         self,
         card_store: CardStore,
         *,
-        in_domain: bool = True,
+        matches: bool = True,
         header: str = "Test Role · ACME · Hamburg",
         summary: str = "A test role description.",
     ) -> None:
         self._card_store = card_store
-        self._in_domain = in_domain
+        self._matches = matches
         self._header = header
         self._summary = summary
 
     def enrich(
         self, stub: PositionStub, body_selector: "str | None"
     ) -> "RelevanceVerdictV2 | None":
-        if self._in_domain:
+        if self._matches:
             self._card_store.put(
                 stub.url,
                 CardExtract(header=self._header, summary=self._summary),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=self._header, summary=self._summary
+                matches=True, header=self._header, summary=self._summary
             )
-        return RelevanceVerdictV2(in_domain=False)
+        return RelevanceVerdictV2(matches=False)
 
 
 def _read_all_results(results_dir: Path) -> str:
@@ -783,13 +782,13 @@ class _FakeLLMEnricherRejectJob1:
         self, stub: PositionStub, body_selector: "str | None"
     ) -> "RelevanceVerdictV2 | None":
         if stub.title == "Job 1":
-            return RelevanceVerdictV2(in_domain=False)
+            return RelevanceVerdictV2(matches=False)
         self._card_store.put(
             stub.url,
             CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
         )
         return RelevanceVerdictV2(
-            in_domain=True,
+            matches=True,
             header=_FAKE_ENRICH_HEADER,
             summary=_FAKE_ENRICH_SUMMARY,
         )
@@ -1280,7 +1279,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
 
 def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> None:
     """In v2, a stub skipped by LLMEnricher (None return) is marked enrich_failed.
-    classify_relevance_v2 event with in_domain=None is logged."""
+    classify_relevance_v2 event with matches=None is logged."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -1332,10 +1331,10 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
         .splitlines()
         if line.strip()
     ]
-    # v2 logs a classify_relevance_v2 event with in_domain=None when enricher returns None
+    # v2 logs a classify_relevance_v2 event with matches=None when enricher returns None
     classify_v2_rows = [r for r in events if r.get("event") == "classify_relevance_v2"]
     assert len(classify_v2_rows) == 1
-    assert classify_v2_rows[0].get("in_domain") is None
+    assert classify_v2_rows[0].get("matches") is None
 
 
 def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> None:
@@ -2240,7 +2239,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
@@ -2332,9 +2331,9 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
     assert any(
-        row.get("event") == "classify_relevance_v2" and row.get("in_domain") is True
+        row.get("event") == "classify_relevance_v2" and row.get("matches") is True
         for row in events_rows
-    ), "classify_relevance_v2 in_domain=True event must appear in events log"
+    ), "classify_relevance_v2 matches=True event must appear in events log"
     assert summary.written == 1
 
 
@@ -2402,7 +2401,7 @@ def test_four_positions_each_get_solo_classify_call(tmp_path: Path) -> None:
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     class _FourStubParser(_StubParserBase):
@@ -2561,7 +2560,7 @@ def test_mixed_listing_set_all_classified(tmp_path: Path) -> None:
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     class _FourStubParser(_StubParserBase):
@@ -2606,13 +2605,13 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
             self, stub: PositionStub, body_selector: "str | None"
         ) -> "RelevanceVerdictV2 | None":
             if stub.url == _OFF_URL:
-                return RelevanceVerdictV2(in_domain=False)
+                return RelevanceVerdictV2(matches=False)
             card_store.put(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     judge_candidate_ids: list[list[str]] = []
@@ -2681,7 +2680,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     summary = run(
@@ -2756,7 +2755,6 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
     triage_dir = user_info_dir / "triage-profile"
     triage_dir.mkdir()
     (triage_dir / "self-description.md").write_text("dev background\n")
-    (triage_dir / "domain-fit.md").write_text("ML roles\n")
     (triage_dir / "match-criteria.md").write_text("Hamburg, remote\n")
 
     cfg = Config(
@@ -2783,7 +2781,6 @@ def test_init_materialises_user_info_files(
     }
 
     assert "self-description.md" in triage_files
-    assert "domain-fit.md" in triage_files
     assert "match-criteria.md" in triage_files
 
 
@@ -3740,7 +3737,7 @@ def test_non_quota_worker_exception_writes_failure_report(
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     monkeypatch.setattr(
@@ -4148,7 +4145,7 @@ def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     summary = run(
@@ -4205,7 +4202,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     run(
@@ -4518,7 +4515,7 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     class _FourStubParser(_StubParserBase):
@@ -4601,7 +4598,7 @@ def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     class _FourStubParser2(_StubParserBase):
@@ -4812,24 +4809,24 @@ _V2_CARD_SUMMARY = "Exciting ML engineering role with competitive compensation."
 class _FakeLLMEnricher:
     """Fake LLMEnricher: writes card to store and returns in-domain verdict."""
 
-    def __init__(self, card_store: object, *, in_domain: bool = True) -> None:
+    def __init__(self, card_store: object, *, matches: bool = True) -> None:
         self._card_store = card_store
-        self._in_domain = in_domain
+        self._matches = matches
 
     def enrich(
         self, stub: PositionStub, body_selector: "str | None"
     ) -> "RelevanceVerdictV2 | None":
-        if self._in_domain:
+        if self._matches:
             self._card_store.put(  # type: ignore[union-attr, attr-defined]
                 stub.url,
                 CardExtract(header=_V2_CARD_HEADER, summary=_V2_CARD_SUMMARY),
             )
             return RelevanceVerdictV2(
-                in_domain=True,
+                matches=True,
                 header=_V2_CARD_HEADER,
                 summary=_V2_CARD_SUMMARY,
             )
-        return RelevanceVerdictV2(in_domain=False)
+        return RelevanceVerdictV2(matches=False)
 
 
 class _FakeJudgeExtractorV2:

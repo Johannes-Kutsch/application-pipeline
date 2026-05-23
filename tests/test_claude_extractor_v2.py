@@ -55,7 +55,7 @@ def _config() -> Config:
 def _prompts() -> Prompts:
     return Prompts(
         classify_relevance_v2=PromptTemplate(
-            "v2 {TITLE} {RAW_DESCRIPTION} {COMPANY} {LOCATION} {POSTED_DATE}",
+            "v2 {LISTING_BULLETS} {RAW_DESCRIPTION}",
             CLASSIFY_RELEVANCE_V2_SLOTS,
         ),
         judge_top_n_v2=PromptTemplate("v2 {skills} {candidates}", JUDGE_TOP_N_V2_SLOTS),
@@ -111,7 +111,7 @@ def test_classify_relevance_v2_in_domain_returns_header_and_summary(
     invoker = _fake_invoker(
         _classify_v2_response(
             {
-                "in_domain": True,
+                "matches": True,
                 "header": "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
                 "summary": "Great role for ML engineers.",
             }
@@ -128,7 +128,7 @@ def test_classify_relevance_v2_in_domain_returns_header_and_summary(
         _item(company="Acme", location="Hamburg")
     )
     assert isinstance(result, RelevanceVerdictV2)
-    assert result.in_domain is True
+    assert result.matches is True
     assert (
         result.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
     )
@@ -145,7 +145,7 @@ def test_classify_relevance_v2_in_domain_returns_header_and_summary(
 def test_classify_relevance_v2_out_of_domain_returns_none_header_and_summary(
     run_log: RunLog,
 ) -> None:
-    invoker = _fake_invoker(_classify_v2_response({"in_domain": False}))
+    invoker = _fake_invoker(_classify_v2_response({"matches": False}))
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
@@ -155,7 +155,7 @@ def test_classify_relevance_v2_out_of_domain_returns_none_header_and_summary(
     )
     result, _ = extractor.classify_relevance_v2(_item())
     assert isinstance(result, RelevanceVerdictV2)
-    assert result.in_domain is False
+    assert result.matches is False
     assert result.header is None
     assert result.summary is None
 
@@ -168,7 +168,7 @@ def test_classify_relevance_v2_out_of_domain_returns_none_header_and_summary(
 def test_classify_relevance_v2_in_domain_missing_header_raises_malformed(
     run_log: RunLog,
 ) -> None:
-    invoker = _fake_invoker(_classify_v2_response({"in_domain": True, "summary": "ok"}))
+    invoker = _fake_invoker(_classify_v2_response({"matches": True, "summary": "ok"}))
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
@@ -184,7 +184,7 @@ def test_classify_relevance_v2_in_domain_missing_summary_raises_malformed(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(
-        _classify_v2_response({"in_domain": True, "header": "some header"})
+        _classify_v2_response({"matches": True, "header": "some header"})
     )
     extractor = ClaudeExtractor(
         _config(),
@@ -201,7 +201,7 @@ def test_classify_relevance_v2_in_domain_empty_header_raises_malformed(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(
-        _classify_v2_response({"in_domain": True, "header": "", "summary": "ok"})
+        _classify_v2_response({"matches": True, "header": "", "summary": "ok"})
     )
     extractor = ClaudeExtractor(
         _config(),
@@ -223,7 +223,7 @@ def test_classify_relevance_v2_prompt_includes_company_and_location(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(
-        _classify_v2_response({"in_domain": True, "header": "h", "summary": "s"})
+        _classify_v2_response({"matches": True, "header": "h", "summary": "s"})
     )
     extractor = ClaudeExtractor(
         _config(),
@@ -236,6 +236,23 @@ def test_classify_relevance_v2_prompt_includes_company_and_location(
     prompt_sent = invoker.call.call_args.args[0]
     assert "TestCorp" in prompt_sent
     assert "Berlin" in prompt_sent
+
+
+def test_classify_relevance_v2_legacy_in_domain_field_raises_malformed(
+    run_log: RunLog,
+) -> None:
+    invoker = _fake_invoker(
+        _classify_v2_response({"in_domain": True, "header": "h", "summary": "s"})
+    )
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(),
+        search_terms=_SEARCH_TERMS,
+        run_log=run_log,
+        _invoker=invoker,
+    )
+    with pytest.raises(ExtractorMalformedError):
+        extractor.classify_relevance_v2(_item())
 
 
 # ---------------------------------------------------------------------------

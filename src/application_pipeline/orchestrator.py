@@ -421,13 +421,13 @@ class _EnrichThread(_QueueWorker):
         self._run_log.event(
             "llm_classify_relevance",
             "classify_relevance_v2",
-            in_domain=verdict.in_domain if verdict is not None else None,
+            matches=verdict.matches if verdict is not None else None,
         )
 
         if verdict is None:
             self._dedup_store.mark_enrich_failed(stub)
             self._metrics.enrich_failed(stub.source)
-        elif not verdict.in_domain:
+        elif not verdict.matches:
             self._dedup_store.mark_out_of_domain(stub)
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 1)
         else:

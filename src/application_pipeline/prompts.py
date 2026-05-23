@@ -11,12 +11,12 @@ class PromptError(Exception):
 
 
 CLASSIFY_RELEVANCE_V2_SLOTS: frozenset[str] = frozenset(
-    {"TITLE", "RAW_DESCRIPTION", "COMPANY", "LOCATION", "POSTED_DATE"}
+    {"LISTING_BULLETS", "RAW_DESCRIPTION"}
 )
 JUDGE_TOP_N_V2_SLOTS: frozenset[str] = frozenset({"skills", "candidates"})
 
 _PACKAGE_CLASSIFY_V2_SLOTS: frozenset[str] = frozenset(
-    {"USER_INFO", "TITLE", "RAW_DESCRIPTION", "COMPANY", "LOCATION", "POSTED_DATE"}
+    {"USER_INFO", "LISTING_BULLETS", "RAW_DESCRIPTION"}
 )
 _PACKAGE_JUDGE_TOP_N_V2_SLOTS: frozenset[str] = frozenset(
     {"USER_INFO", "skills", "candidates"}
@@ -47,12 +47,19 @@ class Prompts:
 
 def load_prompts(config: Config) -> Prompts:
     triage_dir = config.user_info_dir / "triage-profile"
+    legacy_domain_fit = triage_dir / "domain-fit.md"
+    if legacy_domain_fit.exists():
+        raise PromptError(
+            f"{legacy_domain_fit}: legacy file retired per ADR-0043; merge its "
+            "in-scope / out-of-scope content into match-criteria.md and delete the file."
+        )
+
     self_desc = _read_user_info(triage_dir, "self-description.md")
-    domain_fit = _read_user_info(triage_dir, "domain-fit.md")
     match_criteria = _read_user_info(triage_dir, "match-criteria.md")
 
-    classify_user_info = f"<user-info>\n{self_desc}\n{domain_fit}\n</user-info>"
-    judge_user_info = f"<user-info>\n{self_desc}\n{match_criteria}\n</user-info>"
+    user_info = (
+        f"# Kandidatenprofil\n\n{self_desc}\n\n# Match-Kriterien\n\n{match_criteria}"
+    )
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
     classify_v2 = _load_template(
@@ -60,14 +67,14 @@ def load_prompts(config: Config) -> Prompts:
         "classify_relevance_v2",
         _PACKAGE_CLASSIFY_V2_SLOTS,
         CLASSIFY_RELEVANCE_V2_SLOTS,
-        classify_user_info,
+        user_info,
     )
     judge_top_n_v2 = _load_template(
         pkg,
         "judge_top_n_v2",
         _PACKAGE_JUDGE_TOP_N_V2_SLOTS,
         JUDGE_TOP_N_V2_SLOTS,
-        judge_user_info,
+        user_info,
     )
     return Prompts(
         classify_relevance_v2=classify_v2,

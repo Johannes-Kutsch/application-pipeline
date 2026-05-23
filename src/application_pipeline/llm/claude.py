@@ -99,6 +99,17 @@ _JUDGE_TOP_N_SITE = _CallSite(
 )
 
 
+def _build_listing_bullets(item: ClassifyItem) -> str:
+    lines = [f"- Jobtitel: {item.title}"]
+    if item.company and item.company.strip():
+        lines.append(f"- Unternehmen: {item.company}")
+    if item.location and item.location.strip():
+        lines.append(f"- Ort: {item.location}")
+    if item.posted_date is not None:
+        lines.append(f"- Listing-Datum: {item.posted_date}")
+    return "\n".join(lines)
+
+
 class ClaudeExtractor:
     def __init__(
         self,
@@ -119,11 +130,8 @@ class ClaudeExtractor:
         self, item: ClassifyItem
     ) -> tuple[RelevanceVerdictV2, CallUsage]:
         prompt = self._prompts.classify_relevance_v2.render(
-            TITLE=item.title,
+            LISTING_BULLETS=_build_listing_bullets(item),
             RAW_DESCRIPTION=item.raw_description,
-            COMPANY=item.company or "",
-            LOCATION=item.location or "",
-            POSTED_DATE=str(item.posted_date) if item.posted_date else "",
         )
         parsed, response = self._invoke(_CLASSIFY_SITE, prompt, {})
         usage = self._usage_from(response)
@@ -285,24 +293,24 @@ class ClaudeExtractor:
             raise ExtractorMalformedError(
                 f"classify_relevance_v2: expected JSON object, got {type(parsed_result).__name__}"
             )
-        in_domain = parsed_result.get("in_domain")
-        if not isinstance(in_domain, bool):
+        matches = parsed_result.get("matches")
+        if not isinstance(matches, bool):
             raise ExtractorMalformedError(
-                f"classify_relevance_v2: in_domain must be bool, got {in_domain!r}"
+                f"classify_relevance_v2: matches must be bool, got {matches!r}"
             )
-        if not in_domain:
-            return RelevanceVerdictV2(in_domain=False)
+        if not matches:
+            return RelevanceVerdictV2(matches=False)
         header = parsed_result.get("header")
         summary = parsed_result.get("summary")
         if not isinstance(header, str) or not header:
             raise ExtractorMalformedError(
-                "classify_relevance_v2: header must be a non-empty string for in-domain verdict"
+                "classify_relevance_v2: header must be a non-empty string for matching verdict"
             )
         if not isinstance(summary, str) or not summary:
             raise ExtractorMalformedError(
-                "classify_relevance_v2: summary must be a non-empty string for in-domain verdict"
+                "classify_relevance_v2: summary must be a non-empty string for matching verdict"
             )
-        return RelevanceVerdictV2(in_domain=True, header=header, summary=summary)
+        return RelevanceVerdictV2(matches=True, header=header, summary=summary)
 
     @staticmethod
     def _parse_top_n_v2_response(

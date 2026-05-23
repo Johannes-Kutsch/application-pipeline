@@ -46,7 +46,6 @@ def _cv_template_bytes(name: str) -> bytes:
 
 _TRIAGE_PROFILE_FILES = (
     "self-description.md",
-    "domain-fit.md",
     "match-criteria.md",
     "writing-style.md",
 )

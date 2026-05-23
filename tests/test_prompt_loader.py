@@ -34,7 +34,6 @@ def make_config_with_user_info(tmp_path: pathlib.Path) -> Config:
     triage = user_info / "triage-profile"
     triage.mkdir()
     (triage / "self-description.md").write_text("I am a developer\n")
-    (triage / "domain-fit.md").write_text("ML roles\n")
     (triage / "match-criteria.md").write_text("Hamburg, remote\n")
     return Config(
         sources=[SourceEntry(parser_type="bundesagentur")],
@@ -94,48 +93,23 @@ def test_load_prompts_returns_prompt_template_per_call_site(
     assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
 
 
-def test_load_prompts_embeds_user_info_in_classify_prompt(
+def test_load_prompts_classify_embeds_both_named_sub_blocks(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
     rendered = prompts.classify_relevance_v2.render(
-        TITLE="x", RAW_DESCRIPTION="y", COMPANY="x", LOCATION="x", POSTED_DATE="x"
+        LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
     )
 
-    assert "<user-info>" in rendered
-    assert "I am a developer" in rendered
-    assert "ML roles" in rendered
-
-
-def test_load_prompts_embeds_user_info_in_judge_top_n_prompt(
-    tmp_path: pathlib.Path,
-) -> None:
-    config = make_config_with_user_info(tmp_path)
-
-    prompts = load_prompts(config)
-    rendered = prompts.judge_top_n_v2.render(skills="Python", candidates="x")
-
-    assert "<user-info>" in rendered
+    assert "# Kandidatenprofil" in rendered
+    assert "# Match-Kriterien" in rendered
     assert "I am a developer" in rendered
     assert "Hamburg, remote" in rendered
 
 
-def test_load_prompts_classify_does_not_embed_match_criteria(
-    tmp_path: pathlib.Path,
-) -> None:
-    config = make_config_with_user_info(tmp_path)
-
-    prompts = load_prompts(config)
-    rendered = prompts.classify_relevance_v2.render(
-        TITLE="x", RAW_DESCRIPTION="y", COMPANY="x", LOCATION="x", POSTED_DATE="x"
-    )
-
-    assert "Hamburg, remote" not in rendered
-
-
-def test_load_prompts_judge_top_n_does_not_embed_domain_fit(
+def test_load_prompts_judge_embeds_both_named_sub_blocks(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
@@ -143,28 +117,43 @@ def test_load_prompts_judge_top_n_does_not_embed_domain_fit(
     prompts = load_prompts(config)
     rendered = prompts.judge_top_n_v2.render(skills="Python", candidates="x")
 
-    assert "ML roles" not in rendered
+    assert "# Kandidatenprofil" in rendered
+    assert "# Match-Kriterien" in rendered
+    assert "I am a developer" in rendered
+    assert "Hamburg, remote" in rendered
 
 
-def test_load_prompts_classify_contains_verdicts_tag_instruction(
+def test_load_prompts_classify_contains_verdict_tag_instruction(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
     rendered = prompts.classify_relevance_v2.render(
-        TITLE="x", RAW_DESCRIPTION="y", COMPANY="x", LOCATION="x", POSTED_DATE="x"
+        LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
     )
 
     assert "<verdict>" in rendered
 
 
-# --- load_prompts: missing / empty user-info files ---
+# --- load_prompts: legacy / missing / empty user-info files ---
+
+
+def test_load_prompts_raises_when_legacy_domain_fit_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    (config.user_info_dir / "triage-profile" / "domain-fit.md").write_text("legacy\n")
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+    assert "domain-fit.md" in str(exc_info.value)
+    assert "match-criteria.md" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
     "missing_file",
-    ["self-description.md", "domain-fit.md", "match-criteria.md"],
+    ["self-description.md", "match-criteria.md"],
 )
 def test_load_prompts_raises_when_user_info_file_missing(
     tmp_path: pathlib.Path, missing_file: str
@@ -179,7 +168,7 @@ def test_load_prompts_raises_when_user_info_file_missing(
 
 @pytest.mark.parametrize(
     "empty_file",
-    ["self-description.md", "domain-fit.md", "match-criteria.md"],
+    ["self-description.md", "match-criteria.md"],
 )
 def test_load_prompts_raises_when_user_info_file_empty(
     tmp_path: pathlib.Path, empty_file: str
@@ -201,12 +190,7 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     triage = user_info / "triage-profile"
     triage.mkdir()
     (triage / "self-description.md").write_text("background\n")
-    (triage / "domain-fit.md").write_text("ML roles\n")
     (triage / "match-criteria.md").write_text("Hamburg\n")
-    (tmp_path / "layout.py").write_text(
-        "PLACEHOLDER_GROUPS = {}\n"
-        'CARD_TEMPLATE = "# {rank} \xb7 {title}\\n\\n{summary}\\n\\n---\\n<{url}>\\n"\n'
-    )
     path = tmp_path / "config.py"
     path.write_text(REQUIRED_BODY)
 
@@ -222,7 +206,7 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
 
 def test_prompts_is_frozen() -> None:
     tpl = PromptTemplate(
-        "{TITLE} {RAW_DESCRIPTION} {COMPANY} {LOCATION} {POSTED_DATE}",
+        "{LISTING_BULLETS} {RAW_DESCRIPTION}",
         CLASSIFY_RELEVANCE_V2_SLOTS,
     )
     prompts = Prompts(

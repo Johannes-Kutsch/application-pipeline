@@ -124,7 +124,7 @@ def test_enricher_in_domain_returns_verdict_and_writes_card_store(
     extractor = MagicMock()
     extractor.classify_relevance_v2.return_value = (
         RelevanceVerdictV2(
-            in_domain=True,
+            matches=True,
             header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
             summary="Great ML role.",
         ),
@@ -145,7 +145,7 @@ def test_enricher_in_domain_returns_verdict_and_writes_card_store(
     result = enricher.enrich(stub, ".job")
 
     assert result is not None
-    assert result.in_domain is True
+    assert result.matches is True
     assert (
         result.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
     )
@@ -215,7 +215,7 @@ def test_enricher_follows_http_redirect_and_uses_final_page_content(
     extractor = MagicMock()
     extractor.classify_relevance_v2.return_value = (
         RelevanceVerdictV2(
-            in_domain=True,
+            matches=True,
             header="Data Engineer\nCorp · Berlin · on-site\n2024-01-01",
             summary="Good role.",
         ),
@@ -232,7 +232,7 @@ def test_enricher_follows_http_redirect_and_uses_final_page_content(
     result = enricher.enrich(stub, ".job")
 
     assert result is not None
-    assert result.in_domain is True
+    assert result.matches is True
     call_args = extractor.classify_relevance_v2.call_args
     item = call_args.args[0]
     assert "Data Engineer at final destination" in item.raw_description
@@ -446,7 +446,7 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
     extractor = MagicMock()
     extractor.classify_relevance_v2.return_value = (
         RelevanceVerdictV2(
-            in_domain=True,
+            matches=True,
             header=stale_header,
             summary="Old ML role.",
         ),
@@ -493,7 +493,7 @@ def test_enricher_freshness_drop_records_post_enrich_transcript(
     stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2025-12-15 · mid · —"
     extractor = MagicMock()
     extractor.classify_relevance_v2.return_value = (
-        RelevanceVerdictV2(in_domain=True, header=stale_header, summary="Stale role."),
+        RelevanceVerdictV2(matches=True, header=stale_header, summary="Stale role."),
         _call_usage(),
     )
 
@@ -540,7 +540,7 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
     extractor = MagicMock()
     extractor.classify_relevance_v2.return_value = (
         RelevanceVerdictV2(
-            in_domain=True,
+            matches=True,
             header=fresh_header,
             summary="Good ML role.",
         ),
@@ -568,7 +568,7 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
     result = enricher.enrich(stub, ".job")
 
     assert result is not None
-    assert result.in_domain is True
+    assert result.matches is True
     card = card_store.get(stub.url)
     assert card is not None
     assert card.header == fresh_header
@@ -590,7 +590,7 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
     extractor = MagicMock()
     extractor.classify_relevance_v2.return_value = (
         RelevanceVerdictV2(
-            in_domain=True,
+            matches=True,
             header=no_date_header,
             summary="Undated backend role.",
         ),
@@ -618,5 +618,5 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
     result = enricher.enrich(stub, ".job")
 
     assert result is not None
-    assert result.in_domain is True
+    assert result.matches is True
     assert card_store.get(stub.url) is not None

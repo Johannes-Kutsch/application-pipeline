@@ -1,30 +1,23 @@
 from __future__ import annotations
 
-import base64
 import json
 import sys
 import urllib.parse
 from collections.abc import Iterator
-from typing import Any, Literal
+from typing import Any
 
-from application_pipeline.http import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
 
-from ._text import parse_iso_date, strip_html
-from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
     City,
-    ExternalRedirect,
     NotServedQuery,
     ParserQuery,
-    Position,
     PositionStub,
 )
 
 _BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6"
-_DETAIL_BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
 _PUBLIC_JOB_URL = "https://www.arbeitsagentur.de/jobsuche/jobdetail"
 _API_KEY = "jobboerse-jobsuche"
 _PAGE_SIZE = 25
@@ -77,27 +70,6 @@ serves_remote: bool = True
 def remote_wire() -> dict[str, str]:
     # PRD #51 decision 41: use arbeitszeit=ho for homeoffice
     return {"arbeitszeit": "ho"}
-
-
-def _contract_type(
-    vertragsdauer: str | None,
-) -> Literal["permanent", "fixed-term", "freelance"] | None:
-    if vertragsdauer == "UNBEFRISTET":
-        return "permanent"
-    if vertragsdauer == "BEFRISTET":
-        return "fixed-term"
-    return None
-
-
-def _employment_type(
-    vollzeit: bool,
-    teilzeit: bool,
-) -> Literal["full-time", "part-time", "internship"] | None:
-    if vollzeit:
-        return "full-time"
-    if teilzeit:
-        return "part-time"
-    return None
 
 
 class BundesagenturParser:
@@ -187,57 +159,6 @@ class BundesagenturParser:
                 count += 1
 
             page += 1
-
-    def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
-        raw_ref = stub.url.rsplit("/", 1)[-1]
-        ref_b64 = base64.b64encode(raw_ref.encode()).decode()
-        rest_url = f"{_DETAIL_BASE_URL}/jobdetails/{ref_b64}"
-        try:
-            raw = self._http.get(
-                rest_url, error_prefix=f"Bundesagentur enrich failed for {stub.url}"
-            )
-        except HttpRedirectResponse as exc:
-            location = exc.location
-            source_host = urllib.parse.urlparse(_DETAIL_BASE_URL).hostname or ""
-            location_host = urllib.parse.urlparse(location).hostname or ""
-            if location_host and location_host != source_host:
-                return ExternalRedirect(stub, location)
-            raise ParserError(
-                f"Bundesagentur enrich 3xx redirect: location={location!r}"
-            ) from exc
-        data: dict[str, Any] = json.loads(raw)
-
-        outbound: str | None = data.get("externeURL") or None
-        raw_description = strip_html(data.get("stellenangebotsBeschreibung") or "")
-        body = raw_description.strip()
-
-        if outbound:
-            skipped = body == ""
-            self._run_log.event(
-                "parser_bundesagentur_api",
-                "external_redirect",
-                stub_url=stub.url,
-                outbound=outbound,
-                skipped=skipped,
-            )
-            if skipped:
-                return ExternalRedirect(stub, outbound)
-
-        veroeffentlichung = data.get("veroeffentlichungszeitraum") or {}
-        vollzeit = bool(data.get("arbeitszeitVollzeit"))
-        teilzeit = any(
-            bool(v) for k, v in data.items() if k.startswith("arbeitszeitTeilzeit")
-        )
-
-        return Position(
-            stub=stub,
-            raw_description=raw_description,
-            contract_type=_contract_type(data.get("vertragsdauer")),
-            employment_type=_employment_type(vollzeit, teilzeit),
-            work_model=None,
-            posted_date=parse_iso_date(veroeffentlichung.get("von")),
-            deadline=parse_iso_date(data.get("bewerbungsschluss")),
-        )
 
 
 parser_class = BundesagenturParser

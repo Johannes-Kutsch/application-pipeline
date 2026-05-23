@@ -108,7 +108,6 @@ def main() -> None:
         f"  classifier_dropped={summary.classifier_dropped}"
         f"  written={summary.written}"
         f"  enrich_failed={summary.enrich_failed}"
-        f"  external_redirects={summary.external_redirects}"
         f"  errored={summary.errored}"
         f"  classify_items={summary.classify_items}"
         f"  claude_input_tokens={summary.claude_input_tokens}"

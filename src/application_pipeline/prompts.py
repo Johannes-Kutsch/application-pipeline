@@ -10,19 +10,11 @@ class PromptError(Exception):
     pass
 
 
-CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"TITLE", "RAW_DESCRIPTION"})
-JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"skills", "candidates"})
 CLASSIFY_RELEVANCE_V2_SLOTS: frozenset[str] = frozenset(
     {"TITLE", "RAW_DESCRIPTION", "COMPANY", "LOCATION", "POSTED_DATE"}
 )
 JUDGE_TOP_N_V2_SLOTS: frozenset[str] = frozenset({"skills", "candidates"})
 
-_PACKAGE_CLASSIFY_SLOTS: frozenset[str] = frozenset(
-    {"USER_INFO", "TITLE", "RAW_DESCRIPTION"}
-)
-_PACKAGE_JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset(
-    {"USER_INFO", "skills", "candidates"}
-)
 _PACKAGE_CLASSIFY_V2_SLOTS: frozenset[str] = frozenset(
     {"USER_INFO", "TITLE", "RAW_DESCRIPTION", "COMPANY", "LOCATION", "POSTED_DATE"}
 )
@@ -49,10 +41,8 @@ class PromptTemplate:
 
 @dataclass(frozen=True)
 class Prompts:
-    classify_relevance: PromptTemplate
-    judge_top_n: PromptTemplate
-    classify_relevance_v2: PromptTemplate | None = None
-    judge_top_n_v2: PromptTemplate | None = None
+    classify_relevance_v2: PromptTemplate
+    judge_top_n_v2: PromptTemplate
 
 
 def load_prompts(config: Config) -> Prompts:
@@ -65,20 +55,6 @@ def load_prompts(config: Config) -> Prompts:
     judge_user_info = f"<user-info>\n{self_desc}\n{match_criteria}\n</user-info>"
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
-    classify = _load_template(
-        pkg,
-        "classify_relevance",
-        _PACKAGE_CLASSIFY_SLOTS,
-        CLASSIFY_RELEVANCE_SLOTS,
-        classify_user_info,
-    )
-    judge_top_n = _load_template(
-        pkg,
-        "judge_top_n",
-        _PACKAGE_JUDGE_TOP_N_SLOTS,
-        JUDGE_TOP_N_SLOTS,
-        judge_user_info,
-    )
     classify_v2 = _load_template(
         pkg,
         "classify_relevance_v2",
@@ -94,8 +70,6 @@ def load_prompts(config: Config) -> Prompts:
         judge_user_info,
     )
     return Prompts(
-        classify_relevance=classify,
-        judge_top_n=judge_top_n,
         classify_relevance_v2=classify_v2,
         judge_top_n_v2=judge_top_n_v2,
     )

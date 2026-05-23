@@ -23,9 +23,7 @@ from application_pipeline.llm.types import (
 )
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prompts import (
-    CLASSIFY_RELEVANCE_SLOTS,
     CLASSIFY_RELEVANCE_V2_SLOTS,
-    JUDGE_TOP_N_SLOTS,
     JUDGE_TOP_N_V2_SLOTS,
     PromptTemplate,
     Prompts,
@@ -56,10 +54,6 @@ def _config() -> Config:
 
 def _prompts() -> Prompts:
     return Prompts(
-        classify_relevance=PromptTemplate(
-            "x {TITLE} {RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS
-        ),
-        judge_top_n=PromptTemplate("{skills}\n{candidates}", JUDGE_TOP_N_SLOTS),
         classify_relevance_v2=PromptTemplate(
             "v2 {TITLE} {RAW_DESCRIPTION} {COMPANY} {LOCATION} {POSTED_DATE}",
             CLASSIFY_RELEVANCE_V2_SLOTS,

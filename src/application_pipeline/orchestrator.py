@@ -937,7 +937,7 @@ def run(
             "content_considered=%d content_passed=%d content_dropped_empty_body=%d "
             "dedup_url_hits=%d dedup_tuple_hits=%d dedup_run_hits=%d dedup_misses=%d "
             "classifier_dropped=%d written=%d "
-            "enrich_failed=%d external_redirects=%d errored=%d parsers_dead=%d",
+            "enrich_failed=%d errored=%d parsers_dead=%d",
             summary.discovered,
             summary.skipped,
             summary.prefilter_considered,
@@ -954,7 +954,6 @@ def run(
             summary.classifier_dropped,
             summary.written,
             summary.enrich_failed,
-            summary.external_redirects,
             summary.errored,
             summary.parsers_dead,
         )

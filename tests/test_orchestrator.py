@@ -19,7 +19,6 @@ from application_pipeline.llm import (
     CallUsage,
     ExtractorError,
     ExtractorUnreachableError,
-    RelevanceVerdict,
 )
 from application_pipeline.extracts.card_store import (
     CardExtract,
@@ -30,14 +29,12 @@ from application_pipeline.llm.types import (
     JudgeCandidateV2,
     MatchVerdictV2,
     RelevanceVerdictV2,
-    StructuredExtract,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import (
     Parser,
     ParserQuery,
-    Position,
     PositionStub,
 )
 from application_pipeline.parsers.errors import ParserError
@@ -91,11 +88,6 @@ def _write_config(
         + parallelism_line,
         encoding="utf-8",
     )
-    (tmp_path / "layout.py").write_text(
-        "PLACEHOLDER_GROUPS = {}\n"
-        'CARD_TEMPLATE = "# {rank} \xb7 {title}\\n\\n{summary}\\n\\n---\\n<{url}>\\n"\n',
-        encoding="utf-8",
-    )
     user_info_dir = tmp_path / "user-info"
     user_info_dir.mkdir(exist_ok=True)
     if with_user_info_files:
@@ -120,16 +112,6 @@ def _write_config(
 
 _ZERO_USAGE = CallUsage(
     input_tokens=0, output_tokens=0, cache_read_tokens=0, cost_usd=0.0, duration_s=0.0
-)
-
-_STUB_EXTRACT = StructuredExtract(
-    seniority=None,
-    work_model=None,
-    contract_type=None,
-    key_skills=[],
-    key_responsibilities=[],
-    must_have_requirements=[],
-    notable_caveats="",
 )
 
 
@@ -333,9 +315,6 @@ class _StubParser(_StubParserBase):
             for i in range(3)
         ]
 
-    def enrich(self, stub: PositionStub) -> Position:
-        return Position(stub=stub, raw_description="test description")
-
 
 def test_integration_discover_and_enrich(tmp_path: Path) -> None:
     """2 keywords × 1 location, 3 stubs each → discovered==6, skipped==0, written==5 (capped by judge_top_n_v2)."""
@@ -412,9 +391,6 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
             queries_received.append(query)
             return []
 
-        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-            raise NotImplementedError
-
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -463,9 +439,6 @@ def test_integration_dedup_counter_breakdown(
                 PositionStub(url=_DEDUP_URLS[i], title=f"Job {i}", source="stub")
                 for i in range(7)
             ]
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="good description")
 
     dedup = MagicMock()
     # 4 misses, 2 url_hits, 1 tuple_hit
@@ -580,9 +553,6 @@ def test_consecutive_url_hits_never_trigger_skip_and_end_query(tmp_path: Path) -
                 consumed[0] += 1
                 yield stub
 
-        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-            raise NotImplementedError
-
     dedup = MagicMock()
     dedup.is_seen.return_value = "url_hit"
     _wire_run_scope(dedup)
@@ -685,9 +655,6 @@ def test_in_run_dedup_run_hits_in_log_line(
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [PositionStub(url=dup_url, title="Dup", source="stub")]
 
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="good description")
-
     with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
         run(
             _write_config(
@@ -721,9 +688,6 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [PositionStub(url=dup_url, title="Job", source="stub")]
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="good description")
 
     config_path = _write_config(
         tmp_path,
@@ -785,11 +749,6 @@ class _LLMStubParser(_StubParserBase):
             )
             for i in range(6)
         ]
-
-    def enrich(self, stub: PositionStub) -> Position:
-        # Encode URL index in description so judge can return the right tier
-        idx = _STUB_URLS_LLM.index(stub.url)
-        return Position(stub=stub, raw_description=f"description for job {idx}")
 
 
 _FAKE_CLASSIFY_USAGE = CallUsage(
@@ -1030,9 +989,6 @@ class _TwoStubParser(_StubParserBase):
             PositionStub(url=_ERR_URLS[i], title=f"Job {i}", source="stub")
             for i in range(2)
         ]
-
-    def enrich(self, stub: PositionStub) -> Position:
-        return Position(stub=stub, raw_description="good description")
 
 
 def _two_stub_config(tmp_path: Path) -> Path:
@@ -1438,9 +1394,6 @@ class _OneStubParser(_StubParserBase):
     def discover(self, query: ParserQuery) -> list[PositionStub]:
         return [PositionStub(url=_RESUME_URL, title="ML Engineer", source="stub")]
 
-    def enrich(self, stub: PositionStub) -> Position:
-        return Position(stub=stub, raw_description="good ml job description")
-
 
 def _one_stub_config(tmp_path: Path) -> Path:
     return _write_config(
@@ -1816,9 +1769,6 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
             raise RuntimeError("unexpected crash")
             yield  # pragma: no cover — makes this a generator
 
-        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-            raise NotImplementedError
-
     summary = run(
         _write_config(
             tmp_path,
@@ -1851,9 +1801,6 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
             raise RuntimeError("boom")
             yield  # pragma: no cover
 
-        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-            raise NotImplementedError
-
     class _HealthyParser(_StubParserBase):
         def __enter__(self) -> "_HealthyParser":
             return self
@@ -1869,9 +1816,6 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
                     source="healthy",
                 )
             ]
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="good description")
 
     def _registry(parser_type: str) -> type[Parser] | None:
         if parser_type == "dead":
@@ -2008,9 +1952,6 @@ def test_run_complete_event_carries_dedup_run_hits(tmp_path: Path) -> None:
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [PositionStub(url=dup_url, title="Dup", source="stub")]
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="good description")
 
     run(
         _write_config(
@@ -2215,9 +2156,6 @@ def test_not_served_queries_counted_in_parser_log_summary(
         def discover(self, query: ParserQuery) -> list[NotServedQuery]:
             return [NotServedQuery()]
 
-        def enrich(self, stub: PositionStub) -> Position:
-            raise AssertionError("enrich must not be called")
-
     logs_dir = tmp_path / "synched" / "logs"
     run_log = parser_log.RunLog(logs_dir)
 
@@ -2340,33 +2278,12 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
 
 
 # ---------------------------------------------------------------------------
-# Position._warnings — field existence and round-trip
-# ---------------------------------------------------------------------------
-
-
-def test_position_warnings_defaults_to_empty_tuple() -> None:
-    stub = PositionStub(url="https://x.com/1", title="T", source="s")
-    pos = Position(stub=stub, raw_description="desc")
-    assert pos._warnings == ()
-
-
-def test_position_warnings_round_trips_through_construction() -> None:
-    stub = PositionStub(url="https://x.com/1", title="T", source="s")
-    pos = Position(
-        stub=stub,
-        raw_description="desc",
-        _warnings=("unparseable_date raw=INVALID",),
-    )
-    assert pos._warnings == ("unparseable_date raw=INVALID",)
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator: Position._warnings drained to parser_log + SUMMARY
+# Orchestrator: classify_relevance_v2 logging (v2 enricher path)
 # ---------------------------------------------------------------------------
 
 
 class _WarnParser(_StubParserBase):
-    """Returns one stub; enrich returns a Position with an unparseable_date warning."""
+    """Returns one stub; used in tests for llm_enricher classify_relevance_v2 logging."""
 
     def __enter__(self) -> "_WarnParser":
         return self
@@ -2380,14 +2297,6 @@ class _WarnParser(_StubParserBase):
                 url="https://stub.example/warn/1", title="Warn Job", source="stub"
             )
         ]
-
-    def enrich(self, stub: PositionStub) -> Position:
-        return Position(
-            stub=stub,
-            raw_description="some description",
-            posted_date=None,
-            _warnings=("unparseable_date raw=INVALID_DATE",),
-        )
 
 
 def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
@@ -2534,7 +2443,6 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
     classify_relevance update_body event in the FakeStatusDisplay call log
     precedes the parser-done update_body event, proving parser/LLM overlap.
     """
-    import time as _time
 
     class _SlowTwoStubParser(_StubParserBase):
         def __enter__(self) -> "_SlowTwoStubParser":
@@ -2552,10 +2460,6 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
                 )
                 for i in range(2)
             ]
-
-        def enrich(self, stub: PositionStub) -> Position:
-            _time.sleep(0.2)
-            return Position(stub=stub, raw_description="Software engineering role.")
 
     display = FakeStatusDisplay()
 
@@ -2800,82 +2704,6 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
     assert _ERR_URLS[0] not in seen_data
 
 
-def test_classify_failure_logs_to_classify_relevance_events(
-    tmp_path: Path,
-) -> None:
-    """ExtractorError on classify_relevance is logged to classify_relevance.events.jsonl."""
-    import application_pipeline.parser_log as pl
-    from application_pipeline.llm import ExtractorMalformedError
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = pl.RunLog(logs_dir)
-
-    ext = MagicMock()
-    ext.classify_relevance.side_effect = ExtractorMalformedError("bad verdict")
-
-    run(
-        _batch_size_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        run_log=run_log,
-    )
-
-    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
-    assert events_file.exists(), (
-        "classify_relevance.events.jsonl must be created on classify error"
-    )
-
-
-def test_classify_failure_writes_one_event_per_position(tmp_path: Path) -> None:
-    """ExtractorError on classify_relevance: one event row per failing position."""
-    import application_pipeline.parser_log as pl
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = pl.RunLog(logs_dir)
-
-    ext = MagicMock()
-    ext.classify_relevance.side_effect = ExtractorError("classify boom")
-
-    run(
-        _batch_size_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        run_log=run_log,
-    )
-
-    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
-    events_rows = [
-        json.loads(line)
-        for line in events_file.read_text(encoding="utf-8").splitlines()
-    ]
-    # 2 positions → 2 classify_relevance failure events (one per position)
-    assert len(events_rows) == 2
-
-
-def test_classify_failure_event_written_on_extractor_error(tmp_path: Path) -> None:
-    """ExtractorError on classify_relevance: events file exists (logged by classify thread)."""
-    import application_pipeline.parser_log as pl
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = pl.RunLog(logs_dir)
-
-    ext = MagicMock()
-    ext.classify_relevance.side_effect = ExtractorError("classify gone")
-
-    run(
-        _batch_size_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        run_log=run_log,
-    )
-
-    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
-    assert events_file.exists(), "llm_classify_relevance.events.jsonl must be written"
-
-
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     """ExtractorUnreachableError with forensics → returncode and stderr_excerpt in judge_top_n_v2 log."""
     import application_pipeline.parser_log as pl
@@ -2915,7 +2743,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
 
 def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> None:
-    """load_prompts returns PromptTemplate for classify_relevance and judge_top_n."""
+    """load_prompts returns PromptTemplate for classify_relevance_v2 and judge_top_n_v2."""
     from application_pipeline.prompts import load_prompts
     from application_pipeline import (
         Config,
@@ -2938,8 +2766,8 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
     )
     prompts = load_prompts(cfg)
 
-    assert isinstance(prompts.classify_relevance, PromptTemplate)
-    assert isinstance(prompts.judge_top_n, PromptTemplate)
+    assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
+    assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
 
 
 def test_init_materialises_user_info_files(
@@ -3405,9 +3233,6 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
             raise RuntimeError("intentional crash")
             yield  # pragma: no cover
 
-        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-            raise NotImplementedError
-
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3448,9 +3273,6 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return []
-
-        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-            raise NotImplementedError
 
     # Use two real parser_type names so location coverage validation passes
     config_path = _write_config(
@@ -3623,11 +3445,6 @@ class _MixedLangParser199(_StubParserBase):
             ),
         ]
 
-    def enrich(self, stub: PositionStub) -> Position:
-        if "de1" in stub.url:
-            return Position(stub=stub, raw_description=_DE_DESCRIPTION_199)
-        return Position(stub=stub, raw_description="Software engineering role.")
-
 
 def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
     """classify_relevance and judge_match rows are registered below prefilter and adjacent."""
@@ -3719,9 +3536,6 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
             time.sleep(_THRESHOLD * 4)  # sleep well past threshold
             return []
 
-        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-            raise NotImplementedError
-
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3770,9 +3584,6 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             time.sleep(_THRESHOLD * 8)  # sleep for multiple poll ticks
             return []
-
-        def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-            raise NotImplementedError
 
     config_path = _write_config(
         tmp_path,
@@ -3859,9 +3670,6 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
                 url="https://raise.example/0", title="Job 0", source="stub"
             )
             raise RuntimeError("boom mid-discover")
-
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="good description")
 
     config_path = _write_config(
         tmp_path,
@@ -4014,29 +3822,6 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     assert "items_failed=2" in last_body
 
 
-def test_judge_error_written_is_zero(tmp_path: Path) -> None:
-    """ExtractorError on judge_top_n: no positions written, run completes without raising."""
-    ext = MagicMock()
-    ext.classify_relevance.side_effect = lambda item: (
-        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
-        _ZERO_USAGE,
-    )
-    ext.judge_top_n.side_effect = ExtractorError("judge boom")
-
-    display = FakeStatusDisplay()
-
-    summary = run(
-        _two_stub_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
-    )
-
-    assert summary.written == 0, "no positions should be written when judge_top_n fails"
-    assert "llm_judge_match" in display.registered_names()
-
-
 def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
     """On a clean run, classify and judge bodies contain no error tokens."""
     display = FakeStatusDisplay()
@@ -4117,68 +3902,6 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_classify_failure_logs_events_per_position(
-    tmp_path: Path,
-) -> None:
-    """A failing classify_relevance call logs one event per position to classify_relevance.events.jsonl."""
-    import application_pipeline.parser_log as pl
-
-    logs_dir = tmp_path / "logs"
-    run_log = pl.RunLog(logs_dir)
-
-    ext = MagicMock()
-    ext.classify_relevance.side_effect = ExtractorError("classify boom")
-
-    run(
-        _two_stub_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        run_log=run_log,
-    )
-
-    events_rows = [
-        json.loads(line)
-        for line in (logs_dir / "llm_classify_relevance.events.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    # 2 positions → 2 failure events
-    assert len(events_rows) == 2
-
-
-def test_judge_top_n_failure_leaves_no_daily_file(
-    tmp_path: Path,
-) -> None:
-    """A run where judge_top_n fails does not write any cards to the daily file."""
-    from datetime import datetime, timezone
-
-    today = datetime.now(timezone.utc).date().isoformat()
-
-    ext = MagicMock()
-    ext.classify_relevance.side_effect = lambda item: (
-        RelevanceVerdict(in_domain=True, extract=_STUB_EXTRACT),
-        _ZERO_USAGE,
-    )
-    ext.judge_top_n.side_effect = ExtractorError("judge boom")
-
-    run(
-        _two_stub_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-    )
-
-    results_dir = tmp_path / "results"
-    dated_file = results_dir / f"{today}.md"
-    if dated_file.exists():
-        content = dated_file.read_text(encoding="utf-8")
-        cards = re.findall(r"^# .+ · .+", content, re.MULTILINE)
-        assert cards == [], (
-            f"no cards should be written on judge_top_n failure: {cards}"
-        )
-
-
 def test_clean_run_writes_classify_success_events(tmp_path: Path) -> None:
     """A clean run logs one classify_relevance_v2 success event per position."""
     import application_pipeline.parser_log as pl
@@ -4205,22 +3928,6 @@ def test_clean_run_writes_classify_success_events(tmp_path: Path) -> None:
     ]
     success_rows = [r for r in rows if r.get("event") == "classify_relevance_v2"]
     assert len(success_rows) == 2
-
-
-def test_classify_failure_does_not_set_degraded_reason(tmp_path: Path) -> None:
-    """A classify_relevance failure does not cause the run to set degraded_reason."""
-    ext = MagicMock()
-    ext.classify_relevance.side_effect = ExtractorError("classify boom")
-
-    summary = run(
-        _two_stub_config(tmp_path),
-        extractor=ext,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-    )
-
-    # An abandoned classify batch should not abort the run
-    assert isinstance(summary, RunSummary)
 
 
 # ---------------------------------------------------------------------------
@@ -4590,9 +4297,6 @@ class _Daily390Parser(_StubParserBase):
 
     def discover(self, query: ParserQuery) -> list[PositionStub]:
         return [PositionStub(url=_DAILY390_URL, title="Python Dev", source="stub")]
-
-    def enrich(self, stub: PositionStub) -> Position:
-        return Position(stub=stub, raw_description="good job description")
 
 
 def test_successful_run_writes_dated_daily_file(tmp_path: Path) -> None:
@@ -4965,9 +4669,6 @@ def test_parallel_classify_pool_join_completes_no_live_workers(
                 for i in range(4)
             ]
 
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="good description")
-
     threads_before = set(t.name for t in threading.enumerate())
 
     run(
@@ -5101,9 +4802,6 @@ class _DiscoverOnlyParser(_StubParserBase):
 
     def discover(self, query: ParserQuery) -> "list[PositionStub]":
         return self._stubs
-
-    def enrich(self, stub: PositionStub) -> Position:  # pragma: no cover
-        raise AssertionError("enrich() must not be called in the v2 pipeline")
 
 
 _V2_STUB_URL = "https://v2stub.example/0"

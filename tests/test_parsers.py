@@ -12,7 +12,6 @@ from application_pipeline.parsers import (
     Parser,
     ParserError,
     ParserQuery,
-    Position,
     PositionStub,
 )
 from application_pipeline.config.types import ConfigError
@@ -38,9 +37,6 @@ class _ConcreteParser:
 
     def discover(self, query: ParserQuery) -> Iterable[PositionStub]:
         return iter([])
-
-    def enrich(self, stub: PositionStub) -> Position:
-        return Position(stub=stub, raw_description="")
 
 
 @pytest.fixture
@@ -106,23 +102,6 @@ def test_class_missing_discover_does_not_satisfy_parser_protocol():
         def __exit__(self, *args: object) -> None:
             pass
 
-        def enrich(self, stub: PositionStub) -> Position:
-            return Position(stub=stub, raw_description="")
-
-    assert not isinstance(_Bad(), Parser)
-
-
-def test_class_missing_enrich_does_not_satisfy_parser_protocol():
-    class _Bad:
-        def __enter__(self) -> "_Bad":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> Iterable[PositionStub]:
-            return iter([])
-
     assert not isinstance(_Bad(), Parser)
 
 
@@ -131,12 +110,6 @@ def test_parser_protocol_works_as_context_manager(parser: _ConcreteParser):
     with parser as p:
         result = list(p.discover(q))
     assert result == []
-
-
-def test_parser_enrich_returns_position(parser: _ConcreteParser, stub: PositionStub):
-    position = parser.enrich(stub)
-    assert isinstance(position, Position)
-    assert position.stub is stub
 
 
 # --- Registry ---

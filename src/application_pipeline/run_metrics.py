@@ -16,7 +16,6 @@ class _ParserCounters:
     lifecycle: str = ""  # "" | "done" | "dead"
     discovered: int = 0
     enrich_failed: int = 0
-    external_redirects: int = 0
     not_served_queries: int = 0
     parsers_dead: int = 0
     unparseable_dates: int = 0
@@ -43,7 +42,6 @@ class RunSummary:
     classifier_dropped: int = 0
     written: int = 0
     enrich_failed: int = 0
-    external_redirects: int = 0
     errored: int = 0
     parsers_dead: int = 0
     classify_items: int = 0
@@ -80,7 +78,6 @@ class RunMetrics:
         self._content_passed = 0
         self._content_dropped_empty_body = 0
         self._enrich_failed = 0
-        self._external_redirects = 0
         self._parsers_dead = 0
 
         # Classify-stage counters
@@ -251,15 +248,6 @@ class RunMetrics:
         if parser_id and parser_body is not None:
             self._display.update_body("parser_" + parser_id, body=parser_body)
 
-    def external_redirect(self, parser_id: str = "") -> None:
-        with self._lock:
-            self._external_redirects += 1
-            if parser_id:
-                self._parser_entry(parser_id).external_redirects += 1
-            parser_body = self._parser_body(parser_id) if parser_id else None
-        if parser_id and parser_body is not None:
-            self._display.update_body("parser_" + parser_id, body=parser_body)
-
     def parser_dead(self, parser_id: str = "") -> None:
         with self._lock:
             self._parsers_dead += 1
@@ -311,7 +299,6 @@ class RunMetrics:
             return {
                 "discovered": c.discovered,
                 "enrich_failed": c.enrich_failed,
-                "external_redirects": c.external_redirects,
                 "not_served_queries": c.not_served_queries,
                 "parsers_dead": c.parsers_dead,
                 "unparseable_dates": c.unparseable_dates,
@@ -576,7 +563,6 @@ class RunMetrics:
                 classifier_dropped=classifier_dropped,
                 written=self._written,
                 enrich_failed=self._enrich_failed,
-                external_redirects=self._external_redirects,
                 errored=self._judge_errored + classify_items_errored,
                 parsers_dead=self._parsers_dead,
                 classify_items=classify_items,

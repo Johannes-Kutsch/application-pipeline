@@ -16,14 +16,9 @@ from .types import (
     ExtractorMalformedJSONError,
     ExtractorSchemaError,
     ExtractorUnreachableError,
-    JudgeCandidate,
     JudgeCandidateV2,
-    LLMExtractor,
-    MatchVerdict,
     MatchVerdictV2,
-    RelevanceVerdict,
     RelevanceVerdictV2,
-    StructuredExtract,
 )
 
 __all__ = [
@@ -42,12 +37,7 @@ __all__ = [
     "ExtractorMalformedJSONError",
     "ExtractorSchemaError",
     "ExtractorUnreachableError",
-    "JudgeCandidate",
     "JudgeCandidateV2",
-    "LLMExtractor",
-    "MatchVerdict",
     "MatchVerdictV2",
-    "RelevanceVerdict",
     "RelevanceVerdictV2",
-    "StructuredExtract",
 ]

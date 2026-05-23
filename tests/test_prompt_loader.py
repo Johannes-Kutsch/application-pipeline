@@ -12,7 +12,10 @@ from application_pipeline import (
     load,
     load_prompts,
 )
-from application_pipeline.prompts import CLASSIFY_RELEVANCE_SLOTS, JUDGE_TOP_N_SLOTS
+from application_pipeline.prompts import (
+    CLASSIFY_RELEVANCE_V2_SLOTS,
+    JUDGE_TOP_N_V2_SLOTS,
+)
 
 
 REQUIRED_BODY = """
@@ -87,8 +90,8 @@ def test_load_prompts_returns_prompt_template_per_call_site(
 
     prompts = load_prompts(config)
 
-    assert isinstance(prompts.classify_relevance, PromptTemplate)
-    assert isinstance(prompts.judge_top_n, PromptTemplate)
+    assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
+    assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
 
 
 def test_load_prompts_embeds_user_info_in_classify_prompt(
@@ -97,7 +100,9 @@ def test_load_prompts_embeds_user_info_in_classify_prompt(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(TITLE="x", RAW_DESCRIPTION="y")
+    rendered = prompts.classify_relevance_v2.render(
+        TITLE="x", RAW_DESCRIPTION="y", COMPANY="x", LOCATION="x", POSTED_DATE="x"
+    )
 
     assert "<user-info>" in rendered
     assert "I am a developer" in rendered
@@ -110,7 +115,7 @@ def test_load_prompts_embeds_user_info_in_judge_top_n_prompt(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.judge_top_n.render(skills="Python", candidates="x")
+    rendered = prompts.judge_top_n_v2.render(skills="Python", candidates="x")
 
     assert "<user-info>" in rendered
     assert "I am a developer" in rendered
@@ -123,7 +128,9 @@ def test_load_prompts_classify_does_not_embed_match_criteria(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(TITLE="x", RAW_DESCRIPTION="y")
+    rendered = prompts.classify_relevance_v2.render(
+        TITLE="x", RAW_DESCRIPTION="y", COMPANY="x", LOCATION="x", POSTED_DATE="x"
+    )
 
     assert "Hamburg, remote" not in rendered
 
@@ -134,7 +141,7 @@ def test_load_prompts_judge_top_n_does_not_embed_domain_fit(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.judge_top_n.render(skills="Python", candidates="x")
+    rendered = prompts.judge_top_n_v2.render(skills="Python", candidates="x")
 
     assert "ML roles" not in rendered
 
@@ -145,7 +152,9 @@ def test_load_prompts_classify_contains_verdicts_tag_instruction(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(TITLE="x", RAW_DESCRIPTION="y")
+    rendered = prompts.classify_relevance_v2.render(
+        TITLE="x", RAW_DESCRIPTION="y", COMPANY="x", LOCATION="x", POSTED_DATE="x"
+    )
 
     assert "<verdict>" in rendered
 
@@ -204,21 +213,24 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     config = load(path)
     prompts = load_prompts(config)
 
-    assert isinstance(prompts.classify_relevance, PromptTemplate)
-    assert isinstance(prompts.judge_top_n, PromptTemplate)
+    assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
+    assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
 
 
 # --- Prompts dataclass ---
 
 
 def test_prompts_is_frozen() -> None:
-    tpl = PromptTemplate("{TITLE} {RAW_DESCRIPTION}", CLASSIFY_RELEVANCE_SLOTS)
+    tpl = PromptTemplate(
+        "{TITLE} {RAW_DESCRIPTION} {COMPANY} {LOCATION} {POSTED_DATE}",
+        CLASSIFY_RELEVANCE_V2_SLOTS,
+    )
     prompts = Prompts(
-        classify_relevance=tpl,
-        judge_top_n=PromptTemplate("{skills} {candidates}", JUDGE_TOP_N_SLOTS),
+        classify_relevance_v2=tpl,
+        judge_top_n_v2=PromptTemplate("{skills} {candidates}", JUDGE_TOP_N_V2_SLOTS),
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
-        prompts.classify_relevance = tpl  # type: ignore[misc]
+        prompts.classify_relevance_v2 = tpl  # type: ignore[misc]
 
 
 # --- error hierarchy ---

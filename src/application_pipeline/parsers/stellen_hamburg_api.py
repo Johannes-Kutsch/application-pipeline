@@ -1,26 +1,20 @@
 from __future__ import annotations
 
-import html.parser
 import json
 import sys
 import urllib.parse
 from collections.abc import Iterator
-from typing import Any, Literal, NoReturn
+from typing import Any, NoReturn
 
-from application_pipeline.http import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
 from application_pipeline.text import normalize
 
-from ._text import parse_iso_date, strip_html
-from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
     City,
-    ExternalRedirect,
     NotServedQuery,
     ParserQuery,
-    Position,
     PositionStub,
 )
 
@@ -43,60 +37,6 @@ serves_remote: bool = False
 
 def remote_wire() -> NoReturn:
     raise AssertionError("stellen_hamburg_api does not serve remote")
-
-
-class _JsonLdExtractor(html.parser.HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self._in_jsonld = False
-        self._chunks: list[str] = []
-        self._job_posting: dict[str, Any] = {}
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "script":
-            attrs_dict = dict(attrs)
-            if attrs_dict.get("type") == "application/ld+json":
-                self._in_jsonld = True
-                self._chunks = []
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == "script" and self._in_jsonld:
-            self._in_jsonld = False
-            try:
-                data = json.loads("".join(self._chunks))
-                entries = data if isinstance(data, list) else [data]
-                for entry in entries:
-                    if isinstance(entry, dict) and entry.get("@type") == "JobPosting":
-                        self._job_posting = entry
-                        break
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-    def handle_data(self, data: str) -> None:
-        if self._in_jsonld:
-            self._chunks.append(data)
-
-    def result(self) -> dict[str, Any]:
-        return self._job_posting
-
-
-def _extract_jsonld(html_bytes: bytes) -> dict[str, Any]:
-    extractor = _JsonLdExtractor()
-    extractor.feed(html_bytes.decode("utf-8", errors="replace"))
-    return extractor.result()
-
-
-def _employment_type(
-    value: str | None,
-) -> Literal["full-time", "part-time", "internship"] | None:
-    if not value:
-        return None
-    v = value.upper()
-    if v == "FULL_TIME":
-        return "full-time"
-    if v == "PART_TIME":
-        return "part-time"
-    return None
 
 
 def _search_url(keyword: str, page_number: int) -> str:
@@ -201,38 +141,6 @@ class StellenHamburgParser:
             location=location,
         )
 
-    def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
-        try:
-            raw = self._http.get(
-                stub.url, error_prefix=f"StellenHamburg enrich failed for {stub.url}"
-            )
-        except HttpRedirectResponse as exc:
-            if not exc.location:
-                raise ParserError(
-                    f"StellenHamburg enrich: 3xx with no Location for {stub.url}"
-                ) from exc
-            stub_host = urllib.parse.urlparse(stub.url).netloc
-            location_host = urllib.parse.urlparse(exc.location).netloc
-            if location_host == stub_host:
-                raise ParserError(
-                    f"StellenHamburg enrich: same-host redirect to {exc.location} for {stub.url}"
-                ) from exc
-            return ExternalRedirect(stub, exc.location)
-
-        job_data = _extract_jsonld(raw)
-        raw_description = strip_html(job_data.get("description") or "")
-
-        return Position(
-            stub=stub,
-            raw_description=raw_description,
-            contract_type=None,
-            employment_type=_employment_type(job_data.get("employmentType")),
-            work_model=None,
-            posted_date=parse_iso_date(job_data.get("datePosted")),
-            deadline=parse_iso_date(job_data.get("validThrough")),
-            salary=None,
-        )
-
 
 parser_class = StellenHamburgParser
 
@@ -253,10 +161,3 @@ if __name__ == "__main__":
         items = list(p.discover(query))
     stubs = [s for s in items if isinstance(s, PositionStub)]
     print(f"discover: {len(stubs)} stubs")
-    if stubs:
-        with StellenHamburgParser(run_log=_run_log) as p:
-            result = p.enrich(stubs[0])
-        if isinstance(result, Position):
-            print(f"enrich: {len(result.raw_description)} chars")
-        else:
-            print(f"enrich: external redirect to {result.outbound_url}")

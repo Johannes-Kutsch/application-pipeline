@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from application_pipeline import Config, Layout, load, load_layout
+from application_pipeline import Config, load
 from application_pipeline.init_cmd import init
 from application_pipeline.prompts import load_prompts
 
@@ -147,19 +147,6 @@ def test_config_template_loads_successfully(tmp_path: Path) -> None:
     assert config.include_remote is True
 
 
-def test_layout_template_loads_successfully(tmp_path: Path) -> None:
-    import importlib.resources
-
-    layout_bytes = (
-        importlib.resources.files("application_pipeline.templates") / "layout.py"
-    ).read_bytes()
-    (tmp_path / "layout.py").write_bytes(layout_bytes)
-
-    layout = load_layout(tmp_path / "layout.py")
-
-    assert isinstance(layout, Layout)
-
-
 # --- User-info file seeding ---
 
 
@@ -212,8 +199,8 @@ def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) 
 
     from application_pipeline import PromptTemplate
 
-    assert isinstance(prompts.classify_relevance, PromptTemplate)
-    assert isinstance(prompts.judge_top_n, PromptTemplate)
+    assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
+    assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
 
 
 def test_rerun_is_idempotent(tmp_path: Path) -> None:

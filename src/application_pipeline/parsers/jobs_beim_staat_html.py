@@ -22,18 +22,14 @@ from typing import Any, assert_never
 
 from bs4 import BeautifulSoup, Tag
 
-from application_pipeline.http.errors import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
 
-from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
     City,
-    ExternalRedirect,
     NotServedQuery,
     ParserQuery,
-    Position,
     PositionStub,
 )
 
@@ -90,33 +86,6 @@ def _parse_posted_date(raw: str, today: date) -> tuple[date | None, str | None]:
 def _id_from_query(url: str) -> str | None:
     params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     return params["id"][0] if "id" in params else None
-
-
-def _extract_job_id(soup: BeautifulSoup) -> str | None:
-    raw_url_input = soup.find("input", {"name": "raw-url"})
-    if isinstance(raw_url_input, Tag):
-        job_id = _id_from_query(str(raw_url_input.get("value", "")))
-        if job_id is not None:
-            return job_id
-    iframe = soup.find("iframe")
-    if isinstance(iframe, Tag):
-        return _id_from_query(str(iframe.get("src", "")))
-    return None
-
-
-def _find_outbound_href(soup: BeautifulSoup) -> str | None:
-    for a in soup.find_all("a", href=True):
-        href = str(a["href"])
-        host = urllib.parse.urlparse(href).netloc
-        if host and "jobs-beim-staat.de" not in host:
-            return href
-    return None
-
-
-def _normalize_description(text: str) -> str:
-    lines = [" ".join(line.split()) for line in text.split("\n")]
-    collapsed = re.sub(r"\n{3,}", "\n\n", "\n".join(lines))
-    return collapsed.strip()
 
 
 def _text_after_icon(card: Tag, icon_suffix: str) -> str | None:
@@ -267,47 +236,6 @@ class JobsBeimStaatParser:
 
             start += step
 
-    def enrich(self, stub: PositionStub) -> Position | ExternalRedirect:
-        try:
-            wrapper_raw = self._http.get(
-                stub.url, error_prefix=f"jobs-beim-staat enrich failed for {stub.url}"
-            )
-        except HttpRedirectResponse as exc:
-            location = exc.location
-            location_host = urllib.parse.urlparse(location).netloc
-            base_host = urllib.parse.urlparse(_BASE_URL).netloc
-            if location and location_host != base_host:
-                return ExternalRedirect(stub, location)
-            raise ParserError(
-                f"jobs-beim-staat enrich: 3xx with same-host or missing location"
-                f" for {stub.url} location={location!r}"
-            ) from exc
-
-        wrapper_soup = BeautifulSoup(wrapper_raw, "html.parser")
-        job_id = _extract_job_id(wrapper_soup)
-        if job_id is None:
-            outbound = _find_outbound_href(wrapper_soup)
-            if outbound is not None:
-                return ExternalRedirect(stub, outbound)
-            raise ParserError(
-                f"jobs-beim-staat enrich: no iframe target found in wrapper {stub.url}"
-            )
-
-        iframe_url = f"{_BASE_URL}/stellenanzeigen-details/?id={job_id}"
-        iframe_raw = self._http.get(
-            iframe_url, error_prefix=f"jobs-beim-staat enrich failed for {iframe_url}"
-        )
-
-        iframe_soup = BeautifulSoup(iframe_raw, "html.parser")
-        raw_description = _normalize_description(iframe_soup.get_text(separator="\n"))
-
-        return Position(
-            stub=stub,
-            raw_description=raw_description,
-            posted_date=stub.posted_date,
-            _warnings=stub._warnings,
-        )
-
 
 parser_class = JobsBeimStaatParser
 
@@ -328,10 +256,3 @@ if __name__ == "__main__":
         items = list(p.discover(query))
     stubs = [s for s in items if isinstance(s, PositionStub)]
     print(f"discover: {len(stubs)} stubs")
-    if stubs:
-        with JobsBeimStaatParser(run_log=_run_log) as p:
-            result = p.enrich(stubs[0])
-        if isinstance(result, Position):
-            print(f"enrich: {len(result.raw_description)} chars")
-        else:
-            print(f"enrich: external_redirect outbound={result.outbound_url}")

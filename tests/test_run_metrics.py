@@ -471,7 +471,6 @@ def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> Run
     metrics.prefilter_passed()
     metrics.prefilter_dropped(blacklist_hit=True)
     metrics.enrich_failed()
-    metrics.external_redirect()
     metrics.parser_dead()
 
     classify_usage = _make_usage(
@@ -732,7 +731,6 @@ def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
     assert summary.classifier_dropped == 1
     assert summary.written == 1
     assert summary.enrich_failed == 1
-    assert summary.external_redirects == 1
     assert summary.errored == 0
     assert summary.parsers_dead == 1
     assert summary.classify_items == 2
@@ -889,7 +887,6 @@ def test_parser_summary_key_set_is_exact(run_log: RunLog) -> None:
     assert set(summary.keys()) == {
         "discovered",
         "enrich_failed",
-        "external_redirects",
         "not_served_queries",
         "parsers_dead",
         "unparseable_dates",
@@ -898,7 +895,7 @@ def test_parser_summary_key_set_is_exact(run_log: RunLog) -> None:
 
 
 def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
-    """All six per-parser event methods update the right counter in parser_summary."""
+    """All per-parser event methods update the right counter in parser_summary."""
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
@@ -907,7 +904,6 @@ def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
     started = time.monotonic()
     metrics.discovered("p")
     metrics.enrich_failed("p")
-    metrics.external_redirect("p")
     metrics.parser_dead("p")
     metrics.not_served_query("p")
     metrics.unparseable_date("p")
@@ -916,7 +912,6 @@ def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
     s = metrics.parser_summary("p", end, started)
     assert s["discovered"] == 1
     assert s["enrich_failed"] == 1
-    assert s["external_redirects"] == 1
     assert s["parsers_dead"] == 1
     assert s["not_served_queries"] == 1
     assert s["unparseable_dates"] == 1
@@ -953,7 +948,6 @@ def test_interleaved_parsers_produce_independent_per_parser_totals(
         metrics.enrich_failed("alpha")
     for _ in range(5):
         metrics.discovered("beta")
-        metrics.external_redirect("beta")
     end = time.monotonic()
 
     sa = metrics.parser_summary("alpha", end, started)
@@ -962,14 +956,11 @@ def test_interleaved_parsers_produce_independent_per_parser_totals(
     assert sa["discovered"] == 3
     assert sa["enrich_failed"] == 3
     assert sb["discovered"] == 5
-    assert sb["external_redirects"] == 5
-    assert sa["external_redirects"] == 0
     assert sb["enrich_failed"] == 0
 
     summary = metrics.to_run_summary(1.0)
     assert summary.discovered == 8
     assert summary.enrich_failed == 3
-    assert summary.external_redirects == 5
 
 
 def test_parser_summary_unknown_parser_id_returns_zeros(run_log: RunLog) -> None:
@@ -984,7 +975,6 @@ def test_parser_summary_unknown_parser_id_returns_zeros(run_log: RunLog) -> None
     s = metrics.parser_summary("never_seen", end, started)
     assert s["discovered"] == 0
     assert s["enrich_failed"] == 0
-    assert s["external_redirects"] == 0
     assert s["not_served_queries"] == 0
     assert s["parsers_dead"] == 0
     assert s["unparseable_dates"] == 0

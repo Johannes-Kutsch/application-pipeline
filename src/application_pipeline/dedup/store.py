@@ -22,9 +22,7 @@ from application_pipeline.text import normalize
 from .errors import DedupStoreError
 
 if TYPE_CHECKING:
-    from application_pipeline.extracts import ExtractStore
     from application_pipeline.extracts.card_store import CardStore
-    from application_pipeline.llm.types import StructuredExtract
 
 SeenStatus = Literal[
     "out_of_domain",
@@ -66,7 +64,6 @@ class DeduplicationStore:
         path: Path,
         records: dict[str, dict[str, Any]],
         *,
-        extract_store: "ExtractStore | None" = None,
         card_store: "CardStore | None" = None,
     ) -> None:
         self._path = path
@@ -76,7 +73,6 @@ class DeduplicationStore:
         )
         self._lock = threading.Lock()
         self._in_run: set[str] | None = None
-        self._extract_store = extract_store
         self._card_store = card_store
 
     @staticmethod
@@ -187,8 +183,6 @@ class DeduplicationStore:
             self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
 
     def _delete_from_stores(self, url: str) -> None:
-        if self._extract_store is not None:
-            self._extract_store.delete(url)
         if self._card_store is not None:
             self._card_store.delete(url)
 
@@ -207,10 +201,6 @@ class DeduplicationStore:
             self._mark(key, "enrich_failed", overwrite_if="in_domain")
             self._delete_from_stores(key.url)
 
-    def mark_external_redirect(self, key: _SeenKey) -> None:
-        with self._lock:
-            self._mark(key, "external_redirect")
-
     def mark_expired(self, key: _SeenKey) -> None:
         with self._lock:
             prior = self._records.get(key.url)
@@ -221,13 +211,9 @@ class DeduplicationStore:
             else:
                 self._mark(key, "expired")
 
-    def mark_in_domain(
-        self, key: _SeenKey, *, extract: "StructuredExtract | None" = None
-    ) -> None:
+    def mark_in_domain(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "in_domain")
-            if self._extract_store is not None and extract is not None:
-                self._extract_store.put(key.url, extract)
 
     @contextmanager
     def run_scope(self) -> Generator[DeduplicationStore, None, None]:
@@ -270,13 +256,10 @@ class DeduplicationStore:
 def load(
     path: Path,
     *,
-    extract_store: "ExtractStore | None" = None,
     card_store: "CardStore | None" = None,
 ) -> DeduplicationStore:
     if not path.exists():
-        return DeduplicationStore(
-            path, {}, extract_store=extract_store, card_store=card_store
-        )
+        return DeduplicationStore(path, {}, card_store=card_store)
 
     try:
         raw = path.read_bytes()
@@ -316,6 +299,4 @@ def load(
                     f"(see wipe instruction in the store migration guide)"
                 )
 
-    return DeduplicationStore(
-        path, data, extract_store=extract_store, card_store=card_store
-    )
+    return DeduplicationStore(path, data, card_store=card_store)

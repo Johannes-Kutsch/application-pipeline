@@ -262,50 +262,6 @@ def test_admit_drop_marks_expired_in_dedup_store(
     assert data["https://example.com/old"]["status"] == "expired"
 
 
-def test_admit_drop_in_domain_transition_removes_extract(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics
-) -> None:
-    from application_pipeline.extracts import load as extract_load
-    from application_pipeline.llm.types import StructuredExtract
-
-    extract_store = extract_load(tmp_path / "extracts.json")
-    dedup = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
-
-    url = "https://example.com/in-domain"
-
-    @dataclass
-    class _S:
-        url: str
-        company: str = "Acme"
-        title: str = "Engineer"
-        location: str = "Remote"
-
-    stub = _S(url=url)
-    extract = StructuredExtract(
-        seniority="senior",
-        work_model="remote",
-        contract_type="permanent",
-        key_skills=["python"],
-        key_responsibilities=["ship things"],
-        must_have_requirements=["3+ years"],
-        notable_caveats="",
-    )
-    dedup.mark_in_domain(stub, extract=extract)
-    assert extract_store.get(url) is not None
-
-    gate = FreshnessGate(
-        anchored_today=ANCHORED_TODAY,
-        max_listing_age_days=MAX_AGE,
-        dedup=dedup,
-        metrics=metrics,
-        run_log=RunLog(tmp_path / "logs2"),
-    )
-    position = _make_position(url=url, posted_date=date(2025, 12, 15))
-    gate.admit(position)
-
-    assert extract_store.get(url) is None
-
-
 def test_admit_drop_increments_freshness_dropped_metric(
     tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:

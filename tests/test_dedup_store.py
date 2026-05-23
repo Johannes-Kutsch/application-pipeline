@@ -15,20 +15,6 @@ from application_pipeline import (
     load,
 )
 from application_pipeline.dedup import RunScopedSeenResult, load as dedup_load
-from application_pipeline.extracts import load as extract_load
-from application_pipeline.llm.types import StructuredExtract
-
-
-def _extract() -> StructuredExtract:
-    return StructuredExtract(
-        seniority="senior",
-        work_model="remote",
-        contract_type="permanent",
-        key_skills=["python"],
-        key_responsibilities=["ship things"],
-        must_have_requirements=["3+ years"],
-        notable_caveats="",
-    )
 
 
 @dataclass
@@ -114,17 +100,6 @@ def test_mark_enrich_failed_persists_status(store_path: Path) -> None:
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     assert on_disk["https://example.com/ef"]["status"] == "enrich_failed"
-
-
-def test_mark_external_redirect_persists_status(store_path: Path) -> None:
-    store = dedup_load(store_path)
-    stub = StubLike(url="https://example.com/redir")
-    store.mark_external_redirect(stub)
-
-    assert store.is_seen(stub) == "url_hit"
-
-    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk["https://example.com/redir"]["status"] == "external_redirect"
 
 
 def test_second_mark_same_url_is_silent_no_op(store_path: Path) -> None:
@@ -507,12 +482,25 @@ def test_round_trip_mix_of_originals_and_aliases(store_path: Path) -> None:
 
 
 def test_external_redirect_status_survives_reload(store_path: Path) -> None:
-    store = dedup_load(store_path)
-    stub = StubLike(url="https://example.com/redir2")
-    store.mark_external_redirect(stub)
-
+    # Write external_redirect status directly — mark_external_redirect() was removed
+    # (ADR-0042: v2 pipeline no longer follows redirects), but the status value stays
+    # so existing .seen.json entries continue to short-circuit.
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/redir2": {
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "external_redirect",
+                    "first_seen": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     reloaded = dedup_load(store_path)
-    assert reloaded.is_seen(stub) == "url_hit"
+    assert reloaded.is_seen(StubLike(url="https://example.com/redir2")) == "url_hit"
 
 
 def test_concurrent_marks_produce_valid_store(store_path: Path) -> None:
@@ -552,7 +540,7 @@ def test_mark_in_domain_then_is_seen_returns_judge_pending(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid")
-    store.mark_in_domain(stub, extract=_extract())
+    store.mark_in_domain(stub)
     assert store.is_seen(stub) == "judge_pending"
 
 
@@ -561,7 +549,7 @@ def test_mark_in_domain_then_mark_selected_by_judge_returns_url_hit(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid3")
-    store.mark_in_domain(stub, extract=_extract())
+    store.mark_in_domain(stub)
     store.mark_selected_by_judge(stub)
 
     assert store.is_seen(stub) == "url_hit"
@@ -575,7 +563,7 @@ def test_mark_in_domain_persists_correct_record(
 ) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/cid2")
-    store.mark_in_domain(stub, extract=_extract())
+    store.mark_in_domain(stub)
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     record = on_disk["https://example.com/cid2"]
@@ -633,7 +621,7 @@ def test_tuple_alias_of_in_domain_returns_judge_pending(
     store = dedup_load(store_path)
     a = StubLike(url="https://example.com/original")
     b = StubLike(url="https://example.com/alias")
-    store.mark_in_domain(a, extract=_extract())
+    store.mark_in_domain(a)
     # tuple hit writes alias with in_domain status
     assert store.is_seen(b) == "tuple_hit"
     # next is_seen on b resolves via URL tier → judge_pending
@@ -731,93 +719,6 @@ def test_run_scope_concurrent_is_seen(store: DeduplicationStore) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ExtractStore integration
-# ---------------------------------------------------------------------------
-
-
-def test_mark_in_domain_writes_extract_to_extract_store(tmp_path: Path) -> None:
-    extract_path = tmp_path / "extracts.json"
-    extract_store = extract_load(extract_path)
-    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
-
-    stub = StubLike(url="https://example.com/job1")
-    extract = _extract()
-    store.mark_in_domain(stub, extract=extract)
-
-    assert extract_store.get(stub.url) == extract
-
-
-def test_mark_selected_by_judge_on_in_domain_deletes_extract(tmp_path: Path) -> None:
-    extract_path = tmp_path / "extracts.json"
-    extract_store = extract_load(extract_path)
-    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
-
-    stub = StubLike(url="https://example.com/job2")
-    store.mark_in_domain(stub, extract=_extract())
-    store.mark_selected_by_judge(stub)
-
-    assert extract_store.get(stub.url) is None
-    assert store.is_seen(stub) == "url_hit"
-
-
-def test_mark_enrich_failed_on_in_domain_deletes_extract(tmp_path: Path) -> None:
-    extract_path = tmp_path / "extracts.json"
-    extract_store = extract_load(extract_path)
-    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
-
-    stub = StubLike(url="https://example.com/job3")
-    store.mark_in_domain(stub, extract=_extract())
-    store.mark_enrich_failed(stub)
-
-    assert extract_store.get(stub.url) is None
-
-
-def test_mark_out_of_domain_on_in_domain_deletes_extract(tmp_path: Path) -> None:
-    extract_path = tmp_path / "extracts.json"
-    extract_store = extract_load(extract_path)
-    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
-
-    stub = StubLike(url="https://example.com/job4")
-    store.mark_in_domain(stub, extract=_extract())
-    store.mark_out_of_domain(stub)
-
-    assert extract_store.get(stub.url) is None
-
-
-def test_in_domain_invariant_extract_exists_iff_status_in_domain(
-    tmp_path: Path,
-) -> None:
-    extract_path = tmp_path / "extracts.json"
-    extract_store = extract_load(extract_path)
-    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
-
-    in_stub = StubLike(
-        url="https://example.com/in", company="A", title="T", location="L"
-    )
-    out_stub = StubLike(
-        url="https://example.com/out", company="B", title="T", location="L"
-    )
-    sel_stub = StubLike(
-        url="https://example.com/sel", company="C", title="T", location="L"
-    )
-    ef_stub = StubLike(
-        url="https://example.com/ef", company="D", title="T", location="L"
-    )
-
-    store.mark_in_domain(in_stub, extract=_extract())
-    store.mark_out_of_domain(out_stub)
-    store.mark_in_domain(sel_stub, extract=_extract())
-    store.mark_selected_by_judge(sel_stub)
-    store.mark_in_domain(ef_stub, extract=_extract())
-    store.mark_enrich_failed(ef_stub)
-
-    assert extract_store.get(in_stub.url) is not None
-    assert extract_store.get(out_stub.url) is None
-    assert extract_store.get(sel_stub.url) is None
-    assert extract_store.get(ef_stub.url) is None
-
-
-# ---------------------------------------------------------------------------
 # mark_expired
 # ---------------------------------------------------------------------------
 
@@ -837,21 +738,6 @@ def test_mark_expired_persists_status(store_path: Path) -> None:
     assert record["title_lc"] == "engineer"
     assert record["location_lc"] == "hamburg"
     assert record["first_seen"] == date.today().isoformat()
-
-
-def test_mark_expired_on_in_domain_deletes_extract(tmp_path: Path) -> None:
-    extract_path = tmp_path / "extracts.json"
-    extract_store = extract_load(extract_path)
-    store = dedup_load(tmp_path / ".seen.json", extract_store=extract_store)
-
-    stub = StubLike(url="https://example.com/stale")
-    store.mark_in_domain(stub, extract=_extract())
-    assert extract_store.get(stub.url) is not None
-
-    store.mark_expired(stub)
-
-    assert extract_store.get(stub.url) is None
-    assert store.is_seen(stub) == "url_hit"
 
 
 def test_expired_status_survives_reload(store_path: Path) -> None:

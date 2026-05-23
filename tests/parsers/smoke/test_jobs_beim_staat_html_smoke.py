@@ -8,9 +8,7 @@ from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.jobs_beim_staat_html import JobsBeimStaatParser
 from application_pipeline.parsers.types import (
     City,
-    ExternalRedirect,
     ParserQuery,
-    Position,
     PositionStub,
 )
 
@@ -21,19 +19,8 @@ def run_log(tmp_path: Path) -> RunLog:
 
 
 @pytest.mark.smoke
-def test_discover_hamburg_returns_stubs_and_enrich_populates_description(
-    run_log: RunLog,
-) -> None:
+def test_discover_hamburg_returns_stubs(run_log: RunLog) -> None:
     query = ParserQuery(keyword="*", location=City("hamburg"), max_results=5)
     with JobsBeimStaatParser(run_log=run_log) as p:
         stubs = [s for s in p.discover(query) if isinstance(s, PositionStub)]
     assert len(stubs) >= 1
-
-    with JobsBeimStaatParser(run_log=run_log) as p:
-        for stub in stubs:
-            result = p.enrich(stub)
-            if isinstance(result, Position):
-                assert result.raw_description != ""
-                return
-            assert isinstance(result, ExternalRedirect)
-            assert result.outbound_url != ""

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -49,26 +48,3 @@ class NotServedQuery:
     Consumed by the orchestrator to count skipped queries; never forwarded
     to classify or judge stages.
     """
-
-
-@dataclass(frozen=True)
-class ExternalRedirect:
-    stub: PositionStub
-    outbound_url: str
-
-
-@dataclass(frozen=True)
-class Position:
-    stub: PositionStub
-    raw_description: str
-    salary: str | None = None
-    contract_type: Literal["permanent", "fixed-term", "freelance"] | None = None
-    employment_type: Literal["full-time", "part-time", "internship"] | None = None
-    work_model: Literal["remote", "hybrid", "on-site"] | None = None
-    posted_date: date | None = None
-    deadline: date | None = None
-    _warnings: tuple[str, ...] = ()
-
-    @property
-    def title(self) -> str:
-        return self.stub.title

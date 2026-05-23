@@ -7,9 +7,7 @@ import pytest
 from application_pipeline.extracts import (
     CardExtract,
     CardStore,
-    ExtractStore,
     ExtractStoreError,
-    load,
     load_card_store,
 )
 
@@ -98,15 +96,3 @@ def test_concurrent_writers_do_not_corrupt_file(store_path: Path) -> None:
     assert set(on_disk) == {f"k{i}" for i in range(8)}
     for i in range(8):
         assert store.get(f"k{i}") == CardExtract(header=f"H{i}", summary=f"S{i}")
-
-
-def test_v2_store_is_independent_of_v1_store(tmp_path: Path) -> None:
-    v1_path = tmp_path / "extracts_v1.json"
-    v2_path = tmp_path / "extracts_v2.json"
-
-    v2_store = load_card_store(v2_path)
-    v2_store.put("id1", CardExtract(header="H", summary="S"))
-
-    assert not v1_path.exists()
-    v1_store: ExtractStore = load(v1_path)
-    assert v1_store.get("id1") is None

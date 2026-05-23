@@ -1,5 +1,7 @@
 # Hardcoded prompts with externalized user-info; single-language pipeline
 
+> **Superseded by [ADR-0043](./0043-classifier-three-check-matches-verdict-and-triage-profile-merge.md).** The single `{USER_INFO}` slot and the per-call-site routing (classifier reads `self-description.md` + `domain-fit.md`; judge reads `self-description.md` + `match-criteria.md`) both retire. The current shape is three named slots — `{SELF_DESCRIPTION}`, `{MATCH_CRITERIA}`, `{SKILLS}` — placed by each prompt template under its own heading; `domain-fit.md` is folded into `match-criteria.md`. The hardcoded-package-prompts vs externalized-user-content split, the `<user-info>` framing principle, and the single-language (German) decision all survive. Read this ADR for the original separation rationale; read 0043 for the current slot model.
+
 Prompts split into two parts. The **agent protocol** — task framing, output-tag instruction, JSON shape, synthetic example — is **hardcoded** inside the package at `src/application_pipeline/templates/prompts/`. The **applicant-specific content** — candidate self-description, in/out-of-domain rules, hard match criteria — lives in `data/user-info/` as three markdown files injected via a single `{USER_INFO}` slot wrapped in `<user-info>` tags. The **Prompt Loader** concatenates per call site:
 
 - **Relevance Classifier**: `self-description.md` + `domain-fit.md`.

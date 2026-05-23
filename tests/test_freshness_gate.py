@@ -408,7 +408,7 @@ def test_admit_stub_stale_marks_expired_in_dedup(
     assert dedup.is_seen(stub) == "url_hit"
 
 
-def test_admit_post_enrich_writes_transcript_with_post_enrich_arm(
+def test_admit_writes_transcript_with_post_llm_arm(
     tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
 ) -> None:
     gate = _make_gate(tmp_path, run_log, metrics, dedup)
@@ -418,4 +418,4 @@ def test_admit_post_enrich_writes_transcript_with_post_enrich_arm(
     gate.admit(position)
     rows = _read_transcripts(logs_dir)
     assert len(rows) == 1
-    assert rows[0]["gate_arm"] == "post_enrich"
+    assert rows[0]["gate_arm"] == "post_llm"

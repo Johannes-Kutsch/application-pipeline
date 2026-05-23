@@ -405,7 +405,7 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
     assert card_store.get(stub.url) is None
 
 
-def test_enricher_freshness_drop_records_post_enrich_transcript(
+def test_enricher_freshness_drop_records_post_llm_transcript(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
@@ -440,7 +440,7 @@ def test_enricher_freshness_drop_records_post_enrich_transcript(
 
     rows = _read_freshness_transcripts(tmp_path)
     assert len(rows) == 1
-    assert rows[0]["gate_arm"] == "post_enrich"
+    assert rows[0]["gate_arm"] == "post_llm"
     assert rows[0]["passes"] is False
     assert rows[0]["posted_date"] == "2025-12-15"
 

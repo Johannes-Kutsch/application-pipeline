@@ -41,7 +41,12 @@ class _PreFilterLike(Protocol):
 
 
 class _FreshnessLike(Protocol):
-    def admit_stub(self, stub: Any) -> bool: ...
+    def admit_stub(
+        self,
+        stub: Any,
+        *,
+        gate_arm: Literal["discover", "post_enrich"] = "discover",
+    ) -> bool: ...
 
 
 class _ContentLike(Protocol):
@@ -57,21 +62,25 @@ def run_gates(
     prefilter: _PreFilterLike,
     freshness: _FreshnessLike,
     content: _ContentLike | None = None,
+    gate_arm: Literal["discover", "post_enrich"] = "discover",
 ) -> Verdict:
     """Evaluate all non-LLM gates for a stub; return the first drop or pass.
 
     Pre-enrich: Content Gate is always a no-op (no body available).
+    Post-enrich: dedup "run_hit" is treated as pass — the stub already entered
+    the in-run set during the pre-enrich invocation and is being processed normally.
     Each gate owns its own transcript writes.
     """
-    if not freshness.admit_stub(stub):
+    if not freshness.admit_stub(stub, gate_arm=gate_arm):
         return "drop"
 
-    result = dedup.is_seen(stub)
-    metrics.record_dedup(result)
-    if result == "judge_pending":
-        return "judge_pending"
-    if result != "miss":
-        return "drop"
+    if gate_arm != "post_enrich":
+        result = dedup.is_seen(stub)
+        metrics.record_dedup(result)
+        if result == "judge_pending":
+            return "judge_pending"
+        if result != "miss":
+            return "drop"
 
     if not prefilter.admit_stub(stub):
         return "drop"

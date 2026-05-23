@@ -373,6 +373,8 @@ class _EnrichThread(_QueueWorker):
         run_state: _RunState,
         run_log: RunLog,
         quota_wall: "_quota.QuotaWall",
+        freshness: "FreshnessGate",
+        prefilter: "PreFilterGate",
         worker_index: int = 0,
     ) -> None:
         super().__init__(
@@ -388,6 +390,8 @@ class _EnrichThread(_QueueWorker):
         self._metrics = metrics
         self._run_log = run_log
         self._quota_wall = quota_wall
+        self._freshness = freshness
+        self._prefilter = prefilter
 
     def _on_dequeue(self, item: object) -> None:
         assert isinstance(item, _EnrichRequest)
@@ -416,6 +420,22 @@ class _EnrichThread(_QueueWorker):
         self._metrics.enriched(item.parser_id, enrich_result.mode)
         stub = enrich_result.stub
         body = enrich_result.body
+
+        post_verdict = _run_gates(
+            stub,
+            run_log=self._run_log,
+            metrics=self._metrics,
+            dedup=self._dedup_store,
+            prefilter=self._prefilter,
+            freshness=self._freshness,
+            gate_arm="post_enrich",
+        )
+        if post_verdict == "drop":
+            return
+        if post_verdict == "judge_pending":
+            self._pool_collector.add_judge_pending(stub)
+            return
+
         while True:
             self._quota_wall.wait_if_blocked()
             try:
@@ -766,23 +786,6 @@ def run(
 
             metrics.register_rows(starting_order=2 + len(threads))
 
-            enrich_threads = [
-                _EnrichThread(
-                    enrich_queue=enrich_queue,
-                    pool_collector=pool_collector,
-                    llm_enricher=llm_enricher,
-                    dedup_store=dedup_store,
-                    metrics=metrics,
-                    run_state=run_state,
-                    run_log=run_log,
-                    quota_wall=quota_wall,
-                    worker_index=i,
-                )
-                for i in range(cfg.claude_classify_parallelism)
-            ]
-            for et in enrich_threads:
-                et.start()
-
             freshness = FreshnessGate(
                 anchored_today=anchored_today,
                 max_listing_age_days=cfg.max_listing_age_days,
@@ -798,6 +801,25 @@ def run(
                 metrics=metrics,
                 run_log=run_log,
             )
+
+            enrich_threads = [
+                _EnrichThread(
+                    enrich_queue=enrich_queue,
+                    pool_collector=pool_collector,
+                    llm_enricher=llm_enricher,
+                    dedup_store=dedup_store,
+                    metrics=metrics,
+                    run_state=run_state,
+                    run_log=run_log,
+                    quota_wall=quota_wall,
+                    freshness=freshness,
+                    prefilter=prefilter,
+                    worker_index=i,
+                )
+                for i in range(cfg.claude_classify_parallelism)
+            ]
+            for et in enrich_threads:
+                et.start()
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,

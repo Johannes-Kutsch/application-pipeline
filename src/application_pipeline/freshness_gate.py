@@ -120,11 +120,16 @@ class FreshnessGate:
             "too_old_and_deadline_passed": 0,
         }
 
-    def admit_stub(self, stub: _Stub) -> bool:
-        """Pre-LLM arm: evaluate freshness from stub posted_date.
+    def admit_stub(
+        self,
+        stub: _Stub,
+        *,
+        gate_arm: Literal["discover", "post_enrich"] = "discover",
+    ) -> bool:
+        """Stub arm: evaluate freshness from stub posted_date.
 
-        Returns True (pass through) when posted_date is absent — the post-enrich
-        arm will evaluate later. Returns False and drops the stub when it is stale.
+        Returns True (pass through) when posted_date is absent. Returns False and
+        drops the stub when it is stale. gate_arm selects the transcript label.
         """
         verdict = _evaluate_stub(stub, self._anchored_today, self._max_listing_age_days)
         if verdict is None:
@@ -143,7 +148,7 @@ class FreshnessGate:
                 "age_days": verdict.age_days,
                 "passes": verdict.passes,
                 "reason": verdict.reason,
-                "gate_arm": "discover",
+                "gate_arm": gate_arm,
             },
         )
         self._counts[verdict.reason] += 1
@@ -170,7 +175,7 @@ class FreshnessGate:
                 "age_days": verdict.age_days,
                 "passes": verdict.passes,
                 "reason": verdict.reason,
-                "gate_arm": "post_enrich",
+                "gate_arm": "post_llm",
             },
         )
         self._counts[verdict.reason] += 1

@@ -5107,3 +5107,274 @@ def test_gates_bundle_passing_stub_parser_enrich_called(tmp_path: Path) -> None:
 
     assert fresh_url in enrich_calls, "parser.enrich() must be called for passing stubs"
     assert fresh_url in llm_stub_urls, "LLM enricher must receive the same stub"
+
+
+# ---------------------------------------------------------------------------
+# Post-enrich Gates Bundle (issue #555)
+# ---------------------------------------------------------------------------
+
+
+def test_post_enrich_gates_drops_stub_with_expired_posted_date_backfilled(
+    tmp_path: Path,
+) -> None:
+    """Stub with posted_date=None from discover, enrich() back-fills expired posted_date
+    → dropped at post-enrich bundle, not passed to LLM Enricher, transcript has post_enrich row."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
+
+    stale_url = "https://ba.example/stale"
+    expired_date = _date(2020, 1, 1)
+    llm_calls: list[str] = []
+
+    class _BackfillParser(_StubParserBase):
+        def __enter__(self) -> "_BackfillParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=stale_url, title="Stale Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enriched = PositionStub(
+                url=stub.url,
+                title=stub.title,
+                source=stub.source,
+                posted_date=expired_date,
+            )
+            return EnrichResult(stub=enriched, body="job body", mode="native")
+
+    card_store = _make_card_store(tmp_path)
+
+    class _TrackingLLMEnricher(_FakeLLMEnricherHelper):
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
+            llm_calls.append(stub.url)
+            return super().enrich(stub, body)
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_TrackingLLMEnricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _BackfillParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        run_log=run_log,
+    )
+
+    assert stale_url not in llm_calls, (
+        "expired back-filled stub must not reach LLM Enricher"
+    )
+
+    transcript_file = logs_dir / "pipeline" / "freshness.transcripts.jsonl"
+    assert transcript_file.exists(), "freshness transcripts must be written"
+    rows = [
+        json.loads(line)
+        for line in transcript_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    post_enrich_rows = [r for r in rows if r.get("gate_arm") == "post_enrich"]
+    stale_row = next((r for r in post_enrich_rows if r.get("url") == stale_url), None)
+    assert stale_row is not None, (
+        "must have a post_enrich freshness row for the stale URL"
+    )
+    assert stale_row["passes"] is False
+
+
+def test_post_enrich_expired_stub_absent_from_llm_classify_events(
+    tmp_path: Path,
+) -> None:
+    """Stub dropped at post-enrich must produce no llm_classify_relevance event row."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
+
+    stale_url = "https://ba.example/stale-no-llm"
+    expired_date = _date(2020, 1, 1)
+
+    class _BackfillParser(_StubParserBase):
+        def __enter__(self) -> "_BackfillParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=stale_url, title="Stale Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            return EnrichResult(
+                stub=PositionStub(
+                    url=stub.url,
+                    title=stub.title,
+                    source=stub.source,
+                    posted_date=expired_date,
+                ),
+                body="job body",
+                mode="native",
+            )
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _BackfillParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        run_log=run_log,
+    )
+
+    classify_events_file = logs_dir / "llm" / "classify_relevance.events.jsonl"
+    if classify_events_file.exists():
+        events = [
+            json.loads(line)
+            for line in classify_events_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert not any(r.get("url") == stale_url for r in events), (
+            "stale stub must not produce a classify_relevance event row"
+        )
+
+
+def test_post_enrich_non_expired_stub_reaches_llm_enricher(
+    tmp_path: Path,
+) -> None:
+    """A stub whose posted_date is not expired after enrich() passes post-enrich bundle
+    and reaches the LLM Enricher with the same (stub, body) shape."""
+    fresh_url = "https://ba.example/fresh"
+    recent_date = _date.today() - _timedelta(days=10)
+    llm_calls: list[tuple[str, str]] = []
+
+    class _FreshBackfillParser(_StubParserBase):
+        def __enter__(self) -> "_FreshBackfillParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=fresh_url, title="Fresh Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enriched = PositionStub(
+                url=stub.url,
+                title=stub.title,
+                source=stub.source,
+                posted_date=recent_date,
+            )
+            return EnrichResult(stub=enriched, body="fresh job body", mode="native")
+
+    card_store = _make_card_store(tmp_path)
+
+    class _TrackingLLMEnricher(_FakeLLMEnricherHelper):
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
+            llm_calls.append((stub.url, body))
+            return super().enrich(stub, body)
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_TrackingLLMEnricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _FreshBackfillParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert len(llm_calls) == 1, "fresh stub must reach LLM Enricher exactly once"
+    url_received, body_received = llm_calls[0]
+    assert url_received == fresh_url
+    assert body_received == "fresh job body"
+
+
+def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
+    tmp_path: Path,
+) -> None:
+    """Existing post-LLM Freshness behavior is preserved: LLM-inferred expired
+    posted_date still drops the candidate with gate_arm: 'post_llm'."""
+    import application_pipeline.parser_log as parser_log
+
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
+
+    url = "https://ba.example/post-llm-drop"
+    # The LLM classifier will return a header with an expired posted_date in line 3.
+    stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2020-01-01 · mid · —"
+
+    class _SimpleParser(_StubParserBase):
+        def __enter__(self) -> "_SimpleParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=url, title="ML Engineer", source="stub")]
+
+    from application_pipeline.llm import CallUsage
+    from application_pipeline.llm.types import RelevanceVerdict
+    from unittest.mock import MagicMock
+
+    _zero_usage = CallUsage(
+        input_tokens=0,
+        output_tokens=0,
+        cache_read_tokens=0,
+        cost_usd=0.0,
+        duration_s=0.0,
+    )
+
+    extractor_mock = MagicMock()
+    extractor_mock.classify_relevance.return_value = (
+        RelevanceVerdict(matches=True, header=stale_header, summary="Old role."),
+        _zero_usage,
+    )
+    extractor_mock.judge_top_n.return_value = ([], _zero_usage)
+
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=extractor_mock,
+        card_store=card_store,
+        parser_registry=lambda _: _SimpleParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    transcript_file = logs_dir / "pipeline" / "freshness.transcripts.jsonl"
+    assert transcript_file.exists(), "freshness transcripts must be written"
+    rows = [
+        json.loads(line)
+        for line in transcript_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    post_llm_rows = [
+        r for r in rows if r.get("gate_arm") == "post_llm" and r.get("url") == url
+    ]
+    assert len(post_llm_rows) == 1, "must have a post_llm freshness row"
+    assert post_llm_rows[0]["passes"] is False

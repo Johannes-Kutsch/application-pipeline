@@ -4,6 +4,7 @@ import string
 from dataclasses import dataclass
 
 from .config import Config
+from .search_terms.types import SearchTerms
 
 
 class PromptError(Exception):
@@ -13,13 +14,10 @@ class PromptError(Exception):
 CLASSIFY_RELEVANCE_V2_SLOTS: frozenset[str] = frozenset(
     {"LISTING_BULLETS", "RAW_DESCRIPTION"}
 )
-JUDGE_TOP_N_V2_SLOTS: frozenset[str] = frozenset({"skills", "candidates"})
+JUDGE_TOP_N_V2_SLOTS: frozenset[str] = frozenset({"CANDIDATES"})
 
-_PACKAGE_CLASSIFY_V2_SLOTS: frozenset[str] = frozenset(
-    {"USER_INFO", "LISTING_BULLETS", "RAW_DESCRIPTION"}
-)
-_PACKAGE_JUDGE_TOP_N_V2_SLOTS: frozenset[str] = frozenset(
-    {"USER_INFO", "skills", "candidates"}
+_PROFILE_SLOTS: frozenset[str] = frozenset(
+    {"SELF_DESCRIPTION", "MATCH_CRITERIA", "SKILLS"}
 )
 
 
@@ -45,7 +43,7 @@ class Prompts:
     judge_top_n_v2: PromptTemplate
 
 
-def load_prompts(config: Config) -> Prompts:
+def load_prompts(config: Config, search_terms: SearchTerms) -> Prompts:
     triage_dir = config.user_info_dir / "triage-profile"
     legacy_domain_fit = triage_dir / "domain-fit.md"
     if legacy_domain_fit.exists():
@@ -54,27 +52,24 @@ def load_prompts(config: Config) -> Prompts:
             "in-scope / out-of-scope content into match-criteria.md and delete the file."
         )
 
-    self_desc = _read_user_info(triage_dir, "self-description.md")
-    match_criteria = _read_user_info(triage_dir, "match-criteria.md")
-
-    user_info = (
-        f"# Kandidatenprofil\n\n{self_desc}\n\n# Match-Kriterien\n\n{match_criteria}"
-    )
+    profile_values: dict[str, str] = {
+        "SELF_DESCRIPTION": _read_user_info(triage_dir, "self-description.md"),
+        "MATCH_CRITERIA": _read_user_info(triage_dir, "match-criteria.md"),
+        "SKILLS": "\n".join(f"- {s}" for s in search_terms.skills),
+    }
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
     classify_v2 = _load_template(
         pkg,
         "classify_relevance_v2",
-        _PACKAGE_CLASSIFY_V2_SLOTS,
         CLASSIFY_RELEVANCE_V2_SLOTS,
-        user_info,
+        profile_values,
     )
     judge_top_n_v2 = _load_template(
         pkg,
         "judge_top_n_v2",
-        _PACKAGE_JUDGE_TOP_N_V2_SLOTS,
         JUDGE_TOP_N_V2_SLOTS,
-        user_info,
+        profile_values,
     )
     return Prompts(
         classify_relevance_v2=classify_v2,
@@ -96,9 +91,8 @@ def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:
 def _load_template(
     pkg: importlib.resources.abc.Traversable,
     call_site: str,
-    package_slots: frozenset[str],
-    render_slots: frozenset[str],
-    user_info: str,
+    required_data_slots: frozenset[str],
+    profile_values: dict[str, str],
 ) -> PromptTemplate:
     filename = f"{call_site}.md"
     resource = pkg / filename
@@ -106,13 +100,24 @@ def _load_template(
         raw = resource.read_text(encoding="utf-8-sig")
     except Exception as exc:
         raise PromptError(f"{filename}: {exc}") from exc
-    _validate_slots(filename, raw, package_slots)
-    escaped_user_info = user_info.replace("{", "{{").replace("}", "}}")
-    text = raw.replace("{USER_INFO}", escaped_user_info)
-    return PromptTemplate(template=text, expected_slots=render_slots)
+
+    found = _parse_slots(filename, raw)
+    allowed = required_data_slots | _PROFILE_SLOTS
+    missing = required_data_slots - found
+    unknown = found - allowed
+    if missing:
+        raise PromptError(f"{filename}: missing required data slots: {missing!r}")
+    if unknown:
+        raise PromptError(f"{filename}: unknown slots: {unknown!r}")
+
+    text = raw
+    for slot in _PROFILE_SLOTS & found:
+        escaped = profile_values[slot].replace("{", "{{").replace("}", "}}")
+        text = text.replace("{" + slot + "}", escaped)
+    return PromptTemplate(template=text, expected_slots=required_data_slots)
 
 
-def _validate_slots(filename: str, text: str, expected_slots: frozenset[str]) -> None:
+def _parse_slots(filename: str, text: str) -> frozenset[str]:
     found_slots: set[str] = set()
     try:
         for _, field_name, format_spec, conversion in string.Formatter().parse(text):
@@ -129,10 +134,4 @@ def _validate_slots(filename: str, text: str, expected_slots: frozenset[str]) ->
             found_slots.add(field_name)
     except ValueError as exc:
         raise PromptError(f"{filename}: {exc}") from exc
-
-    missing = expected_slots - found_slots
-    unknown = found_slots - expected_slots
-    if missing:
-        raise PromptError(f"{filename}: missing slots: {missing!r}")
-    if unknown:
-        raise PromptError(f"{filename}: unknown slots: {unknown!r}")
+    return frozenset(found_slots)

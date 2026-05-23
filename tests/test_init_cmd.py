@@ -11,35 +11,34 @@ from application_pipeline.init_cmd import init
 from application_pipeline.prompts import load_prompts
 
 
-def _template_bytes(name: str) -> bytes:
-    return (
-        importlib.resources.files("application_pipeline.templates") / name
-    ).read_bytes()
-
-
-def _user_info_template_bytes(name: str) -> bytes:
-    node = importlib.resources.files("application_pipeline.templates") / "user-info"
+def _ap_template_bytes(name: str) -> bytes:
+    node = importlib.resources.files("application_pipeline.templates") / "application-pipeline"
     for part in name.split("/"):
         node = node / part
     return node.read_bytes()
 
 
+def _user_info_template_bytes(name: str) -> bytes:
+    return _ap_template_bytes(f"user-info/{name}")
+
+
 def _triage_profile_template_bytes(name: str) -> bytes:
-    return (
-        importlib.resources.files("application_pipeline.templates")
-        / "user-info"
-        / "triage-profile"
-        / name
-    ).read_bytes()
+    return _ap_template_bytes(f"user-info/triage-profile/{name}")
 
 
 def _cv_template_bytes(name: str) -> bytes:
-    return (
-        importlib.resources.files("application_pipeline.templates")
-        / "user-info"
-        / "cv"
-        / name
-    ).read_bytes()
+    return _ap_template_bytes(f"user-info/cv/{name}")
+
+
+def _skeleton_template_bytes() -> bytes:
+    return _ap_template_bytes("cv-template/cv_skeleton.tex")
+
+
+def _claude_template_bytes(rel: str) -> bytes:
+    node = importlib.resources.files("application_pipeline.templates") / "claude"
+    for part in rel.split("/"):
+        node = node / part
+    return node.read_bytes()
 
 
 _TRIAGE_PROFILE_FILES = (
@@ -63,18 +62,28 @@ _LATEX_USER_INFO_FILES = (
     "signature.png",
 )
 
+_PKG_SKILL_DIRS = ("_shared", "analyse-listing", "iterate-cv", "write-cv")
+
+
+def _ap(tmp: Path) -> Path:
+    return tmp / "application-pipeline"
+
+
+def _claude(tmp: Path) -> Path:
+    return tmp / ".claude"
+
 
 def test_first_bootstrap_writes_config(tmp_path: Path) -> None:
     init(tmp_path)
 
-    assert (tmp_path / "config.py").read_bytes() == _template_bytes("config.py")
-    assert not (tmp_path / "layout.py").exists()
+    assert (_ap(tmp_path) / "config.py").read_bytes() == _ap_template_bytes("config.py")
+    assert not (_ap(tmp_path) / "layout.py").exists()
 
 
 def test_config_template_contains_claude_classify_parallelism(tmp_path: Path) -> None:
     init(tmp_path)
 
-    config_text = (tmp_path / "config.py").read_text()
+    config_text = (_ap(tmp_path) / "config.py").read_text()
     assert "CLAUDE_CLASSIFY_PARALLELISM = 4" in config_text
 
 
@@ -91,7 +100,8 @@ def test_first_bootstrap_prints_wrote_config(
 def test_skip_existing_config_prints_correctly(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (tmp_path / "config.py").write_text("# operator-edited\n")
+    _ap(tmp_path).mkdir()
+    (_ap(tmp_path) / "config.py").write_text("# operator-edited\n")
 
     init(tmp_path)
 
@@ -103,8 +113,9 @@ def test_skip_existing_config_prints_correctly(
 def test_both_exist_prints_skipped_for_both(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (tmp_path / "config.py").write_text("# custom\n")
-    (tmp_path / "layout.py").write_text("# custom\n")
+    _ap(tmp_path).mkdir()
+    (_ap(tmp_path) / "config.py").write_text("# custom\n")
+    (_ap(tmp_path) / "layout.py").write_text("# custom\n")
 
     init(tmp_path)
 
@@ -114,30 +125,32 @@ def test_both_exist_prints_skipped_for_both(
 
 
 def test_skip_existing_config_preserves_content(tmp_path: Path) -> None:
+    _ap(tmp_path).mkdir()
     original = "# operator-edited content\nKEYWORDS = ['custom']\n"
-    (tmp_path / "config.py").write_text(original)
+    (_ap(tmp_path) / "config.py").write_text(original)
 
     init(tmp_path)
 
-    assert (tmp_path / "config.py").read_text() == original
+    assert (_ap(tmp_path) / "config.py").read_text() == original
 
 
 def test_both_exist_neither_modified(tmp_path: Path) -> None:
+    _ap(tmp_path).mkdir()
     config_content = "# my config\n"
     layout_content = "# my layout\n"
-    (tmp_path / "config.py").write_text(config_content)
-    (tmp_path / "layout.py").write_text(layout_content)
+    (_ap(tmp_path) / "config.py").write_text(config_content)
+    (_ap(tmp_path) / "layout.py").write_text(layout_content)
 
     init(tmp_path)
 
-    assert (tmp_path / "config.py").read_text() == config_content
-    assert (tmp_path / "layout.py").read_text() == layout_content
+    assert (_ap(tmp_path) / "config.py").read_text() == config_content
+    assert (_ap(tmp_path) / "layout.py").read_text() == layout_content
 
 
 def test_config_template_loads_successfully(tmp_path: Path) -> None:
     init(tmp_path)
 
-    config = load(tmp_path / "config.py")
+    config = load(_ap(tmp_path) / "config.py")
 
     assert isinstance(config, Config)
     assert config.sources
@@ -150,14 +163,14 @@ def test_config_template_loads_successfully(tmp_path: Path) -> None:
 def test_fresh_seed_creates_user_info_tree(tmp_path: Path) -> None:
     init(tmp_path)
 
-    assert (tmp_path / "config.py").exists()
-    assert not (tmp_path / "layout.py").exists()
+    assert (_ap(tmp_path) / "config.py").exists()
+    assert not (_ap(tmp_path) / "layout.py").exists()
     for fname in _TRIAGE_PROFILE_FILES:
-        dest = tmp_path / "user-info" / "triage-profile" / fname
+        dest = _ap(tmp_path) / "user-info" / "triage-profile" / fname
         assert dest.exists(), f"expected {dest} to be seeded"
         assert dest.read_bytes() == _triage_profile_template_bytes(fname)
     for fname in _USER_INFO_ROOT_FILES:
-        dest = tmp_path / "user-info" / fname
+        dest = _ap(tmp_path) / "user-info" / fname
         assert dest.exists(), f"expected {dest} to be seeded"
         assert dest.read_bytes() == _user_info_template_bytes(fname)
 
@@ -165,13 +178,13 @@ def test_fresh_seed_creates_user_info_tree(tmp_path: Path) -> None:
 def test_fresh_seed_does_not_create_prompts_dir(tmp_path: Path) -> None:
     init(tmp_path)
 
-    assert not (tmp_path / "prompts").exists()
+    assert not (_ap(tmp_path) / "prompts").exists()
 
 
 def test_fresh_seed_does_not_create_latex_dir(tmp_path: Path) -> None:
     init(tmp_path)
 
-    assert not (tmp_path / "latex").exists()
+    assert not (_ap(tmp_path) / "latex").exists()
 
 
 def test_fresh_seed_prints_all_five_files(
@@ -190,9 +203,12 @@ def test_fresh_seed_prints_all_five_files(
 
 def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) -> None:
     init(tmp_path)
-    config = load(tmp_path / "config.py")
+    config = load(_ap(tmp_path) / "config.py")
 
-    prompts = load_prompts(config)
+    from application_pipeline.search_terms import load_search_terms
+
+    search_terms = load_search_terms(config.user_info_dir)
+    prompts = load_prompts(config, search_terms)
 
     from application_pipeline import PromptTemplate
 
@@ -202,16 +218,17 @@ def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) 
 
 def test_rerun_is_idempotent(tmp_path: Path) -> None:
     init(tmp_path)
+    ap = _ap(tmp_path)
     first_contents = (
-        {p: (tmp_path / p).read_bytes() for p in ["config.py"]}
+        {p: (ap / p).read_bytes() for p in ["config.py"]}
         | {
             f"user-info/triage-profile/{f}": (
-                tmp_path / "user-info" / "triage-profile" / f
+                ap / "user-info" / "triage-profile" / f
             ).read_bytes()
             for f in _TRIAGE_PROFILE_FILES
         }
         | {
-            f"user-info/{f}": (tmp_path / "user-info" / f).read_bytes()
+            f"user-info/{f}": (ap / "user-info" / f).read_bytes()
             for f in _USER_INFO_ROOT_FILES
         }
     )
@@ -219,7 +236,7 @@ def test_rerun_is_idempotent(tmp_path: Path) -> None:
     init(tmp_path)
 
     for rel, original in first_contents.items():
-        assert (tmp_path / rel).read_bytes() == original
+        assert (ap / rel).read_bytes() == original
 
 
 def test_rerun_prints_all_skipped(
@@ -242,8 +259,9 @@ def test_rerun_prints_all_skipped(
 def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "user-info" / "triage-profile").mkdir(parents=True)
-    existing = tmp_path / "user-info" / "triage-profile" / "self-description.md"
+    ap = _ap(tmp_path)
+    (ap / "user-info" / "triage-profile").mkdir(parents=True)
+    existing = ap / "user-info" / "triage-profile" / "self-description.md"
     original_content = "# operator content\n"
     existing.write_text(original_content)
 
@@ -252,18 +270,19 @@ def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
     assert existing.read_text() == original_content
     for fname in _TRIAGE_PROFILE_FILES:
         if fname != "self-description.md":
-            assert (tmp_path / "user-info" / "triage-profile" / fname).exists(), (
+            assert (ap / "user-info" / "triage-profile" / fname).exists(), (
                 f"{fname} should be seeded"
             )
     for fname in _USER_INFO_ROOT_FILES:
-        assert (tmp_path / "user-info" / fname).exists(), f"{fname} should be seeded"
+        assert (ap / "user-info" / fname).exists(), f"{fname} should be seeded"
 
 
 def test_per_file_skip_granular_output(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (tmp_path / "user-info" / "triage-profile").mkdir(parents=True)
-    (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
+    ap = _ap(tmp_path)
+    (ap / "user-info" / "triage-profile").mkdir(parents=True)
+    (ap / "user-info" / "triage-profile" / "self-description.md").write_text(
         "# custom\n"
     )
 
@@ -281,12 +300,12 @@ def test_per_file_skip_granular_output(
 
 
 def test_banner_does_not_trigger_prompt_error(tmp_path: Path) -> None:
-    init(tmp_path)
-    config = load(tmp_path / "config.py")
+    from application_pipeline.search_terms import load_search_terms
 
-    # load_prompts injects user-info content into package templates;
-    # if any user-info template line uses raw {slot} syntax this would raise PromptError
-    load_prompts(config)
+    init(tmp_path)
+    config = load(_ap(tmp_path) / "config.py")
+
+    load_prompts(config, load_search_terms(config.user_info_dir))
 
 
 # --- LaTeX per-applicant file seeding ---
@@ -296,7 +315,7 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
     init(tmp_path)
 
     for fname in _LATEX_USER_INFO_FILES:
-        dest = tmp_path / "user-info" / "cv" / fname
+        dest = _ap(tmp_path) / "user-info" / "cv" / fname
         assert dest.exists(), f"expected {dest} to be seeded by init"
         assert dest.read_bytes() == _cv_template_bytes(fname)
 
@@ -304,7 +323,7 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
 def test_init_seeds_subdirs_under_user_info(tmp_path: Path) -> None:
     init(tmp_path)
 
-    user_info = tmp_path / "user-info"
+    user_info = _ap(tmp_path) / "user-info"
     top_level = {p.name for p in user_info.iterdir()}
     assert top_level == {"triage-profile", "search-terms", "cv"}
 
@@ -330,7 +349,7 @@ def test_rerun_skips_existing_latex_files(
 
 def test_rerun_preserves_latex_file_content(tmp_path: Path) -> None:
     init(tmp_path)
-    facts_path = tmp_path / "user-info" / "cv" / "facts.tex"
+    facts_path = _ap(tmp_path) / "user-info" / "cv" / "facts.tex"
     original = facts_path.read_bytes()
 
     init(tmp_path)
@@ -341,16 +360,17 @@ def test_rerun_preserves_latex_file_content(tmp_path: Path) -> None:
 def test_init_does_not_auto_migrate_existing_identity_and_contact(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "user-info").mkdir()
+    ap = _ap(tmp_path)
+    (ap / "user-info").mkdir(parents=True)
     identity_content = "% user-edited identity\n\\firstname{Alice}\n"
     contact_content = "% user-edited contact\n\\address{Musterstr}{Berlin}{}\n"
-    (tmp_path / "user-info" / "identity.tex").write_text(identity_content)
-    (tmp_path / "user-info" / "contact.tex").write_text(contact_content)
+    (ap / "user-info" / "identity.tex").write_text(identity_content)
+    (ap / "user-info" / "contact.tex").write_text(contact_content)
 
     init(tmp_path)
 
-    assert (tmp_path / "user-info" / "identity.tex").read_text() == identity_content
-    assert (tmp_path / "user-info" / "contact.tex").read_text() == contact_content
+    assert (ap / "user-info" / "identity.tex").read_text() == identity_content
+    assert (ap / "user-info" / "contact.tex").read_text() == contact_content
 
 
 # --- LaTeX package (application_pipeline.latex) ---
@@ -374,40 +394,42 @@ _SETUP_SCRIPTS = ("cron.sh", "cron-install.sh", "cron-uninstall.sh")
 
 
 def _setup_template_bytes(name: str) -> bytes:
-    return (
-        importlib.resources.files("application_pipeline.templates") / "setup" / name
-    ).read_bytes()
+    return _ap_template_bytes(f"setup/{name}")
 
 
 def test_init_seeds_setup_scripts_with_correct_content(tmp_path: Path) -> None:
     init(tmp_path)
 
     for fname in _SETUP_SCRIPTS:
-        assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
+        assert (_ap(tmp_path) / "setup" / fname).read_bytes() == _setup_template_bytes(
+            fname
+        )
 
 
 def test_rerun_does_not_overwrite_existing_setup_scripts(tmp_path: Path) -> None:
     init(tmp_path)
+    ap = _ap(tmp_path)
     originals = {
-        fname: (tmp_path / "setup" / fname).read_bytes() for fname in _SETUP_SCRIPTS
+        fname: (ap / "setup" / fname).read_bytes() for fname in _SETUP_SCRIPTS
     }
 
     init(tmp_path)
 
     for fname in _SETUP_SCRIPTS:
-        assert (tmp_path / "setup" / fname).read_bytes() == originals[fname]
+        assert (ap / "setup" / fname).read_bytes() == originals[fname]
 
 
 def test_init_skips_existing_setup_scripts(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (tmp_path / "setup").mkdir()
+    ap = _ap(tmp_path)
+    (ap / "setup").mkdir(parents=True)
     custom = "# custom cron\n"
-    (tmp_path / "setup" / "cron.sh").write_text(custom)
+    (ap / "setup" / "cron.sh").write_text(custom)
 
     init(tmp_path)
 
-    assert (tmp_path / "setup" / "cron.sh").read_text() == custom
+    assert (ap / "setup" / "cron.sh").read_text() == custom
     out = capsys.readouterr().out
     assert "skipped setup/cron.sh (already exists)" in out
     assert "wrote setup/cron-install.sh" in out
@@ -416,7 +438,7 @@ def test_init_skips_existing_setup_scripts(
 
 def test_cron_sh_invokes_init_refresh_without_path_arg(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
     match = re.search(r"application-pipeline init --refresh(\S*)", cron_sh)
     assert match is not None
     assert match.group(1) == ""
@@ -424,7 +446,7 @@ def test_cron_sh_invokes_init_refresh_without_path_arg(tmp_path: Path) -> None:
 
 def test_cron_sh_self_locates_via_dirname(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
     assert 'cd "$(dirname "$0")/../.."' in cron_sh
     cd_pos = cron_sh.index('cd "$(dirname "$0")/../.."')
     assert cd_pos < cron_sh.index("pip ")
@@ -433,14 +455,13 @@ def test_cron_sh_self_locates_via_dirname(tmp_path: Path) -> None:
 
 def test_cron_sh_flock_uses_project_root_relative_path(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
     assert "application-pipeline/.cron.lock" in cron_sh
 
 
 def test_cron_sh_pip_upgrade_warns_and_continues_on_failure(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
-    # pip failures must warn-and-continue, not call fail() or exit
+    cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
     pip_lines = [ln for ln in cron_sh.splitlines() if "pip install" in ln]
     assert len(pip_lines) >= 2, "expected at least two pip install lines"
     for ln in pip_lines:
@@ -450,32 +471,29 @@ def test_cron_sh_pip_upgrade_warns_and_continues_on_failure(tmp_path: Path) -> N
 
 def test_cron_sh_both_pip_upgrade_attempts_run_unconditionally(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
     pip_lines = [ln for ln in cron_sh.splitlines() if "pip install" in ln]
     assert len(pip_lines) >= 2, "expected at least two pip install upgrade lines"
-    # both must target application-pipeline
     assert all("application-pipeline" in ln for ln in pip_lines)
 
 
 def test_cron_sh_pip_warning_names_attempt_number(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
     assert re.search(r"WARNING.*attempt 1", cron_sh)
     assert re.search(r"WARNING.*attempt 2", cron_sh)
 
 
 def test_cron_sh_pip_warning_includes_captured_stderr(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
-    # stderr must be captured in a variable and echoed in the warning
+    cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
     assert re.search(r"\$\(pip install.*2>&1", cron_sh)
-    # the variable is referenced inside the warning echo
     assert re.search(r"WARNING.*\$_pip_stderr", cron_sh)
 
 
 def test_cron_sh_pipeline_stages_still_call_fail_on_error(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_sh = (tmp_path / "setup" / "cron.sh").read_text()
+    cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
     assert re.search(
         r"application-pipeline init --refresh.*\|\|.*\bfail\b", cron_sh, re.DOTALL
     )
@@ -498,14 +516,14 @@ def test_adr_0027_documents_pip_warn_and_continue_policy() -> None:
 
 def test_cron_install_writes_weekday_only_schedule(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_install = (tmp_path / "setup" / "cron-install.sh").read_text()
+    cron_install = (_ap(tmp_path) / "setup" / "cron-install.sh").read_text()
     assert "30 0 * * 1-5" in cron_install
     assert "30 0 * * *" not in cron_install
 
 
 def test_cron_install_command_is_absolute_path_only(tmp_path: Path) -> None:
     init(tmp_path)
-    cron_install = (tmp_path / "setup" / "cron-install.sh").read_text()
+    cron_install = (_ap(tmp_path) / "setup" / "cron-install.sh").read_text()
     match = re.search(r"CRON_LINE=(.+)", cron_install)
     assert match is not None
     line = match.group(1)
@@ -519,16 +537,17 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
+    ap = _ap(tmp_path)
     # Modify all files
     for fname in _SETUP_SCRIPTS:
-        (tmp_path / "setup" / fname).write_text("# custom\n")
-    (tmp_path / "config.py").write_text("# custom\n")
-    (tmp_path / "layout.py").write_text("# legacy layout\n")
-    (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
+        (ap / "setup" / fname).write_text("# custom\n")
+    (ap / "config.py").write_text("# custom\n")
+    (ap / "layout.py").write_text("# legacy layout\n")
+    (ap / "user-info" / "triage-profile" / "self-description.md").write_text(
         "# custom\n"
     )
     # Delete a global file to trigger "wrote"
-    (tmp_path / "setup" / "cron-install.sh").unlink()
+    (ap / "setup" / "cron-install.sh").unlink()
     capsys.readouterr()
 
     init(tmp_path, refresh=True)
@@ -546,29 +565,30 @@ def test_refresh_removes_layout_py_if_present(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
-    (tmp_path / "layout.py").write_text("# legacy\n")
+    (_ap(tmp_path) / "layout.py").write_text("# legacy\n")
     capsys.readouterr()
 
     init(tmp_path, refresh=True)
 
-    assert not (tmp_path / "layout.py").exists()
+    assert not (_ap(tmp_path) / "layout.py").exists()
     assert "removed layout.py" in capsys.readouterr().out
 
 
 def test_refresh_on_empty_dir_writes_all_files(tmp_path: Path) -> None:
     init(tmp_path, refresh=True)
 
-    assert (tmp_path / "config.py").read_bytes() == _template_bytes("config.py")
-    assert not (tmp_path / "layout.py").exists()
+    ap = _ap(tmp_path)
+    assert (ap / "config.py").read_bytes() == _ap_template_bytes("config.py")
+    assert not (ap / "layout.py").exists()
     for fname in _SETUP_SCRIPTS:
-        assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
+        assert (ap / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
     for fname in _TRIAGE_PROFILE_FILES:
         assert (
-            tmp_path / "user-info" / "triage-profile" / fname
+            ap / "user-info" / "triage-profile" / fname
         ).read_bytes() == _triage_profile_template_bytes(fname)
     for fname in _USER_INFO_ROOT_FILES:
         assert (
-            tmp_path / "user-info" / fname
+            ap / "user-info" / fname
         ).read_bytes() == _user_info_template_bytes(fname)
 
 
@@ -576,90 +596,243 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
+    ap = _ap(tmp_path)
 
-    # Modify all files to simulate user edits
     custom_setup = "# user-modified setup\n"
     custom_config = "# user-modified config\n"
     custom_user_info = "# user-modified self-description\n"
     for fname in _SETUP_SCRIPTS:
-        (tmp_path / "setup" / fname).write_text(custom_setup)
-    (tmp_path / "config.py").write_text(custom_config)
-    (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
+        (ap / "setup" / fname).write_text(custom_setup)
+    (ap / "config.py").write_text(custom_config)
+    (ap / "user-info" / "triage-profile" / "self-description.md").write_text(
         custom_user_info
     )
 
     init(tmp_path, refresh=True)
 
-    # setup/ files must match package templates
     for fname in _SETUP_SCRIPTS:
-        assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
-    # user files must retain user-modified content
-    assert (tmp_path / "config.py").read_text() == custom_config
+        assert (ap / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
+    assert (ap / "config.py").read_text() == custom_config
     assert (
-        tmp_path / "user-info" / "triage-profile" / "self-description.md"
+        ap / "user-info" / "triage-profile" / "self-description.md"
     ).read_text() == custom_user_info
 
 
-# --- skills/cv_skeleton.tex seeding ---
-
-
-def _skills_template_bytes(name: str) -> bytes:
-    return (
-        importlib.resources.files("application_pipeline.templates") / "skills" / name
-    ).read_bytes()
+# --- cv-template/cv_skeleton.tex seeding ---
 
 
 def test_fresh_init_creates_cv_skeleton(tmp_path: Path) -> None:
     init(tmp_path)
 
-    dest = tmp_path / "skills" / "cv_skeleton.tex"
+    dest = _ap(tmp_path) / "cv-template" / "cv_skeleton.tex"
     assert dest.exists()
-    assert dest.read_bytes() == _skills_template_bytes("cv_skeleton.tex")
+    assert dest.read_bytes() == _skeleton_template_bytes()
 
 
 def test_init_skips_existing_cv_skeleton(tmp_path: Path) -> None:
-    (tmp_path / "skills").mkdir()
+    ap = _ap(tmp_path)
+    (ap / "cv-template").mkdir(parents=True)
     original = "% user-edited skeleton\n"
-    (tmp_path / "skills" / "cv_skeleton.tex").write_text(original)
+    (ap / "cv-template" / "cv_skeleton.tex").write_text(original)
 
     init(tmp_path)
 
-    assert (tmp_path / "skills" / "cv_skeleton.tex").read_text() == original
+    assert (ap / "cv-template" / "cv_skeleton.tex").read_text() == original
 
 
 def test_refresh_overwrites_cv_skeleton(tmp_path: Path) -> None:
     init(tmp_path)
-    (tmp_path / "skills" / "cv_skeleton.tex").write_text("% user-edited\n")
+    (_ap(tmp_path) / "cv-template" / "cv_skeleton.tex").write_text("% user-edited\n")
 
     init(tmp_path, refresh=True)
 
     assert (
-        tmp_path / "skills" / "cv_skeleton.tex"
-    ).read_bytes() == _skills_template_bytes("cv_skeleton.tex")
+        _ap(tmp_path) / "cv-template" / "cv_skeleton.tex"
+    ).read_bytes() == _skeleton_template_bytes()
 
 
 def test_refresh_prints_overwrote_for_cv_skeleton(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
-    (tmp_path / "skills" / "cv_skeleton.tex").write_text("% user-edited\n")
+    (_ap(tmp_path) / "cv-template" / "cv_skeleton.tex").write_text("% user-edited\n")
     capsys.readouterr()
 
     init(tmp_path, refresh=True)
 
     out = capsys.readouterr().out
-    assert "overwrote skills/cv_skeleton.tex" in out
+    assert "overwrote cv-template/cv_skeleton.tex" in out
 
 
 def test_refresh_preserves_user_info_when_skills_exist(tmp_path: Path) -> None:
     init(tmp_path)
     custom_user_info = "# my self-description\n"
-    (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
+    (_ap(tmp_path) / "user-info" / "triage-profile" / "self-description.md").write_text(
         custom_user_info
     )
 
     init(tmp_path, refresh=True)
 
     assert (
-        tmp_path / "user-info" / "triage-profile" / "self-description.md"
+        _ap(tmp_path) / "user-info" / "triage-profile" / "self-description.md"
     ).read_text() == custom_user_info
+
+
+# --- legacy <cwd>/application-pipeline/skills/ cleanup on refresh ---
+
+
+def test_refresh_removes_legacy_skills_dir_with_only_cv_skeleton(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    legacy = _ap(tmp_path) / "skills"
+    legacy.mkdir(parents=True, exist_ok=True)
+    (legacy / "cv_skeleton.tex").write_text("% stale\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert not legacy.exists()
+    out = capsys.readouterr().out
+    assert "removed skills/cv_skeleton.tex" in out
+    assert "removed skills/" in out
+
+
+def test_refresh_preserves_legacy_skills_dir_with_user_content(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    legacy = _ap(tmp_path) / "skills"
+    legacy.mkdir(parents=True, exist_ok=True)
+    (legacy / "cv_skeleton.tex").write_text("% stale\n")
+    (legacy / "notes.md").write_text("# my notes\n")
+
+    init(tmp_path, refresh=True)
+
+    assert legacy.exists()
+    assert not (legacy / "cv_skeleton.tex").exists()
+    assert (legacy / "notes.md").read_text() == "# my notes\n"
+
+
+def test_refresh_with_no_legacy_skills_dir_is_silent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    out = capsys.readouterr().out
+    assert "removed skills/" not in out
+
+
+# --- .claude/skills/ seeding (ADR-0044) ---
+
+
+def test_fresh_init_seeds_claude_skills(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    claude_skills = _claude(tmp_path) / "skills"
+    assert claude_skills.is_dir()
+    for d in _PKG_SKILL_DIRS:
+        assert (claude_skills / d).is_dir(), f"{d} missing"
+
+
+def test_fresh_init_seeds_known_skill_files_with_template_content(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    claude_skills = _claude(tmp_path) / "skills"
+    expected_files = [
+        "_shared/STARTUP-TRIAGE.md",
+        "_shared/TRIAGE-ROUTING.md",
+        "analyse-listing/SKILL.md",
+        "iterate-cv/SKILL.md",
+        "write-cv/SKILL.md",
+    ]
+    for rel in expected_files:
+        dest = claude_skills / rel
+        assert dest.exists(), f"expected {rel} to be seeded"
+        assert dest.read_bytes() == _claude_template_bytes(f"skills/{rel}")
+
+
+def test_seeded_startup_triage_drops_domain_fit(tmp_path: Path) -> None:
+    init(tmp_path)
+    text = (_claude(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md").read_text()
+    assert "domain-fit.md" not in text
+    assert "match-criteria.md" in text
+
+
+def test_seeded_triage_routing_drops_domain_fit(tmp_path: Path) -> None:
+    init(tmp_path)
+    text = (_claude(tmp_path) / "skills" / "_shared" / "TRIAGE-ROUTING.md").read_text()
+    assert "domain-fit.md" not in text
+    assert "match-criteria.md" in text
+
+
+def test_seeded_write_cv_skill_references_new_cv_template_path(tmp_path: Path) -> None:
+    init(tmp_path)
+    text = (_claude(tmp_path) / "skills" / "write-cv" / "SKILL.md").read_text()
+    assert "application-pipeline/cv-template/cv_skeleton.tex" in text
+    assert "application-pipeline/skills/cv_skeleton.tex" not in text
+
+
+def test_seeded_iterate_cv_skill_references_new_cv_template_path(tmp_path: Path) -> None:
+    init(tmp_path)
+    text = (_claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md").read_text()
+    assert "application-pipeline/cv-template/cv_skeleton.tex" in text
+    assert "application-pipeline/skills/cv_skeleton.tex" not in text
+
+
+def test_refresh_overwrites_package_owned_skill_files(tmp_path: Path) -> None:
+    init(tmp_path)
+    skill_file = _claude(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md"
+    skill_file.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert skill_file.read_bytes() == _claude_template_bytes(
+        "skills/_shared/STARTUP-TRIAGE.md"
+    )
+
+
+def test_refresh_preserves_user_added_skill_dirs(tmp_path: Path) -> None:
+    init(tmp_path)
+    custom = _claude(tmp_path) / "skills" / "my-skill"
+    custom.mkdir(parents=True, exist_ok=True)
+    (custom / "SKILL.md").write_text("# my private skill\n")
+
+    init(tmp_path, refresh=True)
+
+    assert (custom / "SKILL.md").read_text() == "# my private skill\n"
+
+
+def test_refresh_preserves_unknown_files_inside_package_owned_skill_dirs(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    notes = _claude(tmp_path) / "skills" / "iterate-cv" / "notes.md"
+    notes.write_text("# wip\n")
+
+    init(tmp_path, refresh=True)
+
+    assert notes.read_text() == "# wip\n"
+
+
+def test_init_creates_claude_dir_if_missing(tmp_path: Path) -> None:
+    assert not (tmp_path / ".claude").exists()
+
+    init(tmp_path)
+
+    assert (tmp_path / ".claude").is_dir()
+
+
+def test_init_does_not_touch_existing_claude_settings_local(tmp_path: Path) -> None:
+    claude = _claude(tmp_path)
+    claude.mkdir(parents=True, exist_ok=True)
+    settings = claude / "settings.local.json"
+    settings.write_text('{"foo": "bar"}\n')
+
+    init(tmp_path, refresh=True)
+
+    assert settings.read_text() == '{"foo": "bar"}\n'

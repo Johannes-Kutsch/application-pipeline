@@ -34,10 +34,21 @@ fallback_version = "0.0.0"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"application_pipeline.templates" = [
+    "application-pipeline/*",
+    "application-pipeline/setup/*.sh",
+    "application-pipeline/cv-template/*",
+    "application-pipeline/user-info/*",
+    "application-pipeline/user-info/triage-profile/*",
+    "application-pipeline/user-info/search-terms/*",
+    "application-pipeline/user-info/cv/*",
+    "claude/skills/_shared/*",
+    "claude/skills/analyse-listing/*",
+    "claude/skills/iterate-cv/*",
+    "claude/skills/write-cv/*",
+]
 "application_pipeline.templates.prompts" = ["*.md"]
 "application_pipeline.latex" = ["*.tex", "*.cls", "*.sty", "*.md"]
-"application_pipeline.templates.user-info" = ["*", "triage-profile/*"]
-"application_pipeline.templates.setup" = ["*.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -43,9 +43,9 @@ def main() -> None:
         if rest:
             print("usage: application-pipeline init [--refresh]", file=sys.stderr)
             sys.exit(2)
-        from application_pipeline.init_cmd import home_dir, init
+        from application_pipeline.init_cmd import init
 
-        init(home_dir(), refresh=refresh)
+        init(Path.cwd(), refresh=refresh)
         return
 
     if args and args[0] == "compile-cv" and len(args) == 2:

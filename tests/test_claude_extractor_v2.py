@@ -1,4 +1,4 @@
-"""Tests for ClaudeExtractor v2 call shapes — classify_relevance_v2 and judge_top_n_v2."""
+﻿"""Tests for ClaudeExtractor v2 call shapes â€” classify_relevance_v2 and judge_top_n_v2."""
 
 from __future__ import annotations
 
@@ -28,12 +28,6 @@ from application_pipeline.prompts import (
     PromptTemplate,
     Prompts,
 )
-from application_pipeline.search_terms.types import SearchTerms
-
-
-_SEARCH_TERMS = SearchTerms(keywords=("python",), skills=(), negative_keywords=())
-
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -58,7 +52,7 @@ def _prompts() -> Prompts:
             "v2 {LISTING_BULLETS} {RAW_DESCRIPTION}",
             CLASSIFY_RELEVANCE_V2_SLOTS,
         ),
-        judge_top_n_v2=PromptTemplate("v2 {skills} {candidates}", JUDGE_TOP_N_V2_SLOTS),
+        judge_top_n_v2=PromptTemplate("v2 {CANDIDATES}", JUDGE_TOP_N_V2_SLOTS),
     )
 
 
@@ -112,7 +106,7 @@ def test_classify_relevance_v2_in_domain_returns_header_and_summary(
         _classify_v2_response(
             {
                 "matches": True,
-                "header": "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+                "header": "Senior Python Engineer\nAcme Â· Hamburg Â· remote\n2024-01-01",
                 "summary": "Great role for ML engineers.",
             }
         )
@@ -120,7 +114,6 @@ def test_classify_relevance_v2_in_domain_returns_header_and_summary(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -130,7 +123,7 @@ def test_classify_relevance_v2_in_domain_returns_header_and_summary(
     assert isinstance(result, RelevanceVerdictV2)
     assert result.matches is True
     assert (
-        result.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
+        result.header == "Senior Python Engineer\nAcme Â· Hamburg Â· remote\n2024-01-01"
     )
     assert result.summary == "Great role for ML engineers."
     assert usage.input_tokens == 100
@@ -149,7 +142,6 @@ def test_classify_relevance_v2_out_of_domain_returns_none_header_and_summary(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -172,7 +164,6 @@ def test_classify_relevance_v2_in_domain_missing_header_raises_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -189,7 +180,6 @@ def test_classify_relevance_v2_in_domain_missing_summary_raises_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -206,7 +196,6 @@ def test_classify_relevance_v2_in_domain_empty_header_raises_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -228,7 +217,6 @@ def test_classify_relevance_v2_prompt_includes_company_and_location(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -247,7 +235,6 @@ def test_classify_relevance_v2_legacy_in_domain_field_raises_malformed(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -278,7 +265,6 @@ def test_judge_top_n_v2_returns_match_verdict_v2_with_id_and_rank(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -297,7 +283,6 @@ def test_judge_top_n_v2_empty_candidates_returns_empty_list(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )
@@ -316,7 +301,6 @@ def test_judge_top_n_v2_candidates_appear_in_prompt(
     extractor = ClaudeExtractor(
         _config(),
         _prompts(),
-        search_terms=_SEARCH_TERMS,
         run_log=run_log,
         _invoker=invoker,
     )

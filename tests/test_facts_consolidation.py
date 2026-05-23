@@ -44,6 +44,7 @@ _RETIRED_FILENAMES = ("identity.tex", "contact.tex")
 def facts_seed() -> str:
     return (
         importlib.resources.files("application_pipeline.templates")
+        / "application-pipeline"
         / "user-info"
         / "cv"
         / "facts.tex"
@@ -70,7 +71,10 @@ def test_facts_tex_contains_no_moderncv_calls(facts_seed: str, call: str) -> Non
 @pytest.mark.parametrize("retired", _RETIRED_FILENAMES)
 def test_retired_user_info_file_absent_from_package(retired: str) -> None:
     user_info_cv = (
-        importlib.resources.files("application_pipeline.templates") / "user-info" / "cv"
+        importlib.resources.files("application_pipeline.templates")
+        / "application-pipeline"
+        / "user-info"
+        / "cv"
     )
     names = {item.name for item in user_info_cv.iterdir()}
     assert retired not in names, f"{retired} must be deleted from package"

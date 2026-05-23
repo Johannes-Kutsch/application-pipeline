@@ -2,11 +2,15 @@
 
 ## Kandidatenprofil
 
-{USER_INFO}
+{SELF_DESCRIPTION}
 
 ## Kompetenzprofil
 
-{skills}
+{SKILLS}
+
+## Match-Kriterien
+
+{MATCH_CRITERIA}
 
 ## Aufgabe
 
@@ -24,4 +28,4 @@ Antworte ausschließlich mit einem JSON-Array in folgendem Format innerhalb von 
 
 ## Kandidaten
 
-{candidates}
+{CANDIDATES}

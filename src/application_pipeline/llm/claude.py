@@ -6,7 +6,6 @@ from typing import Any
 from application_pipeline.config import Config
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prompts import Prompts
-from application_pipeline.search_terms.types import SearchTerms
 
 from .agent_output import AgentOutputProtocolError, extract_json_block
 from .claude_cli import (
@@ -116,7 +115,6 @@ class ClaudeExtractor:
         config: Config,
         prompts: Prompts,
         *,
-        search_terms: SearchTerms,
         run_log: RunLog,
         _invoker: ClaudeCliInvoker | None = None,
     ) -> None:
@@ -124,7 +122,6 @@ class ClaudeExtractor:
         self._prompts = prompts
         self._run_log = run_log
         self._invoker = _invoker or ClaudeCliInvoker(cli_path=config.claude_cli_path)
-        self._skills_block = "\n".join(f"- {s}" for s in search_terms.skills)
 
     def classify_relevance_v2(
         self, item: ClassifyItem
@@ -149,9 +146,7 @@ class ClaudeExtractor:
                 duration_s=0.0,
             )
         candidates_block = self._format_candidates_v2(candidates)
-        prompt = self._prompts.judge_top_n_v2.render(
-            skills=self._skills_block, candidates=candidates_block
-        )
+        prompt = self._prompts.judge_top_n_v2.render(CANDIDATES=candidates_block)
         data, response = self._invoke(
             _JUDGE_TOP_N_SITE, prompt, {"candidate_count": len(candidates)}
         )

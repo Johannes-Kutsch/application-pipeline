@@ -225,8 +225,12 @@ def test_config_error_propagates(tmp_path: Path) -> None:
 
 
 def test_prompt_error_propagates(tmp_path: Path) -> None:
-    # user-info dir exists but files are missing → PromptError on load_prompts
+    # search-terms present so load_search_terms passes, but triage files are
+    # missing → PromptError on load_prompts
     config_path = _write_config(tmp_path, with_user_info_files=False)
+    st_dir = tmp_path / "user-info" / "search-terms"
+    st_dir.mkdir(parents=True, exist_ok=True)
+    (st_dir / "keywords.md").write_text("- python\n", encoding="utf-8")
 
     with pytest.raises(PromptError):
         run(
@@ -2762,7 +2766,12 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
         locations=["Hamburg"],
         user_info_dir=user_info_dir,
     )
-    prompts = load_prompts(cfg)
+    from application_pipeline.search_terms.types import SearchTerms
+
+    prompts = load_prompts(
+        cfg,
+        SearchTerms(keywords=("python",), skills=(), negative_keywords=()),
+    )
 
     assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
     assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
@@ -2777,7 +2786,10 @@ def test_init_materialises_user_info_files(
     init(tmp_path)
 
     triage_files = {
-        f.name for f in (tmp_path / "user-info" / "triage-profile").glob("*.md")
+        f.name
+        for f in (
+            tmp_path / "application-pipeline" / "user-info" / "triage-profile"
+        ).glob("*.md")
     }
 
     assert "self-description.md" in triage_files

@@ -131,7 +131,7 @@ def test_init_seeds_search_terms_template_that_loads_successfully(
 ) -> None:
     init(tmp_path)
 
-    result = load_search_terms(tmp_path / "user-info")
+    result = load_search_terms(tmp_path / "application-pipeline" / "user-info")
 
     assert isinstance(result, SearchTerms)
     assert result.keywords

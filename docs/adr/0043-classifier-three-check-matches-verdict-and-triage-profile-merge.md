@@ -39,6 +39,22 @@ In the same change, the **Triage Profile** collapses from three files (`self-des
 - **Test updates**: `tests/test_prompt_loader.py` (rendered prompt contains both sub-block headers; legacy `domain-fit.md` raises `PromptError`); `tests/test_claude_extractor_v2.py` (new verdict shape parses; legacy `in_domain` shape fails); `tests/test_llm_enricher.py` + `tests/test_orchestrator.py` (`matches: true` writes `in_domain` dedup status + extract; `matches: false` writes `out_of_domain`).
 - **Tracking**: implementation lives in issue #535.
 
+## Amendment (post-issue #535): render-responsibility moves into templates
+
+The "both call sites see the same merged `{USER_INFO}` block with `# Kandidatenprofil` + `# Match-Kriterien` headers" rule above describes the *content* invariant only. The loader (`prompts.py`) no longer renders headers — it exposes three named profile slots that each prompt template places (with its own heading level) explicitly:
+
+- `{SELF_DESCRIPTION}` — body of `self-description.md`.
+- `{MATCH_CRITERIA}` — body of `match-criteria.md`.
+- `{SKILLS}` — `\n`-joined `- {skill}` bullets from `SearchTerms.skills` (the former judge-only `{skills}` slot, lifted to a shared profile slot under the Caps naming convention).
+
+Per call-site validation: data slots stay required (`{LISTING_BULLETS}` + `{RAW_DESCRIPTION}` for classify; `{CANDIDATES}` for judge), the three profile slots are *allowed* in either template in any subset. A future need to put `{SKILLS}` into the classifier (which ADR-0019 currently forbids) is a deliberate prompt edit, not a loader change. The judge keeps its existing `## Kandidatenprofil` / `## Kompetenzprofil` / `## Match-Kriterien` H2 structure; the classifier uses flat H1.
+
+Consequences:
+
+- `load_prompts(config)` becomes `load_prompts(config, search_terms)` so the loader can substitute `{SKILLS}` at load time.
+- `ClaudeExtractor` no longer needs `SearchTerms` (the skills block is baked into the judge template on load); the kwarg is dropped.
+- The judge's old lowercase `{skills}` and `{candidates}` placeholders rename to `{SKILLS}` and `{CANDIDATES}` (Caps convention applies to all v2 placeholders).
+
 ## Supersedes / amends
 
 - **Supersedes ADR-0016** in the USER_INFO file-routing area: the per-call-site `self-description + domain-fit` vs `self-description + match-criteria` split retires. ADR-0016's hardcoded-protocol / externalised-content split and the single-language pipeline decision remain in force.

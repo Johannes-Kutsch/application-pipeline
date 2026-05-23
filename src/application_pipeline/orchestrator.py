@@ -606,20 +606,16 @@ def run(
             run_log = RunLog(cfg.logs_path)
 
         # Steps 2-3: Load prompts, build extractor + LLMEnricher
+        if search_terms is None:
+            search_terms = load_search_terms(cfg.user_info_dir)
         if extractor is None or llm_enricher is None:
             try:
-                prompts = load_prompts(cfg)
+                prompts = load_prompts(cfg, search_terms)
             except PromptError as exc:
                 _log.error("startup failed — prompts: %s", exc)
                 raise
-            if search_terms is None:
-                search_terms = load_search_terms(cfg.user_info_dir)
             if extractor is None:
-                extractor = ClaudeExtractor(
-                    cfg, prompts, search_terms=search_terms, run_log=run_log
-                )
-        elif search_terms is None:
-            search_terms = load_search_terms(cfg.user_info_dir)
+                extractor = ClaudeExtractor(cfg, prompts, run_log=run_log)
 
         # Step 6: Resolve parser classes
         _resolve = (

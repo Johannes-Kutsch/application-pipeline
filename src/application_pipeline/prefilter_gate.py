@@ -38,6 +38,15 @@ class _DedupStore(Protocol):
 
 
 @dataclass(frozen=True)
+class _StubAsPosition:
+    stub: _Stub
+
+    @property
+    def title(self) -> str:
+        return self.stub.title or ""
+
+
+@dataclass(frozen=True)
 class _PreFilterVerdict:
     passes: bool
     reason: Literal["passed", "blacklist_drop"]
@@ -85,16 +94,7 @@ class PreFilterGate:
 
     def admit_stub(self, stub: _Stub) -> bool:
         """Check negative keyword blacklist on stub title, without requiring a Position."""
-
-        class _StubPosition:
-            def __init__(self, s: _Stub) -> None:
-                self.stub = s
-
-            @property
-            def title(self) -> str:
-                return self.stub.title or ""
-
-        return self.admit(_StubPosition(stub))
+        return self.admit(_StubAsPosition(stub))
 
     def admit(self, position: _Position) -> bool:
         verdict = _evaluate(position, self._blacklist)

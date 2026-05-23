@@ -221,7 +221,9 @@ class DeduplicationStore:
             else:
                 self._mark(key, "expired")
 
-    def mark_in_domain(self, key: _SeenKey, *, extract: "StructuredExtract | None" = None) -> None:
+    def mark_in_domain(
+        self, key: _SeenKey, *, extract: "StructuredExtract | None" = None
+    ) -> None:
         with self._lock:
             self._mark(key, "in_domain")
             if self._extract_store is not None and extract is not None:
@@ -272,7 +274,9 @@ def load(
     card_store: "CardStore | None" = None,
 ) -> DeduplicationStore:
     if not path.exists():
-        return DeduplicationStore(path, {}, extract_store=extract_store, card_store=card_store)
+        return DeduplicationStore(
+            path, {}, extract_store=extract_store, card_store=card_store
+        )
 
     try:
         raw = path.read_bytes()
@@ -312,4 +316,6 @@ def load(
                     f"(see wipe instruction in the store migration guide)"
                 )
 
-    return DeduplicationStore(path, data, extract_store=extract_store, card_store=card_store)
+    return DeduplicationStore(
+        path, data, extract_store=extract_store, card_store=card_store
+    )

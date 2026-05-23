@@ -36,7 +36,7 @@ from application_pipeline.llm import (
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm.types import CallUsage, RelevanceVerdictV2
-from application_pipeline.llm_enricher import LLMEnricher
+from application_pipeline.llm_enricher import LLMEnricher, LLMExtractorV2
 from application_pipeline.parsers import (
     NotServedQuery,
     Parser,
@@ -649,8 +649,6 @@ def run(
         if quota_wall is None:
             quota_wall = _quota.QuotaWall()
         if llm_enricher is None:
-            from application_pipeline.llm_enricher import LLMExtractorV2
-
             assert isinstance(extractor, LLMExtractorV2), (
                 "extractor must implement LLMExtractorV2 (classify_relevance_v2)"
             )

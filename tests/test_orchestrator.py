@@ -21,7 +21,11 @@ from application_pipeline.llm import (
     ExtractorUnreachableError,
     RelevanceVerdict,
 )
-from application_pipeline.extracts.card_store import CardExtract, CardStore, load_card_store
+from application_pipeline.extracts.card_store import (
+    CardExtract,
+    CardStore,
+    load_card_store,
+)
 from application_pipeline.llm.types import (
     JudgeCandidateV2,
     MatchVerdictV2,
@@ -172,13 +176,17 @@ class _FakeLLMEnricherHelper:
         self._header = header
         self._summary = summary
 
-    def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+    def enrich(
+        self, stub: PositionStub, body_selector: "str | None"
+    ) -> "RelevanceVerdictV2 | None":
         if self._in_domain:
             self._card_store.put(
                 stub.url,
                 CardExtract(header=self._header, summary=self._summary),
             )
-            return RelevanceVerdictV2(in_domain=True, header=self._header, summary=self._summary)
+            return RelevanceVerdictV2(
+                in_domain=True, header=self._header, summary=self._summary
+            )
         return RelevanceVerdictV2(in_domain=False)
 
 
@@ -522,7 +530,9 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _TrackingEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             enrich_calls.append(stub.url)
             return super().enrich(stub, body_selector)
 
@@ -626,7 +636,9 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
     card_store = _make_card_store(tmp_path)
 
     class _TrackingEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             enrich_calls.append(stub.url)
             return super().enrich(stub, body_selector)
 
@@ -935,7 +947,9 @@ def test_classify_precedes_judge(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _InstrumentedEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             call_log.append("enrich")
             return super().enrich(stub, body_selector)
 
@@ -944,7 +958,10 @@ def test_classify_precedes_judge(tmp_path: Path) -> None:
             self, candidates: list[JudgeCandidateV2]
         ) -> tuple[list[MatchVerdictV2], CallUsage]:
             call_log.append("judge_top_n")
-            return [MatchVerdictV2(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])], _ZERO_USAGE
+            return [
+                MatchVerdictV2(id=c.id, rank=i + 1)
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     class _MultiStubParser(_StubParserBase):
         """Emits 5 stubs, all pass prefilter."""
@@ -1036,7 +1053,9 @@ def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> N
     call_count = [0]
 
     class _FailFirstEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ExtractorError("classify boom")
@@ -1103,7 +1122,9 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
             ]
 
     class _NoneForSecondEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             if stub.url == _ERR_URLS[1]:
                 return None  # HTTP fetch failure → enrich_failed
             return super().enrich(stub, body_selector)
@@ -1151,7 +1172,9 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
             ]
 
     class _HttpErrorEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             if stub.url == _ERR_URLS[1]:
                 return None  # HTTP error → enrich_failed
             return super().enrich(stub, body_selector)
@@ -1265,7 +1288,9 @@ def test_external_redirect_marks_seen_and_increments_counter(
             ]
 
     class _SkipFirstEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             if stub.url == _ERR_URLS[0]:
                 return None  # skip this stub (e.g., HTTP error)
             return super().enrich(stub, body_selector)
@@ -1321,7 +1346,9 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
             ]
 
     class _NoneEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             return None  # enricher returns None → enrich_failed
 
     summary = run(
@@ -1478,7 +1505,9 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
     card_store = load_card_store(tmp_path / "extracts.json")
 
     class _TrackingEnricher(_FakeLLMEnricherHelper):
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             enrich_calls.append(stub.url)
             return super().enrich(stub, body_selector)
 
@@ -1490,7 +1519,10 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
         ) -> tuple[list[MatchVerdictV2], CallUsage]:
             for c in candidates:
                 judge_candidate_ids.append(c.id)
-            return [MatchVerdictV2(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])], _ZERO_USAGE
+            return [
+                MatchVerdictV2(id=c.id, rank=i + 1)
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     summary = run(
         _one_stub_config(tmp_path),
@@ -1622,7 +1654,10 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
         ) -> tuple[list[MatchVerdictV2], CallUsage]:
             for c in candidates:
                 judge_candidate_ids.append(c.id)
-            return [MatchVerdictV2(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])], _ZERO_USAGE
+            return [
+                MatchVerdictV2(id=c.id, rank=i + 1)
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     run(
         _one_stub_config(tmp_path),
@@ -1645,7 +1680,9 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
     _enrich_failed_url = "https://enrich-fail.example/0"
 
     class _FailEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             # Return None to trigger enrich_failed
             return None
 
@@ -1657,7 +1694,9 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
             pass
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [PositionStub(url=_enrich_failed_url, title="ML Engineer", source="stub")]
+            return [
+                PositionStub(url=_enrich_failed_url, title="ML Engineer", source="stub")
+            ]
 
     summary = run(
         _one_stub_config(tmp_path),
@@ -2012,7 +2051,9 @@ def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
     results_dir = tmp_path / "results"
 
     class _CrashingEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             raise RuntimeError("unexpected crash escaping main path")
 
     card_store = _make_card_store(tmp_path)
@@ -2240,17 +2281,29 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
             pass
 
         def discover(self, query: ParserQuery):  # type: ignore[return]
-            yield PositionStub(url=_STUB_URLS[0], title="Job 0", source="bundesagentur_api")
-            yield PositionStub(url=_STUB_URLS[1], title="Job 1", source="bundesagentur_api")
+            yield PositionStub(
+                url=_STUB_URLS[0], title="Job 0", source="bundesagentur_api"
+            )
+            yield PositionStub(
+                url=_STUB_URLS[1], title="Job 1", source="bundesagentur_api"
+            )
             raise RuntimeError("thread crashed")
 
     class _EnrichFailEnricher:
         """Enricher that returns None for Job 0 (enrich_failed) and in-domain for Job 1."""
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             if stub.url == _STUB_URLS[0]:
                 return None  # triggers enrich_failed
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
         summary = run(
@@ -2431,10 +2484,17 @@ def test_four_positions_each_get_solo_classify_call(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _CountingEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             call_count[0] += 1
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
@@ -2588,10 +2648,17 @@ def test_mixed_listing_set_all_classified(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _CountingEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             call_count[0] += 1
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
@@ -2631,18 +2698,30 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _SelectiveEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             if stub.url == _OFF_URL:
                 return RelevanceVerdictV2(in_domain=False)
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     judge_candidate_ids: list[list[str]] = []
 
     class _TrackingJudge:
-        def judge_top_n_v2(self, candidates: "list[JudgeCandidateV2]") -> "tuple[list[MatchVerdictV2], CallUsage]":
+        def judge_top_n_v2(
+            self, candidates: "list[JudgeCandidateV2]"
+        ) -> "tuple[list[MatchVerdictV2], CallUsage]":
             judge_candidate_ids.append([c.id for c in candidates])
-            return [MatchVerdictV2(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])], _ZERO_USAGE
+            return [
+                MatchVerdictV2(id=c.id, rank=i + 1)
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     class _TwoLangParser(_StubParserBase):
         def __enter__(self) -> "_TwoLangParser":
@@ -2685,13 +2764,21 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
     call_count = [0]
 
     class _FailFirstEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 from application_pipeline.llm import ExtractorMalformedError
+
                 raise ExtractorMalformedError("bad verdict")
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -3837,9 +3924,16 @@ def test_non_quota_worker_exception_writes_failure_report(
         def __init__(self, *, card_store: "CardStore", **_kw: object) -> None:
             self._card_store = card_store
 
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
-            self._card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
+            self._card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     monkeypatch.setattr(
         "application_pipeline.orchestrator.ClaudeExtractor",
@@ -3896,7 +3990,9 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _ErrorEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             raise ExtractorError("classify boom")
 
     display = FakeStatusDisplay()
@@ -4328,7 +4424,9 @@ def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
     call_count = [0]
 
     class _QuotaEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ClaudeUsageLimitError(
@@ -4338,8 +4436,13 @@ def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
                     stderr="subscription cap",
                     envelope=None,
                 )
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     summary = run(
         _write_config(
@@ -4378,7 +4481,9 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
     call_count = [0]
 
     class _QuotaEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ClaudeUsageLimitError(
@@ -4388,8 +4493,13 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
                     stderr="cap",
                     envelope=None,
                 )
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     run(
         _write_config(
@@ -4436,13 +4546,18 @@ def test_quota_judge_retries_and_completes(
     judge_call_count = [0]
 
     class _RetryJudge:
-        def judge_top_n_v2(self, candidates: "list[JudgeCandidateV2]") -> "tuple[list[MatchVerdictV2], CallUsage]":
+        def judge_top_n_v2(
+            self, candidates: "list[JudgeCandidateV2]"
+        ) -> "tuple[list[MatchVerdictV2], CallUsage]":
             judge_call_count[0] += 1
             if judge_call_count[0] == 1:
                 raise ClaudeUsageLimitError(
                     "quota", returncode=1, stdout="", stderr="quota", envelope=None
                 )
-            return [MatchVerdictV2(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])], _ZERO_USAGE
+            return [
+                MatchVerdictV2(id=c.id, rank=i + 1)
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -4563,7 +4678,14 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
 
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             # Include a stale posted_date so freshness gate can reject the stub in admit_stub()
-            return [PositionStub(url=stale_url, title="Extract Job", source="stub", posted_date=_stale_date)]
+            return [
+                PositionStub(
+                    url=stale_url,
+                    title="Extract Job",
+                    source="stub",
+                    posted_date=_stale_date,
+                )
+            ]
 
     run(
         _write_config(
@@ -4640,7 +4762,10 @@ def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge
         ) -> "tuple[list[MatchVerdictV2], CallUsage]":
             for c in candidates:
                 judge_candidate_ids.append(c.id)
-            return [MatchVerdictV2(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])], _ZERO_USAGE
+            return [
+                MatchVerdictV2(id=c.id, rank=i + 1)
+                for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
 
     run(
         _write_config(
@@ -4676,14 +4801,21 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _TimedEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             start = _time.monotonic()
             _time.sleep(0.05)
             end = _time.monotonic()
             with log_lock:
                 call_log.append((start, end))
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
@@ -4746,7 +4878,9 @@ def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
     call_lock = threading.Lock()
 
     class _QuotaEnricher2:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             with call_lock:
                 call_count[0] += 1
                 current = call_count[0]
@@ -4758,8 +4892,13 @@ def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
                     stderr="cap",
                     envelope=None,
                 )
-            card_store.put(stub.url, CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY))
-            return RelevanceVerdictV2(in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY)
+            card_store.put(
+                stub.url,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return RelevanceVerdictV2(
+                in_domain=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+            )
 
     class _FourStubParser2(_StubParserBase):
         def __enter__(self) -> "_FourStubParser2":
@@ -4902,7 +5041,9 @@ def test_parallel_classify_worker_exception_propagates(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _CrashingEnricher:
-        def enrich(self, stub: PositionStub, body_selector: "str | None") -> "RelevanceVerdictV2 | None":
+        def enrich(
+            self, stub: PositionStub, body_selector: "str | None"
+        ) -> "RelevanceVerdictV2 | None":
             raise RuntimeError("classify crash")
 
     class _OneStubParser2(_StubParserBase):

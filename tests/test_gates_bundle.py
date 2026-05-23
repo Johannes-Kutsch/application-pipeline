@@ -229,3 +229,60 @@ def test_dedup_record_called_for_url_hit() -> None:
     )
 
     dedup_counters.record.assert_called_once_with("url_hit")
+
+
+def test_dedup_record_called_for_tuple_hit() -> None:
+    run_log, metrics, dedup_counters, dedup, prefilter, freshness, content = _gates(
+        dedup_result="tuple_hit"
+    )
+
+    run_gates(
+        _stub(),
+        run_log=run_log,
+        metrics=metrics,
+        dedup_counters=dedup_counters,
+        dedup=dedup,
+        prefilter=prefilter,
+        freshness=freshness,
+        content=content,
+    )
+
+    dedup_counters.record.assert_called_once_with("tuple_hit")
+
+
+def test_dedup_record_called_for_run_hit() -> None:
+    run_log, metrics, dedup_counters, dedup, prefilter, freshness, content = _gates(
+        dedup_result="run_hit"
+    )
+
+    run_gates(
+        _stub(),
+        run_log=run_log,
+        metrics=metrics,
+        dedup_counters=dedup_counters,
+        dedup=dedup,
+        prefilter=prefilter,
+        freshness=freshness,
+        content=content,
+    )
+
+    dedup_counters.record.assert_called_once_with("run_hit")
+
+
+def test_dedup_record_called_for_judge_pending() -> None:
+    run_log, metrics, dedup_counters, dedup, prefilter, freshness, content = _gates(
+        dedup_result="judge_pending"
+    )
+
+    run_gates(
+        _stub(),
+        run_log=run_log,
+        metrics=metrics,
+        dedup_counters=dedup_counters,
+        dedup=dedup,
+        prefilter=prefilter,
+        freshness=freshness,
+        content=content,
+    )
+
+    dedup_counters.record.assert_called_once_with("judge_pending")

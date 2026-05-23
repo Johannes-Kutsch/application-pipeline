@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,17 @@ class PositionStub:
     location: str | None = None
     posted_date: date | None = None
     _warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class EnrichResult:
+    stub: PositionStub
+    body: str
+    mode: Literal["native", "fallback"]
+
+
+class EnrichFailedError(Exception):
+    pass
 
 
 @dataclass(frozen=True)

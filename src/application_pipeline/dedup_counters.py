@@ -50,6 +50,23 @@ class DedupCounters:
             body = self._body()
         self._display.update_body("pipeline_dedup", body=body)
 
+    def emit_run_complete(self) -> None:
+        with self._lock:
+            url_hits = self._dedup_url_hits
+            tuple_hits = self._dedup_tuple_hits
+            run_hits = self._dedup_run_hits
+            misses = self._dedup_misses
+            judge_resumed = self._judge_resumed
+        self._run_log.event(
+            "pipeline_dedup",
+            "run_complete",
+            dedup_url_hits=url_hits,
+            dedup_tuple_hits=tuple_hits,
+            dedup_run_hits=run_hits,
+            dedup_misses=misses,
+            judge_resumed=judge_resumed,
+        )
+
     def snapshot(self) -> DedupSnapshot:
         with self._lock:
             return DedupSnapshot(

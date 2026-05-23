@@ -922,6 +922,7 @@ def run(
             prefilter_snapshot = prefilter.snapshot()
             content_gate.emit_run_complete()
             content_snapshot = content_gate.snapshot()
+            dedup_counters.emit_run_complete()
             dedup_snapshot = dedup_counters.snapshot()
             dispatcher.flush_residual(n=cfg.claude_classify_parallelism)
 

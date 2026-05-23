@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,13 @@ from application_pipeline.parser_log import RunLog
 
 
 @pytest.fixture
-def run_log(tmp_path: Path) -> RunLog:
-    return RunLog(tmp_path / "logs")
+def logs_dir(tmp_path: Path) -> Path:
+    return tmp_path / "logs"
+
+
+@pytest.fixture
+def run_log(logs_dir: Path) -> RunLog:
+    return RunLog(logs_dir)
 
 
 @pytest.fixture
@@ -24,6 +30,13 @@ def display() -> FakeStatusDisplay:
 
 def _make(run_log: RunLog, display: FakeStatusDisplay) -> DedupCounters:
     return DedupCounters(display=display, run_log=run_log)
+
+
+def _read_events(logs_dir: Path) -> list[dict]:
+    path = logs_dir / "pipeline" / "dedup.events.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -139,3 +152,31 @@ def test_judge_pending_does_not_alter_body_counters(
     counters.record("judge_pending")
     bodies = display.body_updates_for("pipeline_dedup")
     assert bodies[-1] == "url_hits=0 tuple_hits=0 run_hits=0 misses=0"
+
+
+# ---------------------------------------------------------------------------
+# emit_run_complete() — aggregate event
+# ---------------------------------------------------------------------------
+
+
+def test_emit_run_complete_writes_event_with_counters(
+    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
+) -> None:
+    counters = _make(run_log, display)
+    counters.record("url_hit")
+    counters.record("url_hit")
+    counters.record("tuple_hit")
+    counters.record("run_hit")
+    counters.record("miss")
+    counters.record("judge_pending")
+    counters.emit_run_complete()
+
+    events = _read_events(logs_dir)
+    assert len(events) == 1
+    evt = events[0]
+    assert evt["event"] == "run_complete"
+    assert evt["dedup_url_hits"] == 2
+    assert evt["dedup_tuple_hits"] == 1
+    assert evt["dedup_run_hits"] == 1
+    assert evt["dedup_misses"] == 1
+    assert evt["judge_resumed"] == 1

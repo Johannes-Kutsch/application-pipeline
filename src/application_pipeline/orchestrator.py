@@ -57,6 +57,16 @@ _log = logging.getLogger(__name__)
 
 _STALL_THRESHOLD_S: float = 60.0
 
+
+def _has_native_enrich(cls: type) -> bool:
+    # Class attribute wins (test doubles); fall back to module-level declaration.
+    v = cls.__dict__.get("has_native_enrich")
+    if v is not None:
+        return bool(v)
+    module = sys.modules.get(cls.__module__)
+    return bool(getattr(module, "has_native_enrich", False))
+
+
 _ZERO_USAGE = CallUsage(
     input_tokens=0,
     output_tokens=0,
@@ -157,6 +167,7 @@ _QUERY_DONE = _QueryDone()
 class _EnrichRequest:
     stub: PositionStub
     parser: Parser
+    parser_id: str
 
 
 class _NoMoreBatches:
@@ -401,6 +412,7 @@ class _EnrichThread(_QueueWorker):
             self._metrics.enrich_failed(item.stub.source)
             return
 
+        self._metrics.enriched(item.parser_id, enrich_result.mode)
         stub = enrich_result.stub
         body = enrich_result.body
         while True:
@@ -537,7 +549,9 @@ class _OutboundDispatcher:
         if result == "miss":
             if self._prefilter.admit_stub(payload):
                 self._enrich_queue.put(
-                    _EnrichRequest(stub=payload, parser=self._parsers[pid])
+                    _EnrichRequest(
+                        stub=payload, parser=self._parsers[pid], parser_id=pid
+                    )
                 )
                 self._metrics.classify_buffered(1)
             state.inbound.put(_SKIP)
@@ -643,6 +657,9 @@ def run(
             cls = _resolve(source.parser_type)
             if cls is not None:
                 resolved.append((cls, source))
+        native_enrich_by_type: dict[str, bool] = {
+            source.parser_type: _has_native_enrich(cls) for cls, source in resolved
+        }
 
         # Step 7: Dedup store + CardStore (wipe v1 extracts if present)
         extracts_path = cfg.seen_store_path.parent / "extracts.json"
@@ -744,6 +761,7 @@ def run(
                     pid,
                     order=2 + i,
                     total_queries=len(t._worklist),
+                    has_native_enrich=native_enrich_by_type.get(pid, False),
                 )
 
             status_display.remove("startup")

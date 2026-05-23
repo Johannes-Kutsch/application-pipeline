@@ -226,7 +226,7 @@ def test_config_error_propagates(tmp_path: Path) -> None:
 
 def test_prompt_error_propagates(tmp_path: Path) -> None:
     # search-terms present so load_search_terms passes, but triage files are
-    # missing â†’ PromptError on load_prompts
+    # missing â†' PromptError on load_prompts
     config_path = _write_config(tmp_path, with_user_info_files=False)
     st_dir = tmp_path / "user-info" / "search-terms"
     st_dir.mkdir(parents=True, exist_ok=True)
@@ -274,7 +274,7 @@ def test_results_file_error_propagates(
 
 
 # ---------------------------------------------------------------------------
-# Unknown parser_type â†’ WARNING + excluded, run continues
+# Unknown parser_type â†' WARNING + excluded, run continues
 # ---------------------------------------------------------------------------
 
 
@@ -323,7 +323,7 @@ class _StubParser(_StubParserBase):
 
 
 def test_integration_discover_and_enrich(tmp_path: Path) -> None:
-    """2 keywords Ã— 1 location, 3 stubs each â†’ discovered==6, skipped==0, written==5 (capped by judge_top_n)."""
+    """2 keywords Ã— 1 location, 3 stubs each â†' discovered==6, skipped==0, written==5 (capped by judge_top_n)."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -348,7 +348,7 @@ def test_integration_discover_and_enrich(tmp_path: Path) -> None:
 
 
 def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
-    """Pre-seed all 6 URLs â†’ discovered==6, skipped==6, written==0."""
+    """Pre-seed all 6 URLs â†' discovered==6, skipped==6, written==0."""
     seen_path = tmp_path / ".seen.json"
     seen_data = {
         url: {
@@ -428,7 +428,7 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
 def test_integration_dedup_counter_breakdown(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """2 url_hits + 1 tuple_hit + 4 misses â†’ dedup_url_hits=2 dedup_tuple_hits=1 dedup_misses=4 in RunSummary and run complete: log."""
+    """2 url_hits + 1 tuple_hit + 4 misses â†' dedup_url_hits=2 dedup_tuple_hits=1 dedup_misses=4 in RunSummary and run complete: log."""
     import logging
 
     _DEDUP_URLS = [f"https://dedup.example/{i}" for i in range(7)]
@@ -492,7 +492,7 @@ def test_integration_dedup_counter_breakdown(
 
 
 def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
-    """Same URL yielded by two different ParserQuerys â†’ second yield is run_hit, enricher called once."""
+    """Same URL yielded by two different ParserQuerys â†' second yield is run_hit, enricher called once."""
     enrich_calls: list[str] = []
     duplicate_url = "https://dup.example/job"
 
@@ -856,7 +856,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
 
 
 def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
-    """Second run on same tmp_path â†’ all 6 skipped, tier files unchanged."""
+    """Second run on same tmp_path â†' all 6 skipped, tier files unchanged."""
     seen_path = tmp_path / ".seen.json"
     results_dir = tmp_path / "results"
     config_path = _write_config(
@@ -1055,7 +1055,7 @@ def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
 
 
 def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
-    """LLMEnricher.enrich() returns None for one stub â†’ enrich_failed increments, other stubs proceed."""
+    """LLMEnricher.enrich() returns None for one stub â†' enrich_failed increments, other stubs proceed."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -1075,7 +1075,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
     class _NoneForSecondEnricher(_FakeLLMEnricherHelper):
         def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[1]:
-                return None  # HTTP fetch failure â†’ enrich_failed
+                return None  # HTTP fetch failure â†' enrich_failed
             return super().enrich(stub, body)
 
     summary = run(
@@ -1103,7 +1103,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
 def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     tmp_path: Path,
 ) -> None:
-    """LLMEnricher.enrich() returns None (HTTP error) â†’ enrich_failed, other stubs continue."""
+    """LLMEnricher.enrich() returns None (HTTP error) â†' enrich_failed, other stubs continue."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -1123,7 +1123,7 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     class _HttpErrorEnricher(_FakeLLMEnricherHelper):
         def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[1]:
-                return None  # HTTP error â†’ enrich_failed
+                return None  # HTTP error â†' enrich_failed
             return super().enrich(stub, body)
 
     summary = run(
@@ -1151,7 +1151,7 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
 def test_parser_fatal_http_error_on_enrich_marks_parser_dead_surviving_parsers_continue(
     tmp_path: Path,
 ) -> None:
-    """Parser raises exception in discover() â†’ parsers_dead increments, surviving parsers complete."""
+    """Parser raises exception in discover() â†' parsers_dead increments, surviving parsers complete."""
     card_store = _make_card_store(tmp_path)
 
     class _FatalDiscoverParser(_StubParserBase):
@@ -1292,7 +1292,7 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
 
     class _NoneEnricher(_FakeLLMEnricherHelper):
         def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
-            return None  # enricher returns None â†’ enrich_failed
+            return None  # enricher returns None â†' enrich_failed
 
     summary = run(
         _write_config(
@@ -1363,7 +1363,7 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# judge_pending: classifyâ†’judge boundary idempotency (issue #289)
+# judge_pending: classifyâ†'judge boundary idempotency (issue #289)
 # ---------------------------------------------------------------------------
 
 _RESUME_URL = "https://resume.example/job/0"
@@ -1737,7 +1737,7 @@ def test_judge_pending_judge_failure_stays_matched_on_rerun(
 
 
 def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
-    """Uncaught exception in parser thread â†’ parsers_dead==1, run completes (no hang)."""
+    """Uncaught exception in parser thread â†' parsers_dead==1, run completes (no hang)."""
 
     class _DeadParser(_StubParserBase):
         def __enter__(self) -> "_DeadParser":
@@ -1769,7 +1769,7 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
 
 
 def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
-    """One dead parser + one healthy parser â†’ dead counted, healthy stubs written."""
+    """One dead parser + one healthy parser â†' dead counted, healthy stubs written."""
 
     class _DeadParser(_StubParserBase):
         def __enter__(self) -> "_DeadParser":
@@ -2005,7 +2005,7 @@ def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
 def test_fatal_error_writes_failure_report_and_exits_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DedupStoreError at startup â†’ failure report written, stage=orchestrator, exit 1."""
+    """DedupStoreError at startup â†' failure report written, stage=orchestrator, exit 1."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     _write_config(tmp_path / "application-pipeline")
@@ -2119,7 +2119,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Three NotServedQuery sentinels â†’ not_served_queries=3 in SUMMARY, nothing in body, no stderr."""
+    """Three NotServedQuery sentinels â†' not_served_queries=3 in SUMMARY, nothing in body, no stderr."""
     import logging
 
     import application_pipeline.parser_log as parser_log
@@ -2138,7 +2138,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
     logs_dir = tmp_path / "synched" / "logs"
     run_log = parser_log.RunLog(logs_dir)
 
-    # 3 keywords Ã— 1 location Ã— no remote = 3 discover() calls â†’ 3 sentinels
+    # 3 keywords Ã— 1 location Ã— no remote = 3 discover() calls â†' 3 sentinels
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -2365,7 +2365,7 @@ def _batch_size_config(tmp_path: Path, batch_size: int = 1) -> Path:
 
 
 def test_four_positions_each_get_solo_classify_call(tmp_path: Path) -> None:
-    """4 positions â†’ llm_enricher.enrich() called 4 times, once per position."""
+    """4 positions â†' llm_enricher.enrich() called 4 times, once per position."""
     call_count = [0]
     card_store = _make_card_store(tmp_path)
 
@@ -2464,7 +2464,7 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
 
 
 def test_classify_thread_six_positions_happy_path(tmp_path: Path) -> None:
-    """v2 pipeline happy path: 6 stubs â†’ llm_enricher.enrich() Ã— 6, judge caps at 5 written.
+    """v2 pipeline happy path: 6 stubs â†' llm_enricher.enrich() Ã— 6, judge caps at 5 written.
 
     All positions are in-domain and judged.  Asserts set-equality on the
     URLs that appear in daily results and on the 'kept' members of .seen.json.
@@ -2501,7 +2501,7 @@ def test_classify_thread_six_positions_happy_path(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # 6 positions â†’ 6 enrich calls; judge_top_n caps at 5
+    # 6 positions â†' 6 enrich calls; judge_top_n caps at 5
     assert summary.written == 5
     assert summary.classify_items == 6
     assert summary.classifier_dropped == 0
@@ -2673,7 +2673,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
-    """ExtractorUnreachableError with forensics â†’ returncode and stderr_excerpt in judge_top_n log."""
+    """ExtractorUnreachableError with forensics â†' returncode and stderr_excerpt in judge_top_n log."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -2788,7 +2788,7 @@ def test_run_summary_carries_token_and_cost_totals(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # 5 items pass prefilter â†’ 5 enrich calls (1 off-domain + 4 in-domain = 5 classified)
+    # 5 items pass prefilter â†' 5 enrich calls (1 off-domain + 4 in-domain = 5 classified)
     assert summary.classify_items == 5
     # In v2, classify usage is zero; judge usage comes from _FakeExtractor._FAKE_JUDGE_USAGE
     assert summary.claude_input_tokens == _FAKE_JUDGE_USAGE.input_tokens
@@ -3164,7 +3164,7 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
 
 
 def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
-    """Parser row body contains queries/total, stubs, and enriched counts."""
+    """Parser row body contains queries/total and stubs; no enriched column when has_native_enrich=False."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3183,14 +3183,109 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
     )
 
     bodies = display.body_updates_for("parser_bundesagentur_api")
-    # Last body before "done" should have format: "X/Y queries · N stubs · M enriched · done"
+    # _StubParser returns 3 stubs per call; 1 keyword × 1 location = 1 query → 3 stubs
+    # bundesagentur_api has has_native_enrich=False → no enriched column
     final = bodies[-1]
-    assert "queries" in final
-    assert "stubs" in final
-    assert "enriched" in final
-    # _StubParser returns 3 stubs per call; 1 keyword Ã— 1 location = 1 query â†’ 3 stubs
-    # In v2, enriched count is 0 (parser.enrich() is not called; enrichment happens in LLMEnricher)
-    assert final.startswith("1/1 queries · 3 stubs · 0 enriched")
+    assert final.startswith("1/1 queries · 3 stubs"), f"unexpected body: {final!r}"
+    assert "enriched" not in final, f"enriched column must be absent: {final!r}"
+
+
+def test_parser_row_body_shows_native_enriched_counter(tmp_path: Path) -> None:
+    """Parser row shows M/N enriched for parsers with has_native_enrich=True."""
+
+    class _NativeParser(_StubParserBase):
+        has_native_enrich = True
+
+        def __enter__(self) -> "_NativeParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://native.example/{i}", title=f"Job {i}", source="stub"
+                )
+                for i in range(3)
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            return EnrichResult(stub=stub, body="native body", mode="native")
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _NativeParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("parser_bundesagentur_api")
+    final = bodies[-1]
+    # All 3 stubs enriched natively → M == N == 3
+    assert "3/3 enriched" in final, f"expected '3/3 enriched' in {final!r}"
+
+
+def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -> None:
+    """Parser row shows M/N enriched with M<N when some stubs fall back."""
+    _call_index = [0]
+
+    class _MixedParser(_StubParserBase):
+        has_native_enrich = True
+
+        def __enter__(self) -> "_MixedParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://mixed.example/{i}", title=f"Job {i}", source="stub"
+                )
+                for i in range(3)
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            from typing import Literal
+
+            idx = _call_index[0]
+            _call_index[0] += 1
+            mode: Literal["native", "fallback"] = "native" if idx == 0 else "fallback"
+            return EnrichResult(stub=stub, body="body", mode=mode)
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _MixedParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        status_display=display,
+    )
+
+    bodies = display.body_updates_for("parser_bundesagentur_api")
+    final = bodies[-1]
+    # 1 native out of 3 total enrichments -> M=1, N=3
+    assert "1/3 enriched" in final, f"expected '1/3 enriched' in {final!r}"
 
 
 def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
@@ -3591,7 +3686,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
 
 
 def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
-    """N queries â†’ exactly N query_started and N query_ended lines in the parser log."""
+    """N queries â†' exactly N query_started and N query_ended lines in the parser log."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -3684,7 +3779,7 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
 def test_non_quota_worker_exception_writes_failure_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """RuntimeError from judge worker â†’ failure report written, exit 1."""
+    """RuntimeError from judge worker â†' failure report written, exit 1."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     _write_config(tmp_path / "application-pipeline")
@@ -4092,7 +4187,7 @@ def _make_advancing_quota_wall():  # type: ignore[return]
 
 
 def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
-    """ClaudeUsageLimitError from llm_enricher.enrich() â†’ orchestrator sleeps via QuotaWall and retries; run completes."""
+    """ClaudeUsageLimitError from llm_enricher.enrich() â†' orchestrator sleeps via QuotaWall and retries; run completes."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -4209,7 +4304,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
 def test_quota_judge_retries_and_completes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ClaudeUsageLimitError on judge_top_n â†’ orchestrator sleeps and retries; run completes."""
+    """ClaudeUsageLimitError on judge_top_n â†' orchestrator sleeps and retries; run completes."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -4304,7 +4399,7 @@ from datetime import date as _date, timedelta as _timedelta  # noqa: E402
 
 
 def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
-    """matched â†’ expired transition on pool re-discovery removes the entry from extracts.json."""
+    """matched â†' expired transition on pool re-discovery removes the entry from extracts.json."""
     stale_url = "https://pool-reentry.example/stale-extract"
     (tmp_path / ".runtime-data").mkdir()
     seen_path = tmp_path / ".runtime-data" / "seen.json"

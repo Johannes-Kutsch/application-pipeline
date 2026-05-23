@@ -13,7 +13,13 @@ from application_pipeline.content_gate import ContentGate
 from application_pipeline.extracts.card_store import CardExtract, CardStore
 from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.llm.quota import QuotaWall
-from application_pipeline.llm.types import CallUsage, ClassifyItem, RelevanceVerdictV2
+from application_pipeline.llm.types import (
+    CallUsage,
+    ClassifyItem,
+    ExtractorMalformedError,
+    ExtractorMalformedJSONError,
+    RelevanceVerdictV2,
+)
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
 from application_pipeline.run_metrics import RunMetrics
@@ -100,7 +106,9 @@ class LLMEnricher:
         """Fetch, strip, gate, classify and write CardStore.
 
         Returns the verdict on success, or None when the position was gated
-        (empty body, oversized body, or HTTP error).
+        (empty body, HTTP error, or oversized body — oversized also stashes raw HTML).
+        Raises ExtractorMalformedError / ExtractorMalformedJSONError on malformed LLM
+        output after stashing the error text, so callers do not mark .seen.json.
         """
         html = self._fetch(stub)
         if html is None:
@@ -110,6 +118,13 @@ class LLMEnricher:
 
         if len(text) > self._token_cap * _CHARS_PER_TOKEN:
             self._stash_failure("oversized", stub, html)
+            self._run_log.event(
+                "llm_enricher",
+                "body_oversized",
+                url=stub.url,
+                source=stub.source,
+                body_len=len(text),
+            )
             return None
 
         position = _FetchedPosition(stub=stub, raw_description=text)
@@ -123,7 +138,18 @@ class LLMEnricher:
             location=stub.location,
             posted_date=stub.posted_date,
         )
-        verdict, _ = self._extractor.classify_relevance_v2(item)
+        try:
+            verdict, _ = self._extractor.classify_relevance_v2(item)
+        except (ExtractorMalformedError, ExtractorMalformedJSONError) as exc:
+            self._stash_failure("malformed", stub, str(exc), ext="txt")
+            self._run_log.event(
+                "llm_enricher",
+                "classify_malformed",
+                url=stub.url,
+                source=stub.source,
+                error=str(exc),
+            )
+            raise
 
         if verdict.in_domain:
             assert verdict.header is not None
@@ -150,9 +176,11 @@ class LLMEnricher:
         except httpx.HTTPError:
             return None
 
-    def _stash_failure(self, kind: str, stub: PositionStub, content: str) -> None:
+    def _stash_failure(
+        self, kind: str, stub: PositionStub, content: str, *, ext: str = "html"
+    ) -> None:
         stash_dir = self._failures_dir / kind
         stash_dir.mkdir(parents=True, exist_ok=True)
         slug = stub.url.replace("https://", "").replace("http://", "").replace("/", "-")
-        path = stash_dir / f"{stub.source}-{slug}.html"
+        path = stash_dir / f"{stub.source}-{slug}.{ext}"
         path.write_text(content, encoding="utf-8")

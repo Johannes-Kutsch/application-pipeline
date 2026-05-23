@@ -3238,7 +3238,7 @@ def test_parser_row_body_shows_native_enriched_counter(tmp_path: Path) -> None:
 
 def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -> None:
     """Parser row shows M/N enriched with M<N when some stubs fall back."""
-    _call_index = [0]
+    call_count = [0]
 
     class _MixedParser(_StubParserBase):
         has_native_enrich = True
@@ -3258,12 +3258,10 @@ def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -
             ]
 
         def enrich(self, stub: PositionStub) -> EnrichResult:
-            from typing import Literal
-
-            idx = _call_index[0]
-            _call_index[0] += 1
-            mode: Literal["native", "fallback"] = "native" if idx == 0 else "fallback"
-            return EnrichResult(stub=stub, body="body", mode=mode)
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return EnrichResult(stub=stub, body="body", mode="native")
+            return EnrichResult(stub=stub, body="body", mode="fallback")
 
     config_path = _write_config(
         tmp_path,

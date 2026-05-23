@@ -11,6 +11,7 @@ import httpx
 import pytest
 import respx
 
+from application_pipeline.http import HttpParserFatalError
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserError, ParserQuery, PositionStub
 from application_pipeline.parsers.bundesagentur_api import (
@@ -646,3 +647,35 @@ def test_enrich_native_calls_v4_api_with_base64_encoded_ref(
     assert detail_url.endswith(expected_ref_b64), (
         f"expected base64-encoded ref '{expected_ref_b64}' at end of URL, got: {detail_url}"
     )
+
+
+# ---------------------------------------------------------------------------
+# enrich — fallback when native raises HttpNotRetryableError
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_falls_back_to_html_when_jobdetails_raises_http_not_retryable(
+    run_log: RunLog, tmp_path: Path
+) -> None:
+    def fatal_get(url: str, timeout: float) -> bytes:
+        raise HttpParserFatalError("auth: forbidden")
+
+    stub = PositionStub(
+        url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http = ParserHttp(run_log=run_log, _http_get=fatal_get)
+    with respx.mock:
+        respx.get(stub.url).mock(
+            return_value=httpx.Response(
+                200,
+                text="<html><body><p>Fallback job description text here.</p></body></html>",
+            )
+        )
+        with BundesagenturParser(
+            run_log=run_log, failures_dir=tmp_path, _http=http
+        ) as p:
+            result = p.enrich(stub)
+    assert result.mode == "fallback"
+    assert result.body

@@ -14,6 +14,8 @@ from bs4 import BeautifulSoup
 
 from application_pipeline.parser_log import RunLog
 
+from application_pipeline.http import HttpNotRetryableError
+
 from .body_fetch import fetch_and_strip
 from .errors import ParserError
 from .http import ParserHttp
@@ -140,7 +142,7 @@ class BundesagenturParser:
             body = _strip_html(description_html)
             updated_stub = _backfill_posted_date(stub, data)
             return EnrichResult(stub=updated_stub, body=body, mode="native")
-        except (ParserError, json.JSONDecodeError):
+        except (ParserError, HttpNotRetryableError, json.JSONDecodeError):
             pass
 
         body = fetch_and_strip(

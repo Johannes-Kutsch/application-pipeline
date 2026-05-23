@@ -21,7 +21,7 @@ from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
     CallUsage,
     ExtractorMalformedError,
-    RelevanceVerdictV2,
+    RelevanceVerdict,
 )
 from application_pipeline.llm_enricher import LLMEnricher
 from application_pipeline.parser_log import RunLog
@@ -94,7 +94,7 @@ def test_strip_to_text_with_selector_returns_matched_node_text() -> None:
 def test_strip_to_text_without_selector_falls_back_to_trafilatura() -> None:
     html = (
         "<html><body>"
-        "<article>Senior Data Engineer — Python, Spark, and Kafka.</article>"
+        "<article>Senior Data Engineer â€” Python, Spark, and Kafka.</article>"
         "</body></html>"
     )
     result = strip_to_text(html, None)
@@ -114,7 +114,7 @@ def test_enricher_in_domain_returns_verdict_and_writes_card_store(
 ) -> None:
     html = (
         "<html><body>"
-        "<div class='job'>Senior Python Engineer — remote ML role.</div>"
+        "<div class='job'>Senior Python Engineer â€” remote ML role.</div>"
         "</body></html>"
     )
     respx.get("https://example.com/job/1").mock(
@@ -122,8 +122,8 @@ def test_enricher_in_domain_returns_verdict_and_writes_card_store(
     )
 
     extractor = MagicMock()
-    extractor.classify_relevance_v2.return_value = (
-        RelevanceVerdictV2(
+    extractor.classify_relevance.return_value = (
+        RelevanceVerdict(
             matches=True,
             header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
             summary="Great ML role.",
@@ -158,7 +158,7 @@ def test_enricher_in_domain_returns_verdict_and_writes_card_store(
 
 
 # ---------------------------------------------------------------------------
-# LLMEnricher: empty body dropped by ContentGate — no LLM call
+# LLMEnricher: empty body dropped by ContentGate â€” no LLM call
 # ---------------------------------------------------------------------------
 
 
@@ -184,7 +184,7 @@ def test_enricher_drops_empty_body_without_llm_call(
     result = enricher.enrich(stub, ".job")
 
     assert result is None
-    extractor.classify_relevance_v2.assert_not_called()
+    extractor.classify_relevance.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +213,8 @@ def test_enricher_follows_http_redirect_and_uses_final_page_content(
     )
 
     extractor = MagicMock()
-    extractor.classify_relevance_v2.return_value = (
-        RelevanceVerdictV2(
+    extractor.classify_relevance.return_value = (
+        RelevanceVerdict(
             matches=True,
             header="Data Engineer\nCorp · Berlin · on-site\n2024-01-01",
             summary="Good role.",
@@ -233,7 +233,7 @@ def test_enricher_follows_http_redirect_and_uses_final_page_content(
 
     assert result is not None
     assert result.matches is True
-    call_args = extractor.classify_relevance_v2.call_args
+    call_args = extractor.classify_relevance.call_args
     item = call_args.args[0]
     assert "Data Engineer at final destination" in item.raw_description
 
@@ -255,10 +255,10 @@ def test_enricher_stashes_malformed_llm_output(
     )
 
     error_msg = (
-        "classify_relevance_v2: header must be a non-empty string for in-domain verdict"
+        "classify_relevance: header must be a non-empty string for in-domain verdict"
     )
     extractor = MagicMock()
-    extractor.classify_relevance_v2.side_effect = ExtractorMalformedError(error_msg)
+    extractor.classify_relevance.side_effect = ExtractorMalformedError(error_msg)
 
     enricher = _make_enricher(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -377,9 +377,9 @@ def test_enricher_malformed_llm_output_emits_log_event(
         return_value=httpx.Response(200, text=html)
     )
 
-    error_msg = "classify_relevance_v2: summary must be a non-empty string"
+    error_msg = "classify_relevance: summary must be a non-empty string"
     extractor = MagicMock()
-    extractor.classify_relevance_v2.side_effect = ExtractorMalformedError(error_msg)
+    extractor.classify_relevance.side_effect = ExtractorMalformedError(error_msg)
 
     enricher = _make_enricher(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -441,11 +441,11 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
 
     # LLM infers a stale posted_date in the header (31 days before ANCHORED_TODAY)
     stale_header = (
-        "Python Engineer\nAcme · Hamburg · remote\n2025-12-15 · senior · €80k"
+        "Python Engineer\nAcme · Hamburg · remote\n2025-12-15 · senior · â‚¬80k"
     )
     extractor = MagicMock()
-    extractor.classify_relevance_v2.return_value = (
-        RelevanceVerdictV2(
+    extractor.classify_relevance.return_value = (
+        RelevanceVerdict(
             matches=True,
             header=stale_header,
             summary="Old ML role.",
@@ -490,10 +490,10 @@ def test_enricher_freshness_drop_records_post_enrich_transcript(
         return_value=httpx.Response(200, text=html)
     )
 
-    stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2025-12-15 · mid · —"
+    stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2025-12-15 · mid · â€”"
     extractor = MagicMock()
-    extractor.classify_relevance_v2.return_value = (
-        RelevanceVerdictV2(matches=True, header=stale_header, summary="Stale role."),
+    extractor.classify_relevance.return_value = (
+        RelevanceVerdict(matches=True, header=stale_header, summary="Stale role."),
         _call_usage(),
     )
 
@@ -535,11 +535,11 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
         return_value=httpx.Response(200, text=html)
     )
 
-    # posted_date 5 days ago — within MAX_AGE=30
-    fresh_header = "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · €90k"
+    # posted_date 5 days ago â€” within MAX_AGE=30
+    fresh_header = "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · â‚¬90k"
     extractor = MagicMock()
-    extractor.classify_relevance_v2.return_value = (
-        RelevanceVerdictV2(
+    extractor.classify_relevance.return_value = (
+        RelevanceVerdict(
             matches=True,
             header=fresh_header,
             summary="Good ML role.",
@@ -586,10 +586,10 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
     )
 
     # Header line 3 has no date (LLM dropped the segment)
-    no_date_header = "Backend Engineer\nCorp · Munich · on-site\nseniority: mid · —"
+    no_date_header = "Backend Engineer\nCorp · Munich · on-site\nseniority: mid · â€”"
     extractor = MagicMock()
-    extractor.classify_relevance_v2.return_value = (
-        RelevanceVerdictV2(
+    extractor.classify_relevance.return_value = (
+        RelevanceVerdict(
             matches=True,
             header=no_date_header,
             summary="Undated backend role.",

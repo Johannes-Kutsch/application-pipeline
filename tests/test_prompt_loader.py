@@ -1,4 +1,4 @@
-﻿import dataclasses
+import dataclasses
 import pathlib
 
 import pytest
@@ -13,8 +13,8 @@ from application_pipeline import (
     load_prompts,
 )
 from application_pipeline.prompts import (
-    CLASSIFY_RELEVANCE_V2_SLOTS,
-    JUDGE_TOP_N_V2_SLOTS,
+    CLASSIFY_RELEVANCE_SLOTS,
+    JUDGE_TOP_N_SLOTS,
 )
 from application_pipeline.search_terms.types import SearchTerms
 
@@ -95,8 +95,8 @@ def test_load_prompts_returns_prompt_template_per_call_site(
 
     prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
 
-    assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
-    assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
+    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.judge_top_n, PromptTemplate)
 
 
 def test_load_prompts_classify_embeds_both_named_sub_blocks(
@@ -105,7 +105,7 @@ def test_load_prompts_classify_embeds_both_named_sub_blocks(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
-    rendered = prompts.classify_relevance_v2.render(
+    rendered = prompts.classify_relevance.render(
         LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
     )
 
@@ -121,7 +121,7 @@ def test_load_prompts_judge_embeds_both_named_sub_blocks(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
-    rendered = prompts.judge_top_n_v2.render(CANDIDATES="x")
+    rendered = prompts.judge_top_n.render(CANDIDATES="x")
 
     assert "# Kandidatenprofil" in rendered
     assert "# Match-Kriterien" in rendered
@@ -135,7 +135,7 @@ def test_load_prompts_classify_contains_verdict_tag_instruction(
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
-    rendered = prompts.classify_relevance_v2.render(
+    rendered = prompts.classify_relevance.render(
         LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
     )
 
@@ -203,8 +203,8 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     config = load(path)
     prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
 
-    assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
-    assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
+    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.judge_top_n, PromptTemplate)
 
 
 # --- Prompts dataclass ---
@@ -213,14 +213,14 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
 def test_prompts_is_frozen() -> None:
     tpl = PromptTemplate(
         "{LISTING_BULLETS} {RAW_DESCRIPTION}",
-        CLASSIFY_RELEVANCE_V2_SLOTS,
+        CLASSIFY_RELEVANCE_SLOTS,
     )
     prompts = Prompts(
-        classify_relevance_v2=tpl,
-        judge_top_n_v2=PromptTemplate("{CANDIDATES}", JUDGE_TOP_N_V2_SLOTS),
+        classify_relevance=tpl,
+        judge_top_n=PromptTemplate("{CANDIDATES}", JUDGE_TOP_N_SLOTS),
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
-        prompts.classify_relevance_v2 = tpl  # type: ignore[misc]
+        prompts.classify_relevance = tpl  # type: ignore[misc]
 
 
 # --- error hierarchy ---

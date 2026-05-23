@@ -1,4 +1,4 @@
-"""LLM Enricher — fetch + strip + classify + write CardStore."""
+"""LLM Enricher â€” fetch + strip + classify + write CardStore."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from application_pipeline.llm.types import (
     ClassifyItem,
     ExtractorMalformedError,
     ExtractorMalformedJSONError,
-    RelevanceVerdictV2,
+    RelevanceVerdict,
 )
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
@@ -32,10 +32,10 @@ _CHARS_PER_TOKEN = 4
 
 
 @runtime_checkable
-class LLMExtractorV2(Protocol):
-    def classify_relevance_v2(
+class LLMExtractor(Protocol):
+    def classify_relevance(
         self, item: ClassifyItem
-    ) -> tuple[RelevanceVerdictV2, CallUsage]: ...
+    ) -> tuple[RelevanceVerdict, CallUsage]: ...
 
 
 @dataclass
@@ -76,12 +76,12 @@ def _parse_header_date(header: str) -> date | None:
 
 
 class LLMEnricher:
-    """Orchestrate HTTP fetch → body strip → content gate → classify → CardStore write."""
+    """Orchestrate HTTP fetch â†’ body strip â†’ content gate â†’ classify â†’ CardStore write."""
 
     def __init__(
         self,
         *,
-        extractor: LLMExtractorV2,
+        extractor: LLMExtractor,
         quota_wall: QuotaWall,
         card_store: CardStore,
         run_log: RunLog,
@@ -102,11 +102,11 @@ class LLMEnricher:
 
     def enrich(
         self, stub: PositionStub, body_selector: str | None
-    ) -> RelevanceVerdictV2 | None:
+    ) -> RelevanceVerdict | None:
         """Fetch, strip, gate, classify and write CardStore.
 
         Returns the verdict on success, or None when the position was gated
-        (empty body, HTTP error, or oversized body — oversized also stashes raw HTML).
+        (empty body, HTTP error, or oversized body â€” oversized also stashes raw HTML).
         Raises ExtractorMalformedError / ExtractorMalformedJSONError on malformed LLM
         output after stashing the error text, so callers do not mark .seen.json.
         """
@@ -139,7 +139,7 @@ class LLMEnricher:
             posted_date=stub.posted_date,
         )
         try:
-            verdict, _ = self._extractor.classify_relevance_v2(item)
+            verdict, _ = self._extractor.classify_relevance(item)
         except (ExtractorMalformedError, ExtractorMalformedJSONError) as exc:
             self._stash_failure("malformed", stub, str(exc), ext="txt")
             self._run_log.event(

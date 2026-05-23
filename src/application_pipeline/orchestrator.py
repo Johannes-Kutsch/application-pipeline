@@ -31,12 +31,12 @@ from application_pipeline.failure_report import write_failure as _write_failure
 from application_pipeline.llm import (
     ClaudeExtractor,
     ExtractorError,
-    JudgeCandidateV2,
-    MatchVerdictV2,
+    JudgeCandidate,
+    MatchVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
-from application_pipeline.llm.types import CallUsage, RelevanceVerdictV2
-from application_pipeline.llm_enricher import LLMEnricher, LLMExtractorV2
+from application_pipeline.llm.types import CallUsage, RelevanceVerdict
+from application_pipeline.llm_enricher import LLMEnricher, LLMExtractor
 from application_pipeline.parsers import (
     NotServedQuery,
     Parser,
@@ -48,7 +48,7 @@ from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
-from application_pipeline.renderer_v2 import render as render_v2
+from application_pipeline.renderer import render as render
 from application_pipeline.results import ResultsFileError, append, ensure_initialized
 from application_pipeline.search_terms import SearchTerms, load_search_terms
 
@@ -67,15 +67,15 @@ _ZERO_USAGE = CallUsage(
 
 @runtime_checkable
 class _LLMJudge(Protocol):
-    def judge_top_n_v2(
-        self, candidates: list[JudgeCandidateV2]
-    ) -> tuple[list[MatchVerdictV2], CallUsage]: ...
+    def judge_top_n(
+        self, candidates: list[JudgeCandidate]
+    ) -> tuple[list[MatchVerdict], CallUsage]: ...
 
 
 class _LLMEnricherLike(Protocol):
     def enrich(
         self, stub: PositionStub, body_selector: str | None
-    ) -> "RelevanceVerdictV2 | None": ...
+    ) -> "RelevanceVerdict | None": ...
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +168,7 @@ _NO_MORE_BATCHES = _NoMoreBatches()
 
 
 # ---------------------------------------------------------------------------
-# Pool collector — thread-safe accumulator for judge candidates
+# Pool collector â€” thread-safe accumulator for judge candidates
 # ---------------------------------------------------------------------------
 
 
@@ -191,7 +191,7 @@ class _PoolCollector:
         with self._lock:
             return self._stubs.get(url)
 
-    def build_candidates(self, card_store: CardStore) -> list[JudgeCandidateV2]:
+    def build_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
         with self._lock:
             stubs = dict(self._stubs)
         candidates = []
@@ -200,7 +200,7 @@ class _PoolCollector:
             if card is None:
                 continue
             candidates.append(
-                JudgeCandidateV2(id=url, header=card.header, summary=card.summary)
+                JudgeCandidate(id=url, header=card.header, summary=card.summary)
             )
         return candidates
 
@@ -258,7 +258,7 @@ class _QueueWorker(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
-# Parser thread — pure stub producer (no enrich)
+# Parser thread â€” pure stub producer (no enrich)
 # ---------------------------------------------------------------------------
 
 
@@ -305,7 +305,7 @@ class _ParserThread(threading.Thread):
                             decision = self._inbound.get()
                             if decision is _SKIP_AND_END_QUERY:
                                 break
-                            # else: _SKIP — continue to next stub
+                            # else: _SKIP â€” continue to next stub
                     finally:
                         close = getattr(gen, "close", None)
                         if close is not None:
@@ -346,7 +346,7 @@ def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Enrich thread — calls LLMEnricher per stub
+# Enrich thread â€” calls LLMEnricher per stub
 # ---------------------------------------------------------------------------
 
 
@@ -412,7 +412,7 @@ class _EnrichThread(_QueueWorker):
                 self._metrics.classify_batch_failed(1)
                 self._run_log.event(
                     "llm_classify_relevance",
-                    "classify_relevance_v2",
+                    "classify_relevance",
                     status="error",
                     error=str(exc),
                 )
@@ -420,7 +420,7 @@ class _EnrichThread(_QueueWorker):
 
         self._run_log.event(
             "llm_classify_relevance",
-            "classify_relevance_v2",
+            "classify_relevance",
             matches=verdict.matches if verdict is not None else None,
         )
 
@@ -599,7 +599,7 @@ def run(
         try:
             cfg = config_module.load(config_path)
         except ConfigError as exc:
-            _log.error("startup failed — config: %s", exc)
+            _log.error("startup failed â€” config: %s", exc)
             raise
 
         if run_log is None:
@@ -612,7 +612,7 @@ def run(
             try:
                 prompts = load_prompts(cfg, search_terms)
             except PromptError as exc:
-                _log.error("startup failed — prompts: %s", exc)
+                _log.error("startup failed â€” prompts: %s", exc)
                 raise
             if extractor is None:
                 extractor = ClaudeExtractor(cfg, prompts, run_log=run_log)
@@ -638,15 +638,15 @@ def run(
                     cfg.seen_store_path, card_store=card_store
                 )
             except DedupStoreError as exc:
-                _log.error("startup failed — dedup store: %s", exc)
+                _log.error("startup failed â€” dedup store: %s", exc)
                 raise
 
         # Step 8: Build LLMEnricher if not injected
         if quota_wall is None:
             quota_wall = _quota.QuotaWall()
         if llm_enricher is None:
-            assert isinstance(extractor, LLMExtractorV2), (
-                "extractor must implement LLMExtractorV2 (classify_relevance_v2)"
+            assert isinstance(extractor, LLMExtractor), (
+                "extractor must implement LLMExtractor (classify_relevance)"
             )
             metrics_placeholder = RunMetrics(status_display, run_log=run_log)
             llm_enricher = LLMEnricher(
@@ -662,7 +662,7 @@ def run(
         try:
             ensure_initialized(daily_file_path)
         except ResultsFileError as exc:
-            _log.error("startup failed — results file: %s", exc)
+            _log.error("startup failed â€” results file: %s", exc)
             raise
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
@@ -847,25 +847,25 @@ def run(
         # Emit per-call-site SUMMARY OF SESSION trailers
         metrics.summarize_to_parser_log(_run_started_at)
 
-        # Step 13: Single end-of-run judge_top_n_v2 call
+        # Step 13: Single end-of-run judge_top_n call
         candidates = pool_collector.build_candidates(card_store)
         pool_size = pool_collector.pool_size
 
         daily_top_5_count = 0
         if candidates:
-            verdicts: list[MatchVerdictV2] | None = None
+            verdicts: list[MatchVerdict] | None = None
             judge_usage = None
             assert isinstance(extractor, _LLMJudge), (
-                "extractor must implement judge_top_n_v2"
+                "extractor must implement judge_top_n"
             )
             while True:
                 try:
-                    verdicts, judge_usage = extractor.judge_top_n_v2(candidates)
+                    verdicts, judge_usage = extractor.judge_top_n(candidates)
                     break
                 except ClaudeUsageLimitError as err:
                     _quota_sleep(err, run_log)
                 except ExtractorError as exc:
-                    _log.warning("judge_top_n_v2 failed: %s", exc)
+                    _log.warning("judge_top_n failed: %s", exc)
                     run_log.event(
                         "llm_judge_top_n",
                         "error",
@@ -874,7 +874,7 @@ def run(
                         error=str(exc),
                     )
                     _write_failure(
-                        stage="judge_top_n_v2",
+                        stage="judge_top_n",
                         error=exc,
                         log_tail="",
                         failures_dir=cfg.failures_path,
@@ -886,7 +886,7 @@ def run(
                     card = card_store.get(verdict.id)
                     if card is None:
                         continue
-                    rendered = render_v2(verdict.rank, card.header, card.summary)
+                    rendered = render(verdict.rank, card.header, card.summary)
                     try:
                         append(daily_file_path, rendered)
                     except ResultsFileError as exc:

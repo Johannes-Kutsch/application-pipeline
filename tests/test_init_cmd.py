@@ -212,8 +212,8 @@ def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) 
 
     from application_pipeline import PromptTemplate
 
-    assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
-    assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
+    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.judge_top_n, PromptTemplate)
 
 
 def test_rerun_is_idempotent(tmp_path: Path) -> None:

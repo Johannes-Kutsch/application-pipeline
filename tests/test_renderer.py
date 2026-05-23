@@ -1,6 +1,6 @@
 import pytest
 
-from application_pipeline.renderer_v2 import render
+from application_pipeline.renderer import render
 
 
 def test_render_returns_fixed_card_structure() -> None:

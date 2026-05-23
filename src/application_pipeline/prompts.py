@@ -11,10 +11,10 @@ class PromptError(Exception):
     pass
 
 
-CLASSIFY_RELEVANCE_V2_SLOTS: frozenset[str] = frozenset(
+CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset(
     {"LISTING_BULLETS", "RAW_DESCRIPTION"}
 )
-JUDGE_TOP_N_V2_SLOTS: frozenset[str] = frozenset({"CANDIDATES"})
+JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"CANDIDATES"})
 
 _PROFILE_SLOTS: frozenset[str] = frozenset(
     {"SELF_DESCRIPTION", "MATCH_CRITERIA", "SKILLS"}
@@ -39,8 +39,8 @@ class PromptTemplate:
 
 @dataclass(frozen=True)
 class Prompts:
-    classify_relevance_v2: PromptTemplate
-    judge_top_n_v2: PromptTemplate
+    classify_relevance: PromptTemplate
+    judge_top_n: PromptTemplate
 
 
 def load_prompts(config: Config, search_terms: SearchTerms) -> Prompts:
@@ -59,21 +59,21 @@ def load_prompts(config: Config, search_terms: SearchTerms) -> Prompts:
     }
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
-    classify_v2 = _load_template(
+    classify = _load_template(
         pkg,
-        "classify_relevance_v2",
-        CLASSIFY_RELEVANCE_V2_SLOTS,
+        "classify_relevance",
+        CLASSIFY_RELEVANCE_SLOTS,
         profile_values,
     )
-    judge_top_n_v2 = _load_template(
+    judge_top_n = _load_template(
         pkg,
-        "judge_top_n_v2",
-        JUDGE_TOP_N_V2_SLOTS,
+        "judge_top_n",
+        JUDGE_TOP_N_SLOTS,
         profile_values,
     )
     return Prompts(
-        classify_relevance_v2=classify_v2,
-        judge_top_n_v2=judge_top_n_v2,
+        classify_relevance=classify,
+        judge_top_n=judge_top_n,
     )
 
 

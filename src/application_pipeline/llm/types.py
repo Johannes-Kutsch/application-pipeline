@@ -55,7 +55,7 @@ class CallUsage:
 
 
 @dataclass(frozen=True)
-class RelevanceVerdictV2:
+class RelevanceVerdict:
     matches: bool
     header: str | None = None
     summary: str | None = None
@@ -76,14 +76,14 @@ class RelevanceVerdictV2:
 
 
 @dataclass(frozen=True)
-class JudgeCandidateV2:
+class JudgeCandidate:
     id: str
     header: str
     summary: str
 
 
 @dataclass(frozen=True)
-class MatchVerdictV2:
+class MatchVerdict:
     id: str
     rank: int
 

@@ -26,9 +26,9 @@ from application_pipeline.extracts.card_store import (
     load_card_store,
 )
 from application_pipeline.llm.types import (
-    JudgeCandidateV2,
-    MatchVerdictV2,
-    RelevanceVerdictV2,
+    JudgeCandidate,
+    MatchVerdict,
+    RelevanceVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.orchestrator import RunSummary, run
@@ -116,8 +116,8 @@ _ZERO_USAGE = CallUsage(
 
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
-    ext.judge_top_n_v2.side_effect = lambda candidates: (
-        [MatchVerdictV2(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])],
+    ext.judge_top_n.side_effect = lambda candidates: (
+        [MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])],
         _ZERO_USAGE,
     )
     return ext
@@ -159,16 +159,16 @@ class _FakeLLMEnricherHelper:
 
     def enrich(
         self, stub: PositionStub, body_selector: "str | None"
-    ) -> "RelevanceVerdictV2 | None":
+    ) -> "RelevanceVerdict | None":
         if self._matches:
             self._card_store.put(
                 stub.url,
                 CardExtract(header=self._header, summary=self._summary),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=self._header, summary=self._summary
             )
-        return RelevanceVerdictV2(matches=False)
+        return RelevanceVerdict(matches=False)
 
 
 def _read_all_results(results_dir: Path) -> str:
@@ -226,7 +226,7 @@ def test_config_error_propagates(tmp_path: Path) -> None:
 
 def test_prompt_error_propagates(tmp_path: Path) -> None:
     # search-terms present so load_search_terms passes, but triage files are
-    # missing → PromptError on load_prompts
+    # missing â†’ PromptError on load_prompts
     config_path = _write_config(tmp_path, with_user_info_files=False)
     st_dir = tmp_path / "user-info" / "search-terms"
     st_dir.mkdir(parents=True, exist_ok=True)
@@ -271,7 +271,7 @@ def test_results_file_error_propagates(
 
 
 # ---------------------------------------------------------------------------
-# Unknown parser_type → WARNING + excluded, run continues
+# Unknown parser_type â†’ WARNING + excluded, run continues
 # ---------------------------------------------------------------------------
 
 
@@ -320,7 +320,7 @@ class _StubParser(_StubParserBase):
 
 
 def test_integration_discover_and_enrich(tmp_path: Path) -> None:
-    """2 keywords × 1 location, 3 stubs each → discovered==6, skipped==0, written==5 (capped by judge_top_n_v2)."""
+    """2 keywords Ã— 1 location, 3 stubs each â†’ discovered==6, skipped==0, written==5 (capped by judge_top_n)."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -341,11 +341,11 @@ def test_integration_discover_and_enrich(tmp_path: Path) -> None:
 
     assert summary.discovered == 6
     assert summary.skipped == 0
-    assert summary.written == 5  # judge_top_n_v2 caps at 5
+    assert summary.written == 5  # judge_top_n caps at 5
 
 
 def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
-    """Pre-seed all 6 URLs → discovered==6, skipped==6, written==0."""
+    """Pre-seed all 6 URLs â†’ discovered==6, skipped==6, written==0."""
     seen_path = tmp_path / ".seen.json"
     seen_data = {
         url: {
@@ -425,7 +425,7 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
 def test_integration_dedup_counter_breakdown(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """2 url_hits + 1 tuple_hit + 4 misses → dedup_url_hits=2 dedup_tuple_hits=1 dedup_misses=4 in RunSummary and run complete: log."""
+    """2 url_hits + 1 tuple_hit + 4 misses â†’ dedup_url_hits=2 dedup_tuple_hits=1 dedup_misses=4 in RunSummary and run complete: log."""
     import logging
 
     _DEDUP_URLS = [f"https://dedup.example/{i}" for i in range(7)]
@@ -489,7 +489,7 @@ def test_integration_dedup_counter_breakdown(
 
 
 def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
-    """Same URL yielded by two different ParserQuerys → second yield is run_hit, enricher called once."""
+    """Same URL yielded by two different ParserQuerys â†’ second yield is run_hit, enricher called once."""
     enrich_calls: list[str] = []
     duplicate_url = "https://dup.example/job"
 
@@ -508,7 +508,7 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
     class _TrackingEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             enrich_calls.append(stub.url)
             return super().enrich(stub, body_selector)
 
@@ -611,7 +611,7 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
     class _TrackingEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             enrich_calls.append(stub.url)
             return super().enrich(stub, body_selector)
 
@@ -784,14 +784,14 @@ class _FakeLLMEnricherRejectJob1:
 
     def enrich(
         self, stub: PositionStub, body_selector: "str | None"
-    ) -> "RelevanceVerdictV2 | None":
+    ) -> "RelevanceVerdict | None":
         if stub.title == "Job 1":
-            return RelevanceVerdictV2(matches=False)
+            return RelevanceVerdict(matches=False)
         self._card_store.put(
             stub.url,
             CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
         )
-        return RelevanceVerdictV2(
+        return RelevanceVerdict(
             matches=True,
             header=_FAKE_ENRICH_HEADER,
             summary=_FAKE_ENRICH_SUMMARY,
@@ -799,14 +799,14 @@ class _FakeLLMEnricherRejectJob1:
 
 
 class _FakeExtractor:
-    """Deterministic extractor (v2): judge_top_n_v2 only."""
+    """Deterministic extractor (v2): judge_top_n only."""
 
-    def judge_top_n_v2(
-        self, candidates: list[JudgeCandidateV2]
-    ) -> tuple[list[MatchVerdictV2], CallUsage]:
+    def judge_top_n(
+        self, candidates: list[JudgeCandidate]
+    ) -> tuple[list[MatchVerdict], CallUsage]:
         verdicts = []
         for i, c in enumerate(candidates[:5]):
-            verdicts.append(MatchVerdictV2(id=c.id, rank=i + 1))
+            verdicts.append(MatchVerdict(id=c.id, rank=i + 1))
         return verdicts, _FAKE_JUDGE_USAGE
 
 
@@ -859,7 +859,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
 
 
 def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
-    """Second run on same tmp_path → all 6 skipped, tier files unchanged."""
+    """Second run on same tmp_path â†’ all 6 skipped, tier files unchanged."""
     seen_path = tmp_path / ".seen.json"
     results_dir = tmp_path / "results"
     config_path = _write_config(
@@ -904,24 +904,24 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
 
 
 def test_classify_precedes_judge(tmp_path: Path) -> None:
-    """All enrich calls complete before judge_top_n_v2 is called."""
+    """All enrich calls complete before judge_top_n is called."""
     call_log: list[str] = []
     card_store = _make_card_store(tmp_path)
 
     class _InstrumentedEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             call_log.append("enrich")
             return super().enrich(stub, body_selector)
 
     class _InstrumentedExtractor:
-        def judge_top_n_v2(
-            self, candidates: list[JudgeCandidateV2]
-        ) -> tuple[list[MatchVerdictV2], CallUsage]:
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
             call_log.append("judge_top_n")
             return [
-                MatchVerdictV2(id=c.id, rank=i + 1)
+                MatchVerdict(id=c.id, rank=i + 1)
                 for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
@@ -1014,7 +1014,7 @@ def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> N
     class _FailFirstEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ExtractorError("classify boom")
@@ -1039,12 +1039,12 @@ def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> N
 
 
 def test_extractor_error_on_judge_leaves_status_in_domain(tmp_path: Path) -> None:
-    """ExtractorError on judge_top_n_v2: all positions stay in_domain (not selected_by_judge), no daily file written."""
+    """ExtractorError on judge_top_n: all positions stay in_domain (not selected_by_judge), no daily file written."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
     ext = MagicMock()
-    ext.judge_top_n_v2.side_effect = ExtractorError("judge boom")
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -1063,7 +1063,7 @@ def test_extractor_error_on_judge_leaves_status_in_domain(tmp_path: Path) -> Non
 
 
 def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
-    """LLMEnricher.enrich() returns None for one stub → enrich_failed increments, other stubs proceed."""
+    """LLMEnricher.enrich() returns None for one stub â†’ enrich_failed increments, other stubs proceed."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -1083,9 +1083,9 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
     class _NoneForSecondEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[1]:
-                return None  # HTTP fetch failure → enrich_failed
+                return None  # HTTP fetch failure â†’ enrich_failed
             return super().enrich(stub, body_selector)
 
     summary = run(
@@ -1113,7 +1113,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
 def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     tmp_path: Path,
 ) -> None:
-    """LLMEnricher.enrich() returns None (HTTP error) → enrich_failed, other stubs continue."""
+    """LLMEnricher.enrich() returns None (HTTP error) â†’ enrich_failed, other stubs continue."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -1133,9 +1133,9 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     class _HttpErrorEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[1]:
-                return None  # HTTP error → enrich_failed
+                return None  # HTTP error â†’ enrich_failed
             return super().enrich(stub, body_selector)
 
     summary = run(
@@ -1163,7 +1163,7 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
 def test_parser_fatal_http_error_on_enrich_marks_parser_dead_surviving_parsers_continue(
     tmp_path: Path,
 ) -> None:
-    """Parser raises exception in discover() → parsers_dead increments, surviving parsers complete."""
+    """Parser raises exception in discover() â†’ parsers_dead increments, surviving parsers complete."""
     card_store = _make_card_store(tmp_path)
 
     class _FatalDiscoverParser(_StubParserBase):
@@ -1175,7 +1175,7 @@ def test_parser_fatal_http_error_on_enrich_marks_parser_dead_surviving_parsers_c
 
         def discover(self, query: ParserQuery):  # type: ignore[return]
             raise RuntimeError("auth: stub_url status=401")
-            yield  # pragma: no cover — makes this a generator
+            yield  # pragma: no cover â€” makes this a generator
 
     class _HealthyParser(_StubParserBase):
         def __enter__(self) -> "_HealthyParser":
@@ -1249,7 +1249,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
     class _SkipFirstEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[0]:
                 return None  # skip this stub (e.g., HTTP error)
             return super().enrich(stub, body_selector)
@@ -1283,7 +1283,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
 
 def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> None:
     """In v2, a stub skipped by LLMEnricher (None return) is marked enrich_failed.
-    classify_relevance_v2 event with matches=None is logged."""
+    classify_relevance event with matches=None is logged."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -1307,8 +1307,8 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
     class _NoneEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
-            return None  # enricher returns None → enrich_failed
+        ) -> "RelevanceVerdict | None":
+            return None  # enricher returns None â†’ enrich_failed
 
     summary = run(
         _write_config(
@@ -1335,10 +1335,10 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
         .splitlines()
         if line.strip()
     ]
-    # v2 logs a classify_relevance_v2 event with matches=None when enricher returns None
-    classify_v2_rows = [r for r in events if r.get("event") == "classify_relevance_v2"]
-    assert len(classify_v2_rows) == 1
-    assert classify_v2_rows[0].get("matches") is None
+    # v2 logs a classify_relevance event with matches=None when enricher returns None
+    classify_rows = [r for r in events if r.get("event") == "classify_relevance"]
+    assert len(classify_rows) == 1
+    assert classify_rows[0].get("matches") is None
 
 
 def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> None:
@@ -1379,7 +1379,7 @@ def test_parser_error_mid_discover_processes_yielded_stubs(tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# judge_pending: classify→judge boundary idempotency (issue #289)
+# judge_pending: classifyâ†’judge boundary idempotency (issue #289)
 # ---------------------------------------------------------------------------
 
 _RESUME_URL = "https://resume.example/job/0"
@@ -1409,12 +1409,12 @@ def _one_stub_config(tmp_path: Path) -> Path:
 
 
 def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
-    """After enrich succeeds and judge_top_n_v2 raises ExtractorError, seen store has in_domain."""
+    """After enrich succeeds and judge_top_n raises ExtractorError, seen store has in_domain."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
     ext = MagicMock()
-    ext.judge_top_n_v2.side_effect = ExtractorError("judge boom")
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
 
     run(
         _one_stub_config(tmp_path),
@@ -1453,9 +1453,9 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     # Write card store in v2 format so build_candidates can retrieve the card
-    _v2_card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
+    _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
-        json.dumps({_RESUME_URL: _v2_card}),
+        json.dumps({_RESUME_URL: _card}),
         encoding="utf-8",
     )
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -1463,20 +1463,20 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
     class _TrackingEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             enrich_calls.append(stub.url)
             return super().enrich(stub, body_selector)
 
     judge_candidate_ids: list[str] = []
 
     class _TrackingExtractor:
-        def judge_top_n_v2(
-            self, candidates: list[JudgeCandidateV2]
-        ) -> tuple[list[MatchVerdictV2], CallUsage]:
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
-                MatchVerdictV2(id=c.id, rank=i + 1)
+                MatchVerdict(id=c.id, rank=i + 1)
                 for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
@@ -1512,10 +1512,10 @@ def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) 
         ),
         encoding="utf-8",
     )
-    # Write card store in v2 format so build_candidates produces a JudgeCandidateV2
-    _v2_card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
+    # Write card store in v2 format so build_candidates produces a JudgeCandidate
+    _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
-        json.dumps({_RESUME_URL: _v2_card}), encoding="utf-8"
+        json.dumps({_RESUME_URL: _card}), encoding="utf-8"
     )
     card_store = load_card_store(tmp_path / "extracts.json")
 
@@ -1551,14 +1551,14 @@ def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     # Write card store in v2 format so build_candidates finds the candidate
-    _v2_card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
+    _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
-        json.dumps({_RESUME_URL: _v2_card}), encoding="utf-8"
+        json.dumps({_RESUME_URL: _card}), encoding="utf-8"
     )
     card_store = load_card_store(tmp_path / "extracts.json")
 
     ext = MagicMock()
-    ext.judge_top_n_v2.side_effect = ExtractorError("judge boom again")
+    ext.judge_top_n.side_effect = ExtractorError("judge boom again")
 
     run(
         _one_stub_config(tmp_path),
@@ -1596,22 +1596,22 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write card store in v2 format — this is what build_candidates uses
-    _v2_card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
+    # Write card store in v2 format â€” this is what build_candidates uses
+    _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
-        json.dumps({_RESUME_URL: _v2_card}),
+        json.dumps({_RESUME_URL: _card}),
         encoding="utf-8",
     )
     card_store = load_card_store(tmp_path / "extracts.json")
 
     class _CapturingExtractor:
-        def judge_top_n_v2(
-            self, candidates: list[JudgeCandidateV2]
-        ) -> tuple[list[MatchVerdictV2], CallUsage]:
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
-                MatchVerdictV2(id=c.id, rank=i + 1)
+                MatchVerdict(id=c.id, rank=i + 1)
                 for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
@@ -1625,7 +1625,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
     )
 
     assert _RESUME_URL in judge_candidate_ids, (
-        "judge_top_n_v2 must be called with the judge_pending stub as a candidate"
+        "judge_top_n must be called with the judge_pending stub as a candidate"
     )
 
 
@@ -1638,7 +1638,7 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
     class _FailEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             # Return None to trigger enrich_failed
             return None
 
@@ -1691,9 +1691,9 @@ def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     # Write a v2-format extracts.json so _wipe_extracts_if_v1 keeps it
-    _v2_card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
+    _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
-        json.dumps({_RESUME_URL: _v2_card}), encoding="utf-8"
+        json.dumps({_RESUME_URL: _card}), encoding="utf-8"
     )
     card_store = load_card_store(tmp_path / "extracts.json")
 
@@ -1713,7 +1713,7 @@ def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
 def test_judge_pending_judge_failure_stays_in_domain_on_rerun(
     tmp_path: Path,
 ) -> None:
-    """On rerun, if judge_top_n_v2 fails the resumed stub stays in_domain."""
+    """On rerun, if judge_top_n fails the resumed stub stays in_domain."""
     seen_path = tmp_path / ".seen.json"
 
     seen_path.write_text(
@@ -1731,14 +1731,14 @@ def test_judge_pending_judge_failure_stays_in_domain_on_rerun(
         encoding="utf-8",
     )
     # Write a v2-format extracts.json so _wipe_extracts_if_v1 keeps it
-    _v2_card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
+    _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
-        json.dumps({_RESUME_URL: _v2_card}), encoding="utf-8"
+        json.dumps({_RESUME_URL: _card}), encoding="utf-8"
     )
     card_store = load_card_store(tmp_path / "extracts.json")
 
     ext = MagicMock()
-    ext.judge_top_n_v2.side_effect = ExtractorError("judge boom")
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
 
     run(
         _one_stub_config(tmp_path),
@@ -1759,7 +1759,7 @@ def test_judge_pending_judge_failure_stays_in_domain_on_rerun(
 
 
 def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
-    """Uncaught exception in parser thread → parsers_dead==1, run completes (no hang)."""
+    """Uncaught exception in parser thread â†’ parsers_dead==1, run completes (no hang)."""
 
     class _DeadParser(_StubParserBase):
         def __enter__(self) -> "_DeadParser":
@@ -1770,7 +1770,7 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
 
         def discover(self, query: ParserQuery):  # type: ignore[return]
             raise RuntimeError("unexpected crash")
-            yield  # pragma: no cover — makes this a generator
+            yield  # pragma: no cover â€” makes this a generator
 
     summary = run(
         _write_config(
@@ -1791,7 +1791,7 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
 
 
 def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
-    """One dead parser + one healthy parser → dead counted, healthy stubs written."""
+    """One dead parser + one healthy parser â†’ dead counted, healthy stubs written."""
 
     class _DeadParser(_StubParserBase):
         def __enter__(self) -> "_DeadParser":
@@ -1997,7 +1997,7 @@ def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
     class _CrashingEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             raise RuntimeError("unexpected crash escaping main path")
 
     card_store = _make_card_store(tmp_path)
@@ -2029,7 +2029,7 @@ def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
 def test_fatal_error_writes_failure_report_and_exits_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DedupStoreError at startup → failure report written, stage=orchestrator, exit 1."""
+    """DedupStoreError at startup â†’ failure report written, stage=orchestrator, exit 1."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     _write_config(tmp_path / "application-pipeline")
@@ -2143,7 +2143,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Three NotServedQuery sentinels → not_served_queries=3 in SUMMARY, nothing in body, no stderr."""
+    """Three NotServedQuery sentinels â†’ not_served_queries=3 in SUMMARY, nothing in body, no stderr."""
     import logging
 
     import application_pipeline.parser_log as parser_log
@@ -2162,7 +2162,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
     logs_dir = tmp_path / "synched" / "logs"
     run_log = parser_log.RunLog(logs_dir)
 
-    # 3 keywords × 1 location × no remote = 3 discover() calls → 3 sentinels
+    # 3 keywords Ã— 1 location Ã— no remote = 3 discover() calls â†’ 3 sentinels
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -2235,14 +2235,14 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
 
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             if stub.url == _STUB_URLS[0]:
                 return None  # triggers enrich_failed
             card_store.put(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -2281,12 +2281,12 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
 
 
 # ---------------------------------------------------------------------------
-# Orchestrator: classify_relevance_v2 logging (v2 enricher path)
+# Orchestrator: classify_relevance logging (v2 enricher path)
 # ---------------------------------------------------------------------------
 
 
 class _WarnParser(_StubParserBase):
-    """Returns one stub; used in tests for llm_enricher classify_relevance_v2 logging."""
+    """Returns one stub; used in tests for llm_enricher classify_relevance logging."""
 
     def __enter__(self) -> "_WarnParser":
         return self
@@ -2303,7 +2303,7 @@ class _WarnParser(_StubParserBase):
 
 
 def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
-    """In v2, classify_relevance_v2 events are written to llm_classify_relevance.events.jsonl on successful enrichment."""
+    """In v2, classify_relevance events are written to llm_classify_relevance.events.jsonl on successful enrichment."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -2335,9 +2335,9 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
     assert any(
-        row.get("event") == "classify_relevance_v2" and row.get("matches") is True
+        row.get("event") == "classify_relevance" and row.get("matches") is True
         for row in events_rows
-    ), "classify_relevance_v2 matches=True event must appear in events log"
+    ), "classify_relevance matches=True event must appear in events log"
     assert summary.written == 1
 
 
@@ -2375,12 +2375,12 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
 
 
 # ---------------------------------------------------------------------------
-# Batched classify pipeline — new tests for issue #187
+# Batched classify pipeline â€” new tests for issue #187
 # ---------------------------------------------------------------------------
 
 
 def _batch_size_config(tmp_path: Path, batch_size: int = 1) -> Path:
-    # batch_size is ignored — solo calls per position, no batching
+    # batch_size is ignored â€” solo calls per position, no batching
     return _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -2391,20 +2391,20 @@ def _batch_size_config(tmp_path: Path, batch_size: int = 1) -> Path:
 
 
 def test_four_positions_each_get_solo_classify_call(tmp_path: Path) -> None:
-    """4 positions → llm_enricher.enrich() called 4 times, once per position."""
+    """4 positions â†’ llm_enricher.enrich() called 4 times, once per position."""
     call_count = [0]
     card_store = _make_card_store(tmp_path)
 
     class _CountingEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             call_count[0] += 1
             card_store.put(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -2492,7 +2492,7 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
 
 
 def test_classify_thread_six_positions_happy_path(tmp_path: Path) -> None:
-    """v2 pipeline happy path: 6 stubs → llm_enricher.enrich() × 6, judge caps at 5 written.
+    """v2 pipeline happy path: 6 stubs â†’ llm_enricher.enrich() Ã— 6, judge caps at 5 written.
 
     All positions are in-domain and judged.  Asserts set-equality on the
     URLs that appear in daily results and on the 'kept' members of .seen.json.
@@ -2529,12 +2529,12 @@ def test_classify_thread_six_positions_happy_path(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # 6 positions → 6 enrich calls; judge_top_n_v2 caps at 5
+    # 6 positions â†’ 6 enrich calls; judge_top_n caps at 5
     assert summary.written == 5
     assert summary.classify_items == 6
     assert summary.classifier_dropped == 0
 
-    # .seen.json: 5 URLs kept (top-5 from judge_top_n_v2)
+    # .seen.json: 5 URLs kept (top-5 from judge_top_n)
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     kept_urls = {
         url for url, rec in seen_data.items() if rec["status"] == "selected_by_judge"
@@ -2557,13 +2557,13 @@ def test_mixed_listing_set_all_classified(tmp_path: Path) -> None:
     class _CountingEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             call_count[0] += 1
             card_store.put(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -2598,7 +2598,7 @@ def test_mixed_listing_set_all_classified(tmp_path: Path) -> None:
 
 
 def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
-    """Positions classified as off-domain by llm_enricher are not included in judge_top_n_v2 candidates."""
+    """Positions classified as off-domain by llm_enricher are not included in judge_top_n candidates."""
     seen_path = tmp_path / ".seen.json"
     _OFF_URL = "https://offdomain.example/0"
     _ON_URL = "https://offdomain.example/1"
@@ -2607,26 +2607,26 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     class _SelectiveEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             if stub.url == _OFF_URL:
-                return RelevanceVerdictV2(matches=False)
+                return RelevanceVerdict(matches=False)
             card_store.put(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
     judge_candidate_ids: list[list[str]] = []
 
     class _TrackingJudge:
-        def judge_top_n_v2(
-            self, candidates: "list[JudgeCandidateV2]"
-        ) -> "tuple[list[MatchVerdictV2], CallUsage]":
+        def judge_top_n(
+            self, candidates: "list[JudgeCandidate]"
+        ) -> "tuple[list[MatchVerdict], CallUsage]":
             judge_candidate_ids.append([c.id for c in candidates])
             return [
-                MatchVerdictV2(id=c.id, rank=i + 1)
+                MatchVerdict(id=c.id, rank=i + 1)
                 for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
@@ -2654,7 +2654,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
 
     assert summary.classifier_dropped == 1
     assert summary.written == 1
-    # judge_top_n_v2 called with only the in-domain candidate
+    # judge_top_n called with only the in-domain candidate
     assert len(judge_candidate_ids) == 1
     assert _ON_URL in judge_candidate_ids[0]
     assert _OFF_URL not in judge_candidate_ids[0]
@@ -2673,7 +2673,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
     class _FailFirstEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 from application_pipeline.llm import ExtractorMalformedError
@@ -2683,7 +2683,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -2708,7 +2708,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
-    """ExtractorUnreachableError with forensics → returncode and stderr_excerpt in judge_top_n_v2 log."""
+    """ExtractorUnreachableError with forensics â†’ returncode and stderr_excerpt in judge_top_n log."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -2716,7 +2716,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     ext = MagicMock()
-    ext.judge_top_n_v2.side_effect = ExtractorUnreachableError(
+    ext.judge_top_n.side_effect = ExtractorUnreachableError(
         "cli gone", returncode=2, stderr="timeout on judge"
     )
 
@@ -2746,7 +2746,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
 
 def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> None:
-    """load_prompts returns PromptTemplate for classify_relevance_v2 and judge_top_n_v2."""
+    """load_prompts returns PromptTemplate for classify_relevance and judge_top_n."""
     from application_pipeline.prompts import load_prompts
     from application_pipeline import (
         Config,
@@ -2773,8 +2773,8 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
         SearchTerms(keywords=("python",), skills=(), negative_keywords=()),
     )
 
-    assert isinstance(prompts.classify_relevance_v2, PromptTemplate)
-    assert isinstance(prompts.judge_top_n_v2, PromptTemplate)
+    assert isinstance(prompts.classify_relevance, PromptTemplate)
+    assert isinstance(prompts.judge_top_n, PromptTemplate)
 
 
 def test_init_materialises_user_info_files(
@@ -2823,7 +2823,7 @@ def test_run_summary_carries_token_and_cost_totals(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # 5 items pass prefilter → 5 enrich calls (1 off-domain + 4 in-domain = 5 classified)
+    # 5 items pass prefilter â†’ 5 enrich calls (1 off-domain + 4 in-domain = 5 classified)
     assert summary.classify_items == 5
     # In v2, classify usage is zero; judge usage comes from _FakeExtractor._FAKE_JUDGE_USAGE
     assert summary.claude_input_tokens == _FAKE_JUDGE_USAGE.input_tokens
@@ -3063,7 +3063,7 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# StatusDisplay — startup row
+# StatusDisplay â€” startup row
 # ---------------------------------------------------------------------------
 
 
@@ -3107,7 +3107,7 @@ def test_startup_row_ordering(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# StatusDisplay — per-parser rows (issue #197)
+# StatusDisplay â€” per-parser rows (issue #197)
 # ---------------------------------------------------------------------------
 
 
@@ -3223,7 +3223,7 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
     assert "queries" in final
     assert "stubs" in final
     assert "enriched" in final
-    # _StubParser returns 3 stubs per call; 1 keyword × 1 location = 1 query → 3 stubs
+    # _StubParser returns 3 stubs per call; 1 keyword Ã— 1 location = 1 query â†’ 3 stubs
     # In v2, enriched count is 0 (parser.enrich() is not called; enrichment happens in LLMEnricher)
     assert final.startswith("1/1 queries · 3 stubs · 0 enriched")
 
@@ -3532,7 +3532,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
     logs_dir = tmp_path / "synched" / "logs"
     run_log = parser_log.RunLog(logs_dir)
 
-    _THRESHOLD = 0.05  # 50 ms — fast enough for tests
+    _THRESHOLD = 0.05  # 50 ms â€” fast enough for tests
 
     class _SleepyParser(_StubParserBase):
         def __enter__(self) -> "_SleepyParser":
@@ -3573,7 +3573,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
 
 
 def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
-    """Stall is logged at most once per silence period — not on every poll tick."""
+    """Stall is logged at most once per silence period â€” not on every poll tick."""
     import time
 
     import application_pipeline.parser_log as parser_log
@@ -3626,7 +3626,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
 
 
 def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
-    """N queries → exactly N query_started and N query_ended lines in the parser log."""
+    """N queries â†’ exactly N query_started and N query_ended lines in the parser log."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -3653,7 +3653,7 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
-    # 2 keywords × 1 location = 2 queries
+    # 2 keywords Ã— 1 location = 2 queries
     started_count = sum(1 for row in events_rows if row.get("event") == "query_started")
     ended_count = sum(1 for row in events_rows if row.get("event") == "query_ended")
     assert started_count == 2, f"expected 2 query_started lines, got {started_count}"
@@ -3719,20 +3719,20 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
 def test_non_quota_worker_exception_writes_failure_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """RuntimeError from judge worker → failure report written, exit 1."""
+    """RuntimeError from judge worker â†’ failure report written, exit 1."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     _write_config(tmp_path / "application-pipeline")
     monkeypatch.setattr("sys.argv", ["app", "run"])
 
     class _AbortingExtractor:
-        def classify_relevance_v2(self, item: object) -> object:
-            # Satisfies LLMExtractorV2 Protocol check; never called (LLMEnricher is monkeypatched)
+        def classify_relevance(self, item: object) -> object:
+            # Satisfies LLMExtractor Protocol check; never called (LLMEnricher is monkeypatched)
             raise NotImplementedError
 
-        def judge_top_n_v2(
-            self, candidates: "list[JudgeCandidateV2]"
-        ) -> "tuple[list[MatchVerdictV2], CallUsage]":
+        def judge_top_n(
+            self, candidates: "list[JudgeCandidate]"
+        ) -> "tuple[list[MatchVerdict], CallUsage]":
             raise RuntimeError("disk full")
 
     class _InDomainEnricher:
@@ -3743,12 +3743,12 @@ def test_non_quota_worker_exception_writes_failure_report(
 
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             self._card_store.put(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -3798,7 +3798,7 @@ def test_non_quota_worker_exception_writes_failure_report(
 
 
 # ---------------------------------------------------------------------------
-# Issue #229 — status-row body refreshed on error exit paths
+# Issue #229 â€” status-row body refreshed on error exit paths
 # ---------------------------------------------------------------------------
 
 
@@ -3809,7 +3809,7 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     class _ErrorEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             raise ExtractorError("classify boom")
 
     display = FakeStatusDisplay()
@@ -3852,7 +3852,7 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
 
 
 def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
-    """judge_top_n_v2 success: llm_judge_match body shows 1/1 calls with no error tokens."""
+    """judge_top_n success: llm_judge_match body shows 1/1 calls with no error tokens."""
     card_store = _make_card_store(tmp_path)
 
     display = FakeStatusDisplay()
@@ -3870,13 +3870,13 @@ def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
     judge_bodies = display.body_updates_for("llm_judge_match")
     assert judge_bodies, "expected judge_match body updates"
     last_body = judge_bodies[-1]
-    # 1 successful judge_top_n_v2 call
+    # 1 successful judge_top_n call
     assert "1/1 calls" in last_body
     assert "calls_failed=" not in last_body
 
 
 # ---------------------------------------------------------------------------
-# Issue #230 — live pending-depth signal
+# Issue #230 â€” live pending-depth signal
 # ---------------------------------------------------------------------------
 
 
@@ -3912,7 +3912,7 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
 
 
 def test_clean_run_writes_classify_success_events(tmp_path: Path) -> None:
-    """A clean run logs one classify_relevance_v2 success event per position."""
+    """A clean run logs one classify_relevance success event per position."""
     import application_pipeline.parser_log as pl
 
     logs_dir = tmp_path / "logs"
@@ -3935,7 +3935,7 @@ def test_clean_run_writes_classify_success_events(tmp_path: Path) -> None:
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
     ]
-    success_rows = [r for r in rows if r.get("event") == "classify_relevance_v2"]
+    success_rows = [r for r in rows if r.get("event") == "classify_relevance"]
     assert len(success_rows) == 2
 
 
@@ -3971,7 +3971,7 @@ def test_results_file_lands_under_config_dir_regardless_of_cwd(
 
 
 def test_verdicts_written_to_daily_results_file(tmp_path: Path) -> None:
-    """All judge_top_n_v2 verdicts are written to the daily results file in v2 format."""
+    """All judge_top_n verdicts are written to the daily results file in v2 format."""
     from datetime import datetime, timezone
 
     today = datetime.now(timezone.utc).date().isoformat()
@@ -3999,7 +3999,7 @@ def test_verdicts_written_to_daily_results_file(tmp_path: Path) -> None:
     assert dated_file.exists(), f"Expected daily file at {dated_file}"
 
     # _FakeLLMEnricherRejectJob1: 4 in-domain stubs (after 1 prefilter-drop and 1 classify-drop)
-    # judge_top_n_v2 returns up to 5 verdicts; cards use v2 format: # **rank:** header
+    # judge_top_n returns up to 5 verdicts; cards use v2 format: # **rank:** header
     content = dated_file.read_text(encoding="utf-8")
     cards = re.findall(r"^# \*\*\d+:\*\* .+", content, re.MULTILINE)
     assert len(cards) == 4
@@ -4131,7 +4131,7 @@ def _make_advancing_quota_wall():  # type: ignore[return]
 
 
 def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
-    """ClaudeUsageLimitError from llm_enricher.enrich() → orchestrator sleeps via QuotaWall and retries; run completes."""
+    """ClaudeUsageLimitError from llm_enricher.enrich() â†’ orchestrator sleeps via QuotaWall and retries; run completes."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -4142,7 +4142,7 @@ def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
     class _QuotaEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ClaudeUsageLimitError(
@@ -4156,7 +4156,7 @@ def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -4199,7 +4199,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
     class _QuotaEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ClaudeUsageLimitError(
@@ -4213,7 +4213,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -4252,7 +4252,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
 def test_quota_judge_retries_and_completes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ClaudeUsageLimitError on judge_top_n_v2 → orchestrator sleeps and retries; run completes."""
+    """ClaudeUsageLimitError on judge_top_n â†’ orchestrator sleeps and retries; run completes."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -4262,16 +4262,16 @@ def test_quota_judge_retries_and_completes(
     judge_call_count = [0]
 
     class _RetryJudge:
-        def judge_top_n_v2(
-            self, candidates: "list[JudgeCandidateV2]"
-        ) -> "tuple[list[MatchVerdictV2], CallUsage]":
+        def judge_top_n(
+            self, candidates: "list[JudgeCandidate]"
+        ) -> "tuple[list[MatchVerdict], CallUsage]":
             judge_call_count[0] += 1
             if judge_call_count[0] == 1:
                 raise ClaudeUsageLimitError(
                     "quota", returncode=1, stdout="", stderr="quota", envelope=None
                 )
             return [
-                MatchVerdictV2(id=c.id, rank=i + 1)
+                MatchVerdict(id=c.id, rank=i + 1)
                 for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
@@ -4289,7 +4289,7 @@ def test_quota_judge_retries_and_completes(
 
 
 # ---------------------------------------------------------------------------
-# Daily cutover — issue #390
+# Daily cutover â€” issue #390
 # ---------------------------------------------------------------------------
 
 _DAILY390_URL = "https://daily390.example/job-1"
@@ -4348,7 +4348,7 @@ from datetime import date as _date, timedelta as _timedelta  # noqa: E402
 
 
 def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
-    """in_domain → expired transition on pool re-discovery removes the entry from extracts.json."""
+    """in_domain â†’ expired transition on pool re-discovery removes the entry from extracts.json."""
     stale_url = "https://pool-reentry.example/stale-extract"
     seen_path = tmp_path / ".seen.json"
     extracts_path = tmp_path / "extracts.json"
@@ -4424,7 +4424,7 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
 def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge(
     tmp_path: Path,
 ) -> None:
-    """A still-fresh in_domain URL passes the gate, stays in_domain, and is judged via judge_top_n_v2."""
+    """A still-fresh in_domain URL passes the gate, stays in_domain, and is judged via judge_top_n."""
     fresh_url = "https://pool-reentry.example/fresh"
     seen_path = tmp_path / ".seen.json"
     extracts_path = tmp_path / "extracts.json"
@@ -4469,14 +4469,14 @@ def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [PositionStub(url=fresh_url, title="Fresh Pool Job", source="stub")]
 
-    class _JudgeTrackingExtractorV2:
-        def judge_top_n_v2(
-            self, candidates: "list[JudgeCandidateV2]"
-        ) -> "tuple[list[MatchVerdictV2], CallUsage]":
+    class _JudgeTrackingExtractor:
+        def judge_top_n(
+            self, candidates: "list[JudgeCandidate]"
+        ) -> "tuple[list[MatchVerdict], CallUsage]":
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
-                MatchVerdictV2(id=c.id, rank=i + 1)
+                MatchVerdict(id=c.id, rank=i + 1)
                 for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
@@ -4489,7 +4489,7 @@ def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge
             include_remote=False,
         ),
         llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=_JudgeTrackingExtractorV2(),
+        extractor=_JudgeTrackingExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _FreshPoolParser,  # type: ignore[return-value, arg-type]
     )
@@ -4516,7 +4516,7 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
     class _TimedEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             start = _time.monotonic()
             _time.sleep(0.05)
             end = _time.monotonic()
@@ -4526,7 +4526,7 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -4569,7 +4569,7 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
         if i != j
     )
     assert overlapping, (
-        "Expected at least 2 enrich calls to overlap in time — "
+        "Expected at least 2 enrich calls to overlap in time â€” "
         f"call intervals: {call_log}"
     )
 
@@ -4593,7 +4593,7 @@ def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
     class _QuotaEnricher2:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             with call_lock:
                 call_count[0] += 1
                 current = call_count[0]
@@ -4609,7 +4609,7 @@ def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True, header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
             )
 
@@ -4753,7 +4753,7 @@ def test_parallel_classify_worker_exception_propagates(tmp_path: Path) -> None:
     class _CrashingEnricher:
         def enrich(
             self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdictV2 | None":
+        ) -> "RelevanceVerdict | None":
             raise RuntimeError("classify crash")
 
     class _OneStubParser2(_StubParserBase):
@@ -4787,7 +4787,7 @@ def test_parallel_classify_worker_exception_propagates(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# v2 pipeline: LLMEnricher + judge_top_n_v2 + renderer_v2 (issue #531)
+# pipeline: LLMEnricher + judge_top_n + renderer (issue #531)
 # ---------------------------------------------------------------------------
 
 
@@ -4813,9 +4813,9 @@ class _DiscoverOnlyParser(_StubParserBase):
         return self._stubs
 
 
-_V2_STUB_URL = "https://v2stub.example/0"
-_V2_CARD_HEADER = "ML Engineer · ACME GmbH · Hamburg"
-_V2_CARD_SUMMARY = "Exciting ML engineering role with competitive compensation."
+_STUB_URL = "https://v2stub.example/0"
+_CARD_HEADER = "ML Engineer · ACME GmbH · Hamburg"
+_CARD_SUMMARY = "Exciting ML engineering role with competitive compensation."
 
 
 class _FakeLLMEnricher:
@@ -4827,32 +4827,32 @@ class _FakeLLMEnricher:
 
     def enrich(
         self, stub: PositionStub, body_selector: "str | None"
-    ) -> "RelevanceVerdictV2 | None":
+    ) -> "RelevanceVerdict | None":
         if self._matches:
             self._card_store.put(  # type: ignore[union-attr, attr-defined]
                 stub.url,
-                CardExtract(header=_V2_CARD_HEADER, summary=_V2_CARD_SUMMARY),
+                CardExtract(header=_CARD_HEADER, summary=_CARD_SUMMARY),
             )
-            return RelevanceVerdictV2(
+            return RelevanceVerdict(
                 matches=True,
-                header=_V2_CARD_HEADER,
-                summary=_V2_CARD_SUMMARY,
+                header=_CARD_HEADER,
+                summary=_CARD_SUMMARY,
             )
-        return RelevanceVerdictV2(matches=False)
+        return RelevanceVerdict(matches=False)
 
 
-class _FakeJudgeExtractorV2:
-    """Fake extractor with judge_top_n_v2 only."""
+class _FakeJudgeExtractor:
+    """Fake extractor with judge_top_n only."""
 
-    def judge_top_n_v2(
-        self, candidates: "list[JudgeCandidateV2]"
-    ) -> "tuple[list[MatchVerdictV2], CallUsage]":
+    def judge_top_n(
+        self, candidates: "list[JudgeCandidate]"
+    ) -> "tuple[list[MatchVerdict], CallUsage]":
         return [
-            MatchVerdictV2(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
+            MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
         ], _ZERO_USAGE
 
 
-def test_v2_pipeline_produces_v2_format_cards(tmp_path: Path) -> None:
+def test_pipeline_produces_cards(tmp_path: Path) -> None:
     """Cron path with LLMEnricher renders cards as # **{rank}:** {header}\\n\\n{summary}\\n."""
     card_store = load_card_store(tmp_path / "card_store.json")
     results_dir = tmp_path / "results"
@@ -4866,7 +4866,7 @@ def test_v2_pipeline_produces_v2_format_cards(tmp_path: Path) -> None:
             include_remote=False,
         ),
         llm_enricher=_FakeLLMEnricher(card_store),
-        extractor=_FakeJudgeExtractorV2(),
+        extractor=_FakeJudgeExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _DiscoverOnlyParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
@@ -4874,5 +4874,5 @@ def test_v2_pipeline_produces_v2_format_cards(tmp_path: Path) -> None:
 
     assert summary.written == 1
     content = _read_all_results(results_dir)
-    assert f"# **1:** {_V2_CARD_HEADER}" in content
-    assert _V2_CARD_SUMMARY in content
+    assert f"# **1:** {_CARD_HEADER}" in content
+    assert _CARD_SUMMARY in content

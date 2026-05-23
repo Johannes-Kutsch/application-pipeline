@@ -14,7 +14,7 @@ from application_pipeline.extracts import (
 
 @pytest.fixture
 def store_path(tmp_path: Path) -> Path:
-    return tmp_path / "extracts_v2.json"
+    return tmp_path / "extracts.json"
 
 
 @pytest.fixture

@@ -560,7 +560,28 @@ def test_enrich_falls_back_to_html_when_jobdetails_fails_recoverably(
     assert result.body
 
 
-def test_enrich_raises_enrich_failed_error_when_both_paths_fail(
+def test_enrich_raises_enrich_failed_error_when_both_paths_fail_with_404(
+    run_log: RunLog, tmp_path: Path
+) -> None:
+    def failing_get(url: str, timeout: float) -> bytes:
+        raise OSError("connection refused")
+
+    stub = PositionStub(
+        url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http = ParserHttp(run_log=run_log, _http_get=failing_get, retries=1)
+    with respx.mock:
+        respx.get(stub.url).mock(return_value=httpx.Response(404))
+        with BundesagenturParser(
+            run_log=run_log, failures_dir=tmp_path, _http=http
+        ) as p:
+            with pytest.raises(EnrichFailedError):
+                p.enrich(stub)
+
+
+def test_enrich_propagates_transient_http_error_when_fallback_gets_5xx(
     run_log: RunLog, tmp_path: Path
 ) -> None:
     def failing_get(url: str, timeout: float) -> bytes:
@@ -577,7 +598,7 @@ def test_enrich_raises_enrich_failed_error_when_both_paths_fail(
         with BundesagenturParser(
             run_log=run_log, failures_dir=tmp_path, _http=http
         ) as p:
-            with pytest.raises(EnrichFailedError):
+            with pytest.raises(httpx.HTTPStatusError):
                 p.enrich(stub)
 
 

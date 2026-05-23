@@ -37,17 +37,23 @@ def fetch_and_strip(
 ) -> str:
     """Fetch *url* and strip HTML to plaintext.
 
-    Redirect-following is enabled. Raises EnrichFailedError on unrecoverable
-    HTTP failure. Raises OversizedBodyError when the stripped body exceeds the
-    token cap (raw HTML is stashed to failures_dir/oversized/ before raising).
+    Redirect-following is enabled. Raises EnrichFailedError on per-URL
+    unrecoverable HTTP failures (404, 400, 422). Auth and 5xx errors propagate
+    as httpx.HTTPError so callers can treat them as transient (retry next run).
+    Raises OversizedBodyError when the stripped body exceeds the token cap
+    (raw HTML is stashed to failures_dir/oversized/ before raising).
     """
     try:
         with httpx.Client(follow_redirects=True) as client:
             response = client.get(url)
             response.raise_for_status()
             html = response.text
-    except httpx.HTTPError as exc:
-        raise EnrichFailedError(f"{url}: {exc}") from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (400, 404, 422):
+            raise EnrichFailedError(f"{url}: HTTP {exc.response.status_code}") from exc
+        raise
+    except httpx.HTTPError:
+        raise
 
     text = strip_to_text(html, body_selector)
 

@@ -7,6 +7,8 @@ import sys
 import threading
 import time
 import traceback
+
+import httpx
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -416,8 +418,15 @@ class _EnrichThread(_QueueWorker):
                 source=exc.source,
                 body_len=exc.body_len,
             )
-            self._dedup_store.mark_enrich_failed(item.stub)
-            self._metrics.enrich_failed(item.stub.source)
+            return
+        except httpx.HTTPError as exc:
+            self._run_log.event(
+                "llm_enricher",
+                "fetch_transient_error",
+                url=item.stub.url,
+                source=item.stub.source,
+                error=str(exc),
+            )
             return
 
         self._metrics.enriched(item.parser_id, enrich_result.mode)

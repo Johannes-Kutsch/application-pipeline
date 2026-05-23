@@ -37,8 +37,14 @@ from application_pipeline.parsers import (
     ParserQuery,
     PositionStub,
 )
+from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.errors import ParserError
-from application_pipeline.parsers.types import City, EnrichResult, Remote
+from application_pipeline.parsers.types import (
+    City,
+    EnrichFailedError,
+    EnrichResult,
+    Remote,
+)
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import ResultsFileError
 
@@ -5366,3 +5372,185 @@ def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
     ]
     assert len(post_llm_rows) == 1, "must have a post_llm freshness row"
     assert post_llm_rows[0]["passes"] is False
+
+
+# ---------------------------------------------------------------------------
+# EnrichFailedError / OversizedBodyError semantics (issue #557)
+# ---------------------------------------------------------------------------
+
+_EF_URL = "https://enrich-fail-557.example/job"
+
+
+class _EnrichFailedParser(_StubParserBase):
+    """Parser that raises EnrichFailedError from enrich() — simulates a 404 body fetch."""
+
+    def __enter__(self) -> "_EnrichFailedParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery) -> list[PositionStub]:
+        return [PositionStub(url=_EF_URL, title="Job", source="stub")]
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        raise EnrichFailedError("404: not found")
+
+
+def _ef_config(tmp_path: Path) -> Path:
+    return _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+
+
+def test_enrich_failed_error_from_parser_writes_enrich_failed_to_seen(
+    tmp_path: Path,
+) -> None:
+    """parser.enrich() raises EnrichFailedError → seen.json has status: enrich_failed."""
+    seen_path = tmp_path / ".seen.json"
+
+    summary = run(
+        _ef_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _EnrichFailedParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.enrich_failed == 1
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_EF_URL]["status"] == "enrich_failed"
+
+
+def test_oversized_body_from_parser_enrich_does_not_mark_enrich_failed(
+    tmp_path: Path,
+) -> None:
+    """OversizedBodyError from parser.enrich() must NOT write enrich_failed to seen.json.
+
+    Per ADR-0041: oversized bodies are stashed and re-checked on the next run.
+    The URL must remain absent from seen.json so it is retried.
+    """
+    seen_path = tmp_path / ".seen.json"
+
+    class _OversizedParser(_StubParserBase):
+        def __enter__(self) -> "_OversizedParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=_EF_URL, title="Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            raise OversizedBodyError(url=_EF_URL, source="stub", body_len=100_000)
+
+    summary = run(
+        _ef_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _OversizedParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.enrich_failed == 0
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert _EF_URL not in seen_data, (
+        "oversized-body URL must not be permanently blacklisted"
+    )
+
+
+def test_enrich_failed_url_is_not_re_attempted_on_subsequent_run(
+    tmp_path: Path,
+) -> None:
+    """URL marked enrich_failed on run 1 is skipped on run 2 — URL-tier dedup short-circuit."""
+    seen_path = tmp_path / ".seen.json"
+    enrich_calls: list[str] = []
+
+    class _TrackingEnrichFailParser(_StubParserBase):
+        def __enter__(self) -> "_TrackingEnrichFailParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=_EF_URL, title="Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enrich_calls.append(stub.url)
+            raise EnrichFailedError("404: not found")
+
+    def _make_run() -> RunSummary:
+        return run(
+            _ef_config(tmp_path),
+            extractor=_stub_extractor(),
+            parser_registry=lambda _: _TrackingEnrichFailParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(seen_path),
+        )
+
+    first = _make_run()
+    assert first.enrich_failed == 1
+    assert enrich_calls == [_EF_URL]
+
+    enrich_calls.clear()
+    second = _make_run()
+    assert second.skipped == 1
+    assert enrich_calls == [], (
+        "enrich must NOT be called for an enrich_failed URL on rerun"
+    )
+
+
+def test_transient_http_error_from_parser_enrich_does_not_mark_enrich_failed(
+    tmp_path: Path,
+) -> None:
+    """A transient/recoverable HTTP error from parser.enrich() must NOT write enrich_failed.
+
+    5xx and network errors are not per-URL failures — they may succeed next run.
+    The URL must remain absent from seen.json so it is retried.
+    The run must complete normally (enrich thread must not die from a per-stub transient error).
+    """
+    import httpx
+
+    seen_path = tmp_path / ".seen.json"
+
+    class _TransientErrorParser(_StubParserBase):
+        def __enter__(self) -> "_TransientErrorParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=_EF_URL, title="Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            raise httpx.HTTPStatusError(
+                "503 Service Unavailable",
+                request=httpx.Request("GET", stub.url),
+                response=httpx.Response(503),
+            )
+
+    summary = run(
+        _ef_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TransientErrorParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.enrich_failed == 0, (
+        "transient error must not permanently blacklist the URL"
+    )
+    assert summary.parsers_dead == 0, (
+        "run must complete normally — no enrich thread death"
+    )
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert _EF_URL not in seen_data, (
+        "transient-error URL must not appear in seen.json so it is retried next run"
+    )

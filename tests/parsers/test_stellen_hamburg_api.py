@@ -15,7 +15,15 @@ from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
 )
-from application_pipeline.parsers.types import City, NotServedQuery, Remote
+import httpx
+import respx
+
+from application_pipeline.parsers.types import (
+    City,
+    EnrichFailedError,
+    NotServedQuery,
+    Remote,
+)
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "stellen_hamburg"
 
@@ -371,3 +379,28 @@ def test_discover_raises_parser_error_on_http_failure(run_log: RunLog) -> None:
     ) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
+
+
+# ---------------------------------------------------------------------------
+# enrich — HTTP error semantics
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_raises_enrich_failed_error_on_404(
+    run_log: RunLog, tmp_path: Path, stub: PositionStub
+) -> None:
+    with respx.mock:
+        respx.get(stub.url).mock(return_value=httpx.Response(404))
+        with StellenHamburgParser(run_log=run_log, failures_dir=tmp_path) as p:
+            with pytest.raises(EnrichFailedError):
+                p.enrich(stub)
+
+
+def test_enrich_propagates_transient_http_error_on_503(
+    run_log: RunLog, tmp_path: Path, stub: PositionStub
+) -> None:
+    with respx.mock:
+        respx.get(stub.url).mock(return_value=httpx.Response(503))
+        with StellenHamburgParser(run_log=run_log, failures_dir=tmp_path) as p:
+            with pytest.raises(httpx.HTTPStatusError):
+                p.enrich(stub)

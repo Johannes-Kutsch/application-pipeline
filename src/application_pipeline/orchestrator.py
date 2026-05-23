@@ -43,6 +43,8 @@ from application_pipeline.parsers import (
     ParserQuery,
     PositionStub,
 )
+from application_pipeline.parsers.body_fetch import OversizedBodyError
+from application_pipeline.parsers.types import EnrichFailedError
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.freshness_gate import FreshnessGate
@@ -73,9 +75,7 @@ class _LLMJudge(Protocol):
 
 
 class _LLMEnricherLike(Protocol):
-    def enrich(
-        self, stub: PositionStub, body_selector: str | None
-    ) -> "RelevanceVerdict | None": ...
+    def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None": ...
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ _QUERY_DONE = _QueryDone()
 @dataclass
 class _EnrichRequest:
     stub: PositionStub
-    body_selector: str | None
+    parser: Parser
 
 
 class _NoMoreBatches:
@@ -384,11 +384,30 @@ class _EnrichThread(_QueueWorker):
 
     def _process(self, item: object) -> None:
         assert isinstance(item, _EnrichRequest)
-        stub = item.stub
+        try:
+            enrich_result = item.parser.enrich(item.stub)
+        except EnrichFailedError:
+            self._dedup_store.mark_enrich_failed(item.stub)
+            self._metrics.enrich_failed(item.stub.source)
+            return
+        except OversizedBodyError as exc:
+            self._run_log.event(
+                "llm_enricher",
+                "body_oversized",
+                url=exc.url,
+                source=exc.source,
+                body_len=exc.body_len,
+            )
+            self._dedup_store.mark_enrich_failed(item.stub)
+            self._metrics.enrich_failed(item.stub.source)
+            return
+
+        stub = enrich_result.stub
+        body = enrich_result.body
         while True:
             self._quota_wall.wait_if_blocked()
             try:
-                verdict = self._llm_enricher.enrich(stub, item.body_selector)
+                verdict = self._llm_enricher.enrich(stub, body)
                 break
             except ClaudeUsageLimitError as err:
                 now = datetime.now(timezone.utc)
@@ -458,7 +477,7 @@ class _OutboundDispatcher:
         self,
         *,
         parser_states: dict[str, "_ParserState"],
-        parser_body_selectors: dict[str, "str | None"],
+        parsers: dict[str, "Parser"],
         dedup: DeduplicationStore,
         metrics: "RunMetrics",
         enrich_queue: "queue.Queue[object]",
@@ -469,7 +488,7 @@ class _OutboundDispatcher:
         prefilter: PreFilterGate,
     ) -> None:
         self._parser_states = parser_states
-        self._parser_body_selectors = parser_body_selectors
+        self._parsers = parsers
         self._dedup = dedup
         self._metrics = metrics
         self._enrich_queue = enrich_queue
@@ -518,9 +537,8 @@ class _OutboundDispatcher:
         self._metrics.record_dedup(result)
         if result == "miss":
             if self._prefilter.admit_stub(payload):
-                body_selector = self._parser_body_selectors.get(pid)
                 self._enrich_queue.put(
-                    _EnrichRequest(stub=payload, body_selector=body_selector)
+                    _EnrichRequest(stub=payload, parser=self._parsers[pid])
                 )
                 self._metrics.classify_buffered(1)
             state.inbound.put(_SKIP)
@@ -679,14 +697,18 @@ def run(
 
         with ExitStack() as stack:
             parsers_list: list[tuple[Parser, SourceEntry]] = [
-                (stack.enter_context(cls(run_log=run_log)), source)  # type: ignore[call-arg]
+                (
+                    stack.enter_context(
+                        cls(run_log=run_log, failures_dir=cfg.failures_path)  # type: ignore[call-arg]
+                    ),
+                    source,
+                )
                 for cls, source in resolved
             ]
             dedup_run = stack.enter_context(dedup_store.run_scope())
 
-            parser_body_selectors: dict[str, str | None] = {
-                source.parser_type: getattr(parser, "body_selector", None)
-                for parser, source in parsers_list
+            parsers_dict: dict[str, Parser] = {
+                source.parser_type: parser for parser, source in parsers_list
             }
 
             parser_states: dict[str, _ParserState] = {}
@@ -764,7 +786,7 @@ def run(
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
-                parser_body_selectors=parser_body_selectors,
+                parsers=parsers_dict,
                 dedup=dedup_run,
                 metrics=metrics,
                 enrich_queue=enrich_queue,

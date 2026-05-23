@@ -1,4 +1,4 @@
-"""LLM Enricher - fetch + strip + classify + write CardStore."""
+"""LLM Enricher - classify + write CardStore."""
 
 from __future__ import annotations
 
@@ -18,14 +18,11 @@ from application_pipeline.llm.types import (
     RelevanceVerdict,
 )
 from application_pipeline.parser_log import RunLog
-from application_pipeline.parsers.body_fetch import OversizedBodyError, fetch_and_strip
-from application_pipeline.parsers.types import EnrichFailedError, PositionStub
+from application_pipeline.parsers.types import PositionStub
 from application_pipeline.run_metrics import RunMetrics
 
 if TYPE_CHECKING:
     from application_pipeline.freshness_gate import FreshnessGate
-
-_TOKEN_CAP_DEFAULT = 8_000
 
 
 @runtime_checkable
@@ -73,7 +70,7 @@ def _parse_header_date(header: str) -> date | None:
 
 
 class LLMEnricher:
-    """Orchestrate body fetch -> strip -> content gate -> classify -> CardStore write."""
+    """Orchestrate content gate -> classify -> CardStore write."""
 
     def __init__(
         self,
@@ -84,7 +81,6 @@ class LLMEnricher:
         run_log: RunLog,
         run_metrics: RunMetrics,
         failures_dir: Path,
-        token_cap: int = _TOKEN_CAP_DEFAULT,
         freshness_gate: "FreshnessGate | None" = None,
     ) -> None:
         self._extractor = extractor
@@ -93,46 +89,23 @@ class LLMEnricher:
         self._run_log = run_log
         self._content_gate = ContentGate(metrics=run_metrics, run_log=run_log)
         self._failures_dir = failures_dir
-        self._token_cap = token_cap
         self.freshness_gate: FreshnessGate | None = freshness_gate
 
-    def enrich(
-        self, stub: PositionStub, body_selector: str | None
-    ) -> RelevanceVerdict | None:
-        """Fetch, strip, gate, classify and write CardStore.
+    def enrich(self, stub: PositionStub, body: str) -> RelevanceVerdict | None:
+        """Gate, classify and write CardStore.
 
         Returns the verdict on success, or None when the position was gated
-        (empty body, HTTP error, or oversized body -- oversized also stashes raw HTML).
+        (empty body).
         Raises ExtractorMalformedError / ExtractorMalformedJSONError on malformed LLM
         output after stashing the error text, so callers do not mark .seen.json.
         """
-        try:
-            text = fetch_and_strip(
-                stub.url,
-                body_selector=body_selector,
-                source=stub.source,
-                failures_dir=self._failures_dir,
-                token_cap=self._token_cap,
-            )
-        except EnrichFailedError:
-            return None
-        except OversizedBodyError as exc:
-            self._run_log.event(
-                "llm_enricher",
-                "body_oversized",
-                url=exc.url,
-                source=exc.source,
-                body_len=exc.body_len,
-            )
-            return None
-
-        position = _FetchedPosition(stub=stub, raw_description=text)
+        position = _FetchedPosition(stub=stub, raw_description=body)
         if not self._content_gate.admit(position):
             return None
 
         item = ClassifyItem(
             title=stub.title,
-            raw_description=text,
+            raw_description=body,
             company=stub.company,
             location=stub.location,
             posted_date=stub.posted_date,

@@ -18,16 +18,19 @@ import sys
 import urllib.parse
 from collections.abc import Iterator
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, assert_never
 
 from bs4 import BeautifulSoup, Tag
 
 from application_pipeline.parser_log import RunLog
 
+from .body_fetch import fetch_and_strip
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
     City,
+    EnrichResult,
     NotServedQuery,
     ParserQuery,
     PositionStub,
@@ -41,6 +44,7 @@ _DISPLAY_NAME = "jobs-beim-staat"
 _MAX_START = 10_000
 
 serves_remote = True
+has_native_enrich: bool = False
 
 
 def serves(name: str) -> bool:
@@ -141,15 +145,17 @@ def _parse_card(card: Tag, today: date) -> PositionStub | None:
 
 
 class JobsBeimStaatParser:
-    body_selector: str | None = None
+    _body_selector: str | None = None
 
     def __init__(
         self,
         *,
         run_log: RunLog,
+        failures_dir: Path = Path("."),
         _http: ParserHttp | None = None,
     ) -> None:
         self._run_log = run_log
+        self._failures_dir = failures_dir
         self._http = _http if _http is not None else ParserHttp(run_log=run_log)
 
     def __enter__(self) -> "JobsBeimStaatParser":
@@ -158,6 +164,15 @@ class JobsBeimStaatParser:
 
     def __exit__(self, *args: object) -> None:
         self._http.__exit__(*args)
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        body = fetch_and_strip(
+            stub.url,
+            body_selector=self._body_selector,
+            source=stub.source,
+            failures_dir=self._failures_dir,
+        )
+        return EnrichResult(stub=stub, body=body, mode="fallback")
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         place: str

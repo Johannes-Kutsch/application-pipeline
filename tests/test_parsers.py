@@ -23,12 +23,10 @@ from application_pipeline.parsers.location import (
     validate_coverage,
 )
 from application_pipeline.parsers.registry import get
-from application_pipeline.parsers.types import City, Location, Remote
+from application_pipeline.parsers.types import City, EnrichResult, Location, Remote
 
 
 class _ConcreteParser:
-    body_selector: str | None = None
-
     def __enter__(self) -> "_ConcreteParser":
         return self
 
@@ -37,6 +35,9 @@ class _ConcreteParser:
 
     def discover(self, query: ParserQuery) -> Iterable[PositionStub]:
         return iter([])
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        return EnrichResult(stub=stub, body="", mode="fallback")
 
 
 @pytest.fixture
@@ -155,7 +156,7 @@ def test_registry_get_result_is_instantiable(tmp_path: Path) -> None:
 
     cls = get("bundesagentur_api")
     assert cls is not None
-    assert isinstance(cls(run_log=RunLog(tmp_path)), Parser)  # type: ignore[call-arg]
+    assert isinstance(cls(run_log=RunLog(tmp_path), failures_dir=tmp_path), Parser)  # type: ignore[call-arg]
 
 
 # --- Location types ---

@@ -3,13 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
-from .types import NotServedQuery, ParserQuery, PositionStub
+from .types import EnrichResult, NotServedQuery, ParserQuery, PositionStub
 
 
 @runtime_checkable
 class Parser(Protocol):
-    body_selector: str | None
-
     def __enter__(self) -> Parser: ...
 
     def __exit__(
@@ -22,3 +20,5 @@ class Parser(Protocol):
     def discover(
         self, query: ParserQuery
     ) -> Iterable[PositionStub | NotServedQuery]: ...
+
+    def enrich(self, stub: PositionStub) -> EnrichResult: ...

@@ -4,14 +4,17 @@ import json
 import sys
 import urllib.parse
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from application_pipeline.parser_log import RunLog
 
+from .body_fetch import fetch_and_strip
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
     City,
+    EnrichResult,
     NotServedQuery,
     ParserQuery,
     PositionStub,
@@ -65,6 +68,7 @@ def to_wire(name: str) -> str:
 
 
 serves_remote: bool = True
+has_native_enrich: bool = False
 
 
 def remote_wire() -> dict[str, str]:
@@ -73,15 +77,17 @@ def remote_wire() -> dict[str, str]:
 
 
 class BundesagenturParser:
-    body_selector: str | None = None
+    _body_selector: str | None = None
 
     def __init__(
         self,
         *,
         run_log: RunLog,
+        failures_dir: Path = Path("."),
         _http: ParserHttp | None = None,
     ) -> None:
         self._run_log = run_log
+        self._failures_dir = failures_dir
         self._http = (
             _http
             if _http is not None
@@ -94,6 +100,15 @@ class BundesagenturParser:
 
     def __exit__(self, *args: object) -> None:
         self._http.__exit__(*args)
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        body = fetch_and_strip(
+            stub.url,
+            body_selector=self._body_selector,
+            source=stub.source,
+            failures_dir=self._failures_dir,
+        )
+        return EnrichResult(stub=stub, body=body, mode="fallback")
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         extra_params: dict[str, object]

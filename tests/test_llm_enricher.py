@@ -7,9 +7,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import httpx
 import pytest
-import respx
 
 from fake_status_display import FakeStatusDisplay
 
@@ -95,7 +93,7 @@ def test_strip_to_text_with_selector_returns_matched_node_text() -> None:
 def test_strip_to_text_without_selector_falls_back_to_trafilatura() -> None:
     html = (
         "<html><body>"
-        "<article>Senior Data Engineer â€” Python, Spark, and Kafka.</article>"
+        "<article>Senior Data Engineer – Python, Spark, and Kafka.</article>"
         "</body></html>"
     )
     result = strip_to_text(html, None)
@@ -107,20 +105,12 @@ def test_strip_to_text_without_selector_falls_back_to_trafilatura() -> None:
 # ---------------------------------------------------------------------------
 
 
-@respx.mock
 def test_enricher_matched_returns_verdict_and_writes_card_store(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = (
-        "<html><body>"
-        "<div class='job'>Senior Python Engineer â€” remote ML role.</div>"
-        "</body></html>"
-    )
-    respx.get("https://example.com/job/1").mock(
-        return_value=httpx.Response(200, text=html)
-    )
+    body = "Senior Python Engineer – remote ML role."
 
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
@@ -143,7 +133,7 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
         location="Hamburg",
     )
 
-    result = enricher.enrich(stub, ".job")
+    result = enricher.enrich(stub, body)
 
     assert result is not None
     assert result.matches is True
@@ -159,20 +149,16 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
 
 
 # ---------------------------------------------------------------------------
-# LLMEnricher: empty body dropped by ContentGate â€” no LLM call
+# LLMEnricher: empty body dropped by ContentGate – no LLM call
 # ---------------------------------------------------------------------------
 
 
-@respx.mock
 def test_enricher_drops_empty_body_without_llm_call(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>   </div></body></html>"
-    respx.get("https://example.com/job/2").mock(
-        return_value=httpx.Response(200, text=html)
-    )
+    body = "   "
 
     extractor = MagicMock()
     enricher = _make_enricher(
@@ -182,61 +168,10 @@ def test_enricher_drops_empty_body_without_llm_call(
         url="https://example.com/job/2", title="Test Job", source="test"
     )
 
-    result = enricher.enrich(stub, ".job")
+    result = enricher.enrich(stub, body)
 
     assert result is None
     extractor.classify_relevance.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# LLMEnricher: HTTP redirects followed silently
-# ---------------------------------------------------------------------------
-
-
-@respx.mock
-def test_enricher_follows_http_redirect_and_uses_final_page_content(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-) -> None:
-    final_html = (
-        "<html><body>"
-        "<div class='job'>Data Engineer at final destination.</div>"
-        "</body></html>"
-    )
-    respx.get("https://redirect.example.com/old").mock(
-        return_value=httpx.Response(
-            301, headers={"Location": "https://final.example.com/job"}
-        )
-    )
-    respx.get("https://final.example.com/job").mock(
-        return_value=httpx.Response(200, text=final_html)
-    )
-
-    extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        RelevanceVerdict(
-            matches=True,
-            header="Data Engineer\nCorp · Berlin · on-site\n2024-01-01",
-            summary="Good role.",
-        ),
-        _call_usage(),
-    )
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://redirect.example.com/old", title="Data Engineer", source="test"
-    )
-
-    result = enricher.enrich(stub, ".job")
-
-    assert result is not None
-    assert result.matches is True
-    call_args = extractor.classify_relevance.call_args
-    item = call_args.args[0]
-    assert "Data Engineer at final destination" in item.raw_description
 
 
 # ---------------------------------------------------------------------------
@@ -244,17 +179,12 @@ def test_enricher_follows_http_redirect_and_uses_final_page_content(
 # ---------------------------------------------------------------------------
 
 
-@respx.mock
 def test_enricher_stashes_malformed_llm_output(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>Software Engineer role.</div></body></html>"
-    respx.get("https://example.com/job/99").mock(
-        return_value=httpx.Response(200, text=html)
-    )
-
+    body = "Software Engineer role."
     error_msg = (
         "classify_relevance: header must be a non-empty string for in-domain verdict"
     )
@@ -271,7 +201,7 @@ def test_enricher_stashes_malformed_llm_output(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(stub, ".job")
+        enricher.enrich(stub, body)
 
     slug = "example.com-job-99"
     stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
@@ -286,17 +216,12 @@ def test_enricher_stashes_malformed_llm_output(
 # ---------------------------------------------------------------------------
 
 
-@respx.mock
 def test_enricher_malformed_error_produces_md_file_with_all_sections(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>Software Engineer role.</div></body></html>"
-    respx.get("https://example.com/job/99").mock(
-        return_value=httpx.Response(200, text=html)
-    )
-
+    body = "Software Engineer role."
     error_msg = "classify_relevance: header must be a non-empty string"
     prompt_text = "You are a relevance classifier. Evaluate this job."
     raw_resp = "<result>{bad json}</result>"
@@ -315,7 +240,7 @@ def test_enricher_malformed_error_produces_md_file_with_all_sections(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(stub, ".job")
+        enricher.enrich(stub, body)
 
     slug = "example.com-job-99"
     stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
@@ -330,17 +255,12 @@ def test_enricher_malformed_error_produces_md_file_with_all_sections(
     assert raw_resp in content
 
 
-@respx.mock
 def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>DevOps role.</div></body></html>"
-    respx.get("https://example.com/job/cli").mock(
-        return_value=httpx.Response(200, text=html)
-    )
-
+    body = "DevOps role."
     error_msg = "claude CLI exited with code 1"
     prompt_text = "Classify this job posting."
     stderr_text = "Error: API rate limit exceeded"
@@ -359,7 +279,7 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
     )
 
     with pytest.raises(ExtractorMalformedJSONError):
-        enricher.enrich(stub, ".job")
+        enricher.enrich(stub, body)
 
     slug = "example.com-job-cli"
     stash_path = tmp_path / "failures" / "malformed" / f"src_cli-{slug}.md"
@@ -377,104 +297,16 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
 
 
 # ---------------------------------------------------------------------------
-# LLMEnricher: oversized body stashed and body_oversized log event emitted
-# ---------------------------------------------------------------------------
-
-
-@respx.mock
-def test_enricher_stashes_oversized_body_and_emits_log_event(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-) -> None:
-    big_text = "word " * 8001  # well over 8000-token cap (4 chars/token = 32000 chars)
-    html = f"<html><body><div class='job'>{big_text}</div></body></html>"
-    respx.get("https://example.com/job/big").mock(
-        return_value=httpx.Response(200, text=html)
-    )
-
-    extractor = MagicMock()
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/big",
-        title="Big Job",
-        source="src_a",
-    )
-
-    enricher.enrich(stub, ".job")
-
-    slug = "example.com-job-big"
-    stash_path = tmp_path / "failures" / "oversized" / f"src_a-{slug}.html"
-    assert stash_path.exists(), f"Expected stash file at {stash_path}"
-    assert big_text[:50] in stash_path.read_text(encoding="utf-8")
-
-    events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
-    assert events_file.exists()
-    events = [json.loads(line) for line in events_file.read_text().splitlines() if line]
-    oversized_events = [e for e in events if e.get("event") == "body_oversized"]
-    assert len(oversized_events) == 1
-    assert oversized_events[0]["source"] == "src_a"
-    assert oversized_events[0]["url"] == stub.url
-
-
-# ---------------------------------------------------------------------------
-# LLMEnricher: re-firing oversized URL overwrites stash file (no duplicates)
-# ---------------------------------------------------------------------------
-
-
-@respx.mock
-def test_enricher_oversized_refire_overwrites_stash(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-) -> None:
-    big_text = "word " * 8001
-    html = f"<html><body><div class='job'>{big_text}</div></body></html>"
-    respx.get("https://example.com/job/refire").mock(
-        return_value=httpx.Response(200, text=html)
-    )
-
-    extractor = MagicMock()
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/refire",
-        title="Job",
-        source="src_b",
-    )
-    slug = "example.com-job-refire"
-    stash_path = tmp_path / "failures" / "oversized" / f"src_b-{slug}.html"
-
-    enricher.enrich(stub, ".job")
-    first_mtime = stash_path.stat().st_mtime
-
-    enricher.enrich(stub, ".job")
-    second_mtime = stash_path.stat().st_mtime
-
-    assert stash_path.exists()
-    assert second_mtime >= first_mtime
-    assert len(list((tmp_path / "failures" / "oversized").iterdir())) == 1
-
-
-# ---------------------------------------------------------------------------
 # LLMEnricher: malformed LLM output emits a log event
 # ---------------------------------------------------------------------------
 
 
-@respx.mock
 def test_enricher_malformed_llm_output_emits_log_event(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>Some job.</div></body></html>"
-    respx.get("https://example.com/job/mal").mock(
-        return_value=httpx.Response(200, text=html)
-    )
-
+    body = "Some job."
     error_msg = "classify_relevance: summary must be a non-empty string"
     extractor = MagicMock()
     extractor.classify_relevance.side_effect = ExtractorMalformedError(error_msg)
@@ -489,7 +321,7 @@ def test_enricher_malformed_llm_output_emits_log_event(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(stub, ".job")
+        enricher.enrich(stub, body)
 
     events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
     assert events_file.exists()
@@ -526,20 +358,16 @@ def _read_freshness_transcripts(tmp_path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-@respx.mock
 def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>Python Engineer role, posted months ago.</div></body></html>"
-    respx.get("https://example.com/job/stale").mock(
-        return_value=httpx.Response(200, text=html)
-    )
+    body = "Python Engineer role, posted months ago."
 
     # LLM infers a stale posted_date in the header (31 days before ANCHORED_TODAY)
     stale_header = (
-        "Python Engineer\nAcme · Hamburg · remote\n2025-12-15 · senior · â‚¬80k"
+        "Python Engineer\nAcme · Hamburg · remote\n2025-12-15 · senior · €80k"
     )
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
@@ -571,24 +399,19 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
         posted_date=None,  # no pre-LLM date
     )
 
-    result = enricher.enrich(stub, ".job")
+    result = enricher.enrich(stub, body)
 
     assert result is None
     assert card_store.get(stub.url) is None
 
 
-@respx.mock
 def test_enricher_freshness_drop_records_post_enrich_transcript(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>Old role.</div></body></html>"
-    respx.get("https://example.com/job/stale2").mock(
-        return_value=httpx.Response(200, text=html)
-    )
-
-    stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2025-12-15 · mid · â€”"
+    body = "Old role."
+    stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2025-12-15 · mid · —"
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
         RelevanceVerdict(matches=True, header=stale_header, summary="Stale role."),
@@ -613,7 +436,7 @@ def test_enricher_freshness_drop_records_post_enrich_transcript(
         posted_date=None,
     )
 
-    enricher.enrich(stub, ".job")
+    enricher.enrich(stub, body)
 
     rows = _read_freshness_transcripts(tmp_path)
     assert len(rows) == 1
@@ -622,21 +445,15 @@ def test_enricher_freshness_drop_records_post_enrich_transcript(
     assert rows[0]["posted_date"] == "2025-12-15"
 
 
-@respx.mock
 def test_enricher_fresh_inferred_date_renders_card_normally(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>Fresh ML role posted recently.</div></body></html>"
-    respx.get("https://example.com/job/fresh").mock(
-        return_value=httpx.Response(200, text=html)
-    )
+    body = "Fresh ML role posted recently."
 
-    # posted_date 5 days ago â€” within MAX_AGE=30
-    fresh_header = (
-        "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · â‚¬90k"
-    )
+    # posted_date 5 days ago – within MAX_AGE=30
+    fresh_header = "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · €90k"
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
         RelevanceVerdict(
@@ -665,7 +482,7 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
         posted_date=None,
     )
 
-    result = enricher.enrich(stub, ".job")
+    result = enricher.enrich(stub, body)
 
     assert result is not None
     assert result.matches is True
@@ -674,19 +491,15 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
     assert card.header == fresh_header
 
 
-@respx.mock
 def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    html = "<html><body><div class='job'>Undated role.</div></body></html>"
-    respx.get("https://example.com/job/noddate").mock(
-        return_value=httpx.Response(200, text=html)
-    )
+    body = "Undated role."
 
     # Header line 3 has no date (LLM dropped the segment)
-    no_date_header = "Backend Engineer\nCorp · Munich · on-site\nseniority: mid · â€”"
+    no_date_header = "Backend Engineer\nCorp · Munich · on-site\nseniority: mid · —"
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
         RelevanceVerdict(
@@ -715,7 +528,7 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
         posted_date=None,
     )
 
-    result = enricher.enrich(stub, ".job")
+    result = enricher.enrich(stub, body)
 
     assert result is not None
     assert result.matches is True

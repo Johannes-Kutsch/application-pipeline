@@ -38,7 +38,7 @@ from application_pipeline.parsers import (
     PositionStub,
 )
 from application_pipeline.parsers.errors import ParserError
-from application_pipeline.parsers.types import City, Remote
+from application_pipeline.parsers.types import City, EnrichResult, Remote
 from application_pipeline.prompts import PromptError
 from application_pipeline.results import ResultsFileError
 
@@ -46,10 +46,11 @@ from application_pipeline.results import ResultsFileError
 class _StubParserBase:
     """Base for all test stub parsers; absorbs the run_log kwarg the orchestrator injects."""
 
-    body_selector: str | None = None
-
     def __init__(self, **_: object) -> None:
         pass
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        return EnrichResult(stub=stub, body="stub body", mode="fallback")
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +117,7 @@ _ZERO_USAGE = CallUsage(
 
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
+    ext.classify_relevance.return_value = (RelevanceVerdict(matches=False), _ZERO_USAGE)
     ext.judge_top_n.side_effect = lambda candidates: (
         [MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])],
         _ZERO_USAGE,
@@ -157,9 +159,7 @@ class _FakeLLMEnricherHelper:
         self._header = header
         self._summary = summary
 
-    def enrich(
-        self, stub: PositionStub, body_selector: "str | None"
-    ) -> "RelevanceVerdict | None":
+    def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
         if self._matches:
             self._card_store.put(
                 stub.url,
@@ -509,11 +509,9 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _TrackingEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             enrich_calls.append(stub.url)
-            return super().enrich(stub, body_selector)
+            return super().enrich(stub, body)
 
     summary = run(
         _write_config(
@@ -612,11 +610,9 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
     card_store = _make_card_store(tmp_path)
 
     class _TrackingEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             enrich_calls.append(stub.url)
-            return super().enrich(stub, body_selector)
+            return super().enrich(stub, body)
 
     dedup = MagicMock()
     dedup.is_seen.side_effect = ["url_hit"] * 80 + ["miss"]
@@ -785,9 +781,7 @@ class _FakeLLMEnricherRejectJob1:
     def __init__(self, card_store: CardStore) -> None:
         self._card_store = card_store
 
-    def enrich(
-        self, stub: PositionStub, body_selector: "str | None"
-    ) -> "RelevanceVerdict | None":
+    def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
         if stub.title == "Job 1":
             return RelevanceVerdict(matches=False)
         self._card_store.put(
@@ -912,11 +906,9 @@ def test_classify_precedes_judge(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _InstrumentedEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             call_log.append("enrich")
-            return super().enrich(stub, body_selector)
+            return super().enrich(stub, body)
 
     class _InstrumentedExtractor:
         def judge_top_n(
@@ -1014,13 +1006,11 @@ def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> N
     call_count = [0]
 
     class _FailFirstEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ExtractorError("classify boom")
-            return super().enrich(stub, body_selector)
+            return super().enrich(stub, body)
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -1083,12 +1073,10 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
             ]
 
     class _NoneForSecondEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[1]:
                 return None  # HTTP fetch failure â†’ enrich_failed
-            return super().enrich(stub, body_selector)
+            return super().enrich(stub, body)
 
     summary = run(
         _write_config(
@@ -1133,12 +1121,10 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
             ]
 
     class _HttpErrorEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[1]:
                 return None  # HTTP error â†’ enrich_failed
-            return super().enrich(stub, body_selector)
+            return super().enrich(stub, body)
 
     summary = run(
         _write_config(
@@ -1249,12 +1235,10 @@ def test_external_redirect_marks_seen_and_increments_counter(
             ]
 
     class _SkipFirstEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[0]:
                 return None  # skip this stub (e.g., HTTP error)
-            return super().enrich(stub, body_selector)
+            return super().enrich(stub, body)
 
     with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
         summary = run(
@@ -1307,9 +1291,7 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
             ]
 
     class _NoneEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             return None  # enricher returns None â†’ enrich_failed
 
     summary = run(
@@ -1463,11 +1445,9 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
     card_store = load_card_store(tmp_path / "extracts.json")
 
     class _TrackingEnricher(_FakeLLMEnricherHelper):
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             enrich_calls.append(stub.url)
-            return super().enrich(stub, body_selector)
+            return super().enrich(stub, body)
 
     judge_candidate_ids: list[str] = []
 
@@ -1636,9 +1616,7 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
     _enrich_failed_url = "https://enrich-fail.example/0"
 
     class _FailEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             # Return None to trigger enrich_failed
             return None
 
@@ -1995,9 +1973,7 @@ def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
     results_dir = tmp_path / "results"
 
     class _CrashingEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             raise RuntimeError("unexpected crash escaping main path")
 
     card_store = _make_card_store(tmp_path)
@@ -2233,9 +2209,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
     class _EnrichFailEnricher:
         """Enricher that returns None for Job 0 (enrich_failed) and in-domain for Job 1."""
 
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _STUB_URLS[0]:
                 return None  # triggers enrich_failed
             card_store.put(
@@ -2396,9 +2370,7 @@ def test_four_positions_each_get_solo_classify_call(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _CountingEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             call_count[0] += 1
             card_store.put(
                 stub.url,
@@ -2555,9 +2527,7 @@ def test_mixed_listing_set_all_classified(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _CountingEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             call_count[0] += 1
             card_store.put(
                 stub.url,
@@ -2605,9 +2575,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _SelectiveEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _OFF_URL:
                 return RelevanceVerdict(matches=False)
             card_store.put(
@@ -2670,9 +2638,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
     call_count = [0]
 
     class _FailFirstEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 from application_pipeline.llm import ExtractorMalformedError
@@ -3740,9 +3706,7 @@ def test_non_quota_worker_exception_writes_failure_report(
         def __init__(self, *, card_store: "CardStore", **_kw: object) -> None:
             self._card_store = card_store
 
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             self._card_store.put(
                 stub.url,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
@@ -3806,9 +3770,7 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _ErrorEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             raise ExtractorError("classify boom")
 
     display = FakeStatusDisplay()
@@ -4139,9 +4101,7 @@ def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
     call_count = [0]
 
     class _QuotaEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ClaudeUsageLimitError(
@@ -4196,9 +4156,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
     call_count = [0]
 
     class _QuotaEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ClaudeUsageLimitError(
@@ -4512,9 +4470,7 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _TimedEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             start = _time.monotonic()
             _time.sleep(0.05)
             end = _time.monotonic()
@@ -4589,9 +4545,7 @@ def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
     call_lock = threading.Lock()
 
     class _QuotaEnricher2:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             with call_lock:
                 call_count[0] += 1
                 current = call_count[0]
@@ -4749,9 +4703,7 @@ def test_parallel_classify_worker_exception_propagates(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     class _CrashingEnricher:
-        def enrich(
-            self, stub: PositionStub, body_selector: "str | None"
-        ) -> "RelevanceVerdict | None":
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             raise RuntimeError("classify crash")
 
     class _OneStubParser2(_StubParserBase):
@@ -4823,9 +4775,7 @@ class _FakeLLMEnricher:
         self._card_store = card_store
         self._matches = matches
 
-    def enrich(
-        self, stub: PositionStub, body_selector: "str | None"
-    ) -> "RelevanceVerdict | None":
+    def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
         if self._matches:
             self._card_store.put(  # type: ignore[union-attr, attr-defined]
                 stub.url,

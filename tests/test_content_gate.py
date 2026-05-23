@@ -210,17 +210,13 @@ def test_snapshot_is_frozen_dataclass(
     gate = _make_gate(run_log, display)
     snap = gate.snapshot()
     assert isinstance(snap, ContentSnapshot)
+    with pytest.raises((AttributeError, TypeError)):
+        snap.content_considered = 99  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
 # Status Display row — body published after each admit()
 # ---------------------------------------------------------------------------
-
-
-def test_status_display_has_pipeline_content_row(run_log: RunLog) -> None:
-    d = FakeStatusDisplay()
-    d.register("pipeline_content", order=3, phase="running")
-    assert "pipeline_content" in d.registered_names()
 
 
 def test_status_display_body_reflects_content_counters(

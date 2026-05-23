@@ -202,7 +202,6 @@ class LLMEnricher:
                 lines += ["", "## CLI stderr", "", exc.stderr]
             if exc.returncode is not None:
                 lines += ["", f"**Returncode:** {exc.returncode}"]
-        else:
-            if exc.raw_response is not None:
-                lines += ["", "## Raw response", "", exc.raw_response]
+        elif exc.raw_response is not None:
+            lines += ["", "## Raw response", "", exc.raw_response]
         self._stash_failure("malformed", stub, "\n".join(lines), ext="md")

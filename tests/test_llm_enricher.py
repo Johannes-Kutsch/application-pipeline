@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -14,7 +15,11 @@ from fake_status_display import FakeStatusDisplay
 from application_pipeline.extracts.card_store import load_card_store
 from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.llm.quota import QuotaWall
-from application_pipeline.llm.types import CallUsage, RelevanceVerdictV2
+from application_pipeline.llm.types import (
+    CallUsage,
+    ExtractorMalformedError,
+    RelevanceVerdictV2,
+)
 from application_pipeline.llm_enricher import LLMEnricher
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
@@ -225,3 +230,168 @@ def test_enricher_follows_http_redirect_and_uses_final_page_content(
     call_args = extractor.classify_relevance_v2.call_args
     item = call_args.args[0]
     assert "Data Engineer at final destination" in item.raw_description
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: malformed LLM output stashed to failures/malformed/
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_enricher_stashes_malformed_llm_output(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    html = "<html><body><div class='job'>Software Engineer role.</div></body></html>"
+    respx.get("https://example.com/job/99").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    error_msg = (
+        "classify_relevance_v2: header must be a non-empty string for in-domain verdict"
+    )
+    extractor = MagicMock()
+    extractor.classify_relevance_v2.side_effect = ExtractorMalformedError(error_msg)
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/99",
+        title="Software Engineer",
+        source="test_src",
+    )
+
+    with pytest.raises(ExtractorMalformedError):
+        enricher.enrich(stub, ".job")
+
+    slug = "example.com-job-99"
+    stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.txt"
+    assert stash_path.exists(), f"Expected stash file at {stash_path}"
+    assert error_msg in stash_path.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: oversized body stashed and body_oversized log event emitted
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_enricher_stashes_oversized_body_and_emits_log_event(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    big_text = "word " * 8001  # well over 8000-token cap (4 chars/token = 32000 chars)
+    html = f"<html><body><div class='job'>{big_text}</div></body></html>"
+    respx.get("https://example.com/job/big").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    extractor = MagicMock()
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/big",
+        title="Big Job",
+        source="src_a",
+    )
+
+    enricher.enrich(stub, ".job")
+
+    slug = "example.com-job-big"
+    stash_path = tmp_path / "failures" / "oversized" / f"src_a-{slug}.html"
+    assert stash_path.exists(), f"Expected stash file at {stash_path}"
+    assert big_text[:50] in stash_path.read_text(encoding="utf-8")
+
+    events_file = tmp_path / "logs" / "llm_enricher.events.jsonl"
+    assert events_file.exists()
+    events = [json.loads(line) for line in events_file.read_text().splitlines() if line]
+    oversized_events = [e for e in events if e.get("event") == "body_oversized"]
+    assert len(oversized_events) == 1
+    assert oversized_events[0]["source"] == "src_a"
+    assert oversized_events[0]["url"] == stub.url
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: re-firing oversized URL overwrites stash file (no duplicates)
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_enricher_oversized_refire_overwrites_stash(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    big_text = "word " * 8001
+    html = f"<html><body><div class='job'>{big_text}</div></body></html>"
+    respx.get("https://example.com/job/refire").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    extractor = MagicMock()
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/refire",
+        title="Job",
+        source="src_b",
+    )
+    slug = "example.com-job-refire"
+    stash_path = tmp_path / "failures" / "oversized" / f"src_b-{slug}.html"
+
+    enricher.enrich(stub, ".job")
+    first_mtime = stash_path.stat().st_mtime
+
+    enricher.enrich(stub, ".job")
+    second_mtime = stash_path.stat().st_mtime
+
+    assert stash_path.exists()
+    assert second_mtime >= first_mtime
+    assert len(list((tmp_path / "failures" / "oversized").iterdir())) == 1
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: malformed LLM output emits a log event
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_enricher_malformed_llm_output_emits_log_event(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    html = "<html><body><div class='job'>Some job.</div></body></html>"
+    respx.get("https://example.com/job/mal").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    error_msg = "classify_relevance_v2: summary must be a non-empty string"
+    extractor = MagicMock()
+    extractor.classify_relevance_v2.side_effect = ExtractorMalformedError(error_msg)
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/mal",
+        title="Some Job",
+        source="src_c",
+    )
+
+    with pytest.raises(ExtractorMalformedError):
+        enricher.enrich(stub, ".job")
+
+    events_file = tmp_path / "logs" / "llm_enricher.events.jsonl"
+    assert events_file.exists()
+    events = [json.loads(line) for line in events_file.read_text().splitlines() if line]
+    malformed_events = [e for e in events if e.get("event") == "classify_malformed"]
+    assert len(malformed_events) == 1
+    assert malformed_events[0]["source"] == "src_c"
+    assert malformed_events[0]["url"] == stub.url
+    assert error_msg in malformed_events[0]["error"]

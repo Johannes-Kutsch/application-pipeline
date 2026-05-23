@@ -132,7 +132,9 @@ class ClaudeExtractor:
         )
         parsed, response = self._invoke(_CLASSIFY_SITE, prompt, {})
         usage = self._usage_from(response)
-        return self._parse_relevance(parsed), usage
+        return self._parse_relevance(
+            parsed, prompt=prompt, raw_response=response.raw_response
+        ), usage
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
@@ -178,13 +180,16 @@ class ClaudeExtractor:
                 extra=extra,
                 exc=exc,
             )
-            err_cls = (
-                ExtractorUnreachableError
-                if isinstance(exc, ClaudeCliError)
-                else ExtractorMalformedJSONError
-            )
-            raise err_cls(
-                str(exc), returncode=exc.returncode, stderr=exc.stderr
+            if isinstance(exc, ClaudeCliError):
+                raise ExtractorUnreachableError(
+                    str(exc), returncode=exc.returncode, stderr=exc.stderr
+                ) from exc
+            raise ExtractorMalformedJSONError(
+                str(exc),
+                returncode=exc.returncode,
+                stderr=exc.stderr,
+                prompt=prompt,
+                raw_response=None,
             ) from exc
         # ClaudeUsageLimitError propagates as-is for abort handling
 
@@ -200,9 +205,12 @@ class ClaudeExtractor:
                 raw_response=response.raw_response,
                 kind=exc.kind,
             )
-            raise site.protocol_error_cls(
-                f"{site.call}: {exc.kind}: <{site.tag}> block missing or malformed"
-            ) from exc
+            msg = f"{site.call}: {exc.kind}: <{site.tag}> block missing or malformed"
+            if site.protocol_error_cls is ExtractorMalformedError:
+                raise ExtractorMalformedError(
+                    msg, prompt=prompt, raw_response=response.raw_response
+                ) from exc
+            raise site.protocol_error_cls(msg) from exc
 
         transcript_entry: dict[str, object] = {
             "call": site.call,
@@ -283,15 +291,21 @@ class ClaudeExtractor:
         return "\n\n".join(parts)
 
     @staticmethod
-    def _parse_relevance(parsed_result: object) -> RelevanceVerdict:
+    def _parse_relevance(
+        parsed_result: object, *, prompt: str, raw_response: str
+    ) -> RelevanceVerdict:
         if not isinstance(parsed_result, dict):
             raise ExtractorMalformedError(
-                f"classify_relevance: expected JSON object, got {type(parsed_result).__name__}"
+                f"classify_relevance: expected JSON object, got {type(parsed_result).__name__}",
+                prompt=prompt,
+                raw_response=raw_response,
             )
         matches = parsed_result.get("matches")
         if not isinstance(matches, bool):
             raise ExtractorMalformedError(
-                f"classify_relevance: matches must be bool, got {matches!r}"
+                f"classify_relevance: matches must be bool, got {matches!r}",
+                prompt=prompt,
+                raw_response=raw_response,
             )
         if not matches:
             return RelevanceVerdict(matches=False)
@@ -299,11 +313,15 @@ class ClaudeExtractor:
         summary = parsed_result.get("summary")
         if not isinstance(header, str) or not header:
             raise ExtractorMalformedError(
-                "classify_relevance: header must be a non-empty string for matching verdict"
+                "classify_relevance: header must be a non-empty string for matching verdict",
+                prompt=prompt,
+                raw_response=raw_response,
             )
         if not isinstance(summary, str) or not summary:
             raise ExtractorMalformedError(
-                "classify_relevance: summary must be a non-empty string for matching verdict"
+                "classify_relevance: summary must be a non-empty string for matching verdict",
+                prompt=prompt,
+                raw_response=raw_response,
             )
         return RelevanceVerdict(matches=True, header=header, summary=summary)
 

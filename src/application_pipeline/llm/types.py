@@ -17,11 +17,19 @@ class ExtractorUnreachableError(ExtractorError):
 
 class ExtractorMalformedJSONError(ExtractorError):
     def __init__(
-        self, message: str, *, returncode: int | None = None, stderr: str = ""
+        self,
+        message: str,
+        *,
+        returncode: int | None = None,
+        stderr: str = "",
+        prompt: str | None = None,
+        raw_response: str | None = None,
     ) -> None:
         super().__init__(message)
         self.returncode = returncode
         self.stderr = stderr
+        self.prompt = prompt
+        self.raw_response = raw_response
 
 
 class ExtractorSchemaError(ExtractorError):
@@ -33,7 +41,16 @@ class ExtractorBatchMalformedError(ExtractorError):
 
 
 class ExtractorMalformedError(ExtractorError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        prompt: str | None = None,
+        raw_response: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.prompt = prompt
+        self.raw_response = raw_response
 
 
 @dataclass(frozen=True)

@@ -4,6 +4,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 
+from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup import RunScopedSeenResult
 from application_pipeline.freshness_gate import FreshnessSnapshot
 from application_pipeline.llm.types import CallUsage
@@ -73,9 +74,6 @@ class RunMetrics:
         self._dedup_run_hits = 0
         self._dedup_misses = 0
         self._judge_resumed = 0
-        self._content_considered = 0
-        self._content_passed = 0
-        self._content_dropped_empty_body = 0
         self._enrich_failed = 0
         self._parsers_dead = 0
 
@@ -205,20 +203,6 @@ class RunMetrics:
                 self._dedup_misses += 1
             body = self._dedup_body()
         self._display.update_body("pipeline_dedup", body=body)
-
-    def content_passed(self) -> None:
-        with self._lock:
-            self._content_considered += 1
-            self._content_passed += 1
-            body = self._content_body()
-        self._display.update_body("pipeline_content", body=body)
-
-    def content_dropped(self) -> None:
-        with self._lock:
-            self._content_considered += 1
-            self._content_dropped_empty_body += 1
-            body = self._content_body()
-        self._display.update_body("pipeline_content", body=body)
 
     def enrich_failed(self, parser_id: str = "") -> None:
         with self._lock:
@@ -524,6 +508,7 @@ class RunMetrics:
         duration_s: float,
         prefilter: PreFilterSnapshot,
         freshness: FreshnessSnapshot,
+        content: ContentSnapshot,
     ) -> RunSummary:
         with self._classify_lock:
             classify_input_tokens = self._classify_input_tokens
@@ -543,9 +528,9 @@ class RunMetrics:
                 prefilter_passed=prefilter.prefilter_passed,
                 prefilter_dropped=prefilter.prefilter_dropped,
                 prefilter_blacklist_hits=prefilter.prefilter_blacklist_hits,
-                content_considered=self._content_considered,
-                content_passed=self._content_passed,
-                content_dropped_empty_body=self._content_dropped_empty_body,
+                content_considered=content.content_considered,
+                content_passed=content.content_passed,
+                content_dropped_empty_body=content.content_dropped_empty_body,
                 dedup_url_hits=self._dedup_url_hits,
                 dedup_tuple_hits=self._dedup_tuple_hits,
                 dedup_run_hits=self._dedup_run_hits,
@@ -642,13 +627,6 @@ class RunMetrics:
             f" tuple_hits={self._dedup_tuple_hits}"
             f" run_hits={self._dedup_run_hits}"
             f" misses={self._dedup_misses}"
-        )
-
-    def _content_body(self) -> str:
-        return (
-            f"considered={self._content_considered}"
-            f" passed={self._content_passed}"
-            f" dropped={self._content_dropped_empty_body}"
         )
 
     def _classify_body(self) -> str:

@@ -813,7 +813,7 @@ def run(
                 display=status_display,
                 run_log=run_log,
             )
-            content_gate = ContentGate(metrics=metrics, run_log=run_log)
+            content_gate = ContentGate(display=status_display, run_log=run_log)
 
             enrich_threads = [
                 _EnrichThread(
@@ -909,6 +909,7 @@ def run(
             prefilter.emit_run_complete()
             prefilter_snapshot = prefilter.snapshot()
             content_gate.emit_run_complete()
+            content_snapshot = content_gate.snapshot()
             dispatcher.flush_residual(n=cfg.claude_classify_parallelism)
 
         first_exc: BaseException | None = None
@@ -1005,6 +1006,7 @@ def run(
             duration_s=elapsed_s,
             prefilter=prefilter_snapshot,
             freshness=freshness_snapshot,
+            content=content_snapshot,
         )
         _log.info(
             "run complete: discovered=%d skipped=%d "

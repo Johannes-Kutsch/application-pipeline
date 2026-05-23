@@ -101,6 +101,8 @@ def _employment_type(
 
 
 class BundesagenturParser:
+    body_selector: str | None = None
+
     def __init__(
         self,
         *,

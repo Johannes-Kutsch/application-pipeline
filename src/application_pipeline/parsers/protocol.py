@@ -8,6 +8,8 @@ from .types import ExternalRedirect, NotServedQuery, ParserQuery, Position, Posi
 
 @runtime_checkable
 class Parser(Protocol):
+    body_selector: str | None
+
     def __enter__(self) -> Parser: ...
 
     def __exit__(

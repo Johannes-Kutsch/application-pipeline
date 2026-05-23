@@ -117,6 +117,8 @@ def _search_url(keyword: str, page_number: int) -> str:
 
 
 class StellenHamburgParser:
+    body_selector: str | None = None
+
     def __init__(
         self,
         *,

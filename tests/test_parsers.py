@@ -28,6 +28,8 @@ from application_pipeline.parsers.types import City, Location, Remote
 
 
 class _ConcreteParser:
+    body_selector: str | None = None
+
     def __enter__(self) -> "_ConcreteParser":
         return self
 

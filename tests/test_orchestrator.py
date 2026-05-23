@@ -44,6 +44,8 @@ from application_pipeline.results import ResultsFileError
 class _StubParserBase:
     """Base for all test stub parsers; absorbs the run_log kwarg the orchestrator injects."""
 
+    body_selector: str | None = None
+
     def __init__(self, **_: object) -> None:
         pass
 

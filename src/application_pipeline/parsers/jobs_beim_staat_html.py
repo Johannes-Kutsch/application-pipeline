@@ -172,6 +172,8 @@ def _parse_card(card: Tag, today: date) -> PositionStub | None:
 
 
 class JobsBeimStaatParser:
+    body_selector: str | None = None
+
     def __init__(
         self,
         *,

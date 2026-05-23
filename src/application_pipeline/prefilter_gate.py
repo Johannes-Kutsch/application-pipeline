@@ -83,6 +83,19 @@ class PreFilterGate:
         self._metrics = metrics
         self._run_log = run_log
 
+    def admit_stub(self, stub: _Stub) -> bool:
+        """Check negative keyword blacklist on stub title, without requiring a Position."""
+
+        class _StubPosition:
+            def __init__(self, s: _Stub) -> None:
+                self.stub = s
+
+            @property
+            def title(self) -> str:
+                return self.stub.title or ""
+
+        return self.admit(_StubPosition(stub))
+
     def admit(self, position: _Position) -> bool:
         verdict = _evaluate(position, self._blacklist)
         self._run_log.transcript(

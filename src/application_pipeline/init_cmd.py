@@ -5,10 +5,12 @@ import importlib.resources.abc
 from pathlib import Path
 
 _EXCLUDE_DIRS = frozenset({"prompts"})
+# Top-level files never seeded (retired; kept as user-space only if operator placed them there).
+_EXCLUDE_FILES = frozenset({"layout.py"})
 # Directories whose contents are user-authored and never overwritten on refresh.
 _PRESERVE_DIRS = frozenset({"user-info"})
 # Top-level files that are user-authored and never overwritten on refresh.
-_PRESERVE_FILES = frozenset({"config.py", "layout.py"})
+_PRESERVE_FILES = frozenset({"config.py"})
 
 
 def home_dir() -> Path:
@@ -18,6 +20,11 @@ def home_dir() -> Path:
 def init(target_dir: Path, *, refresh: bool = False) -> None:
     pkg = importlib.resources.files("application_pipeline.templates")
     _seed(pkg, target_dir, Path(), refresh=refresh)
+    if refresh:
+        layout_path = target_dir / "layout.py"
+        if layout_path.exists():
+            layout_path.unlink()
+            print("removed layout.py")
 
 
 def _seed(
@@ -36,6 +43,8 @@ def _seed(
                 continue
             _seed(item, target_dir, item_rel, refresh=refresh)
         else:
+            if len(rel.parts) == 0 and item.name in _EXCLUDE_FILES:
+                continue
             dest = target_dir / item_rel
             display = item_rel.as_posix()
             overwrite = refresh and _is_global(item_rel)

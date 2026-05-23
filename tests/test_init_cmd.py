@@ -67,11 +67,11 @@ _LATEX_USER_INFO_FILES = (
 )
 
 
-def test_first_bootstrap_writes_both_files(tmp_path: Path) -> None:
+def test_first_bootstrap_writes_config(tmp_path: Path) -> None:
     init(tmp_path)
 
     assert (tmp_path / "config.py").read_bytes() == _template_bytes("config.py")
-    assert (tmp_path / "layout.py").read_bytes() == _template_bytes("layout.py")
+    assert not (tmp_path / "layout.py").exists()
 
 
 def test_config_template_contains_claude_classify_parallelism(tmp_path: Path) -> None:
@@ -81,14 +81,14 @@ def test_config_template_contains_claude_classify_parallelism(tmp_path: Path) ->
     assert "CLAUDE_CLASSIFY_PARALLELISM = 4" in config_text
 
 
-def test_first_bootstrap_prints_wrote_for_both(
+def test_first_bootstrap_prints_wrote_config(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
 
     out = capsys.readouterr().out
     assert "wrote config.py" in out
-    assert "wrote layout.py" in out
+    assert "layout.py" not in out
 
 
 def test_skip_existing_config_prints_correctly(
@@ -100,7 +100,7 @@ def test_skip_existing_config_prints_correctly(
 
     out = capsys.readouterr().out
     assert "skipped config.py (already exists)" in out
-    assert "wrote layout.py" in out
+    assert "layout.py" not in out
 
 
 def test_both_exist_prints_skipped_for_both(
@@ -113,7 +113,7 @@ def test_both_exist_prints_skipped_for_both(
 
     out = capsys.readouterr().out
     assert "skipped config.py (already exists)" in out
-    assert "skipped layout.py (already exists)" in out
+    assert "layout.py" not in out
 
 
 def test_skip_existing_config_preserves_content(tmp_path: Path) -> None:
@@ -148,7 +148,12 @@ def test_config_template_loads_successfully(tmp_path: Path) -> None:
 
 
 def test_layout_template_loads_successfully(tmp_path: Path) -> None:
-    init(tmp_path)
+    import importlib.resources
+
+    layout_bytes = (
+        importlib.resources.files("application_pipeline.templates") / "layout.py"
+    ).read_bytes()
+    (tmp_path / "layout.py").write_bytes(layout_bytes)
 
     layout = load_layout(tmp_path / "layout.py")
 
@@ -162,7 +167,7 @@ def test_fresh_seed_creates_user_info_tree(tmp_path: Path) -> None:
     init(tmp_path)
 
     assert (tmp_path / "config.py").exists()
-    assert (tmp_path / "layout.py").exists()
+    assert not (tmp_path / "layout.py").exists()
     for fname in _TRIAGE_PROFILE_FILES:
         dest = tmp_path / "user-info" / "triage-profile" / fname
         assert dest.exists(), f"expected {dest} to be seeded"
@@ -192,7 +197,7 @@ def test_fresh_seed_prints_all_five_files(
 
     out = capsys.readouterr().out
     assert "wrote config.py" in out
-    assert "wrote layout.py" in out
+    assert "layout.py" not in out
     for fname in _TRIAGE_PROFILE_FILES:
         assert f"wrote user-info/triage-profile/{fname}" in out
     for fname in _USER_INFO_ROOT_FILES:
@@ -214,7 +219,7 @@ def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) 
 def test_rerun_is_idempotent(tmp_path: Path) -> None:
     init(tmp_path)
     first_contents = (
-        {p: (tmp_path / p).read_bytes() for p in ["config.py", "layout.py"]}
+        {p: (tmp_path / p).read_bytes() for p in ["config.py"]}
         | {
             f"user-info/triage-profile/{f}": (
                 tmp_path / "user-info" / "triage-profile" / f
@@ -243,7 +248,7 @@ def test_rerun_prints_all_skipped(
 
     out = capsys.readouterr().out
     assert "skipped config.py (already exists)" in out
-    assert "skipped layout.py (already exists)" in out
+    assert "layout.py" not in out
     for fname in _TRIAGE_PROFILE_FILES:
         assert f"skipped user-info/triage-profile/{fname} (already exists)" in out
     for fname in _USER_INFO_ROOT_FILES:
@@ -603,7 +608,7 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     for fname in _SETUP_SCRIPTS:
         (tmp_path / "setup" / fname).write_text("# custom\n")
     (tmp_path / "config.py").write_text("# custom\n")
-    (tmp_path / "layout.py").write_text("# custom\n")
+    (tmp_path / "layout.py").write_text("# legacy layout\n")
     (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
         "# custom\n"
     )
@@ -618,24 +623,28 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     assert "overwrote setup/cron-uninstall.sh" in out
     assert "wrote setup/cron-install.sh" in out
     assert "skipped config.py (preserved)" in out
-    assert "skipped layout.py (preserved)" in out
+    assert "removed layout.py" in out
     assert "skipped user-info/triage-profile/self-description.md (preserved)" in out
 
 
-def test_refresh_self_heals_missing_global_file(tmp_path: Path) -> None:
+def test_refresh_removes_layout_py_if_present(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     init(tmp_path)
-    (tmp_path / "layout.py").unlink()
+    (tmp_path / "layout.py").write_text("# legacy\n")
+    capsys.readouterr()
 
     init(tmp_path, refresh=True)
 
-    assert (tmp_path / "layout.py").read_bytes() == _template_bytes("layout.py")
+    assert not (tmp_path / "layout.py").exists()
+    assert "removed layout.py" in capsys.readouterr().out
 
 
 def test_refresh_on_empty_dir_writes_all_files(tmp_path: Path) -> None:
     init(tmp_path, refresh=True)
 
     assert (tmp_path / "config.py").read_bytes() == _template_bytes("config.py")
-    assert (tmp_path / "layout.py").read_bytes() == _template_bytes("layout.py")
+    assert not (tmp_path / "layout.py").exists()
     for fname in _SETUP_SCRIPTS:
         assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
     for fname in _TRIAGE_PROFILE_FILES:
@@ -656,12 +665,10 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
     # Modify all files to simulate user edits
     custom_setup = "# user-modified setup\n"
     custom_config = "# user-modified config\n"
-    custom_layout = "# user-modified layout\n"
     custom_user_info = "# user-modified self-description\n"
     for fname in _SETUP_SCRIPTS:
         (tmp_path / "setup" / fname).write_text(custom_setup)
     (tmp_path / "config.py").write_text(custom_config)
-    (tmp_path / "layout.py").write_text(custom_layout)
     (tmp_path / "user-info" / "triage-profile" / "self-description.md").write_text(
         custom_user_info
     )
@@ -673,7 +680,6 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
         assert (tmp_path / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
     # user files must retain user-modified content
     assert (tmp_path / "config.py").read_text() == custom_config
-    assert (tmp_path / "layout.py").read_text() == custom_layout
     assert (
         tmp_path / "user-info" / "triage-profile" / "self-description.md"
     ).read_text() == custom_user_info

@@ -26,7 +26,7 @@ def test_init_no_arg_seeds_at_cwd_application_pipeline(
     monkeypatch.chdir(tmp_path)
     _run_main(["init"])
     assert (tmp_path / "application-pipeline" / "config.py").exists()
-    assert (tmp_path / "application-pipeline" / "layout.py").exists()
+    assert not (tmp_path / "application-pipeline" / "layout.py").exists()
 
 
 def test_init_refresh_seeds_files_on_fresh_dir(
@@ -36,7 +36,24 @@ def test_init_refresh_seeds_files_on_fresh_dir(
     _run_main(["init", "--refresh"])
 
     assert (tmp_path / "application-pipeline" / "config.py").exists()
-    assert (tmp_path / "application-pipeline" / "layout.py").exists()
+    assert not (tmp_path / "application-pipeline" / "layout.py").exists()
+
+
+def test_init_refresh_removes_layout_py_if_present(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "layout.py").write_text("# old layout\n")
+
+    monkeypatch.chdir(tmp_path)
+    _run_main(["init", "--refresh"])
+
+    assert not (home / "layout.py").exists()
+    out = capsys.readouterr().out
+    assert "removed layout.py" in out
 
 
 def test_init_refresh_preserves_user_files(

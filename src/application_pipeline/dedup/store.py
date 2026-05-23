@@ -23,6 +23,7 @@ from .errors import DedupStoreError
 
 if TYPE_CHECKING:
     from application_pipeline.extracts import ExtractStore
+    from application_pipeline.extracts.card_store import CardStore
     from application_pipeline.llm.types import StructuredExtract
 
 SeenStatus = Literal[
@@ -65,7 +66,8 @@ class DeduplicationStore:
         path: Path,
         records: dict[str, dict[str, Any]],
         *,
-        extract_store: ExtractStore | None = None,
+        extract_store: "ExtractStore | None" = None,
+        card_store: "CardStore | None" = None,
     ) -> None:
         self._path = path
         self._records = records
@@ -75,6 +77,7 @@ class DeduplicationStore:
         self._lock = threading.Lock()
         self._in_run: set[str] | None = None
         self._extract_store = extract_store
+        self._card_store = card_store
 
     @staticmethod
     def _validate_record(url: str, record: dict[str, Any]) -> None:
@@ -183,23 +186,26 @@ class DeduplicationStore:
         if company_lc and title_lc and location_lc:
             self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
 
+    def _delete_from_stores(self, url: str) -> None:
+        if self._extract_store is not None:
+            self._extract_store.delete(url)
+        if self._card_store is not None:
+            self._card_store.delete(url)
+
     def mark_out_of_domain(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "out_of_domain")
-            if self._extract_store is not None:
-                self._extract_store.delete(key.url)
+            self._delete_from_stores(key.url)
 
     def mark_selected_by_judge(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "selected_by_judge", overwrite_if="in_domain")
-            if self._extract_store is not None:
-                self._extract_store.delete(key.url)
+            self._delete_from_stores(key.url)
 
     def mark_enrich_failed(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "enrich_failed", overwrite_if="in_domain")
-            if self._extract_store is not None:
-                self._extract_store.delete(key.url)
+            self._delete_from_stores(key.url)
 
     def mark_external_redirect(self, key: _SeenKey) -> None:
         with self._lock:
@@ -211,15 +217,14 @@ class DeduplicationStore:
             prior_status = prior.get("status") if prior else None
             if prior_status == "in_domain":
                 self._mark(key, "expired", overwrite_if="in_domain")
-                if self._extract_store is not None:
-                    self._extract_store.delete(key.url)
+                self._delete_from_stores(key.url)
             else:
                 self._mark(key, "expired")
 
-    def mark_in_domain(self, key: _SeenKey, *, extract: StructuredExtract) -> None:
+    def mark_in_domain(self, key: _SeenKey, *, extract: "StructuredExtract | None" = None) -> None:
         with self._lock:
             self._mark(key, "in_domain")
-            if self._extract_store is not None:
+            if self._extract_store is not None and extract is not None:
                 self._extract_store.put(key.url, extract)
 
     @contextmanager
@@ -261,10 +266,13 @@ class DeduplicationStore:
 
 
 def load(
-    path: Path, *, extract_store: ExtractStore | None = None
+    path: Path,
+    *,
+    extract_store: "ExtractStore | None" = None,
+    card_store: "CardStore | None" = None,
 ) -> DeduplicationStore:
     if not path.exists():
-        return DeduplicationStore(path, {}, extract_store=extract_store)
+        return DeduplicationStore(path, {}, extract_store=extract_store, card_store=card_store)
 
     try:
         raw = path.read_bytes()
@@ -304,4 +312,4 @@ def load(
                     f"(see wipe instruction in the store migration guide)"
                 )
 
-    return DeduplicationStore(path, data, extract_store=extract_store)
+    return DeduplicationStore(path, data, extract_store=extract_store, card_store=card_store)

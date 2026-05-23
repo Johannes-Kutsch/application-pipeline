@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import sys
@@ -11,11 +12,10 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
-from application_pipeline import extracts as extracts_module
-from application_pipeline import layout as layout_module
 from application_pipeline.llm import quota as _quota
 from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
@@ -26,39 +26,56 @@ from application_pipeline.dedup import (
     DedupStoreError,
     DeduplicationStore,
 )
+from application_pipeline.extracts.card_store import CardStore, load_card_store
 from application_pipeline.failure_report import write_failure as _write_failure
-from application_pipeline.layout.types import Layout
 from application_pipeline.llm import (
-    ClassifyItem,
     ClaudeExtractor,
     ExtractorError,
-    JudgeCandidate,
-    LLMExtractor,
+    JudgeCandidateV2,
+    MatchVerdictV2,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
-from application_pipeline.llm.types import MatchVerdict, StructuredExtract
+from application_pipeline.llm.types import CallUsage, RelevanceVerdictV2
+from application_pipeline.llm_enricher import LLMEnricher
 from application_pipeline.parsers import (
-    ExternalRedirect,
     NotServedQuery,
     Parser,
     ParserQuery,
-    Position,
     PositionStub,
 )
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
-from application_pipeline.parsers.errors import ParserError
-from application_pipeline.content_gate import ContentGate
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
-from application_pipeline.search_terms import SearchTerms, load_search_terms
-from application_pipeline.renderer import render
+from application_pipeline.renderer_v2 import render as render_v2
 from application_pipeline.results import ResultsFileError, append, ensure_initialized
+from application_pipeline.search_terms import SearchTerms, load_search_terms
 
 _log = logging.getLogger(__name__)
 
 _STALL_THRESHOLD_S: float = 60.0
+
+_ZERO_USAGE = CallUsage(
+    input_tokens=0,
+    output_tokens=0,
+    cache_read_tokens=0,
+    cost_usd=0.0,
+    duration_s=0.0,
+)
+
+
+@runtime_checkable
+class _LLMJudge(Protocol):
+    def judge_top_n_v2(
+        self, candidates: list[JudgeCandidateV2]
+    ) -> tuple[list[MatchVerdictV2], CallUsage]: ...
+
+
+class _LLMEnricherLike(Protocol):
+    def enrich(
+        self, stub: PositionStub, body_selector: str | None
+    ) -> "RelevanceVerdictV2 | None": ...
 
 
 # ---------------------------------------------------------------------------
@@ -112,18 +129,6 @@ class _ParserDead:
     traceback_str: str
 
 
-@dataclass
-class _EnrichDecision:
-    judge_resume: bool
-
-
-@dataclass
-class _EnrichResult:
-    stub: PositionStub
-    payload: "Position | ParserError | ExternalRedirect"
-    judge_resume: bool
-
-
 class _Skip:
     __slots__ = ()
 
@@ -145,13 +150,14 @@ _QUERY_DONE = _QueryDone()
 
 
 # ---------------------------------------------------------------------------
-# Classify queue protocol
+# Enrich queue protocol
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class _ClassifyPosition:
-    position: "Position"
+class _EnrichRequest:
+    stub: PositionStub
+    body_selector: str | None
 
 
 class _NoMoreBatches:
@@ -167,56 +173,41 @@ _NO_MORE_BATCHES = _NoMoreBatches()
 
 
 class _PoolCollector:
-    """Collects (Position, StructuredExtract) pairs from classify and judge-pending paths."""
+    """Collects PositionStubs from enrich-complete and judge-pending paths."""
 
     def __init__(self) -> None:
-        self._positions: dict[str, "Position"] = {}
-        self._extracts: dict[str, "StructuredExtract"] = {}
+        self._stubs: dict[str, PositionStub] = {}
         self._lock = threading.Lock()
 
-    def add_classified(
-        self, position: "Position", extract: "StructuredExtract"
-    ) -> None:
+    def add_in_domain(self, stub: PositionStub) -> None:
         with self._lock:
-            self._positions[position.stub.url] = position
-            self._extracts[position.stub.url] = extract
+            self._stubs[stub.url] = stub
 
-    def add_judge_pending(self, position: "Position") -> None:
+    def add_judge_pending(self, stub: PositionStub) -> None:
         with self._lock:
-            self._positions[position.stub.url] = position
+            self._stubs[stub.url] = stub
 
-    def get_position(self, url: str) -> "Position | None":
+    def get_stub(self, url: str) -> PositionStub | None:
         with self._lock:
-            return self._positions.get(url)
+            return self._stubs.get(url)
 
-    def build_candidates(
-        self, extract_store: "extracts_module.ExtractStore | None"
-    ) -> "list[JudgeCandidate]":
+    def build_candidates(self, card_store: CardStore) -> list[JudgeCandidateV2]:
         with self._lock:
-            positions = dict(self._positions)
-            extracts = dict(self._extracts)
+            stubs = dict(self._stubs)
         candidates = []
-        for url, position in positions.items():
-            extract: StructuredExtract | None = extracts.get(url)
-            if extract is None and extract_store is not None:
-                extract = extract_store.get(url)
-            if extract is None:
+        for url in stubs:
+            card = card_store.get(url)
+            if card is None:
                 continue
             candidates.append(
-                JudgeCandidate(
-                    id=url,
-                    extract=extract,
-                    title=position.stub.title,
-                    company=position.stub.company,
-                    location=position.stub.location,
-                )
+                JudgeCandidateV2(id=url, header=card.header, summary=card.summary)
             )
         return candidates
 
     @property
     def pool_size(self) -> int:
         with self._lock:
-            return len(self._positions)
+            return len(self._stubs)
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +258,7 @@ class _QueueWorker(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
-# Parser thread — pure producer
+# Parser thread — pure stub producer (no enrich)
 # ---------------------------------------------------------------------------
 
 
@@ -310,27 +301,9 @@ class _ParserThread(threading.Thread):
                         for item in gen:
                             self._outbound.put((self._parser_id, item))
                             if isinstance(item, NotServedQuery):
-                                continue  # fire-and-forget; orchestrator counts, no reply
+                                continue
                             decision = self._inbound.get()
-                            if isinstance(decision, _EnrichDecision):
-                                enrich_payload: (
-                                    Position | ParserError | ExternalRedirect
-                                )
-                                try:
-                                    enrich_payload = self._parser.enrich(item)
-                                except ParserError as exc:
-                                    enrich_payload = exc
-                                self._outbound.put(
-                                    (
-                                        self._parser_id,
-                                        _EnrichResult(
-                                            stub=item,
-                                            payload=enrich_payload,
-                                            judge_resume=decision.judge_resume,
-                                        ),
-                                    )
-                                )
-                            elif decision is _SKIP_AND_END_QUERY:
+                            if decision is _SKIP_AND_END_QUERY:
                                 break
                             # else: _SKIP — continue to next stub
                     finally:
@@ -373,17 +346,17 @@ def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Classify thread
+# Enrich thread — calls LLMEnricher per stub
 # ---------------------------------------------------------------------------
 
 
-class _ClassifyThread(_QueueWorker):
+class _EnrichThread(_QueueWorker):
     def __init__(
         self,
         *,
-        classify_queue: queue.Queue[object],
+        enrich_queue: queue.Queue[object],
         pool_collector: "_PoolCollector",
-        extractor: LLMExtractor,
+        llm_enricher: "_LLMEnricherLike",
         dedup_store: DeduplicationStore,
         metrics: "RunMetrics",
         run_state: _RunState,
@@ -392,36 +365,30 @@ class _ClassifyThread(_QueueWorker):
         worker_index: int = 0,
     ) -> None:
         super().__init__(
-            input_queue=classify_queue,
+            input_queue=enrich_queue,
             sentinel=_NO_MORE_BATCHES,
-            stage_name="classify",
+            stage_name="enrich",
             run_state=run_state,
         )
-        self.name = f"classify-worker-{worker_index}"
+        self.name = f"enrich-worker-{worker_index}"
         self._pool_collector = pool_collector
-        self._extractor = extractor
+        self._llm_enricher = llm_enricher
         self._dedup_store = dedup_store
         self._metrics = metrics
         self._run_log = run_log
         self._quota_wall = quota_wall
 
     def _on_dequeue(self, item: object) -> None:
-        assert isinstance(item, _ClassifyPosition)
+        assert isinstance(item, _EnrichRequest)
         self._metrics.classify_batch_dequeued(1)
 
     def _process(self, item: object) -> None:
-        assert isinstance(item, _ClassifyPosition)
-        position = item.position
-        classify_item = ClassifyItem(
-            title=position.stub.title,
-            raw_description=position.raw_description,
-        )
+        assert isinstance(item, _EnrichRequest)
+        stub = item.stub
         while True:
             self._quota_wall.wait_if_blocked()
             try:
-                verdict, classify_usage = self._extractor.classify_relevance(
-                    classify_item
-                )
+                verdict = self._llm_enricher.enrich(stub, item.body_selector)
                 break
             except ClaudeUsageLimitError as err:
                 now = datetime.now(timezone.utc)
@@ -441,11 +408,11 @@ class _ClassifyThread(_QueueWorker):
                         duration_s=duration_s,
                     )
             except ExtractorError as exc:
-                _log.warning("classify_relevance failed: %s", exc)
+                _log.warning("llm_enricher.enrich failed: %s", exc)
                 self._metrics.classify_batch_failed(1)
                 self._run_log.event(
                     "llm_classify_relevance",
-                    "classify_relevance",
+                    "classify_relevance_v2",
                     status="error",
                     error=str(exc),
                 )
@@ -453,18 +420,20 @@ class _ClassifyThread(_QueueWorker):
 
         self._run_log.event(
             "llm_classify_relevance",
-            "classify_relevance",
-            in_domain=verdict.in_domain,
+            "classify_relevance_v2",
+            in_domain=verdict.in_domain if verdict is not None else None,
         )
-        classifier_dropped = 0
-        if not verdict.in_domain:
-            self._dedup_store.mark_out_of_domain(position.stub)
-            classifier_dropped = 1
+
+        if verdict is None:
+            self._dedup_store.mark_enrich_failed(stub)
+            self._metrics.enrich_failed(stub.source)
+        elif not verdict.in_domain:
+            self._dedup_store.mark_out_of_domain(stub)
+            self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 1)
         else:
-            assert verdict.extract is not None
-            self._dedup_store.mark_in_domain(position.stub, extract=verdict.extract)
-            self._pool_collector.add_classified(position, verdict.extract)
-        self._metrics.classify_batch_complete(classify_usage, 1, classifier_dropped)
+            self._dedup_store.mark_in_domain(stub)
+            self._pool_collector.add_in_domain(stub)
+            self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 0)
 
 
 @dataclass
@@ -489,26 +458,26 @@ class _OutboundDispatcher:
         self,
         *,
         parser_states: dict[str, "_ParserState"],
+        parser_body_selectors: dict[str, "str | None"],
         dedup: DeduplicationStore,
         metrics: "RunMetrics",
-        classify_queue: "queue.Queue[object]",
+        enrich_queue: "queue.Queue[object]",
         pool_collector: "_PoolCollector",
         run_state: _RunState,
         run_log: RunLog,
         freshness: FreshnessGate,
         prefilter: PreFilterGate,
-        content: ContentGate,
     ) -> None:
         self._parser_states = parser_states
+        self._parser_body_selectors = parser_body_selectors
         self._dedup = dedup
         self._metrics = metrics
-        self._classify_queue = classify_queue
+        self._enrich_queue = enrich_queue
         self._pool_collector = pool_collector
         self._run_state = run_state
         self._run_log = run_log
         self._freshness = freshness
         self._prefilter = prefilter
-        self._content = content
 
     def dispatch(self, pid: str, payload: object) -> bool:
         """Dispatch a payload to the appropriate handler.
@@ -518,8 +487,6 @@ class _OutboundDispatcher:
         state = self._parser_states[pid]
         if isinstance(payload, PositionStub):
             self._handle_stub(pid, state, payload)
-        elif isinstance(payload, _EnrichResult):
-            self._handle_enrich_result(pid, payload)
         elif isinstance(payload, NotServedQuery):
             self._handle_not_served(pid)
         elif payload is _QUERY_DONE:
@@ -533,13 +500,9 @@ class _OutboundDispatcher:
         return False
 
     def flush_residual(self, n: int = 1) -> None:
-        """Signal end of positions to n classify workers."""
+        """Signal end of stubs to n enrich workers."""
         for _ in range(n):
-            self._classify_queue.put(_NO_MORE_BATCHES)
-
-    def _enqueue_classify(self, position: Position) -> None:
-        self._classify_queue.put(_ClassifyPosition(position=position))
-        self._metrics.classify_buffered(1)
+            self._enrich_queue.put(_NO_MORE_BATCHES)
 
     def _handle_stub(
         self, pid: str, state: _ParserState, payload: PositionStub
@@ -554,50 +517,18 @@ class _OutboundDispatcher:
         result = self._dedup.is_seen(payload)
         self._metrics.record_dedup(result)
         if result == "miss":
-            state.inbound.put(_EnrichDecision(judge_resume=False))
+            if self._prefilter.admit_stub(payload):
+                body_selector = self._parser_body_selectors.get(pid)
+                self._enrich_queue.put(
+                    _EnrichRequest(stub=payload, body_selector=body_selector)
+                )
+                self._metrics.classify_buffered(1)
+            state.inbound.put(_SKIP)
         elif result == "judge_pending":
-            state.inbound.put(_EnrichDecision(judge_resume=True))
+            self._pool_collector.add_judge_pending(payload)
+            state.inbound.put(_SKIP)
         else:
             state.inbound.put(_SKIP)
-
-    def _handle_enrich_result(self, pid: str, wrapper: _EnrichResult) -> None:
-        stub = wrapper.stub
-        payload = wrapper.payload
-        if isinstance(payload, Position):
-            for warning in payload._warnings:
-                self._run_log.event("parser_" + pid, warning)
-                if warning.startswith("unparseable_date"):
-                    self._metrics.unparseable_date(pid)
-            self._metrics.enriched(pid)
-            if wrapper.judge_resume:
-                if self._freshness.admit(payload):
-                    if self._content.admit(payload):
-                        self._pool_collector.add_judge_pending(payload)
-            else:
-                if self._prefilter.admit(payload):
-                    if self._freshness.admit(payload):
-                        if self._content.admit(payload):
-                            self._enqueue_classify(payload)
-        elif isinstance(payload, ParserError):
-            self._run_log.event(
-                "parser_" + pid,
-                "enrich_failed",
-                stub_url=stub.url,
-                title=stub.title,
-                reason=str(payload),
-            )
-            self._dedup.mark_enrich_failed(stub)
-            self._metrics.enrich_failed(pid)
-        elif isinstance(payload, ExternalRedirect):
-            self._run_log.event(
-                "parser_" + pid,
-                "external_redirect",
-                stub_url=stub.url,
-                outbound=payload.outbound_url,
-                skipped=True,
-            )
-            self._dedup.mark_external_redirect(stub)
-            self._metrics.external_redirect(pid)
 
     def _handle_not_served(self, pid: str) -> None:
         self._metrics.not_served_query(pid)
@@ -613,14 +544,41 @@ class _OutboundDispatcher:
         self._metrics.parser_dead(pid)
 
 
+# ---------------------------------------------------------------------------
+# Extracts wipe helper (ADR-0024)
+# ---------------------------------------------------------------------------
+
+
+def _wipe_extracts_if_v1(path: Path) -> None:
+    """Delete extracts.json if it contains v1-format records (pre-upgrade data)."""
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_bytes())
+    except (json.JSONDecodeError, OSError):
+        path.unlink(missing_ok=True)
+        return
+    if not isinstance(data, dict):
+        path.unlink(missing_ok=True)
+        return
+    for record in data.values():
+        if not isinstance(record, dict):
+            path.unlink(missing_ok=True)
+            return
+        if "header" not in record or "summary" not in record:
+            path.unlink(missing_ok=True)
+            return
+
+
 def run(
     config_path: Path,
     *,
     search_terms: SearchTerms | None = None,
-    extractor: LLMExtractor | None = None,
+    llm_enricher: "_LLMEnricherLike | None" = None,
+    extractor: object = None,
+    card_store: CardStore | None = None,
     parser_registry: Callable[[str], type[Parser] | None] | None = None,
     dedup_store: DeduplicationStore | None = None,
-    layout: Layout | None = None,
     status_display: StatusDisplay | None = None,
     run_log: RunLog | None = None,
     stall_threshold_s: float = _STALL_THRESHOLD_S,
@@ -647,8 +605,8 @@ def run(
         if run_log is None:
             run_log = RunLog(cfg.logs_path)
 
-        # Steps 2-3: Load prompts, build extractor
-        if extractor is None:
+        # Steps 2-3: Load prompts, build extractor + LLMEnricher
+        if extractor is None or llm_enricher is None:
             try:
                 prompts = load_prompts(cfg)
             except PromptError as exc:
@@ -656,13 +614,14 @@ def run(
                 raise
             if search_terms is None:
                 search_terms = load_search_terms(cfg.user_info_dir)
-            extractor = ClaudeExtractor(
-                cfg, prompts, search_terms=search_terms, run_log=run_log
-            )
+            if extractor is None:
+                extractor = ClaudeExtractor(
+                    cfg, prompts, search_terms=search_terms, run_log=run_log
+                )
         elif search_terms is None:
             search_terms = load_search_terms(cfg.user_info_dir)
 
-        # Step 6: Resolve parser classes; unknown types are skipped (registry logs WARNING)
+        # Step 6: Resolve parser classes
         _resolve = (
             parser_registry if parser_registry is not None else _default_registry.get
         )
@@ -672,25 +631,38 @@ def run(
             if cls is not None:
                 resolved.append((cls, source))
 
-        # Step 7: Dedup store (wire ExtractStore for judge_pending extract retrieval)
-        extract_store = extracts_module.load(
-            cfg.seen_store_path.parent / "extracts.json"
-        )
+        # Step 7: Dedup store + CardStore (wipe v1 extracts if present)
+        extracts_path = cfg.seen_store_path.parent / "extracts.json"
+        _wipe_extracts_if_v1(extracts_path)
+        if card_store is None:
+            card_store = load_card_store(extracts_path)
         if dedup_store is None:
             try:
                 dedup_store = dedup_module.load(
-                    cfg.seen_store_path, extract_store=extract_store
+                    cfg.seen_store_path, card_store=card_store
                 )
             except DedupStoreError as exc:
                 _log.error("startup failed — dedup store: %s", exc)
                 raise
 
-        # Step 8: Layout + daily results file initialization
-        if layout is None:
-            if cfg.layout is not None:
-                layout = layout_module.load(cfg.layout)
-            else:
-                layout = layout_module.default()
+        # Step 8: Build LLMEnricher if not injected
+        if quota_wall is None:
+            quota_wall = _quota.QuotaWall()
+        if llm_enricher is None:
+            from application_pipeline.llm_enricher import LLMExtractorV2
+
+            assert isinstance(extractor, LLMExtractorV2), (
+                "extractor must implement LLMExtractorV2 (classify_relevance_v2)"
+            )
+            metrics_placeholder = RunMetrics(status_display, run_log=run_log)
+            llm_enricher = LLMEnricher(
+                extractor=extractor,
+                quota_wall=quota_wall,
+                card_store=card_store,
+                run_log=run_log,
+                run_metrics=metrics_placeholder,
+                failures_dir=cfg.failures_path,
+            )
 
         daily_file_path = cfg.results_dir / f"{cron_anchored_date}.md"
         try:
@@ -701,7 +673,7 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display, run_log=run_log)
-        classify_queue: queue.Queue[object] = queue.Queue()
+        enrich_queue: queue.Queue[object] = queue.Queue()
         pool_collector = _PoolCollector()
         _run_started_at = datetime.now(timezone.utc)
 
@@ -717,6 +689,11 @@ def run(
                 for cls, source in resolved
             ]
             dedup_run = stack.enter_context(dedup_store.run_scope())
+
+            parser_body_selectors: dict[str, str | None] = {
+                source.parser_type: getattr(parser, "body_selector", None)
+                for parser, source in parsers_list
+            }
 
             parser_states: dict[str, _ParserState] = {}
             threads: list[tuple[str, _ParserThread]] = []
@@ -758,13 +735,11 @@ def run(
 
             metrics.register_rows(starting_order=2 + len(threads))
 
-            if quota_wall is None:
-                quota_wall = _quota.QuotaWall()
-            classify_threads = [
-                _ClassifyThread(
-                    classify_queue=classify_queue,
+            enrich_threads = [
+                _EnrichThread(
+                    enrich_queue=enrich_queue,
                     pool_collector=pool_collector,
-                    extractor=extractor,
+                    llm_enricher=llm_enricher,
                     dedup_store=dedup_store,
                     metrics=metrics,
                     run_state=run_state,
@@ -774,8 +749,8 @@ def run(
                 )
                 for i in range(cfg.claude_classify_parallelism)
             ]
-            for ct in classify_threads:
-                ct.start()
+            for et in enrich_threads:
+                et.start()
 
             freshness = FreshnessGate(
                 anchored_today=anchored_today,
@@ -790,22 +765,18 @@ def run(
                 metrics=metrics,
                 run_log=run_log,
             )
-            content = ContentGate(
-                metrics=metrics,
-                run_log=run_log,
-            )
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
+                parser_body_selectors=parser_body_selectors,
                 dedup=dedup_run,
                 metrics=metrics,
-                classify_queue=classify_queue,
+                enrich_queue=enrich_queue,
                 pool_collector=pool_collector,
                 run_state=run_state,
                 run_log=run_log,
                 freshness=freshness,
                 prefilter=prefilter,
-                content=content,
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())
@@ -866,14 +837,13 @@ def run(
 
             freshness.emit_run_complete()
             prefilter.emit_run_complete()
-            content.emit_run_complete()
             dispatcher.flush_residual(n=cfg.claude_classify_parallelism)
 
         first_exc: BaseException | None = None
-        for ct in classify_threads:
-            ct.join()
-            if first_exc is None and ct.exc is not None:
-                first_exc = ct.exc
+        for et in enrich_threads:
+            et.join()
+            if first_exc is None and et.exc is not None:
+                first_exc = et.exc
 
         if first_exc is not None:
             raise first_exc
@@ -881,22 +851,25 @@ def run(
         # Emit per-call-site SUMMARY OF SESSION trailers
         metrics.summarize_to_parser_log(_run_started_at)
 
-        # Step 13: Single end-of-run judge_top_n call
-        candidates = pool_collector.build_candidates(extract_store)
+        # Step 13: Single end-of-run judge_top_n_v2 call
+        candidates = pool_collector.build_candidates(card_store)
         pool_size = pool_collector.pool_size
 
         daily_top_5_count = 0
         if candidates:
-            verdicts: list[MatchVerdict] | None = None
+            verdicts: list[MatchVerdictV2] | None = None
             judge_usage = None
+            assert isinstance(extractor, _LLMJudge), (
+                "extractor must implement judge_top_n_v2"
+            )
             while True:
                 try:
-                    verdicts, judge_usage = extractor.judge_top_n(candidates)
+                    verdicts, judge_usage = extractor.judge_top_n_v2(candidates)
                     break
                 except ClaudeUsageLimitError as err:
                     _quota_sleep(err, run_log)
                 except ExtractorError as exc:
-                    _log.warning("judge_top_n failed: %s", exc)
+                    _log.warning("judge_top_n_v2 failed: %s", exc)
                     run_log.event(
                         "llm_judge_top_n",
                         "error",
@@ -905,7 +878,7 @@ def run(
                         error=str(exc),
                     )
                     _write_failure(
-                        stage="judge_top_n",
+                        stage="judge_top_n_v2",
                         error=exc,
                         log_tail="",
                         failures_dir=cfg.failures_path,
@@ -914,16 +887,18 @@ def run(
 
             if verdicts is not None and judge_usage is not None:
                 for verdict in sorted(verdicts, key=lambda v: v.rank):
-                    position = pool_collector.get_position(verdict.id)
-                    if position is None:
+                    card = card_store.get(verdict.id)
+                    if card is None:
                         continue
-                    rendered = render(position, verdict, layout)
+                    rendered = render_v2(verdict.rank, card.header, card.summary)
                     try:
                         append(daily_file_path, rendered)
                     except ResultsFileError as exc:
                         _log.error("daily file append failed: %s", exc)
                         raise
-                    dedup_store.mark_selected_by_judge(position.stub)
+                    stub = pool_collector.get_stub(verdict.id)
+                    if stub is not None:
+                        dedup_store.mark_selected_by_judge(stub)
                     daily_top_5_count += 1
                 metrics.judge_top_n_complete(judge_usage, daily_top_5_count)
                 run_log.event(

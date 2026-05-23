@@ -20,7 +20,7 @@ REQUIRED_BODY = textwrap.dedent(
 
 
 def write_config(
-    tmp_path: pathlib.Path, body: str, *, with_layout: bool = True
+    tmp_path: pathlib.Path, body: str, *, with_layout: bool = False
 ) -> pathlib.Path:
     path = tmp_path / "config.py"
     path.write_text(textwrap.dedent(body))
@@ -171,19 +171,20 @@ def test_resolve_data_paths_anchors_to_data_dir() -> None:
 # --- layout ---
 
 
-def test_layout_auto_discovers_sibling_layout_py(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY)
+def test_layout_is_none_regardless_of_sibling(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY, with_layout=True)
 
     config = load(path)
 
-    assert config.layout == tmp_path / "layout.py"
+    assert config.layout is None
 
 
-def test_layout_errors_when_sibling_missing(tmp_path: pathlib.Path) -> None:
+def test_layout_loads_without_sibling_layout_py(tmp_path: pathlib.Path) -> None:
     path = write_config(tmp_path, REQUIRED_BODY, with_layout=False)
 
-    with pytest.raises(ConfigError, match="LAYOUT"):
-        load(path)
+    config = load(path)
+
+    assert config.layout is None
 
 
 def test_layout_knob_raises_when_set_to_none(tmp_path: pathlib.Path) -> None:

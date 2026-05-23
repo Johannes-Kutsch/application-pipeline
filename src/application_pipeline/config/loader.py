@@ -46,12 +46,6 @@ def load(path: pathlib.Path) -> Config:
 
     seen_store_path = data_paths.seen_store_path
 
-    layout = config_dir / "layout.py"
-    if not layout.is_file():
-        raise ConfigError(
-            f"LAYOUT: {layout} does not exist; add layout.py next to config.py"
-        )
-
     user_info_dir = data_paths.user_info_dir
 
     raw_max_age = getattr(module, "MAX_LISTING_AGE_DAYS", 180)
@@ -80,7 +74,6 @@ def load(path: pathlib.Path) -> Config:
         results_dir=data_paths.results_dir,
         failures_path=data_paths.failures_path,
         logs_path=data_paths.logs_path,
-        layout=layout,
         user_info_dir=user_info_dir,
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
         max_listing_age_days=max_listing_age_days,

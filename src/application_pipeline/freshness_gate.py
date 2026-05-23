@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import date
 from typing import Literal, Protocol
 
 from application_pipeline.parser_log import RunLog
-from application_pipeline.run_metrics import RunMetrics
+from application_pipeline.status_display import StatusDisplay
 
 
 class _Stub(Protocol):
@@ -53,6 +54,11 @@ class _FreshnessVerdict:
         "passed", "too_old", "deadline_passed", "too_old_and_deadline_passed"
     ]
     age_days: int | None
+
+
+@dataclass(frozen=True)
+class FreshnessSnapshot:
+    freshness_dropped: int = 0
 
 
 def _evaluate(
@@ -105,14 +111,15 @@ class FreshnessGate:
         anchored_today: date,
         max_listing_age_days: int,
         dedup: _DedupStore,
-        metrics: RunMetrics,
+        display: StatusDisplay,
         run_log: RunLog,
     ) -> None:
         self._anchored_today = anchored_today
         self._max_listing_age_days = max_listing_age_days
         self._dedup = dedup
-        self._metrics = metrics
+        self._display = display
         self._run_log = run_log
+        self._lock = threading.Lock()
         self._counts: dict[str, int] = {
             "passed": 0,
             "too_old": 0,
@@ -151,10 +158,12 @@ class FreshnessGate:
                 "gate_arm": gate_arm,
             },
         )
-        self._counts[verdict.reason] += 1
+        with self._lock:
+            self._counts[verdict.reason] += 1
+            body = self._freshness_body()
         if not verdict.passes:
             self._dedup.mark_expired(stub)
-            self._metrics.freshness_dropped()
+            self._display.update_body("pipeline_freshness", body=body)
         return verdict.passes
 
     def admit(self, position: _Position) -> bool:
@@ -178,11 +187,30 @@ class FreshnessGate:
                 "gate_arm": "post_llm",
             },
         )
-        self._counts[verdict.reason] += 1
+        with self._lock:
+            self._counts[verdict.reason] += 1
+            body = self._freshness_body()
         if not verdict.passes:
             self._dedup.mark_expired(position.stub)
-            self._metrics.freshness_dropped()
+            self._display.update_body("pipeline_freshness", body=body)
         return verdict.passes
+
+    def snapshot(self) -> FreshnessSnapshot:
+        with self._lock:
+            dropped = (
+                self._counts["too_old"]
+                + self._counts["deadline_passed"]
+                + self._counts["too_old_and_deadline_passed"]
+            )
+        return FreshnessSnapshot(freshness_dropped=dropped)
 
     def emit_run_complete(self) -> None:
         self._run_log.event("pipeline_freshness", "run_complete", **self._counts)
+
+    def _freshness_body(self) -> str:
+        dropped = (
+            self._counts["too_old"]
+            + self._counts["deadline_passed"]
+            + self._counts["too_old_and_deadline_passed"]
+        )
+        return f"dropped={dropped}"

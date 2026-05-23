@@ -802,7 +802,7 @@ def run(
                 anchored_today=anchored_today,
                 max_listing_age_days=cfg.max_listing_age_days,
                 dedup=dedup_run,
-                metrics=metrics,
+                display=status_display,
                 run_log=run_log,
             )
             if isinstance(llm_enricher, LLMEnricher):
@@ -905,6 +905,7 @@ def run(
                 )
 
             freshness.emit_run_complete()
+            freshness_snapshot = freshness.snapshot()
             prefilter.emit_run_complete()
             prefilter_snapshot = prefilter.snapshot()
             content_gate.emit_run_complete()
@@ -1001,7 +1002,9 @@ def run(
         )
 
         summary = metrics.to_run_summary(
-            duration_s=elapsed_s, prefilter=prefilter_snapshot
+            duration_s=elapsed_s,
+            prefilter=prefilter_snapshot,
+            freshness=freshness_snapshot,
         )
         _log.info(
             "run complete: discovered=%d skipped=%d "

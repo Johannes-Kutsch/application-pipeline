@@ -311,15 +311,13 @@ def test_enricher_malformed_llm_output_emits_log_event(
 # ---------------------------------------------------------------------------
 
 
-def _make_freshness_gate(
-    tmp_path: Path, run_log: RunLog, run_metrics: RunMetrics
-) -> FreshnessGate:
+def _make_freshness_gate(tmp_path: Path, run_log: RunLog) -> FreshnessGate:
     dedup = dedup_load(tmp_path / ".seen.json")
     return FreshnessGate(
         anchored_today=_ANCHORED_TODAY,
         max_listing_age_days=_MAX_AGE,
         dedup=dedup,
-        metrics=run_metrics,
+        display=FakeStatusDisplay(),
         run_log=run_log,
     )
 
@@ -352,7 +350,7 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
         _call_usage(),
     )
 
-    gate = _make_freshness_gate(tmp_path, run_log, run_metrics)
+    gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")
     enricher = LLMEnricher(
         extractor=extractor,  # type: ignore[arg-type]
@@ -390,7 +388,7 @@ def test_enricher_freshness_drop_records_post_llm_transcript(
         _call_usage(),
     )
 
-    gate = _make_freshness_gate(tmp_path, run_log, run_metrics)
+    gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")
     enricher = LLMEnricher(
         extractor=extractor,  # type: ignore[arg-type]
@@ -435,7 +433,7 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
         _call_usage(),
     )
 
-    gate = _make_freshness_gate(tmp_path, run_log, run_metrics)
+    gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")
     enricher = LLMEnricher(
         extractor=extractor,  # type: ignore[arg-type]
@@ -480,7 +478,7 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
         _call_usage(),
     )
 
-    gate = _make_freshness_gate(tmp_path, run_log, run_metrics)
+    gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")
     enricher = LLMEnricher(
         extractor=extractor,  # type: ignore[arg-type]

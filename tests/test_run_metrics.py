@@ -9,6 +9,7 @@ import pytest
 
 from fake_status_display import FakeStatusDisplay
 
+from application_pipeline.freshness_gate import FreshnessSnapshot
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.orchestrator import RunSummary
 from application_pipeline.parser_log import RunLog
@@ -596,7 +597,9 @@ def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned(
     assert "judge_items_abandoned=4" in result
     assert "classify_items_abandoned=3" in result
 
-    summary = metrics.to_run_summary(duration_s=1.0, prefilter=PreFilterSnapshot())
+    summary = metrics.to_run_summary(
+        duration_s=1.0, prefilter=PreFilterSnapshot(), freshness=FreshnessSnapshot()
+    )
     assert summary.errored == 4
 
 
@@ -687,7 +690,9 @@ def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
         prefilter_dropped=1,
         prefilter_blacklist_hits=1,
     )
-    summary = metrics.to_run_summary(duration_s=55.5, prefilter=prefilter)
+    summary = metrics.to_run_summary(
+        duration_s=55.5, prefilter=prefilter, freshness=FreshnessSnapshot()
+    )
 
     assert isinstance(summary, RunSummary)
     assert summary.duration_seconds == 55.5
@@ -715,7 +720,9 @@ def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
 def test_to_run_summary_is_frozen(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    summary = metrics.to_run_summary(duration_s=1.0, prefilter=PreFilterSnapshot())
+    summary = metrics.to_run_summary(
+        duration_s=1.0, prefilter=PreFilterSnapshot(), freshness=FreshnessSnapshot()
+    )
 
     with pytest.raises((AttributeError, TypeError)):
         summary.discovered = 99  # type: ignore[misc]
@@ -798,7 +805,9 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
         t.join()
 
     total = n_threads * iters
-    summary = metrics.to_run_summary(duration_s=1.0, prefilter=PreFilterSnapshot())
+    summary = metrics.to_run_summary(
+        duration_s=1.0, prefilter=PreFilterSnapshot(), freshness=FreshnessSnapshot()
+    )
     assert summary.discovered == total
     assert summary.dedup_url_hits == total
     assert summary.dedup_misses == total
@@ -836,7 +845,9 @@ def test_parser_summary_reflects_events_for_that_parser_id(run_log: RunLog) -> N
     assert summary_b["discovered"] == 1
 
     # Aggregate is unaffected
-    run_summary = metrics.to_run_summary(1.0, prefilter=PreFilterSnapshot())
+    run_summary = metrics.to_run_summary(
+        1.0, prefilter=PreFilterSnapshot(), freshness=FreshnessSnapshot()
+    )
     assert run_summary.discovered == 3
 
 
@@ -925,7 +936,9 @@ def test_interleaved_parsers_produce_independent_per_parser_totals(
     assert sb["discovered"] == 5
     assert sb["enrich_failed"] == 0
 
-    summary = metrics.to_run_summary(1.0, prefilter=PreFilterSnapshot())
+    summary = metrics.to_run_summary(
+        1.0, prefilter=PreFilterSnapshot(), freshness=FreshnessSnapshot()
+    )
     assert summary.discovered == 8
     assert summary.enrich_failed == 3
 

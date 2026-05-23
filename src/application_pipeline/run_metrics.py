@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from application_pipeline.dedup import RunScopedSeenResult
+from application_pipeline.freshness_gate import FreshnessSnapshot
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter_gate import PreFilterSnapshot
@@ -72,7 +73,6 @@ class RunMetrics:
         self._dedup_run_hits = 0
         self._dedup_misses = 0
         self._judge_resumed = 0
-        self._freshness_dropped = 0
         self._content_considered = 0
         self._content_passed = 0
         self._content_dropped_empty_body = 0
@@ -205,12 +205,6 @@ class RunMetrics:
                 self._dedup_misses += 1
             body = self._dedup_body()
         self._display.update_body("pipeline_dedup", body=body)
-
-    def freshness_dropped(self) -> None:
-        with self._lock:
-            self._freshness_dropped += 1
-            body = self._freshness_body()
-        self._display.update_body("pipeline_freshness", body=body)
 
     def content_passed(self) -> None:
         with self._lock:
@@ -526,7 +520,10 @@ class RunMetrics:
         return f"<!-- {' '.join(parts)} -->\n"
 
     def to_run_summary(
-        self, duration_s: float, prefilter: PreFilterSnapshot
+        self,
+        duration_s: float,
+        prefilter: PreFilterSnapshot,
+        freshness: FreshnessSnapshot,
     ) -> RunSummary:
         with self._classify_lock:
             classify_input_tokens = self._classify_input_tokens
@@ -646,9 +643,6 @@ class RunMetrics:
             f" run_hits={self._dedup_run_hits}"
             f" misses={self._dedup_misses}"
         )
-
-    def _freshness_body(self) -> str:
-        return f"dropped={self._freshness_dropped}"
 
     def _content_body(self) -> str:
         return (

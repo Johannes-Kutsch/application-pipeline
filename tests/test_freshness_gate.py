@@ -12,7 +12,6 @@ from fake_status_display import FakeStatusDisplay
 from application_pipeline.dedup import load as dedup_load
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parser_log import RunLog
-from application_pipeline.run_metrics import RunMetrics
 
 
 # ---------------------------------------------------------------------------
@@ -64,11 +63,8 @@ def run_log(logs_dir: Path) -> RunLog:
 
 
 @pytest.fixture
-def metrics(tmp_path: Path, run_log: RunLog) -> RunMetrics:
-    display = FakeStatusDisplay()
-    m = RunMetrics(display, run_log=run_log)
-    m.register_rows(starting_order=0)
-    return m
+def display() -> FakeStatusDisplay:
+    return FakeStatusDisplay()
 
 
 @pytest.fixture
@@ -83,7 +79,7 @@ MAX_AGE = 30
 def _make_gate(
     tmp_path: Path,
     run_log: RunLog,
-    metrics: RunMetrics,
+    display: FakeStatusDisplay,
     dedup,
     anchored_today: date = ANCHORED_TODAY,
     max_listing_age_days: int = MAX_AGE,
@@ -92,7 +88,7 @@ def _make_gate(
         anchored_today=anchored_today,
         max_listing_age_days=max_listing_age_days,
         dedup=dedup,
-        metrics=metrics,
+        display=display,
         run_log=run_log,
     )
 
@@ -117,17 +113,17 @@ def _read_events(logs_dir: Path) -> list[dict]:
 
 
 def test_admit_no_dates_returns_true(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(url="https://example.com/1")
     assert gate.admit(position) is True
 
 
 def test_admit_writes_transcript_row_for_passing_position(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(
         url="https://example.com/job1",
         title="Engineer",
@@ -151,10 +147,10 @@ def test_admit_writes_transcript_row_for_passing_position(
 
 
 def test_admit_at_threshold_posted_date_passes(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
     # posted_date exactly max_listing_age_days ago should pass (age == 30, not > 30)
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(
         posted_date=date(2025, 12, 16)
     )  # 30 days before 2026-01-15
@@ -162,9 +158,9 @@ def test_admit_at_threshold_posted_date_passes(
 
 
 def test_admit_one_day_over_threshold_returns_false_with_too_old_reason(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(
         url="https://example.com/old",
         posted_date=date(2025, 12, 15),  # 31 days before 2026-01-15
@@ -178,9 +174,9 @@ def test_admit_one_day_over_threshold_returns_false_with_too_old_reason(
 
 
 def test_admit_future_posted_date_passes_with_negative_age_days(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(posted_date=date(2026, 1, 20))  # 5 days in the future
     assert gate.admit(position) is True
     rows = _read_transcripts(logs_dir)
@@ -188,9 +184,9 @@ def test_admit_future_posted_date_passes_with_negative_age_days(
 
 
 def test_admit_deadline_today_returns_false_with_deadline_passed_reason(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(
         url="https://example.com/deadline-today",
         deadline=ANCHORED_TODAY,
@@ -201,25 +197,25 @@ def test_admit_deadline_today_returns_false_with_deadline_passed_reason(
 
 
 def test_admit_deadline_tomorrow_passes(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(deadline=date(2026, 1, 16))
     assert gate.admit(position) is True
 
 
 def test_admit_deadline_yesterday_returns_false(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(deadline=date(2026, 1, 14))
     assert gate.admit(position) is False
 
 
 def test_admit_combined_too_old_and_deadline_passed(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(
         url="https://example.com/both",
         posted_date=date(2025, 12, 15),  # 31 days ago
@@ -231,9 +227,9 @@ def test_admit_combined_too_old_and_deadline_passed(
 
 
 def test_admit_null_dates_transcript_fields_are_none(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     gate.admit(_make_position())
     row = _read_transcripts(logs_dir)[0]
     assert row["posted_date"] is None
@@ -242,14 +238,14 @@ def test_admit_null_dates_transcript_fields_are_none(
 
 
 # ---------------------------------------------------------------------------
-# admit() drop side-effects: dedup + metrics
+# admit() drop side-effects: dedup + display
 # ---------------------------------------------------------------------------
 
 
 def test_admit_drop_marks_expired_in_dedup_store(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(
         url="https://example.com/old",
         posted_date=date(2025, 12, 15),
@@ -262,18 +258,16 @@ def test_admit_drop_marks_expired_in_dedup_store(
     assert data["https://example.com/old"]["status"] == "expired"
 
 
-def test_admit_drop_increments_freshness_dropped_metric(
+def test_admit_drop_publishes_freshness_body_to_display(
     tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
     display = FakeStatusDisplay()
-    m = RunMetrics(display, run_log=run_log)
-    m.register_rows(starting_order=0)
 
     gate = FreshnessGate(
         anchored_today=ANCHORED_TODAY,
         max_listing_age_days=MAX_AGE,
         dedup=dedup,
-        metrics=m,
+        display=display,
         run_log=run_log,
     )
 
@@ -285,9 +279,10 @@ def test_admit_drop_increments_freshness_dropped_metric(
     )
     gate.admit(_make_position(url="https://example.com/c"))  # passes
 
-    # RunSummary doesn't expose freshness_dropped directly; check display body updates
     freshness_bodies = display.body_updates_for("pipeline_freshness")
     assert len(freshness_bodies) == 2  # one update per drop
+    assert freshness_bodies[0] == "dropped=1"
+    assert freshness_bodies[1] == "dropped=2"
 
 
 # ---------------------------------------------------------------------------
@@ -296,9 +291,9 @@ def test_admit_drop_increments_freshness_dropped_metric(
 
 
 def test_emit_run_complete_writes_event_row_with_per_reason_counts(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
 
     # passed
     gate.admit(_make_position(url="https://example.com/p1"))
@@ -336,9 +331,9 @@ def test_emit_run_complete_writes_event_row_with_per_reason_counts(
 
 
 def test_admit_stub_with_stale_posted_date_returns_false(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(
         url="https://example.com/old", posted_date=date(2025, 12, 15)
     )  # 31 days ago
@@ -346,17 +341,17 @@ def test_admit_stub_with_stale_posted_date_returns_false(
 
 
 def test_admit_stub_with_null_posted_date_returns_true(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(url="https://example.com/no-date", posted_date=None)
     assert gate.admit_stub(stub) is True
 
 
 def test_admit_stub_with_fresh_posted_date_returns_true(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(
         url="https://example.com/fresh", posted_date=date(2026, 1, 10)
     )  # 5 days ago
@@ -364,9 +359,9 @@ def test_admit_stub_with_fresh_posted_date_returns_true(
 
 
 def test_admit_stub_at_age_cutoff_returns_true(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(
         url="https://example.com/cutoff", posted_date=date(2025, 12, 16)
     )  # exactly 30 days ago
@@ -374,9 +369,9 @@ def test_admit_stub_at_age_cutoff_returns_true(
 
 
 def test_admit_stub_stale_writes_transcript_with_discover_arm(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(url="https://example.com/old", posted_date=date(2025, 12, 15))
     gate.admit_stub(stub)
     rows = _read_transcripts(logs_dir)
@@ -390,9 +385,9 @@ def test_admit_stub_stale_writes_transcript_with_discover_arm(
 
 
 def test_admit_stub_null_posted_date_writes_no_transcript(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(url="https://example.com/no-date", posted_date=None)
     gate.admit_stub(stub)
     rows = _read_transcripts(logs_dir)
@@ -400,18 +395,18 @@ def test_admit_stub_null_posted_date_writes_no_transcript(
 
 
 def test_admit_stub_stale_marks_expired_in_dedup(
-    tmp_path: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(url="https://example.com/old", posted_date=date(2025, 12, 15))
     gate.admit_stub(stub)
     assert dedup.is_seen(stub) == "url_hit"
 
 
 def test_admit_writes_transcript_with_post_llm_arm(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, metrics: RunMetrics, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, metrics, dedup)
+    gate = _make_gate(tmp_path, run_log, display, dedup)
     position = _make_position(
         url="https://example.com/job1", posted_date=date(2026, 1, 10)
     )

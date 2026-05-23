@@ -24,8 +24,11 @@ from .types import (
     ExtractorMalformedJSONError,
     ExtractorUnreachableError,
     JudgeCandidate,
+    JudgeCandidateV2,
     MatchVerdict,
+    MatchVerdictV2,
     RelevanceVerdict,
+    RelevanceVerdictV2,
     StructuredExtract,
 )
 
@@ -99,6 +102,24 @@ _JUDGE_TOP_N_SITE = _CallSite(
     protocol_error_cls=ExtractorBatchMalformedError,
 )
 
+_CLASSIFY_SITE_V2 = _CallSite(
+    call="classify_relevance_v2",
+    component_id="llm_classify_relevance",
+    tag="verdict",
+    model=_CLASSIFY_MODEL,
+    effort="",
+    protocol_error_cls=ExtractorMalformedError,
+)
+
+_JUDGE_TOP_N_SITE_V2 = _CallSite(
+    call="judge_top_n_v2",
+    component_id="llm_judge_match",
+    tag="verdicts",
+    model=_JUDGE_MODEL,
+    effort=_JUDGE_EFFORT,
+    protocol_error_cls=ExtractorBatchMalformedError,
+)
+
 
 class ClaudeExtractor:
     def __init__(
@@ -152,6 +173,43 @@ class ClaudeExtractor:
         )
         usage = self._usage_from(response)
         return self._parse_top_n_response(data, candidates), usage
+
+    def classify_relevance_v2(
+        self, item: ClassifyItem
+    ) -> tuple[RelevanceVerdictV2, CallUsage]:
+        assert self._prompts.classify_relevance_v2 is not None
+        prompt = self._prompts.classify_relevance_v2.render(
+            TITLE=item.title,
+            RAW_DESCRIPTION=item.raw_description,
+            COMPANY=item.company or "",
+            LOCATION=item.location or "",
+            POSTED_DATE=str(item.posted_date) if item.posted_date else "",
+        )
+        parsed, response = self._invoke(_CLASSIFY_SITE_V2, prompt, {})
+        usage = self._usage_from(response)
+        return self._parse_relevance_v2(parsed), usage
+
+    def judge_top_n_v2(
+        self, candidates: list[JudgeCandidateV2]
+    ) -> tuple[list[MatchVerdictV2], CallUsage]:
+        if not candidates:
+            return [], CallUsage(
+                input_tokens=0,
+                output_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=0.0,
+                duration_s=0.0,
+            )
+        assert self._prompts.judge_top_n_v2 is not None
+        candidates_block = self._format_candidates_v2(candidates)
+        prompt = self._prompts.judge_top_n_v2.render(
+            skills=self._skills_block, candidates=candidates_block
+        )
+        data, response = self._invoke(
+            _JUDGE_TOP_N_SITE_V2, prompt, {"candidate_count": len(candidates)}
+        )
+        usage = self._usage_from(response)
+        return self._parse_top_n_v2_response(data, candidates), usage
 
     def _invoke(
         self,
@@ -386,6 +444,82 @@ class ClaudeExtractor:
             return RelevanceVerdict(in_domain=False)
         extract = ClaudeExtractor._parse_structured_extract(parsed_result)
         return RelevanceVerdict(in_domain=True, extract=extract)
+
+    @staticmethod
+    def _format_candidates_v2(candidates: list[JudgeCandidateV2]) -> str:
+        parts: list[str] = []
+        for c in candidates:
+            parts.append(f"[Candidate id={c.id}]\n{c.header}\n\n{c.summary}")
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _parse_relevance_v2(parsed_result: object) -> RelevanceVerdictV2:
+        if not isinstance(parsed_result, dict):
+            raise ExtractorMalformedError(
+                f"classify_relevance_v2: expected JSON object, got {type(parsed_result).__name__}"
+            )
+        in_domain = parsed_result.get("in_domain")
+        if not isinstance(in_domain, bool):
+            raise ExtractorMalformedError(
+                f"classify_relevance_v2: in_domain must be bool, got {in_domain!r}"
+            )
+        if not in_domain:
+            return RelevanceVerdictV2(in_domain=False)
+        header = parsed_result.get("header")
+        summary = parsed_result.get("summary")
+        if not isinstance(header, str) or not header:
+            raise ExtractorMalformedError(
+                "classify_relevance_v2: header must be a non-empty string for in-domain verdict"
+            )
+        if not isinstance(summary, str) or not summary:
+            raise ExtractorMalformedError(
+                "classify_relevance_v2: summary must be a non-empty string for in-domain verdict"
+            )
+        return RelevanceVerdictV2(in_domain=True, header=header, summary=summary)
+
+    @staticmethod
+    def _parse_top_n_v2_response(
+        data: object, candidates: list[JudgeCandidateV2]
+    ) -> list[MatchVerdictV2]:
+        if not isinstance(data, list):
+            raise ExtractorBatchMalformedError(
+                f"judge_top_n_v2: expected JSON array, got {type(data).__name__}"
+            )
+        if len(data) > 5:
+            raise ExtractorBatchMalformedError(
+                f"judge_top_n_v2: response contains {len(data)} verdicts, expected at most 5"
+            )
+        valid_ids = {c.id for c in candidates}
+        seen_ranks: set[int] = set()
+        seen_ids: set[str] = set()
+        verdicts: list[MatchVerdictV2] = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n_v2: verdict entry is not a dict: {entry!r}"
+                )
+            entry_id = entry.get("id")
+            if not isinstance(entry_id, str) or entry_id not in valid_ids:
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n_v2: unknown or missing id in verdict: {entry_id!r}"
+                )
+            if entry_id in seen_ids:
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n_v2: duplicate id in response: {entry_id!r}"
+                )
+            rank = entry.get("rank")
+            if not isinstance(rank, int) or not (1 <= rank <= 5):
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n_v2: rank must be int in 1..5, got {rank!r} for id {entry_id!r}"
+                )
+            if rank in seen_ranks:
+                raise ExtractorBatchMalformedError(
+                    f"judge_top_n_v2: duplicate rank {rank} in response"
+                )
+            seen_ranks.add(rank)
+            seen_ids.add(entry_id)
+            verdicts.append(MatchVerdictV2(id=entry_id, rank=rank))
+        return verdicts
 
     @staticmethod
     def _parse_structured_extract(entry: dict[str, object]) -> StructuredExtract:

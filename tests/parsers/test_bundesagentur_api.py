@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import Callable
@@ -621,8 +622,6 @@ def test_enrich_native_backfills_posted_date_when_stub_has_none(
 def test_enrich_native_calls_v4_api_with_base64_encoded_ref(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    import base64
-
     called_urls: list[str] = []
     detail = _load("detail.json")
 

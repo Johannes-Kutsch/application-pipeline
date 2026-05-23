@@ -7,14 +7,14 @@ import sys
 import threading
 import time
 import traceback
-
-import httpx
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+import httpx
 
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module

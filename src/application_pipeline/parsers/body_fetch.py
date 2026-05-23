@@ -52,8 +52,6 @@ def fetch_and_strip(
         if exc.response.status_code in (400, 404, 422):
             raise EnrichFailedError(f"{url}: HTTP {exc.response.status_code}") from exc
         raise
-    except httpx.HTTPError:
-        raise
 
     text = strip_to_text(html, body_selector)
 

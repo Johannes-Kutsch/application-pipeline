@@ -141,7 +141,7 @@ class LLMEnricher:
         try:
             verdict, _ = self._extractor.classify_relevance(item)
         except (ExtractorMalformedError, ExtractorMalformedJSONError) as exc:
-            self._stash_failure("malformed", stub, str(exc), ext="txt")
+            self._stash_malformed(stub, exc)
             self._run_log.event(
                 "llm_enricher",
                 "classify_malformed",
@@ -184,3 +184,25 @@ class LLMEnricher:
         slug = stub.url.replace("https://", "").replace("http://", "").replace("/", "-")
         path = stash_dir / f"{stub.source}-{slug}.{ext}"
         path.write_text(content, encoding="utf-8")
+
+    def _stash_malformed(
+        self,
+        stub: PositionStub,
+        exc: ExtractorMalformedError | ExtractorMalformedJSONError,
+    ) -> None:
+        lines: list[str] = [
+            f"**Source:** {stub.source}",
+            f"**URL:** {stub.url}",
+            f"**Error:** {exc}",
+        ]
+        if exc.prompt is not None:
+            lines += ["", "## Prompt", "", exc.prompt]
+        if isinstance(exc, ExtractorMalformedJSONError):
+            if exc.stderr:
+                lines += ["", "## CLI stderr", "", exc.stderr]
+            if exc.returncode is not None:
+                lines += ["", f"**Returncode:** {exc.returncode}"]
+        else:
+            if exc.raw_response is not None:
+                lines += ["", "## Raw response", "", exc.raw_response]
+        self._stash_failure("malformed", stub, "\n".join(lines), ext="md")

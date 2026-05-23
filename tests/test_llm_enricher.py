@@ -21,6 +21,7 @@ from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
     CallUsage,
     ExtractorMalformedError,
+    ExtractorMalformedJSONError,
     RelevanceVerdict,
 )
 from application_pipeline.llm_enricher import LLMEnricher
@@ -273,9 +274,106 @@ def test_enricher_stashes_malformed_llm_output(
         enricher.enrich(stub, ".job")
 
     slug = "example.com-job-99"
-    stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.txt"
+    stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
     assert stash_path.exists(), f"Expected stash file at {stash_path}"
     assert error_msg in stash_path.read_text(encoding="utf-8")
+    txt_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.txt"
+    assert not txt_path.exists(), "Legacy .txt file must not be produced"
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: malformed LLM output — .md format with structured sections
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_enricher_malformed_error_produces_md_file_with_all_sections(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    html = "<html><body><div class='job'>Software Engineer role.</div></body></html>"
+    respx.get("https://example.com/job/99").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    error_msg = "classify_relevance: header must be a non-empty string"
+    prompt_text = "You are a relevance classifier. Evaluate this job."
+    raw_resp = "<result>{bad json}</result>"
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorMalformedError(
+        error_msg, prompt=prompt_text, raw_response=raw_resp
+    )
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/99",
+        title="Software Engineer",
+        source="test_src",
+    )
+
+    with pytest.raises(ExtractorMalformedError):
+        enricher.enrich(stub, ".job")
+
+    slug = "example.com-job-99"
+    stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
+    assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
+    content = stash_path.read_text(encoding="utf-8")
+    assert "**Source:** test_src" in content
+    assert "**URL:** https://example.com/job/99" in content
+    assert f"**Error:** {error_msg}" in content
+    assert "## Prompt" in content
+    assert prompt_text in content
+    assert "## Raw response" in content
+    assert raw_resp in content
+
+
+@respx.mock
+def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    html = "<html><body><div class='job'>DevOps role.</div></body></html>"
+    respx.get("https://example.com/job/cli").mock(
+        return_value=httpx.Response(200, text=html)
+    )
+
+    error_msg = "claude CLI exited with code 1"
+    prompt_text = "Classify this job posting."
+    stderr_text = "Error: API rate limit exceeded"
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorMalformedJSONError(
+        error_msg, returncode=1, stderr=stderr_text, prompt=prompt_text
+    )
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/cli",
+        title="DevOps Engineer",
+        source="src_cli",
+    )
+
+    with pytest.raises(ExtractorMalformedJSONError):
+        enricher.enrich(stub, ".job")
+
+    slug = "example.com-job-cli"
+    stash_path = tmp_path / "failures" / "malformed" / f"src_cli-{slug}.md"
+    assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
+    content = stash_path.read_text(encoding="utf-8")
+    assert "**Source:** src_cli" in content
+    assert "**URL:** https://example.com/job/cli" in content
+    assert f"**Error:** {error_msg}" in content
+    assert "## Prompt" in content
+    assert prompt_text in content
+    assert "## CLI stderr" in content
+    assert stderr_text in content
+    assert "**Returncode:** 1" in content
+    assert "## Raw response" not in content
 
 
 # ---------------------------------------------------------------------------

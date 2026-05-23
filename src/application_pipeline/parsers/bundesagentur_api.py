@@ -12,9 +12,8 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from application_pipeline.parser_log import RunLog
-
 from application_pipeline.http import HttpNotRetryableError
+from application_pipeline.parser_log import RunLog
 
 from .body_fetch import fetch_and_strip
 from .errors import ParserError

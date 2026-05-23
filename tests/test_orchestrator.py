@@ -4917,3 +4917,193 @@ def test_pipeline_produces_cards(tmp_path: Path) -> None:
     content = _read_all_results(results_dir)
     assert f"# **1:** {_CARD_HEADER}" in content
     assert _CARD_SUMMARY in content
+
+
+# ---------------------------------------------------------------------------
+# Gates bundle pre-enrich gating (issue #554)
+# ---------------------------------------------------------------------------
+
+
+def test_gates_bundle_dedup_hit_parser_enrich_not_called(tmp_path: Path) -> None:
+    """A stub whose URL is already in the dedup store never reaches parser.enrich()."""
+    enrich_calls: list[str] = []
+    seen_url = "https://dedup-gate.example/job"
+
+    class _TrackingParser(_StubParserBase):
+        def __enter__(self) -> "_TrackingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=seen_url, title="Python Dev", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enrich_calls.append(stub.url)
+            return super().enrich(stub)
+
+    seen_path = tmp_path / ".seen.json"
+    seen_path.write_text(
+        json.dumps(
+            {
+                seen_url: {
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "out_of_domain",
+                    "first_seen": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert enrich_calls == [], "parser.enrich() must NOT be called for dedup-hit stubs"
+
+
+def test_gates_bundle_blacklisted_title_parser_enrich_not_called(
+    tmp_path: Path,
+) -> None:
+    """A stub whose title matches a NEGATIVE_KEYWORDS entry never reaches parser.enrich()."""
+    enrich_calls: list[str] = []
+
+    class _TrackingParser(_StubParserBase):
+        def __enter__(self) -> "_TrackingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://bl-gate.example/job",
+                    title="Senior Recruiter Position",
+                    source="stub",
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enrich_calls.append(stub.url)
+            return super().enrich(stub)
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            negative_keywords='["recruiter"]',
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert enrich_calls == [], (
+        "parser.enrich() must NOT be called for blacklisted stubs"
+    )
+
+
+def test_gates_bundle_stale_stub_parser_enrich_not_called(tmp_path: Path) -> None:
+    """A stub with posted_date older than MAX_LISTING_AGE_DAYS never reaches parser.enrich()."""
+    enrich_calls: list[str] = []
+    stale_date = _date(2020, 1, 1)
+
+    class _TrackingParser(_StubParserBase):
+        def __enter__(self) -> "_TrackingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://fresh-gate.example/job",
+                    title="Python Dev",
+                    source="stub",
+                    posted_date=stale_date,
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enrich_calls.append(stub.url)
+            return super().enrich(stub)
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert enrich_calls == [], (
+        "parser.enrich() must NOT be called for stubs with stale posted_date"
+    )
+
+
+def test_gates_bundle_passing_stub_parser_enrich_called(tmp_path: Path) -> None:
+    """A stub passing all pre-enrich gates reaches parser.enrich() and LLM gets (stub, body)."""
+    enrich_calls: list[str] = []
+    llm_stub_urls: list[str] = []
+    fresh_url = "https://pass-gate.example/job"
+    card_store = _make_card_store(tmp_path)
+
+    class _TrackingParser(_StubParserBase):
+        def __enter__(self) -> "_TrackingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=fresh_url, title="Python Dev", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enrich_calls.append(stub.url)
+            return EnrichResult(stub=stub, body="job body text", mode="fallback")
+
+    class _TrackingLLMEnricher(_FakeLLMEnricherHelper):
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
+            llm_stub_urls.append(stub.url)
+            return super().enrich(stub, body)
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_TrackingLLMEnricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert fresh_url in enrich_calls, "parser.enrich() must be called for passing stubs"
+    assert fresh_url in llm_stub_urls, "LLM enricher must receive the same stub"

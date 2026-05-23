@@ -47,6 +47,7 @@ from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import City, EnrichFailedError, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.freshness_gate import FreshnessGate
+from application_pipeline.gates_bundle import run_gates as _run_gates
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.renderer import render as render
@@ -541,25 +542,22 @@ class _OutboundDispatcher:
         if self._run_state.is_aborted:
             state.inbound.put(_SKIP_AND_END_QUERY)
             return
-        if not self._freshness.admit_stub(payload):
-            state.inbound.put(_SKIP)
-            return
-        result = self._dedup.is_seen(payload)
-        self._metrics.record_dedup(result)
-        if result == "miss":
-            if self._prefilter.admit_stub(payload):
-                self._enrich_queue.put(
-                    _EnrichRequest(
-                        stub=payload, parser=self._parsers[pid], parser_id=pid
-                    )
-                )
-                self._metrics.classify_buffered(1)
-            state.inbound.put(_SKIP)
-        elif result == "judge_pending":
+        verdict = _run_gates(
+            payload,
+            run_log=self._run_log,
+            metrics=self._metrics,
+            dedup=self._dedup,
+            prefilter=self._prefilter,
+            freshness=self._freshness,
+        )
+        if verdict == "pass":
+            self._enrich_queue.put(
+                _EnrichRequest(stub=payload, parser=self._parsers[pid], parser_id=pid)
+            )
+            self._metrics.classify_buffered(1)
+        elif verdict == "judge_pending":
             self._pool_collector.add_judge_pending(payload)
-            state.inbound.put(_SKIP)
-        else:
-            state.inbound.put(_SKIP)
+        state.inbound.put(_SKIP)
 
     def _handle_not_served(self, pid: str) -> None:
         self._metrics.not_served_query(pid)

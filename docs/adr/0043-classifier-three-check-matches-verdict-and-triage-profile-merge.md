@@ -55,6 +55,10 @@ Consequences:
 - `ClaudeExtractor` no longer needs `SearchTerms` (the skills block is baked into the judge template on load); the kwarg is dropped.
 - The judge's old lowercase `{skills}` and `{candidates}` placeholders rename to `{SKILLS}` and `{CANDIDATES}` (Caps convention applies to all v2 placeholders).
 
+## Amendment (2026-05-23): store-continuity carve-out reversed; `in_domain` dedup status renamed to `matched`
+
+The original Consequences section stated: "The `in_domain` *dedup status* name is unchanged — only the verdict field is renamed." That carve-out is now reversed. Issue #558 renames the dedup status `in_domain` → `matched` to restore symmetry with the verdict field (`matches: true` → status `matched`). CONTEXT.md's live-state descriptions, the `DeduplicationStore` method (`mark_in_domain` → `mark_matched`), and all downstream code are updated accordingly. No migration is required beyond the in-place rename — the status values stored in `seen.json` are rewritten as part of the #558 implementation.
+
 ## Supersedes / amends
 
 - **Supersedes ADR-0016** in the USER_INFO file-routing area: the per-call-site `self-description + domain-fit` vs `self-description + match-criteria` split retires. ADR-0016's hardcoded-protocol / externalised-content split and the single-language pipeline decision remain in force.

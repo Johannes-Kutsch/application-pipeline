@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
+import httpx
 import pytest
+import respx
 
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserError, ParserQuery, PositionStub
@@ -16,6 +19,7 @@ from application_pipeline.parsers.bundesagentur_api import (
 from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.types import (
     City,
+    EnrichFailedError,
     NotServedQuery,
     Remote,
 )
@@ -532,9 +536,6 @@ def test_enrich_native_returns_mode_native_with_body_from_jobdetails(
 def test_enrich_falls_back_to_html_when_jobdetails_fails_recoverably(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    import respx
-    import httpx
-
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("connection refused")
 
@@ -562,10 +563,6 @@ def test_enrich_falls_back_to_html_when_jobdetails_fails_recoverably(
 def test_enrich_raises_enrich_failed_error_when_both_paths_fail(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    from application_pipeline.parsers.types import EnrichFailedError
-    import respx
-    import httpx
-
     def failing_get(url: str, timeout: float) -> bytes:
         raise OSError("connection refused")
 
@@ -587,8 +584,6 @@ def test_enrich_raises_enrich_failed_error_when_both_paths_fail(
 def test_enrich_native_backfills_posted_date_when_stub_has_none(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    from datetime import date
-
     detail = _load("detail.json")
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",

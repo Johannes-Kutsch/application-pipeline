@@ -25,7 +25,7 @@ def test_record_creates_timestamped_event_line(tmp_path: Path) -> None:
     log = RunLog(tmp_path)
     log.event("llm_classify_relevance", "batch_sent")
 
-    events_file = tmp_path / "llm_classify_relevance.events.jsonl"
+    events_file = tmp_path / "llm" / "classify_relevance.events.jsonl"
     assert events_file.exists()
     row = json.loads(events_file.read_text(encoding="utf-8").strip())
     assert _ISO8601_RE.match(row["ts"])
@@ -39,7 +39,7 @@ def test_record_appends_key_value_fields(tmp_path: Path) -> None:
     )
 
     row = json.loads(
-        (tmp_path / "llm_classify_relevance.events.jsonl")
+        (tmp_path / "llm" / "classify_relevance.events.jsonl")
         .read_text(encoding="utf-8")
         .strip()
     )
@@ -54,7 +54,7 @@ def test_record_multiple_calls_append_in_order(tmp_path: Path) -> None:
     log.event("llm_judge_match", "cli_error", exit_code="1")
 
     lines = (
-        (tmp_path / "llm_judge_match.events.jsonl")
+        (tmp_path / "llm" / "judge_match.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     )
@@ -69,7 +69,7 @@ def test_record_each_line_has_iso8601_timestamp(tmp_path: Path) -> None:
         log.event("llm_classify_relevance", event)
 
     lines = (
-        (tmp_path / "llm_classify_relevance.events.jsonl")
+        (tmp_path / "llm" / "classify_relevance.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     )
@@ -91,7 +91,7 @@ def test_record_transcript_appends_valid_json_object(tmp_path: Path) -> None:
     }
     log.transcript("llm_classify_relevance", entry)
 
-    transcript_file = tmp_path / "llm_classify_relevance.transcripts.jsonl"
+    transcript_file = tmp_path / "llm" / "classify_relevance.transcripts.jsonl"
     assert transcript_file.exists()
     lines = transcript_file.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
@@ -110,7 +110,7 @@ def test_record_transcript_multiple_calls_one_json_per_line(tmp_path: Path) -> N
         log.transcript("llm_classify_relevance", e)
 
     lines = (
-        (tmp_path / "llm_classify_relevance.transcripts.jsonl")
+        (tmp_path / "llm" / "classify_relevance.transcripts.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     )
@@ -136,7 +136,7 @@ def test_record_transcript_preserves_all_entry_fields(tmp_path: Path) -> None:
     }
     log.transcript("llm_classify_relevance", entry)
 
-    raw = (tmp_path / "llm_classify_relevance.transcripts.jsonl").read_text(
+    raw = (tmp_path / "llm" / "classify_relevance.transcripts.jsonl").read_text(
         encoding="utf-8"
     )
     assert json.loads(raw.strip()) == entry
@@ -147,7 +147,9 @@ def test_record_transcript_null_parsed_field_survives_roundtrip(tmp_path: Path) 
     entry = {"ts": "2026-05-12T10:00:00Z", "parsed": None, "status": "error"}
     log.transcript("llm_judge_match", entry)
 
-    raw = (tmp_path / "llm_judge_match.transcripts.jsonl").read_text(encoding="utf-8")
+    raw = (tmp_path / "llm" / "judge_match.transcripts.jsonl").read_text(
+        encoding="utf-8"
+    )
     assert json.loads(raw.strip())["parsed"] is None
 
 
@@ -229,8 +231,8 @@ def test_event_log_and_transcript_are_independent_files(tmp_path: Path) -> None:
         "llm_classify_relevance", {"ts": "2026-05-12T10:00:00Z", "status": "ok"}
     )
 
-    assert (tmp_path / "llm_classify_relevance.events.jsonl").exists()
-    assert (tmp_path / "llm_classify_relevance.transcripts.jsonl").exists()
+    assert (tmp_path / "llm" / "classify_relevance.events.jsonl").exists()
+    assert (tmp_path / "llm" / "classify_relevance.transcripts.jsonl").exists()
 
 
 def test_different_component_ids_write_separate_files(tmp_path: Path) -> None:
@@ -238,7 +240,7 @@ def test_different_component_ids_write_separate_files(tmp_path: Path) -> None:
     log.event("llm_classify_relevance", "batch_sent")
     log.transcript("llm_judge_match", {"ts": "2026-05-12T10:00:00Z"})
 
-    assert (tmp_path / "llm_classify_relevance.events.jsonl").exists()
-    assert (tmp_path / "llm_judge_match.transcripts.jsonl").exists()
-    assert not (tmp_path / "llm_judge_match.events.jsonl").exists()
-    assert not (tmp_path / "llm_classify_relevance.transcripts.jsonl").exists()
+    assert (tmp_path / "llm" / "classify_relevance.events.jsonl").exists()
+    assert (tmp_path / "llm" / "judge_match.transcripts.jsonl").exists()
+    assert not (tmp_path / "llm" / "judge_match.events.jsonl").exists()
+    assert not (tmp_path / "llm" / "classify_relevance.transcripts.jsonl").exists()

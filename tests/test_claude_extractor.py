@@ -316,9 +316,7 @@ def test_classify_relevance_legacy_in_domain_field_raises_malformed(
 
 def _make_candidates(n: int) -> list[JudgeCandidate]:
     return [
-        JudgeCandidate(
-            id=f"cand-{i}", header=f"Title {i}\nCo", summary=f"Summary {i}"
-        )
+        JudgeCandidate(id=f"cand-{i}", header=f"Title {i}\nCo", summary=f"Summary {i}")
         for i in range(n)
     ]
 

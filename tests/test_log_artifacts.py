@@ -1,10 +1,11 @@
-"""Tests for the ADR-0024 log artifact layout.
+"""Tests for the ADR-0045 log artifact layout.
 
-Per ADR-0024, data/logs/ is laid out by reader:
+Per ADR-0045, data/logs/ is laid out as:
 - lifecycle.jsonl — status-display events (registered/phase_changed/removed), shared, includes component field
 - run.log — tracebacks and SUMMARY OF SESSION blocks, shared, with === headers
-- <comp>.events.jsonl — per-step structured events, per-component, no component field
-- <comp>.transcripts.jsonl — unchanged
+- <layer>/<rest>.events.jsonl — per-step structured events, per-component, no component field
+- <layer>/<rest>.transcripts.jsonl — LLM transcripts, per-component
+  where <layer> is parser/, llm/, or pipeline/ and <rest> is the component id with layer prefix stripped
 """
 
 from __future__ import annotations
@@ -118,7 +119,7 @@ def test_summarize_writes_to_run_log_with_header(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# <comp>.events.jsonl — structured per-step events, no component field
+# <layer>/<rest>.events.jsonl — structured per-step events, no component field
 # ---------------------------------------------------------------------------
 
 
@@ -126,7 +127,7 @@ def test_record_writes_jsonl_row_to_events_file(tmp_path: Path) -> None:
     log = RunLog(tmp_path)
     log.event("parser_bundesagentur_api", "discover_page", q="Python", page=1)
 
-    events_file = tmp_path / "parser_bundesagentur_api.events.jsonl"
+    events_file = tmp_path / "parser" / "bundesagentur_api.events.jsonl"
     assert events_file.exists()
     row = json.loads(events_file.read_text(encoding="utf-8").strip())
     assert _ISO8601_RE.match(row["ts"])
@@ -134,6 +135,7 @@ def test_record_writes_jsonl_row_to_events_file(tmp_path: Path) -> None:
     assert row["q"] == "Python"
     assert row["page"] == 1
     assert "component" not in row
+    assert not (tmp_path / "parser_bundesagentur_api.events.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------

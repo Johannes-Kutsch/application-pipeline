@@ -436,7 +436,7 @@ def test_discover_emits_discover_page_heartbeat_per_page(tmp_path: Path) -> None
         list(p.discover(_query()))
     events_rows = [
         json.loads(line)
-        for line in (tmp_path / "parser_jobs_beim_staat_html.events.jsonl")
+        for line in (tmp_path / "parser" / "jobs_beim_staat_html.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]

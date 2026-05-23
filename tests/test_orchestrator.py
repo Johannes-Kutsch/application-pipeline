@@ -921,8 +921,7 @@ def test_classify_precedes_judge(tmp_path: Path) -> None:
         ) -> tuple[list[MatchVerdict], CallUsage]:
             call_log.append("judge_top_n")
             return [
-                MatchVerdict(id=c.id, rank=i + 1)
-                for i, c in enumerate(candidates[:5])
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
     class _MultiStubParser(_StubParserBase):
@@ -1330,7 +1329,7 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
 
     events = [
         json.loads(line)
-        for line in (logs_dir / "llm_classify_relevance.events.jsonl")
+        for line in (logs_dir / "llm" / "classify_relevance.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
         if line.strip()
@@ -1476,8 +1475,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
-                MatchVerdict(id=c.id, rank=i + 1)
-                for i, c in enumerate(candidates[:5])
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
     summary = run(
@@ -1611,8 +1609,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
-                MatchVerdict(id=c.id, rank=i + 1)
-                for i, c in enumerate(candidates[:5])
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
     run(
@@ -1918,7 +1915,7 @@ def test_run_complete_event_logged_to_pipeline_orchestrator_events(
         run_log=run_log,
     )
 
-    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    events_file = logs_dir / "pipeline" / "orchestrator.events.jsonl"
     assert events_file.exists(), "pipeline_orchestrator.events.jsonl must be written"
     rows = [
         json.loads(line)
@@ -1970,7 +1967,7 @@ def test_run_complete_event_carries_dedup_run_hits(tmp_path: Path) -> None:
         run_log=run_log,
     )
 
-    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    events_file = logs_dir / "pipeline" / "orchestrator.events.jsonl"
     rows = [
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
@@ -2123,7 +2120,7 @@ def test_parser_log_integration(
             run_log=run_log,
         )
 
-    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
     assert events_file.exists(), "events log file must be created"
     events_content = events_file.read_text(encoding="utf-8")
     assert "parser started" in events_content
@@ -2181,7 +2178,7 @@ def test_not_served_queries_counted_in_parser_log_summary(
         )
 
     # Events file must not contain not_served events
-    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
     if events_file.exists():
         assert "not_served" not in events_file.read_text(encoding="utf-8")
 
@@ -2269,7 +2266,7 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records == [], f"unexpected WARNING/ERROR(s): {warning_records}"
 
-    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
     assert events_file.exists(), "events log file must be created"
 
     run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
@@ -2328,7 +2325,7 @@ def test_unparseable_date_warning_routed_to_parser_log(tmp_path: Path) -> None:
         run_log=run_log,
     )
 
-    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
+    events_file = logs_dir / "llm" / "classify_relevance.events.jsonl"
     assert events_file.exists(), "classify_relevance events must be written"
     events_rows = [
         json.loads(line)
@@ -2626,8 +2623,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         ) -> "tuple[list[MatchVerdict], CallUsage]":
             judge_candidate_ids.append([c.id for c in candidates])
             return [
-                MatchVerdict(id=c.id, rank=i + 1)
-                for i, c in enumerate(candidates[:5])
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
     class _TwoLangParser(_StubParserBase):
@@ -2732,7 +2728,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
     events_rows = [
         json.loads(line)
-        for line in (logs_dir / "llm_judge_top_n.events.jsonl")
+        for line in (logs_dir / "llm" / "judge_top_n.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]
@@ -3562,7 +3558,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
         run_log=run_log,
     )
 
-    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
     assert events_file.exists(), "events log file must be created"
     events_content = events_file.read_text(encoding="utf-8")
     assert "stalled" in events_content, "stalled event must appear in events log"
@@ -3611,7 +3607,7 @@ def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
         run_log=run_log,
     )
 
-    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
     events_rows = [
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
@@ -3648,7 +3644,7 @@ def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
         run_log=run_log,
     )
 
-    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
     events_rows = [
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
@@ -3698,7 +3694,7 @@ def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
 
     assert summary.parsers_dead == 1
 
-    events_file = logs_dir / "parser_bundesagentur_api.events.jsonl"
+    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
     events_rows = [
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()
@@ -3929,7 +3925,7 @@ def test_clean_run_writes_classify_success_events(tmp_path: Path) -> None:
         run_log=run_log,
     )
 
-    events_file = logs_dir / "llm_classify_relevance.events.jsonl"
+    events_file = logs_dir / "llm" / "classify_relevance.events.jsonl"
     assert events_file.exists()
     rows = [
         json.loads(line)
@@ -4033,7 +4029,7 @@ def test_daily_file_written_event_logged(tmp_path: Path) -> None:
         run_log=run_log,
     )
 
-    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    events_file = logs_dir / "pipeline" / "orchestrator.events.jsonl"
     assert events_file.exists()
     rows = [
         json.loads(line)
@@ -4235,7 +4231,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
         quota_wall=wall,
     )
 
-    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    events_file = logs_dir / "pipeline" / "orchestrator.events.jsonl"
     assert events_file.exists(), "pipeline_orchestrator.events.jsonl must be written"
     rows = [
         json.loads(line)
@@ -4271,8 +4267,7 @@ def test_quota_judge_retries_and_completes(
                     "quota", returncode=1, stdout="", stderr="quota", envelope=None
                 )
             return [
-                MatchVerdict(id=c.id, rank=i + 1)
-                for i, c in enumerate(candidates[:5])
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
     summary = run(
@@ -4476,8 +4471,7 @@ def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
-                MatchVerdict(id=c.id, rank=i + 1)
-                for i, c in enumerate(candidates[:5])
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
             ], _ZERO_USAGE
 
     run(
@@ -4646,7 +4640,7 @@ def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
         quota_wall=wall,
     )
 
-    events_file = logs_dir / "pipeline_orchestrator.events.jsonl"
+    events_file = logs_dir / "pipeline" / "orchestrator.events.jsonl"
     rows = [
         json.loads(line)
         for line in events_file.read_text(encoding="utf-8").splitlines()

@@ -20,29 +20,9 @@ from application_pipeline.run_metrics import RunMetrics
 
 @dataclass
 class _Stub:
-    url: str
+    url: str = "https://example.com/1"
     source: str = "test-source"
     title: str | None = "Test Job"
-
-
-@dataclass
-class _Position:
-    stub: _Stub
-    title: str = "Test Job"
-    raw_description: str = "Some body text"
-
-
-def _make_position(
-    url: str = "https://example.com/1",
-    title: str = "Test Job",
-    raw_description: str = "Some body text",
-    source: str = "test-source",
-) -> _Position:
-    return _Position(
-        stub=_Stub(url=url, source=source, title=title),
-        title=title,
-        raw_description=raw_description,
-    )
 
 
 @pytest.fixture
@@ -90,22 +70,19 @@ def test_admit_non_empty_body_returns_true(
     run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    position = _make_position(raw_description="Some body text")
-    assert gate.admit(position.raw_description, position.stub) is True
+    assert gate.admit("Some body text", _Stub()) is True
 
 
 def test_admit_empty_body_returns_false(run_log: RunLog, metrics: RunMetrics) -> None:
     gate = _make_gate(run_log, metrics)
-    position = _make_position(raw_description="")
-    assert gate.admit(position.raw_description, position.stub) is False
+    assert gate.admit("", _Stub()) is False
 
 
 def test_admit_whitespace_only_body_returns_false(
     run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    position = _make_position(raw_description="   \n\t  ")
-    assert gate.admit(position.raw_description, position.stub) is False
+    assert gate.admit("   \n\t  ", _Stub()) is False
 
 
 # ---------------------------------------------------------------------------
@@ -117,13 +94,9 @@ def test_admit_writes_transcript_for_passing_position(
     logs_dir: Path, run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    position = _make_position(
-        url="https://example.com/job1",
-        title="Engineer",
-        raw_description="We are looking for an engineer.",
-        source="my-source",
-    )
-    gate.admit(position.raw_description, position.stub)
+    stub = _Stub(url="https://example.com/job1", title="Engineer", source="my-source")
+    body = "We are looking for an engineer."
+    gate.admit(body, stub)
     rows = _read_transcripts(logs_dir)
     assert len(rows) == 1
     row = rows[0]
@@ -132,20 +105,17 @@ def test_admit_writes_transcript_for_passing_position(
     assert row["source"] == "my-source"
     assert row["passes"] is True
     assert row["reason"] == "passed"
-    assert row["body_len"] == len("We are looking for an engineer.")
+    assert row["body_len"] == len(body)
 
 
 def test_admit_writes_transcript_for_dropped_position(
     logs_dir: Path, run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    position = _make_position(
-        url="https://example.com/empty",
-        title="Empty Job",
-        raw_description="",
-        source="some-source",
+    stub = _Stub(
+        url="https://example.com/empty", title="Empty Job", source="some-source"
     )
-    gate.admit(position.raw_description, position.stub)
+    gate.admit("", stub)
     rows = _read_transcripts(logs_dir)
     assert len(rows) == 1
     row = rows[0]
@@ -159,8 +129,7 @@ def test_admit_body_len_is_pre_strip_length(
     logs_dir: Path, run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    position = _make_position(raw_description="   ")
-    gate.admit(position.raw_description, position.stub)
+    gate.admit("   ", _Stub())
     rows = _read_transcripts(logs_dir)
     assert rows[0]["body_len"] == 3  # pre-strip length
 
@@ -174,12 +143,9 @@ def test_emit_run_complete_writes_event_with_counters(
     logs_dir: Path, run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    p1 = _make_position(raw_description="has body")
-    p2 = _make_position(raw_description="also has body", url="https://example.com/2")
-    p3 = _make_position(raw_description="", url="https://example.com/3")
-    gate.admit(p1.raw_description, p1.stub)
-    gate.admit(p2.raw_description, p2.stub)
-    gate.admit(p3.raw_description, p3.stub)
+    gate.admit("has body", _Stub(url="https://example.com/1"))
+    gate.admit("also has body", _Stub(url="https://example.com/2"))
+    gate.admit("", _Stub(url="https://example.com/3"))
     gate.emit_run_complete()
 
     events = _read_events(logs_dir)
@@ -195,10 +161,8 @@ def test_emit_run_complete_counters_reconcile_with_transcripts(
     logs_dir: Path, run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    p1 = _make_position(raw_description="body", url="https://example.com/1")
-    p2 = _make_position(raw_description="  ", url="https://example.com/2")
-    gate.admit(p1.raw_description, p1.stub)
-    gate.admit(p2.raw_description, p2.stub)
+    gate.admit("body", _Stub(url="https://example.com/1"))
+    gate.admit("  ", _Stub(url="https://example.com/2"))
     gate.emit_run_complete()
 
     transcripts = _read_transcripts(logs_dir)
@@ -222,8 +186,7 @@ def test_metrics_content_counters_updated_on_pass(
     run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    p = _make_position(raw_description="has body")
-    gate.admit(p.raw_description, p.stub)
+    gate.admit("has body", _Stub())
     summary = metrics.to_run_summary(duration_s=0.0)
     assert summary.content_considered == 1
     assert summary.content_passed == 1
@@ -234,8 +197,7 @@ def test_metrics_content_counters_updated_on_drop(
     run_log: RunLog, metrics: RunMetrics
 ) -> None:
     gate = _make_gate(run_log, metrics)
-    p = _make_position(raw_description="")
-    gate.admit(p.raw_description, p.stub)
+    gate.admit("", _Stub())
     summary = metrics.to_run_summary(duration_s=0.0)
     assert summary.content_considered == 1
     assert summary.content_passed == 0
@@ -261,10 +223,8 @@ def test_status_display_body_reflects_content_counters(
     m = RunMetrics(display, run_log=run_log)
     m.register_rows(starting_order=0)
     gate = ContentGate(metrics=m, run_log=run_log)
-    p1 = _make_position(raw_description="has body")
-    p2 = _make_position(raw_description="", url="https://example.com/2")
-    gate.admit(p1.raw_description, p1.stub)
-    gate.admit(p2.raw_description, p2.stub)
+    gate.admit("has body", _Stub(url="https://example.com/1"))
+    gate.admit("", _Stub(url="https://example.com/2"))
     bodies = display.body_updates_for("pipeline_content")
     assert bodies, "expected at least one body update for pipeline_content"
     last_body = bodies[-1]

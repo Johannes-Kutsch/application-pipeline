@@ -616,3 +616,34 @@ def test_enrich_native_backfills_posted_date_when_stub_has_none(
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         result = p.enrich(stub)
     assert result.stub.posted_date == date(2024, 1, 15)
+
+
+def test_enrich_native_calls_v4_api_with_base64_encoded_ref(
+    run_log: RunLog, tmp_path: Path
+) -> None:
+    import base64
+
+    called_urls: list[str] = []
+    detail = _load("detail.json")
+
+    def capturing_get(url: str, timeout: float) -> bytes:
+        called_urls.append(url)
+        return detail
+
+    ref = "abc123"
+    expected_ref_b64 = base64.b64encode(ref.encode()).decode()
+    stub = PositionStub(
+        url=f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{ref}",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http = ParserHttp(run_log=run_log, _http_get=capturing_get)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        p.enrich(stub)
+
+    assert called_urls, "expected at least one HTTP call to jobdetails"
+    detail_url = called_urls[0]
+    assert "/v4/" in detail_url, f"expected v4 API path, got: {detail_url}"
+    assert detail_url.endswith(expected_ref_b64), (
+        f"expected base64-encoded ref '{expected_ref_b64}' at end of URL, got: {detail_url}"
+    )

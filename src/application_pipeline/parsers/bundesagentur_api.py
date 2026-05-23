@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import dataclasses
 import json
 import sys
@@ -75,7 +76,8 @@ def to_wire(name: str) -> str:
 serves_remote: bool = True
 has_native_enrich: bool = True
 
-_DETAIL_URL = f"{_BASE_URL}/jobdetails"
+_DETAIL_BASE_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4"
+_DETAIL_URL = f"{_DETAIL_BASE_URL}/jobdetails"
 
 
 def remote_wire() -> dict[str, str]:
@@ -127,9 +129,10 @@ class BundesagenturParser:
 
     def enrich(self, stub: PositionStub) -> EnrichResult:
         ref = stub.url.rstrip("/").split("/")[-1]
+        ref_b64 = base64.b64encode(ref.encode()).decode()
         try:
             raw = self._http.get(
-                f"{_DETAIL_URL}/{ref}",
+                f"{_DETAIL_URL}/{ref_b64}",
                 error_prefix="Bundesagentur jobdetails failed",
             )
             data: dict[str, Any] = json.loads(raw)

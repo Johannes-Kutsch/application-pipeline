@@ -768,7 +768,7 @@ def test_summarize_to_parser_log_writes_classify_and_judge_summaries(
     assert "SUMMARY OF SESSION" in run_log_text
     assert "batches_sent=1" in run_log_text
     assert "items_classified=2" in run_log_text
-    assert "in_domain=1" in run_log_text
+    assert "matched=1" in run_log_text
     assert "off_domain=1" in run_log_text
     assert "judges_sent=1" in run_log_text
 

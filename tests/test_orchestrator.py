@@ -1040,8 +1040,8 @@ def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> N
     assert _ERR_URLS[0] not in seen_data
 
 
-def test_extractor_error_on_judge_leaves_status_in_domain(tmp_path: Path) -> None:
-    """ExtractorError on judge_top_n: all positions stay in_domain (not selected_by_judge), no daily file written."""
+def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
+    """ExtractorError on judge_top_n: all positions stay matched (not selected_by_judge), no daily file written."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -1060,8 +1060,8 @@ def test_extractor_error_on_judge_leaves_status_in_domain(tmp_path: Path) -> Non
     assert summary.written == 0
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_ERR_URLS[0]]["status"] == "in_domain"
-    assert seen_data[_ERR_URLS[1]]["status"] == "in_domain"
+    assert seen_data[_ERR_URLS[0]]["status"] == "matched"
+    assert seen_data[_ERR_URLS[1]]["status"] == "matched"
 
 
 def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
@@ -1410,8 +1410,8 @@ def _one_stub_config(tmp_path: Path) -> Path:
     )
 
 
-def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
-    """After enrich succeeds and judge_top_n raises ExtractorError, seen store has in_domain."""
+def test_judge_failure_leaves_status_matched(tmp_path: Path) -> None:
+    """After enrich succeeds and judge_top_n raises ExtractorError, seen store has matched."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -1428,11 +1428,11 @@ def test_judge_failure_leaves_status_in_domain(tmp_path: Path) -> None:
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "in_domain"
+    assert seen_data[_RESUME_URL]["status"] == "matched"
 
 
 def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
-    """On rerun, an in_domain URL (judge_pending) goes to judge pool directly from card_store.
+    """On rerun, a matched URL (judge_pending) goes to judge pool directly from card_store.
 
     In v2, judge_pending stubs skip the enrich queue entirely and their card
     is read from the card_store that was populated in the previous run.
@@ -1447,7 +1447,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "in_domain",
+                    "status": "matched",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1496,7 +1496,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
 
 
 def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) -> None:
-    """On rerun, if judge succeeds the URL transitions from in_domain to selected_by_judge."""
+    """On rerun, if judge succeeds the URL transitions from matched to selected_by_judge."""
     seen_path = tmp_path / ".seen.json"
 
     seen_path.write_text(
@@ -1506,7 +1506,7 @@ def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) 
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "in_domain",
+                    "status": "matched",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1533,8 +1533,8 @@ def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) 
     assert seen_data[_RESUME_URL]["status"] == "selected_by_judge"
 
 
-def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
-    """On rerun, if judge fails again the URL stays in_domain for the next run."""
+def test_judge_pending_failure_stays_matched(tmp_path: Path) -> None:
+    """On rerun, if judge fails again the URL stays matched for the next run."""
     seen_path = tmp_path / ".seen.json"
 
     seen_path.write_text(
@@ -1544,7 +1544,7 @@ def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "in_domain",
+                    "status": "matched",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1571,7 +1571,7 @@ def test_judge_pending_failure_stays_in_domain(tmp_path: Path) -> None:
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "in_domain"
+    assert seen_data[_RESUME_URL]["status"] == "matched"
 
 
 def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
@@ -1590,7 +1590,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "in_domain",
+                    "status": "matched",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1669,7 +1669,7 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
 
 
 def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
-    """judge_pending stubs (status=in_domain) are judged via card_store and reach written."""
+    """judge_pending stubs (status=matched) are judged via card_store and reach written."""
     import application_pipeline.parser_log as parser_log
 
     seen_path = tmp_path / ".seen.json"
@@ -1683,7 +1683,7 @@ def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "in_domain",
+                    "status": "matched",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1710,10 +1710,10 @@ def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
     assert summary.written == 1, "judge_pending stub must be written"
 
 
-def test_judge_pending_judge_failure_stays_in_domain_on_rerun(
+def test_judge_pending_judge_failure_stays_matched_on_rerun(
     tmp_path: Path,
 ) -> None:
-    """On rerun, if judge_top_n fails the resumed stub stays in_domain."""
+    """On rerun, if judge_top_n fails the resumed stub stays matched."""
     seen_path = tmp_path / ".seen.json"
 
     seen_path.write_text(
@@ -1723,7 +1723,7 @@ def test_judge_pending_judge_failure_stays_in_domain_on_rerun(
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "in_domain",
+                    "status": "matched",
                     "first_seen": "2026-05-17",
                 }
             }
@@ -1750,7 +1750,7 @@ def test_judge_pending_judge_failure_stays_in_domain_on_rerun(
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "in_domain"
+    assert seen_data[_RESUME_URL]["status"] == "matched"
 
 
 # ---------------------------------------------------------------------------
@@ -2867,7 +2867,7 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
     for key in (
         "batches_sent=",
         "items_classified=",
-        "in_domain=",
+        "matched=",
         "off_domain=",
         "batches_failed=",
         "input_tokens=",
@@ -4346,7 +4346,7 @@ from datetime import date as _date, timedelta as _timedelta  # noqa: E402
 
 
 def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
-    """in_domain â†’ expired transition on pool re-discovery removes the entry from extracts.json."""
+    """matched â†’ expired transition on pool re-discovery removes the entry from extracts.json."""
     stale_url = "https://pool-reentry.example/stale-extract"
     (tmp_path / ".runtime-data").mkdir()
     seen_path = tmp_path / ".runtime-data" / "seen.json"
@@ -4359,7 +4359,7 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "in_domain",
+                    "status": "matched",
                     "first_seen": "2024-01-01",
                 }
             }
@@ -4420,10 +4420,10 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
         assert stale_url not in extracts_after
 
 
-def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge(
+def test_freshness_pool_reentry_fresh_position_stays_matched_and_reaches_judge(
     tmp_path: Path,
 ) -> None:
-    """A still-fresh in_domain URL passes the gate, stays in_domain, and is judged via judge_top_n."""
+    """A still-fresh matched URL passes the gate, stays matched, and is judged via judge_top_n."""
     fresh_url = "https://pool-reentry.example/fresh"
     seen_path = tmp_path / ".seen.json"
     extracts_path = tmp_path / "extracts.json"
@@ -4435,7 +4435,7 @@ def test_freshness_pool_reentry_fresh_position_stays_in_domain_and_reaches_judge
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
-                    "status": "in_domain",
+                    "status": "matched",
                     "first_seen": "2024-01-01",
                 }
             }

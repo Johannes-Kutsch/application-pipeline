@@ -866,7 +866,6 @@ def test_refresh_preserves_gitignore_and_runtime_data(tmp_path: Path) -> None:
     seen.write_text('{"custom": true}')
 
     gitignore = ap / ".gitignore"
-    ap.mkdir(parents=True, exist_ok=True)
     gitignore.write_text("# bespoke content\n")
 
     init(tmp_path, refresh=True)

@@ -44,8 +44,7 @@ from application_pipeline.parsers import (
     PositionStub,
 )
 from application_pipeline.parsers.body_fetch import OversizedBodyError
-from application_pipeline.parsers.types import EnrichFailedError
-from application_pipeline.parsers.types import City, Location, Remote
+from application_pipeline.parsers.types import City, EnrichFailedError, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate

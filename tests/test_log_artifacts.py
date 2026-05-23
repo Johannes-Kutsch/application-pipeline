@@ -123,21 +123,6 @@ def test_summarize_writes_to_run_log_with_header(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parser_event_written_to_layer_subdir(tmp_path: Path) -> None:
-    log = RunLog(tmp_path)
-    log.event("parser_bundesagentur_api", "discover_page", q="Python", page=1)
-
-    events_file = tmp_path / "parser" / "bundesagentur_api.events.jsonl"
-    assert events_file.exists()
-    row = json.loads(events_file.read_text(encoding="utf-8").strip())
-    assert _ISO8601_RE.match(row["ts"])
-    assert row["event"] == "discover_page"
-    assert row["q"] == "Python"
-    assert row["page"] == 1
-    assert "component" not in row
-    assert not (tmp_path / "parser_bundesagentur_api.events.jsonl").exists()
-
-
 def test_record_writes_jsonl_row_to_events_file(tmp_path: Path) -> None:
     log = RunLog(tmp_path)
     log.event("parser_bundesagentur_api", "discover_page", q="Python", page=1)
@@ -150,6 +135,7 @@ def test_record_writes_jsonl_row_to_events_file(tmp_path: Path) -> None:
     assert row["q"] == "Python"
     assert row["page"] == 1
     assert "component" not in row
+    assert not (tmp_path / "parser_bundesagentur_api.events.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------

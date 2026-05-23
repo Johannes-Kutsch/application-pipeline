@@ -312,7 +312,7 @@ def test_enricher_stashes_oversized_body_and_emits_log_event(
     assert stash_path.exists(), f"Expected stash file at {stash_path}"
     assert big_text[:50] in stash_path.read_text(encoding="utf-8")
 
-    events_file = tmp_path / "logs" / "llm_enricher.events.jsonl"
+    events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
     assert events_file.exists()
     events = [json.loads(line) for line in events_file.read_text().splitlines() if line]
     oversized_events = [e for e in events if e.get("event") == "body_oversized"]
@@ -393,7 +393,7 @@ def test_enricher_malformed_llm_output_emits_log_event(
     with pytest.raises(ExtractorMalformedError):
         enricher.enrich(stub, ".job")
 
-    events_file = tmp_path / "logs" / "llm_enricher.events.jsonl"
+    events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
     assert events_file.exists()
     events = [json.loads(line) for line in events_file.read_text().splitlines() if line]
     malformed_events = [e for e in events if e.get("event") == "classify_malformed"]
@@ -422,7 +422,7 @@ def _make_freshness_gate(
 
 
 def _read_freshness_transcripts(tmp_path: Path) -> list[dict]:
-    path = tmp_path / "logs" / "pipeline_freshness.transcripts.jsonl"
+    path = tmp_path / "logs" / "pipeline" / "freshness.transcripts.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
@@ -536,7 +536,9 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
     )
 
     # posted_date 5 days ago â€” within MAX_AGE=30
-    fresh_header = "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · â‚¬90k"
+    fresh_header = (
+        "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · â‚¬90k"
+    )
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
         RelevanceVerdict(

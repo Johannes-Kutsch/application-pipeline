@@ -68,14 +68,14 @@ def _make_gate(run_log: RunLog, metrics: RunMetrics) -> ContentGate:
 
 
 def _read_transcripts(logs_dir: Path) -> list[dict]:
-    path = logs_dir / "pipeline_content.transcripts.jsonl"
+    path = logs_dir / "pipeline" / "content.transcripts.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def _read_events(logs_dir: Path) -> list[dict]:
-    path = logs_dir / "pipeline_content.events.jsonl"
+    path = logs_dir / "pipeline" / "content.events.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]

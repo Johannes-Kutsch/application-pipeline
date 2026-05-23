@@ -367,7 +367,7 @@ def test_context_manager_returns_self(run_log: RunLog):
 
 
 def _read_events(run_log: RunLog, component_id: str) -> list[dict[str, object]]:
-    path = run_log.logs_dir / f"{component_id}.events.jsonl"
+    path = run_log._component_path(component_id, "events.jsonl")
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 

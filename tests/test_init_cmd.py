@@ -12,7 +12,10 @@ from application_pipeline.prompts import load_prompts
 
 
 def _ap_template_bytes(name: str) -> bytes:
-    node = importlib.resources.files("application_pipeline.templates") / "application-pipeline"
+    node = (
+        importlib.resources.files("application_pipeline.templates")
+        / "application-pipeline"
+    )
     for part in name.split("/"):
         node = node / part
     return node.read_bytes()
@@ -409,9 +412,7 @@ def test_init_seeds_setup_scripts_with_correct_content(tmp_path: Path) -> None:
 def test_rerun_does_not_overwrite_existing_setup_scripts(tmp_path: Path) -> None:
     init(tmp_path)
     ap = _ap(tmp_path)
-    originals = {
-        fname: (ap / "setup" / fname).read_bytes() for fname in _SETUP_SCRIPTS
-    }
+    originals = {fname: (ap / "setup" / fname).read_bytes() for fname in _SETUP_SCRIPTS}
 
     init(tmp_path)
 
@@ -587,9 +588,9 @@ def test_refresh_on_empty_dir_writes_all_files(tmp_path: Path) -> None:
             ap / "user-info" / "triage-profile" / fname
         ).read_bytes() == _triage_profile_template_bytes(fname)
     for fname in _USER_INFO_ROOT_FILES:
-        assert (
-            ap / "user-info" / fname
-        ).read_bytes() == _user_info_template_bytes(fname)
+        assert (ap / "user-info" / fname).read_bytes() == _user_info_template_bytes(
+            fname
+        )
 
 
 def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
@@ -777,7 +778,9 @@ def test_seeded_write_cv_skill_references_new_cv_template_path(tmp_path: Path) -
     assert "application-pipeline/skills/cv_skeleton.tex" not in text
 
 
-def test_seeded_iterate_cv_skill_references_new_cv_template_path(tmp_path: Path) -> None:
+def test_seeded_iterate_cv_skill_references_new_cv_template_path(
+    tmp_path: Path,
+) -> None:
     init(tmp_path)
     text = (_claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md").read_text()
     assert "application-pipeline/cv-template/cv_skeleton.tex" in text

@@ -1,4 +1,4 @@
-"""LLM Enricher â€” fetch + strip + classify + write CardStore."""
+"""LLM Enricher - fetch + strip + classify + write CardStore."""
 
 from __future__ import annotations
 
@@ -7,11 +7,8 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-import httpx
-
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.extracts.card_store import CardExtract, CardStore
-from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
     CallUsage,
@@ -21,14 +18,14 @@ from application_pipeline.llm.types import (
     RelevanceVerdict,
 )
 from application_pipeline.parser_log import RunLog
-from application_pipeline.parsers.types import PositionStub
+from application_pipeline.parsers.body_fetch import OversizedBodyError, fetch_and_strip
+from application_pipeline.parsers.types import EnrichFailedError, PositionStub
 from application_pipeline.run_metrics import RunMetrics
 
 if TYPE_CHECKING:
     from application_pipeline.freshness_gate import FreshnessGate
 
 _TOKEN_CAP_DEFAULT = 8_000
-_CHARS_PER_TOKEN = 4
 
 
 @runtime_checkable
@@ -62,7 +59,7 @@ class _EnrichedPosition:
 def _parse_header_date(header: str) -> date | None:
     """Extract posted_date from line 3 of the LLM-authored Header string.
 
-    Header format: title / company·location·work_model / posted_date·seniority·salary
+    Header format: title / company/location/work_model / posted_date/seniority/salary
     Returns None when the date segment is absent or unparseable.
     """
     lines = header.split("\n")
@@ -76,7 +73,7 @@ def _parse_header_date(header: str) -> date | None:
 
 
 class LLMEnricher:
-    """Orchestrate HTTP fetch â†’ body strip â†’ content gate â†’ classify â†’ CardStore write."""
+    """Orchestrate body fetch -> strip -> content gate -> classify -> CardStore write."""
 
     def __init__(
         self,
@@ -97,7 +94,6 @@ class LLMEnricher:
         self._content_gate = ContentGate(metrics=run_metrics, run_log=run_log)
         self._failures_dir = failures_dir
         self._token_cap = token_cap
-        self._http = httpx.Client(follow_redirects=True)
         self.freshness_gate: FreshnessGate | None = freshness_gate
 
     def enrich(
@@ -106,24 +102,27 @@ class LLMEnricher:
         """Fetch, strip, gate, classify and write CardStore.
 
         Returns the verdict on success, or None when the position was gated
-        (empty body, HTTP error, or oversized body â€” oversized also stashes raw HTML).
+        (empty body, HTTP error, or oversized body -- oversized also stashes raw HTML).
         Raises ExtractorMalformedError / ExtractorMalformedJSONError on malformed LLM
         output after stashing the error text, so callers do not mark .seen.json.
         """
-        html = self._fetch(stub)
-        if html is None:
+        try:
+            text = fetch_and_strip(
+                stub.url,
+                body_selector=body_selector,
+                source=stub.source,
+                failures_dir=self._failures_dir,
+                token_cap=self._token_cap,
+            )
+        except EnrichFailedError:
             return None
-
-        text = strip_to_text(html, body_selector)
-
-        if len(text) > self._token_cap * _CHARS_PER_TOKEN:
-            self._stash_failure("oversized", stub, html)
+        except OversizedBodyError as exc:
             self._run_log.event(
                 "llm_enricher",
                 "body_oversized",
-                url=stub.url,
-                source=stub.source,
-                body_len=len(text),
+                url=exc.url,
+                source=exc.source,
+                body_len=exc.body_len,
             )
             return None
 
@@ -167,14 +166,6 @@ class LLMEnricher:
             )
 
         return verdict
-
-    def _fetch(self, stub: PositionStub) -> str | None:
-        try:
-            response = self._http.get(stub.url)
-            response.raise_for_status()
-            return response.text
-        except httpx.HTTPError:
-            return None
 
     def _stash_failure(
         self, kind: str, stub: PositionStub, content: str, *, ext: str = "html"

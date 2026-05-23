@@ -46,6 +46,7 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import City, EnrichFailedError, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
+from application_pipeline.content_gate import ContentGate
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.gates_bundle import run_gates as _run_gates
 from application_pipeline.prefilter_gate import PreFilterGate
@@ -375,6 +376,7 @@ class _EnrichThread(_QueueWorker):
         quota_wall: "_quota.QuotaWall",
         freshness: "FreshnessGate",
         prefilter: "PreFilterGate",
+        content_gate: "ContentGate",
         worker_index: int = 0,
     ) -> None:
         super().__init__(
@@ -392,6 +394,7 @@ class _EnrichThread(_QueueWorker):
         self._quota_wall = quota_wall
         self._freshness = freshness
         self._prefilter = prefilter
+        self._content_gate = content_gate
 
     def _on_dequeue(self, item: object) -> None:
         assert isinstance(item, _EnrichRequest)
@@ -428,6 +431,8 @@ class _EnrichThread(_QueueWorker):
             dedup=self._dedup_store,
             prefilter=self._prefilter,
             freshness=self._freshness,
+            content=self._content_gate,
+            body=body,
             gate_arm="post_enrich",
         )
         if post_verdict == "drop":
@@ -700,13 +705,11 @@ def run(
             assert isinstance(extractor, LLMExtractor), (
                 "extractor must implement LLMExtractor (classify_relevance)"
             )
-            metrics_placeholder = RunMetrics(status_display, run_log=run_log)
             llm_enricher = LLMEnricher(
                 extractor=extractor,
                 quota_wall=quota_wall,
                 card_store=card_store,
                 run_log=run_log,
-                run_metrics=metrics_placeholder,
                 failures_dir=cfg.failures_path,
             )
 
@@ -801,6 +804,7 @@ def run(
                 metrics=metrics,
                 run_log=run_log,
             )
+            content_gate = ContentGate(metrics=metrics, run_log=run_log)
 
             enrich_threads = [
                 _EnrichThread(
@@ -814,6 +818,7 @@ def run(
                     quota_wall=quota_wall,
                     freshness=freshness,
                     prefilter=prefilter,
+                    content_gate=content_gate,
                     worker_index=i,
                 )
                 for i in range(cfg.claude_classify_parallelism)
@@ -892,6 +897,7 @@ def run(
 
             freshness.emit_run_complete()
             prefilter.emit_run_complete()
+            content_gate.emit_run_complete()
             dispatcher.flush_residual(n=cfg.claude_classify_parallelism)
 
         first_exc: BaseException | None = None

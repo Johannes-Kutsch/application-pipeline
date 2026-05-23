@@ -7,7 +7,6 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from application_pipeline.content_gate import ContentGate
 from application_pipeline.extracts.card_store import CardExtract, CardStore
 from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
@@ -19,7 +18,6 @@ from application_pipeline.llm.types import (
 )
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
-from application_pipeline.run_metrics import RunMetrics
 
 if TYPE_CHECKING:
     from application_pipeline.freshness_gate import FreshnessGate
@@ -30,16 +28,6 @@ class LLMExtractor(Protocol):
     def classify_relevance(
         self, item: ClassifyItem
     ) -> tuple[RelevanceVerdict, CallUsage]: ...
-
-
-@dataclass
-class _FetchedPosition:
-    stub: PositionStub
-    raw_description: str
-
-    @property
-    def title(self) -> str:
-        return self.stub.title
 
 
 @dataclass
@@ -70,7 +58,7 @@ def _parse_header_date(header: str) -> date | None:
 
 
 class LLMEnricher:
-    """Orchestrate content gate -> classify -> CardStore write."""
+    """Orchestrate classify -> CardStore write."""
 
     def __init__(
         self,
@@ -79,7 +67,6 @@ class LLMEnricher:
         quota_wall: QuotaWall,
         card_store: CardStore,
         run_log: RunLog,
-        run_metrics: RunMetrics,
         failures_dir: Path,
         freshness_gate: "FreshnessGate | None" = None,
     ) -> None:
@@ -87,22 +74,17 @@ class LLMEnricher:
         self._quota_wall = quota_wall
         self._card_store = card_store
         self._run_log = run_log
-        self._content_gate = ContentGate(metrics=run_metrics, run_log=run_log)
         self._failures_dir = failures_dir
         self.freshness_gate: FreshnessGate | None = freshness_gate
 
     def enrich(self, stub: PositionStub, body: str) -> RelevanceVerdict | None:
-        """Gate, classify and write CardStore.
+        """Classify and write CardStore.
 
-        Returns the verdict on success, or None when the position was gated
-        (empty body).
+        Returns the verdict on success, or None when dropped by the post-LLM
+        Freshness Gate arm.
         Raises ExtractorMalformedError / ExtractorMalformedJSONError on malformed LLM
         output after stashing the error text, so callers do not mark .seen.json.
         """
-        position = _FetchedPosition(stub=stub, raw_description=body)
-        if not self._content_gate.admit(position):
-            return None
-
         item = ClassifyItem(
             title=stub.title,
             raw_description=body,

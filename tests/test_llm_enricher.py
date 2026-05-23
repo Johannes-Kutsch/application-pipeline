@@ -69,7 +69,6 @@ def _make_enricher(
         quota_wall=QuotaWall(),
         card_store=card_store,
         run_log=run_log,
-        run_metrics=run_metrics,
         failures_dir=tmp_path / "failures",
     )
 
@@ -146,32 +145,6 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
     assert card is not None
     assert card.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
     assert card.summary == "Great ML role."
-
-
-# ---------------------------------------------------------------------------
-# LLMEnricher: empty body dropped by ContentGate – no LLM call
-# ---------------------------------------------------------------------------
-
-
-def test_enricher_drops_empty_body_without_llm_call(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-) -> None:
-    body = "   "
-
-    extractor = MagicMock()
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/2", title="Test Job", source="test"
-    )
-
-    result = enricher.enrich(stub, body)
-
-    assert result is None
-    extractor.classify_relevance.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +359,6 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
         quota_wall=QuotaWall(),
         card_store=card_store,
         run_log=run_log,
-        run_metrics=run_metrics,
         failures_dir=tmp_path / "failures",
         freshness_gate=gate,
     )
@@ -425,7 +397,6 @@ def test_enricher_freshness_drop_records_post_llm_transcript(
         quota_wall=QuotaWall(),
         card_store=card_store,
         run_log=run_log,
-        run_metrics=run_metrics,
         failures_dir=tmp_path / "failures",
         freshness_gate=gate,
     )
@@ -471,7 +442,6 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
         quota_wall=QuotaWall(),
         card_store=card_store,
         run_log=run_log,
-        run_metrics=run_metrics,
         failures_dir=tmp_path / "failures",
         freshness_gate=gate,
     )
@@ -517,7 +487,6 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
         quota_wall=QuotaWall(),
         card_store=card_store,
         run_log=run_log,
-        run_metrics=run_metrics,
         failures_dir=tmp_path / "failures",
         freshness_gate=gate,
     )

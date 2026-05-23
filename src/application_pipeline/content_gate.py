@@ -11,25 +11,17 @@ class _Stub(Protocol):
     def url(self) -> str: ...
 
     @property
+    def title(self) -> str | None: ...
+
+    @property
     def source(self) -> str: ...
-
-
-class _Position(Protocol):
-    @property
-    def stub(self) -> _Stub: ...
-
-    @property
-    def title(self) -> str: ...
-
-    @property
-    def raw_description(self) -> str: ...
 
 
 _Reason = Literal["passed", "empty_body"]
 
 
-def _evaluate(position: _Position) -> tuple[bool, _Reason]:
-    if not position.raw_description.strip():
+def _evaluate(stripped_body: str) -> tuple[bool, _Reason]:
+    if not stripped_body.strip():
         return False, "empty_body"
     return True, "passed"
 
@@ -42,17 +34,17 @@ class ContentGate:
         self._content_passed = 0
         self._content_dropped_empty_body = 0
 
-    def admit(self, position: _Position) -> bool:
-        passes, reason = _evaluate(position)
+    def admit(self, stripped_body: str, stub: _Stub) -> bool:
+        passes, reason = _evaluate(stripped_body)
         self._run_log.transcript(
             "pipeline_content",
             {
-                "url": position.stub.url,
-                "title": position.title,
-                "source": position.stub.source,
+                "url": stub.url,
+                "title": stub.title,
+                "source": stub.source,
                 "passes": passes,
                 "reason": reason,
-                "body_len": len(position.raw_description),
+                "body_len": len(stripped_body),
             },
         )
         self._content_considered += 1

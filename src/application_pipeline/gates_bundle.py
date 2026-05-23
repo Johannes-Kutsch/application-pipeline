@@ -50,7 +50,7 @@ class _FreshnessLike(Protocol):
 
 
 class _ContentLike(Protocol):
-    pass
+    def admit(self, stripped_body: str, stub: Any) -> bool: ...
 
 
 def run_gates(
@@ -63,10 +63,11 @@ def run_gates(
     freshness: _FreshnessLike,
     content: _ContentLike | None = None,
     gate_arm: Literal["discover", "post_enrich"] = "discover",
+    body: str | None = None,
 ) -> Verdict:
     """Evaluate all non-LLM gates for a stub; return the first drop or pass.
 
-    Pre-enrich: Content Gate is always a no-op (no body available).
+    Pre-enrich: Content Gate no-ops (body is None).
     Post-enrich: dedup "run_hit" is treated as pass — the stub already entered
     the in-run set during the pre-enrich invocation and is being processed normally.
     Each gate owns its own transcript writes.
@@ -84,5 +85,9 @@ def run_gates(
 
     if not prefilter.admit_stub(stub):
         return "drop"
+
+    if gate_arm == "post_enrich" and body is not None and content is not None:
+        if not content.admit(body, stub):
+            return "drop"
 
     return "pass"

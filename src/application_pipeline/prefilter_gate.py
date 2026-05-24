@@ -136,8 +136,6 @@ class PreFilterGate:
                 self._dropped += 1
                 if verdict.blacklist_matches:
                     self._blacklist_hits += 1
-            body = self._body()
-        self._display.update_body("pipeline_prefilter", body=body)
         if not verdict.passes:
             self._dedup.mark_out_of_domain(position.stub)
         return verdict.passes
@@ -159,12 +157,4 @@ class PreFilterGate:
                 self._blacklist, self._bl_counts
             ),
             NEGATIVE_KEYWORDS_dead=_format_dead_list(self._blacklist, self._bl_counts),
-        )
-
-    def _body(self) -> str:
-        return (
-            f"considered={self._considered}"
-            f" passed={self._passed}"
-            f" dropped={self._dropped}"
-            f" (bl={self._blacklist_hits})"
         )

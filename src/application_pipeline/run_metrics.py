@@ -118,19 +118,10 @@ class RunMetrics:
 
     def register_rows(self, starting_order: int) -> None:
         self._display.register(
-            "pipeline_prefilter", order=starting_order + 1, phase="running"
+            "llm_classify_relevance", order=starting_order + 1, phase="running"
         )
         self._display.register(
-            "pipeline_freshness", order=starting_order + 2, phase="running"
-        )
-        self._display.register(
-            "pipeline_content", order=starting_order + 3, phase="running"
-        )
-        self._display.register(
-            "llm_classify_relevance", order=starting_order + 4, phase="running"
-        )
-        self._display.register(
-            "llm_judge_match", order=starting_order + 5, phase="running"
+            "llm_judge_match", order=starting_order + 2, phase="running"
         )
 
     def register_parser(
@@ -245,26 +236,38 @@ class RunMetrics:
     def increment_freshness_dropped(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).freshness_dropped += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def increment_dedup_dropped(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).dedup_dropped += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def increment_prefilter_dropped(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).prefilter_dropped += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def increment_enrich_failed_count(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).enrich_failed_count += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def increment_content_dropped(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).content_dropped += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def increment_forwarded(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).forwarded += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body("parser_" + parser_id, body=body)
 
     def parser_summary(
         self, parser_id: str, end_monotonic: float, started_monotonic: float
@@ -593,9 +596,19 @@ class RunMetrics:
 
     def _parser_body(self, parser_id: str) -> str:
         c = self._per_parser.get(parser_id, _ParserCounters())
-        body = f"{c.queries_done}/{c.total_queries} queries · {c.discovered} stubs"
-        if c.has_native_enrich:
-            body += f" · {c.native_enriched}/{c.enriched} enriched"
+        parts = [f"{c.discovered} discovered"]
+        if c.freshness_dropped:
+            parts.append(f"{c.freshness_dropped} freshness")
+        if c.dedup_dropped:
+            parts.append(f"{c.dedup_dropped} dedup")
+        if c.prefilter_dropped:
+            parts.append(f"{c.prefilter_dropped} pre-filter")
+        if c.has_native_enrich and c.enrich_failed_count:
+            parts.append(f"{c.enrich_failed_count} enrich_failed")
+        if c.content_dropped:
+            parts.append(f"{c.content_dropped} content")
+        parts.append(f"{c.forwarded} forwarded")
+        body = " · ".join(parts)
         if c.lifecycle == "done":
             body += " · done"
         elif c.lifecycle == "dead":

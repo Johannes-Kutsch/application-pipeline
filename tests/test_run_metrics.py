@@ -65,20 +65,22 @@ def _last_body(display: FakeStatusDisplay, row: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_register_rows_creates_five_rows_with_correct_order_and_phase(
+def test_register_rows_creates_only_classify_and_judge_rows(
     run_log: RunLog,
 ) -> None:
+    """register_rows no longer registers per-gate rows; only llm rows."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(starting_order=10)
 
-    assert _registers(display) == [
-        ("pipeline_prefilter", 11, "running"),
-        ("pipeline_freshness", 12, "running"),
-        ("pipeline_content", 13, "running"),
-        ("llm_classify_relevance", 14, "running"),
-        ("llm_judge_match", 15, "running"),
-    ]
+    registered = _registers(display)
+    names = [r[0] for r in registered]
+    assert "pipeline_prefilter" not in names
+    assert "pipeline_freshness" not in names
+    assert "pipeline_content" not in names
+    assert "pipeline_dedup" not in names
+    assert ("llm_classify_relevance", 11, "running") in registered
+    assert ("llm_judge_match", 12, "running") in registered
 
 
 def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
@@ -87,7 +89,7 @@ def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
     metrics.register_rows(starting_order=0)
 
     orders = [c.kwargs["order"] for c in display.calls if c.method == "register"]
-    assert orders == [1, 2, 3, 4, 5]
+    assert orders == [1, 2]
 
 
 # ---------------------------------------------------------------------------
@@ -983,3 +985,100 @@ def test_parser_summary_unknown_parser_id_returns_zeros(run_log: RunLog) -> None
     assert s["not_served_queries"] == 0
     assert s["parsers_dead"] == 0
     assert s["unparseable_dates"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Parser body — new counter format (issue #588)
+# ---------------------------------------------------------------------------
+
+
+def test_parser_body_shows_discovered_and_forwarded_not_queries(
+    run_log: RunLog,
+) -> None:
+    """Parser row body uses the new 'K discovered · F forwarded' format, not 'X/Y queries · K stubs'."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=1, total_queries=5)
+
+    metrics.discovered("p")
+    metrics.discovered("p")
+
+    body = _last_body(display, "parser_p")
+    assert "2 discovered" in body
+    assert "queries" not in body
+    assert "stubs" not in body
+
+
+def test_parser_body_zero_drop_counters_hidden(run_log: RunLog) -> None:
+    """Drop counters (freshness, dedup, pre-filter, content) are absent when zero."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=1, total_queries=5)
+
+    metrics.discovered("p")
+
+    body = _last_body(display, "parser_p")
+    assert "freshness" not in body
+    assert "dedup" not in body
+    assert "pre-filter" not in body
+    assert "content" not in body
+    assert "enrich_failed" not in body
+
+
+def test_parser_body_nonzero_drop_counters_appear_inline(run_log: RunLog) -> None:
+    """Nonzero drop counters appear as named inline counters between discovered and forwarded."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=1, total_queries=5, has_native_enrich=True)
+
+    metrics.discovered("p")
+    metrics.increment_freshness_dropped("p")
+    metrics.increment_freshness_dropped("p")
+    metrics.increment_freshness_dropped("p")
+    metrics.increment_dedup_dropped("p")
+    metrics.increment_prefilter_dropped("p")
+    metrics.increment_enrich_failed_count("p")
+    metrics.increment_content_dropped("p")
+    metrics.increment_forwarded("p")
+    # Trigger display update
+    metrics.parser_done("p")
+
+    body = _last_body(display, "parser_p")
+    assert "3 freshness" in body
+    assert "1 dedup" in body
+    assert "1 pre-filter" in body
+    assert "1 enrich_failed" in body
+    assert "1 content" in body
+    assert "1 forwarded" in body
+
+
+def test_parser_body_enrich_failed_hidden_without_native_enrich(
+    run_log: RunLog,
+) -> None:
+    """enrich_failed counter is absent for parsers without has_native_enrich, even if nonzero."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=1, total_queries=5, has_native_enrich=False)
+
+    metrics.discovered("p")
+    metrics.increment_enrich_failed_count("p")
+    metrics.parser_done("p")
+
+    body = _last_body(display, "parser_p")
+    assert "enrich_failed" not in body
+
+
+def test_parser_body_forwarded_updates_display_immediately(run_log: RunLog) -> None:
+    """increment_forwarded triggers a body update on the parser row immediately."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=1, total_queries=2)
+
+    metrics.discovered("p")
+    before = len(display.body_updates_for("parser_p"))
+    metrics.increment_forwarded("p")
+    after = len(display.body_updates_for("parser_p"))
+
+    assert after == before + 1
+    body = _last_body(display, "parser_p")
+    assert "1 forwarded" in body

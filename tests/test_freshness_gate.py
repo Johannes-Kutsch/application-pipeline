@@ -258,9 +258,10 @@ def test_admit_drop_marks_expired_in_dedup_store(
     assert data["https://example.com/old"]["status"] == "expired"
 
 
-def test_admit_drop_publishes_freshness_body_to_display(
+def test_admit_drop_does_not_publish_to_pipeline_freshness_row(
     tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
+    """pipeline_freshness status row is retired; drops no longer publish to it."""
     display = FakeStatusDisplay()
 
     gate = FreshnessGate(
@@ -274,15 +275,9 @@ def test_admit_drop_publishes_freshness_body_to_display(
     gate.admit(
         _make_position(url="https://example.com/a", posted_date=date(2025, 12, 15))
     )
-    gate.admit(
-        _make_position(url="https://example.com/b", posted_date=date(2025, 12, 14))
-    )
     gate.admit(_make_position(url="https://example.com/c"))  # passes
 
-    freshness_bodies = display.body_updates_for("pipeline_freshness")
-    assert len(freshness_bodies) == 2  # one update per drop
-    assert freshness_bodies[0] == "dropped=1"
-    assert freshness_bodies[1] == "dropped=2"
+    assert display.body_updates_for("pipeline_freshness") == []
 
 
 # ---------------------------------------------------------------------------

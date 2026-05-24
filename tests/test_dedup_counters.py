@@ -23,9 +23,7 @@ def run_log(logs_dir: Path) -> RunLog:
 
 @pytest.fixture
 def display() -> FakeStatusDisplay:
-    d = FakeStatusDisplay()
-    d.register("pipeline_dedup", order=10, phase="running")
-    return d
+    return FakeStatusDisplay()
 
 
 def _make(run_log: RunLog, display: FakeStatusDisplay) -> DedupCounters:
@@ -126,32 +124,27 @@ def test_snapshot_is_frozen(run_log: RunLog, display: FakeStatusDisplay) -> None
 
 
 # ---------------------------------------------------------------------------
-# Status Display body publication
+# pipeline_dedup row retired (issue #588)
 # ---------------------------------------------------------------------------
 
 
-def test_status_display_body_published_after_record(
+def test_pipeline_dedup_row_not_registered(
     run_log: RunLog, display: FakeStatusDisplay
 ) -> None:
+    """pipeline_dedup status row is no longer registered."""
+    counters = _make(run_log, display)
+    counters.register(order=10)
+    assert "pipeline_dedup" not in display.registered_names()
+
+
+def test_record_does_not_publish_to_pipeline_dedup_row(
+    run_log: RunLog, display: FakeStatusDisplay
+) -> None:
+    """record() no longer publishes body updates to the retired pipeline_dedup row."""
     counters = _make(run_log, display)
     counters.record("url_hit")
-    counters.record("url_hit")
-    counters.record("tuple_hit")
-    counters.record("run_hit")
-    counters.record("run_hit")
     counters.record("miss")
-    bodies = display.body_updates_for("pipeline_dedup")
-    assert bodies, "expected pipeline_dedup body updates"
-    assert bodies[-1] == "url_hits=2 tuple_hits=1 run_hits=2 misses=1"
-
-
-def test_judge_pending_does_not_alter_body_counters(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    counters = _make(run_log, display)
-    counters.record("judge_pending")
-    bodies = display.body_updates_for("pipeline_dedup")
-    assert bodies[-1] == "url_hits=0 tuple_hits=0 run_hits=0 misses=0"
+    assert display.body_updates_for("pipeline_dedup") == []
 
 
 # ---------------------------------------------------------------------------

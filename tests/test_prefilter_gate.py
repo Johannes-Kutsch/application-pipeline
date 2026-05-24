@@ -61,9 +61,7 @@ def run_log(logs_dir: Path) -> RunLog:
 
 @pytest.fixture
 def display() -> FakeStatusDisplay:
-    d = FakeStatusDisplay()
-    d.register("pipeline_prefilter", order=0, phase="running")
-    return d
+    return FakeStatusDisplay()
 
 
 @pytest.fixture
@@ -227,32 +225,20 @@ def test_admit_multiple_blacklist_matches_in_transcript(
 
 
 # ---------------------------------------------------------------------------
-# publish-to-display body
+# pipeline_prefilter row retired (issue #588)
 # ---------------------------------------------------------------------------
 
 
-def test_admit_publishes_prefilter_body_to_display(
+def test_admit_does_not_publish_to_pipeline_prefilter_row(
     run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
 ) -> None:
+    """pipeline_prefilter status row is retired; admit() no longer publishes to it."""
     gate = _make_gate(run_log, display, dedup, blacklist=["python"])
 
-    gate.admit(_make_position(title="Python Developer"))  # dropped, bl hit
-    gate.admit(_make_position(title="Java Developer"))  # passed
-    gate.admit(_make_position(title="Java Developer"))  # passed
-
-    updates = display.body_updates_for("pipeline_prefilter")
-    assert updates[-1] == "considered=3 passed=2 dropped=1 (bl=1)"
-
-
-def test_admit_body_clean_pass_shows_zero_blacklist_hits(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
-) -> None:
-    gate = _make_gate(run_log, display, dedup, blacklist=["python"])
+    gate.admit(_make_position(title="Python Developer"))
     gate.admit(_make_position(title="Java Developer"))
 
-    updates = display.body_updates_for("pipeline_prefilter")
-    assert "bl=0" in updates[-1]
-    assert "wl=" not in updates[-1]
+    assert display.body_updates_for("pipeline_prefilter") == []
 
 
 # ---------------------------------------------------------------------------

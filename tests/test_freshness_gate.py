@@ -226,15 +226,33 @@ def test_admit_combined_too_old_and_deadline_passed(
     assert rows[0]["reason"] == "too_old_and_deadline_passed"
 
 
-def test_admit_null_dates_transcript_fields_are_none(
+def test_admit_both_none_is_silent_noop_no_transcript(
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, display, dedup)
+    result = gate.admit(_make_position())
+    assert result is True
+    assert _read_transcripts(logs_dir) == []
+
+
+def test_admit_both_none_does_not_increment_passed_counter(
     tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
 ) -> None:
     gate = _make_gate(tmp_path, run_log, display, dedup)
     gate.admit(_make_position())
-    row = _read_transcripts(logs_dir)[0]
-    assert row["posted_date"] is None
-    assert row["deadline"] is None
-    assert row["age_days"] is None
+    gate.emit_run_complete()
+    events = _read_events(logs_dir)
+    ev = events[0]
+    assert ev["passed"] == 0
+
+
+def test_admit_both_none_does_not_mark_expired(
+    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+) -> None:
+    gate = _make_gate(tmp_path, run_log, display, dedup)
+    position = _make_position(url="https://example.com/noop")
+    gate.admit(position)
+    assert dedup.is_seen(position.stub) == "miss"
 
 
 # ---------------------------------------------------------------------------
@@ -290,9 +308,13 @@ def test_emit_run_complete_writes_event_row_with_per_reason_counts(
 ) -> None:
     gate = _make_gate(tmp_path, run_log, display, dedup)
 
-    # passed
-    gate.admit(_make_position(url="https://example.com/p1"))
-    gate.admit(_make_position(url="https://example.com/p2"))
+    # passed (fresh posted_date within threshold)
+    gate.admit(
+        _make_position(url="https://example.com/p1", posted_date=date(2026, 1, 10))
+    )
+    gate.admit(
+        _make_position(url="https://example.com/p2", posted_date=date(2026, 1, 12))
+    )
     # too_old
     gate.admit(
         _make_position(url="https://example.com/o1", posted_date=date(2025, 12, 15))

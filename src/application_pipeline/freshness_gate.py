@@ -165,6 +165,8 @@ class FreshnessGate:
         return verdict.passes
 
     def admit(self, position: _Position) -> bool:
+        if position.posted_date is None and position.deadline is None:
+            return True
         verdict = _evaluate(position, self._anchored_today, self._max_listing_age_days)
         self._run_log.transcript(
             "pipeline_freshness",

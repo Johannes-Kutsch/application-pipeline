@@ -1060,8 +1060,10 @@ def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
     assert seen_data[_ERR_URLS[1]]["status"] == "matched"
 
 
-def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
-    """LLMEnricher.enrich() returns None for one stub â†' enrich_failed increments, other stubs proceed."""
+def test_parser_error_on_enrich_skips_stub_and_increments_metric(
+    tmp_path: Path,
+) -> None:
+    """LLMEnricher.enrich() returns None → enrich_failed increments, URL absent from seen.json, other stubs proceed."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -1081,7 +1083,7 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
     class _NoneForSecondEnricher(_FakeLLMEnricherHelper):
         def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[1]:
-                return None  # HTTP fetch failure â†' enrich_failed
+                return None  # malformed LLM output → skip without seen.json write
             return super().enrich(stub, body)
 
     summary = run(
@@ -1102,14 +1104,18 @@ def test_parser_error_on_enrich_marks_enrich_failed(tmp_path: Path) -> None:
     assert summary.enrich_failed == 1
     assert summary.written == 2
 
-    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_ERR_URLS[1]]["status"] == "enrich_failed"
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert _ERR_URLS[1] not in seen_data, (
+        "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
+    )
 
 
 def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     tmp_path: Path,
 ) -> None:
-    """LLMEnricher.enrich() returns None (HTTP error) â†' enrich_failed, other stubs continue."""
+    """LLMEnricher.enrich() returns None → enrich_failed increments, URL absent from seen.json, other stubs continue."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -1129,7 +1135,7 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     class _HttpErrorEnricher(_FakeLLMEnricherHelper):
         def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[1]:
-                return None  # HTTP error â†' enrich_failed
+                return None  # skip without seen.json write
             return super().enrich(stub, body)
 
     summary = run(
@@ -1150,8 +1156,12 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     assert summary.enrich_failed == 1
     assert summary.parsers_dead == 0
     assert summary.written == 2
-    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_ERR_URLS[1]]["status"] == "enrich_failed"
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert _ERR_URLS[1] not in seen_data, (
+        "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
+    )
 
 
 def test_parser_fatal_http_error_on_enrich_marks_parser_dead_surviving_parsers_continue(
@@ -1211,12 +1221,10 @@ def test_parser_fatal_http_error_on_enrich_marks_parser_dead_surviving_parsers_c
     assert summary.written == 1
 
 
-def test_external_redirect_marks_seen_and_increments_counter(
+def test_external_redirect_skips_stub_and_increments_counter(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """In v2, HTTP redirects are followed by LLMEnricher transparently.
-    A stub where LLMEnricher returns None (HTTP error/skip) is marked enrich_failed,
-    while a successful stub is written; no WARNING logged for normal enricher returns."""
+    """LLMEnricher returns None → enrich_failed increments, URL absent from seen.json, successful stub written; no WARNING."""
     import logging
 
     import application_pipeline.parser_log as parser_log
@@ -1243,7 +1251,7 @@ def test_external_redirect_marks_seen_and_increments_counter(
     class _SkipFirstEnricher(_FakeLLMEnricherHelper):
         def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
             if stub.url == _ERR_URLS[0]:
-                return None  # skip this stub (e.g., HTTP error)
+                return None  # skip without seen.json write
             return super().enrich(stub, body)
 
     with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
@@ -1266,16 +1274,19 @@ def test_external_redirect_marks_seen_and_increments_counter(
     assert summary.enrich_failed == 1
     assert summary.written == 1
 
-    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_ERR_URLS[0]]["status"] == "enrich_failed"
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert _ERR_URLS[0] not in seen_data, (
+        "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
+    )
 
     warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert warning_records == [], f"unexpected WARNING(s): {warning_records}"
 
 
 def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> None:
-    """In v2, a stub skipped by LLMEnricher (None return) is marked enrich_failed.
-    classify_relevance event with matches=None is logged."""
+    """LLMEnricher returns None → enrich_failed metric increments, classify_relevance event with matches=None is logged."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -1615,15 +1626,16 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
     )
 
 
-def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> None:
-    """In v2, enrich_failed is triggered when llm_enricher.enrich() returns None for a new stub."""
+def test_judge_pending_enrich_failure_skips_stub_without_seen_write(
+    tmp_path: Path,
+) -> None:
+    """LLMEnricher.enrich() returns None → enrich_failed increments, URL absent from seen.json."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
     _enrich_failed_url = "https://enrich-fail.example/0"
 
     class _FailEnricher:
         def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
-            # Return None to trigger enrich_failed
             return None
 
     class _FailStubParser(_StubParserBase):
@@ -1648,8 +1660,12 @@ def test_judge_pending_enrich_failure_marks_enrich_failed(tmp_path: Path) -> Non
     )
 
     assert summary.enrich_failed == 1
-    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_enrich_failed_url]["status"] == "enrich_failed"
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert _enrich_failed_url not in seen_data, (
+        "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
+    )
 
 
 def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
@@ -5407,10 +5423,10 @@ def _ef_config(tmp_path: Path) -> Path:
     )
 
 
-def test_enrich_failed_error_from_parser_writes_enrich_failed_to_seen(
+def test_enrich_failed_error_from_parser_does_not_write_to_seen(
     tmp_path: Path,
 ) -> None:
-    """parser.enrich() raises EnrichFailedError → seen.json has status: enrich_failed."""
+    """parser.enrich() raises EnrichFailedError → URL absent from seen.json, enrich_failed increments."""
     seen_path = tmp_path / ".seen.json"
 
     summary = run(
@@ -5421,8 +5437,12 @@ def test_enrich_failed_error_from_parser_writes_enrich_failed_to_seen(
     )
 
     assert summary.enrich_failed == 1
-    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_EF_URL]["status"] == "enrich_failed"
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert _EF_URL not in seen_data, (
+        "EnrichFailedError must not write to seen.json — URL stays unrecorded for retry next run"
+    )
 
 
 def test_oversized_body_from_parser_enrich_does_not_mark_enrich_failed(
@@ -5464,10 +5484,10 @@ def test_oversized_body_from_parser_enrich_does_not_mark_enrich_failed(
     )
 
 
-def test_enrich_failed_url_is_not_re_attempted_on_subsequent_run(
+def test_enrich_failed_url_is_re_attempted_on_subsequent_run(
     tmp_path: Path,
 ) -> None:
-    """URL marked enrich_failed on run 1 is skipped on run 2 — URL-tier dedup short-circuit."""
+    """URL not written to seen.json on EnrichFailedError → enrich() is called again on run 2 (transient retry)."""
     seen_path = tmp_path / ".seen.json"
     enrich_calls: list[str] = []
 
@@ -5499,9 +5519,9 @@ def test_enrich_failed_url_is_not_re_attempted_on_subsequent_run(
 
     enrich_calls.clear()
     second = _make_run()
-    assert second.skipped == 1
-    assert enrich_calls == [], (
-        "enrich must NOT be called for an enrich_failed URL on rerun"
+    assert second.enrich_failed == 1
+    assert enrich_calls == [_EF_URL], (
+        "enrich must be called again on run 2 — URL is unrecorded and retried each run"
     )
 
 

@@ -410,7 +410,12 @@ class _EnrichThread(_QueueWorker):
         try:
             enrich_result = item.parser.enrich(item.stub)
         except EnrichFailedError:
-            self._dedup_store.mark_enrich_failed(item.stub)
+            self._run_log.event(
+                "parser_orchestrator",
+                "enrich_failed",
+                url=item.stub.url,
+                source=item.stub.source,
+            )
             self._metrics.enrich_failed(item.stub.source)
             return
         except OversizedBodyError as exc:
@@ -494,7 +499,6 @@ class _EnrichThread(_QueueWorker):
         )
 
         if verdict is None:
-            self._dedup_store.mark_enrich_failed(stub)
             self._metrics.enrich_failed(stub.source)
         elif not verdict.matches:
             self._dedup_store.mark_out_of_domain(stub)

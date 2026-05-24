@@ -3536,7 +3536,7 @@ class _MixedLangParser199(_StubParserBase):
 
 
 def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
-    """classify_relevance and judge_match rows are registered below prefilter and adjacent."""
+    """classify_relevance row is registered below prefilter; judge_match row is retired."""
     display = FakeStatusDisplay()
 
     run(
@@ -3548,7 +3548,7 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
     )
 
     assert "llm_classify_relevance" in display.registered_names()
-    assert "llm_judge_match" in display.registered_names()
+    assert "llm_judge_match" not in display.registered_names()
 
     prefilter_order = next(
         c.kwargs["order"]
@@ -3560,14 +3560,8 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
         for c in display.calls
         if c.method == "register" and c.name == "llm_classify_relevance"
     )
-    judge_order = next(
-        c.kwargs["order"]
-        for c in display.calls
-        if c.method == "register" and c.name == "llm_judge_match"
-    )
 
     assert classify_order > prefilter_order
-    assert judge_order == classify_order + 1
 
 
 def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
@@ -3593,9 +3587,6 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
         c.method == "remove" and c.name == "llm_classify_relevance"
         for c in display.calls
     ), "classify_relevance row must not be removed during run"
-    assert not any(
-        c.method == "remove" and c.name == "llm_judge_match" for c in display.calls
-    ), "judge_match row must not be removed during run"
 
 
 # ---------------------------------------------------------------------------
@@ -3881,7 +3872,7 @@ def test_non_quota_worker_exception_writes_failure_report(
 
 
 def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
-    """ExtractorError from llm_enricher.enrich(): classify_relevance row body shows calls_failed=N items_failed=M."""
+    """ExtractorError from llm_enricher.enrich(): classify_relevance row body shows dropped count."""
     card_store = _make_card_store(tmp_path)
 
     class _ErrorEnricher:
@@ -3903,8 +3894,7 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     classify_bodies = display.body_updates_for("llm_classify_relevance")
     assert classify_bodies, "expected at least one classify_relevance body update"
     last_body = classify_bodies[-1]
-    assert "calls_failed=2" in last_body
-    assert "items_failed=2" in last_body
+    assert "dropped" in last_body
 
 
 def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
@@ -3923,12 +3913,9 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
         assert "calls_failed=" not in body
         assert "items_failed=" not in body
 
-    for body in display.body_updates_for("llm_judge_match"):
-        assert "calls_failed=" not in body
-
 
 def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
-    """judge_top_n success: llm_judge_match body shows 1/1 calls with no error tokens."""
+    """judge_top_n success: a terminal print message is emitted with the card count."""
     card_store = _make_card_store(tmp_path)
 
     display = FakeStatusDisplay()
@@ -3943,12 +3930,10 @@ def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    judge_bodies = display.body_updates_for("llm_judge_match")
-    assert judge_bodies, "expected judge_match body updates"
-    last_body = judge_bodies[-1]
-    # 1 successful judge_top_n call
-    assert "1/1 calls" in last_body
-    assert "calls_failed=" not in last_body
+    print_calls = [c for c in display.calls if c.method == "print"]
+    assert any(
+        "judge_top_n" in str(c.kwargs.get("message", "")) for c in print_calls
+    ), "expected a judge_top_n terminal message"
 
 
 # ---------------------------------------------------------------------------
@@ -3972,13 +3957,10 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
     )
 
     classify_bodies = display.body_updates_for("llm_classify_relevance")
-    assert "0 items in queue" in classify_bodies[-1], (
-        f"Classify pending should be 0 at end-of-run: {classify_bodies[-1]!r}"
-    )
-
-    judge_bodies = display.body_updates_for("llm_judge_match")
-    assert "0 items in queue" in judge_bodies[-1], (
-        f"Judge pending should be 0 at end-of-run: {judge_bodies[-1]!r}"
+    assert classify_bodies, "expected at least one classify body update"
+    last_classify_body = classify_bodies[-1]
+    assert "queued" in last_classify_body, (
+        f"Classify body missing 'queued' at end-of-run: {last_classify_body!r}"
     )
 
 

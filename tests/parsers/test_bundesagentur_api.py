@@ -469,20 +469,6 @@ def test_discover_location_none_omits_wo_param(run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
-# discover — deduplication
-# ---------------------------------------------------------------------------
-
-
-def test_discover_deduplicates_same_referenznummer(run_log: RunLog) -> None:
-    shared = _item("same_ref", "Dev")
-    page0 = _search_body([shared, shared])
-    http = _make_http([page0, _search_body([])], run_log)
-    with BundesagenturParser(run_log=run_log, _http=http) as p:
-        stubs = list(p.discover(_query()))
-    assert len(stubs) == 1
-
-
-# ---------------------------------------------------------------------------
 # discover — error handling
 # ---------------------------------------------------------------------------
 

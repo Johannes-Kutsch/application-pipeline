@@ -8,8 +8,12 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-import respx
 
+from application_pipeline.http import (
+    HttpParserFatalError,
+    HttpRedirectResponse,
+    HttpStubNotRetryableError,
+)
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserError, ParserQuery, PositionStub
 from application_pipeline.parsers.bundesagentur_api import (
@@ -522,8 +526,6 @@ def test_enrich_native_returns_mode_native_with_body_from_jobdetails(
 def test_enrich_raises_enrich_failed_error_on_native_404(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    from application_pipeline.http import HttpStubNotRetryableError
-
     def not_found_get(url: str, timeout: float) -> bytes:
         raise HttpStubNotRetryableError("not found: ...")
 
@@ -541,8 +543,6 @@ def test_enrich_raises_enrich_failed_error_on_native_404(
 def test_enrich_propagates_parser_fatal_error_on_native_401(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    from application_pipeline.http import HttpParserFatalError
-
     def auth_error_get(url: str, timeout: float) -> bytes:
         raise HttpParserFatalError("auth: forbidden")
 
@@ -560,8 +560,6 @@ def test_enrich_propagates_parser_fatal_error_on_native_401(
 def test_enrich_propagates_redirect_response_on_native_3xx(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    from application_pipeline.http import HttpRedirectResponse
-
     def redirect_get(url: str, timeout: float) -> bytes:
         raise HttpRedirectResponse(301, "https://new.example.com/")
 
@@ -655,9 +653,6 @@ def test_enrich_raises_enrich_failed_error_when_native_api_retries_exhausted(
         source="Bundesagentur",
     )
     http = ParserHttp(run_log=run_log, _http_get=failing_get, retries=1)
-    with respx.mock:
-        with BundesagenturParser(
-            run_log=run_log, failures_dir=tmp_path, _http=http
-        ) as p:
-            with pytest.raises(EnrichFailedError):
-                p.enrich(stub)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)

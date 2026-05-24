@@ -26,6 +26,12 @@ class _ParserCounters:
     native_enriched: int = 0
     has_native_enrich: bool = False
     queries_done: int = 0
+    freshness_dropped: int = 0
+    dedup_dropped: int = 0
+    prefilter_dropped: int = 0
+    enrich_failed_count: int = 0
+    content_dropped: int = 0
+    forwarded: int = 0
 
 
 @dataclass(frozen=True)
@@ -235,6 +241,30 @@ class RunMetrics:
                 entry.native_enriched += 1
             body = self._parser_body(parser_id)
         self._display.update_body("parser_" + parser_id, body=body)
+
+    def increment_freshness_dropped(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).freshness_dropped += 1
+
+    def increment_dedup_dropped(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).dedup_dropped += 1
+
+    def increment_prefilter_dropped(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).prefilter_dropped += 1
+
+    def increment_enrich_failed_count(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).enrich_failed_count += 1
+
+    def increment_content_dropped(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).content_dropped += 1
+
+    def increment_forwarded(self, parser_id: str) -> None:
+        with self._lock:
+            self._parser_entry(parser_id).forwarded += 1
 
     def parser_summary(
         self, parser_id: str, end_monotonic: float, started_monotonic: float

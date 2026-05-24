@@ -72,7 +72,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Freshness Gate**: Drops temporally invalid candidates (ADR-0018, ADR-0032, ADR-0038). `admit(stub, *, gate_arm, deadline=None) -> bool` at three sites: post-discover, post-enrich, post-LLM. Drops when `posted_date` exceeds `MAX_LISTING_AGE_DAYS` or `deadline < anchored_today`. `None` = no signal. Writes `expired`; on `matched → expired` deletes extract. Parser-thread drops summed into one `freshness` counter (ADR-0043). _Avoid_: staleness filter, expiry gate.
 
-**Content Gate**: Drops empty body post-enrich (ADR-0030, ADR-0042). No `seen.json` mark — retried next run. `admit(stripped_body, stub) -> bool`. Reason enum `{passed, empty_body}`. Effective customer: non-native-enrich parsers (ADR-0040). _Avoid_: empty-body filter.
+**Content Gate**: Drops empty or placeholder body post-enrich (ADR-0030, ADR-0042). Minimum 100 chars. No `seen.json` mark — retried next run. `admit(stripped_body, stub) -> bool`. Reason enum `{passed, empty_body, too_short}`. Effective customer: non-native-enrich parsers (ADR-0040). _Avoid_: empty-body filter.
 
 **Domain Pre-Filter**: Title-only blacklist (ADR-0013). Substring match on **Negative Keywords**, case-insensitive. `admit(stub) -> bool`. Drops write `out_of_domain`. Log component `pipeline_prefilter`. _Avoid_: filter, gate, classifier.
 
@@ -149,7 +149,7 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthin
 
 **LLM Extractor**: Protocol: `classify_relevance(item) -> (RelevanceVerdict, CallUsage)` and `judge_top_n(candidates) -> (list[MatchVerdict], CallUsage)`. `RelevanceVerdict` = `{matches, header?, summary?}` (ADR-0034). `MatchVerdict` = `{id, rank}`. Production implementation: `ClaudeExtractor` via `claude -p` subprocess (ADR-0029 wire shape). Models: `haiku` classifier, `haiku --effort medium` judge (ADR-0010). Tags: `<verdict>`/`<verdicts>` via **Agent Output Protocol** (ADR-0010). _Avoid_: LLM, model (unqualified).
 
-**Agent Output Protocol**: `extract_json_block(text, tag) -> Any` + `AgentOutputProtocolError` (ADR-0010). Finds rightmost closing tag, walks back, strips optional fence, `json.loads`. _Avoid_: output parser, response handler.
+**Agent Output Protocol**: `extract_json_block(text, tag) -> Any` + `AgentOutputProtocolError` (ADR-0010). Finds rightmost closing tag, walks back, strips optional fence, `json.loads`. Fallback: when tags absent, attempts bare-JSON extraction from markdown code fence; logs `protocol_fallback` on recovery. _Avoid_: output parser, response handler.
 
 **Pagination**: Page fetches until source returns empty. No dedup-driven early-stop (ADR-0011). `max_results` retired (ADR-0041). _Avoid_: paging.
 

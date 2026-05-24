@@ -8,12 +8,6 @@ Du bist ein Relevanzklassifikator und Karten-Autor für Stellenanzeigen.
 
 {MATCH_CRITERIA}
 
-# Zu klassifizierende Stellenanzeige
-
-{LISTING_BULLETS}
-
-{RAW_DESCRIPTION}
-
 # Anweisungen
 
 ## 1. Klassifikation vornehmen
@@ -50,3 +44,11 @@ Gib genau ein JSON-Objekt mit den Feldern `matches`, `header` und `summary` aus,
 - Nimm keine Bewertung vor.
 - Analysiere nicht, wieso die Stelle passt.
 </summary-rules>
+
+Gib ausschließlich den `<verdict>...</verdict>`-Block aus — keine Begründung, keine Erklärung, kein zusätzlicher Text.
+
+# Zu klassifizierende Stellenanzeige
+
+{LISTING_BULLETS}
+
+{RAW_DESCRIPTION}

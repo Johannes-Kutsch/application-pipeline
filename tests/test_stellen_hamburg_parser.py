@@ -104,7 +104,6 @@ def _query(**kwargs: object) -> ParserQuery:
     defaults: dict = {
         "keyword": "python",
         "location": City("hamburg"),
-        "max_results": 100,
     }
     defaults.update(kwargs)
     return ParserQuery(**defaults)  # type: ignore[arg-type]
@@ -308,18 +307,18 @@ def test_discover_deduplicates_same_object_id(run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
-# discover — max_results cap
+# discover — full pagination
 # ---------------------------------------------------------------------------
 
 
-def test_discover_respects_max_results(run_log: RunLog) -> None:
+def test_discover_returns_all_results_without_cap(run_log: RunLog) -> None:
     items = [_item(str(i)) for i in range(10)]
     get = _make_search_get([_search_body(items, total=10)])
     with StellenHamburgParser(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
-        stubs = list(p.discover(_query(max_results=3)))
-    assert len(stubs) == 3
+        stubs = list(p.discover(_query()))
+    assert len(stubs) == 10
 
 
 # ---------------------------------------------------------------------------

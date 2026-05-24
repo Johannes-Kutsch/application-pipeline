@@ -101,7 +101,6 @@ class StellenHamburgParser:
                 pass
 
         seen: set[str] = set()
-        count = 0
         page_number = 1
         while True:
             url = _search_url(query.keyword, page_number)
@@ -121,8 +120,6 @@ class StellenHamburgParser:
 
             any_new = False
             for item in items:
-                if count >= query.max_results:
-                    return
                 obj_id: str = item.get("MatchedObjectId") or ""
                 if not obj_id or obj_id in seen:
                     continue
@@ -130,7 +127,6 @@ class StellenHamburgParser:
                 any_new = True
                 descriptor: dict[str, Any] = item.get("MatchedObjectDescriptor") or {}
                 yield self._to_stub(descriptor, obj_id)
-                count += 1
 
             total: int = result.get("SearchResultCountAll") or 0
             items_seen = (page_number - 1) * _PAGE_SIZE + len(items)
@@ -169,7 +165,6 @@ if __name__ == "__main__":
     query = ParserQuery(
         keyword=sys.argv[1] if len(sys.argv) > 1 else "*",
         location=City("hamburg"),
-        max_results=5,
     )
     _run_log = RunLog(Path(tempfile.mkdtemp()))
     with StellenHamburgParser(run_log=_run_log) as p:

@@ -54,30 +54,19 @@ def stub() -> PositionStub:
 
 
 def test_parser_query_valid_city():
-    q = ParserQuery(keyword="python", location=City("Hamburg"), max_results=10)
+    q = ParserQuery(keyword="python", location=City("Hamburg"))
     assert q.keyword == "python"
     assert q.location == City("Hamburg")
-    assert q.max_results == 10
 
 
 def test_parser_query_valid_remote():
-    q = ParserQuery(keyword="java", location=Remote(), max_results=50)
+    q = ParserQuery(keyword="java", location=Remote())
     assert q.location == Remote()
 
 
 def test_parser_query_rejects_empty_keyword():
     with pytest.raises(ValueError, match="keyword"):
-        ParserQuery(keyword="", location=Remote(), max_results=10)
-
-
-def test_parser_query_rejects_zero_max_results():
-    with pytest.raises(ValueError, match="max_results"):
-        ParserQuery(keyword="python", location=Remote(), max_results=0)
-
-
-def test_parser_query_rejects_negative_max_results():
-    with pytest.raises(ValueError, match="max_results"):
-        ParserQuery(keyword="python", location=Remote(), max_results=-1)
+        ParserQuery(keyword="", location=Remote())
 
 
 # --- Error hierarchy ---
@@ -107,7 +96,7 @@ def test_class_missing_discover_does_not_satisfy_parser_protocol():
 
 
 def test_parser_protocol_works_as_context_manager(parser: _ConcreteParser):
-    q = ParserQuery(keyword="python", location=Remote(), max_results=10)
+    q = ParserQuery(keyword="python", location=Remote())
     with parser as p:
         result = list(p.discover(q))
     assert result == []

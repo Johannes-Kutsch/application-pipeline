@@ -67,7 +67,6 @@ def _query(**kwargs: object) -> ParserQuery:
     defaults: dict = {
         "keyword": "python",
         "location": City("hamburg"),
-        "max_results": 100,
     }
     defaults.update(kwargs)
     return ParserQuery(**defaults)  # type: ignore[arg-type]
@@ -398,26 +397,6 @@ def test_discover_paginates_across_multiple_pages(run_log: RunLog) -> None:
     ) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 42
-
-
-def test_discover_respects_max_results(run_log: RunLog, list_html: bytes) -> None:
-    get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
-    with JobsBeimStaatParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
-        stubs = list(p.discover(_query(max_results=5)))
-    assert len(stubs) == 5
-
-
-def test_discover_max_results_stops_mid_page(run_log: RunLog) -> None:
-    page1 = _make_list_page(start_id=1, count=21)
-    page2 = _make_list_page(start_id=22, count=21)
-    get = _make_get([_jobs_envelope(page1), _jobs_envelope(page2), _empty_envelope()])
-    with JobsBeimStaatParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
-        stubs = list(p.discover(_query(max_results=30)))
-    assert len(stubs) == 30
 
 
 # ---------------------------------------------------------------------------

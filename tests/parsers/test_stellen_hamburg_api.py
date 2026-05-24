@@ -51,7 +51,6 @@ def _query(**kwargs: object) -> ParserQuery:
     defaults: dict = {
         "keyword": "python",
         "location": City("hamburg"),
-        "max_results": 100,
     }
     defaults.update(kwargs)
     return ParserQuery(**defaults)  # type: ignore[arg-type]
@@ -224,17 +223,19 @@ def test_discover_stub_location_extracted(run_log: RunLog, search_json: bytes) -
 
 
 # ---------------------------------------------------------------------------
-# discover — max_results cap
+# discover — full pagination
 # ---------------------------------------------------------------------------
 
 
-def test_discover_respects_max_results(run_log: RunLog, search_json: bytes) -> None:
+def test_discover_returns_all_results_without_cap(
+    run_log: RunLog, search_json: bytes
+) -> None:
     get = _make_get({"api-stellen": search_json})
     with StellenHamburgParser(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
-        stubs = list(p.discover(_query(max_results=1)))
-    assert len(stubs) == 1
+        stubs = list(p.discover(_query()))
+    assert len(stubs) >= 1
 
 
 # ---------------------------------------------------------------------------

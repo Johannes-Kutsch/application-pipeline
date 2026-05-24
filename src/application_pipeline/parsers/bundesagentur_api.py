@@ -153,7 +153,6 @@ class BundesagenturParser:
                 yield NotServedQuery()
                 return
 
-        seen: set[str] = set()
         page = 1
         while True:
             params: dict[str, object] = {
@@ -179,9 +178,8 @@ class BundesagenturParser:
 
             for item in items:
                 ref: str = item.get("referenznummer") or ""
-                if not ref or ref in seen:
+                if not ref:
                     continue
-                seen.add(ref)
                 title: str = item.get("stellenangebotsTitel") or ""
                 if not title:
                     self._run_log.event(

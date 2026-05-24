@@ -642,3 +642,68 @@ def test_enrich_raises_enrich_failed_error_when_native_api_retries_exhausted(
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(EnrichFailedError):
             p.enrich(stub)
+
+
+# ---------------------------------------------------------------------------
+# enrich — empty stellenangebotsBeschreibung writes Failure Report
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_writes_failure_report_and_raises_when_description_missing(
+    run_log: RunLog, tmp_path: Path
+) -> None:
+    def no_desc_get(url: str, timeout: float) -> bytes:
+        return json.dumps({"referenznummer": "abc123"}).encode()
+
+    stub = PositionStub(
+        url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http = ParserHttp(run_log=run_log, _http_get=no_desc_get)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+    failure_files = list(tmp_path.glob("*.md"))
+    assert len(failure_files) == 1
+
+
+def test_enrich_writes_failure_report_and_raises_when_description_is_empty_string(
+    run_log: RunLog, tmp_path: Path
+) -> None:
+    def empty_str_get(url: str, timeout: float) -> bytes:
+        return json.dumps({"stellenangebotsBeschreibung": ""}).encode()
+
+    stub = PositionStub(
+        url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http = ParserHttp(run_log=run_log, _http_get=empty_str_get)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+    failure_files = list(tmp_path.glob("*.md"))
+    assert len(failure_files) == 1
+
+
+def test_enrich_writes_failure_report_and_raises_when_description_strips_to_empty(
+    run_log: RunLog, tmp_path: Path
+) -> None:
+    def html_only_get(url: str, timeout: float) -> bytes:
+        return json.dumps({"stellenangebotsBeschreibung": "<br/><p></p>"}).encode()
+
+    stub = PositionStub(
+        url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http = ParserHttp(run_log=run_log, _http_get=html_only_get)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+    failure_files = list(tmp_path.glob("*.md"))
+    assert len(failure_files) == 1

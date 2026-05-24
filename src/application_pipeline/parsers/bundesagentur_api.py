@@ -14,6 +14,8 @@ from bs4 import BeautifulSoup
 
 from application_pipeline.parser_log import RunLog
 
+from application_pipeline.failure_report import write_failure
+
 from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
@@ -137,8 +139,19 @@ class BundesagenturParser:
             raise EnrichFailedError(str(exc)) from exc
         # HttpParserFatalError, HttpRedirectResponse propagate as parser-fatal
         data: dict[str, Any] = json.loads(raw)
-        description_html: str = data.get("stellenangebotsBeschreibung") or ""
-        body = _strip_html(description_html)
+        description_html: str | None = data.get("stellenangebotsBeschreibung")
+        body = _strip_html(description_html) if description_html else ""
+        if not body:
+            empty_body_error = ValueError(
+                "stellenangebotsBeschreibung missing or empty — API response may have changed shape"
+            )
+            write_failure(
+                stage=f"enrich:bundesagentur_api:{stub.url}",
+                error=empty_body_error,
+                log_tail="",
+                failures_dir=self._failures_dir,
+            )
+            raise EnrichFailedError(str(empty_body_error)) from empty_body_error
         updated_stub = _backfill_posted_date(stub, data)
         return EnrichResult(stub=updated_stub, body=body, mode="native")
 

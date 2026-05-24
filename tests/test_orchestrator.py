@@ -3463,33 +3463,6 @@ def test_prefilter_row_not_published_to_display(tmp_path: Path) -> None:
     assert display.body_updates_for("pipeline_dedup") == []
 
 
-def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:
-    """dedup and prefilter rows persist for the entire run (no mid-run removal)."""
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-    display = FakeStatusDisplay()
-
-    run(
-        config_path,
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
-    )
-
-    assert not any(
-        c.method == "remove" and c.name == "pipeline_dedup" for c in display.calls
-    ), "pipeline_dedup row must not be removed during run"
-    assert not any(
-        c.method == "remove" and c.name == "pipeline_prefilter" for c in display.calls
-    ), "pipeline_prefilter row must not be removed during run"
-
-
 # ---------------------------------------------------------------------------
 # Status Display: classify_relevance and judge_match rows (issue #199)
 # ---------------------------------------------------------------------------

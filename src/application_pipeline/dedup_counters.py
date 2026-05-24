@@ -32,9 +32,6 @@ class DedupCounters:
         self._dedup_misses = 0
         self._judge_resumed = 0
 
-    def register(self, order: int) -> None:
-        pass
-
     def record(self, result: RunScopedSeenResult) -> None:
         with self._lock:
             if result == "url_hit":

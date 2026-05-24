@@ -128,15 +128,6 @@ def test_snapshot_is_frozen(run_log: RunLog, display: FakeStatusDisplay) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_pipeline_dedup_row_not_registered(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    """pipeline_dedup status row is no longer registered."""
-    counters = _make(run_log, display)
-    counters.register(order=10)
-    assert "pipeline_dedup" not in display.registered_names()
-
-
 def test_record_does_not_publish_to_pipeline_dedup_row(
     run_log: RunLog, display: FakeStatusDisplay
 ) -> None:

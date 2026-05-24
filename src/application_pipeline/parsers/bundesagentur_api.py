@@ -12,9 +12,8 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from application_pipeline.parser_log import RunLog
-
 from application_pipeline.failure_report import write_failure
+from application_pipeline.parser_log import RunLog
 
 from .errors import ParserError
 from .http import ParserHttp

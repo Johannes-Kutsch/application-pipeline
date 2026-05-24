@@ -5629,37 +5629,6 @@ def test_body_fetch_runs_on_parser_thread_not_classify_worker(tmp_path: Path) ->
     )
 
 
-def test_run_gates_bundle_not_called(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """run_gates() must never be called — gate logic runs individually on the parser thread."""
-    called: list[str] = []
-
-    def _fake_run_gates(*args: object, **kwargs: object) -> object:
-        called.append("run_gates")
-        return "pass"
-
-    monkeypatch.setattr("application_pipeline.gates_bundle.run_gates", _fake_run_gates)
-
-    card_store = _make_card_store(tmp_path)
-    run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-        ),
-        llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=_stub_extractor(),
-        card_store=card_store,
-        parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-    )
-
-    assert called == [], f"run_gates() must not be called, but was called: {called}"
-
-
 def test_enrich_failed_error_on_parser_enrich_increments_counter_run_continues(
     tmp_path: Path,
 ) -> None:

@@ -5619,9 +5619,7 @@ def test_run_gates_bundle_not_called(
         called.append("run_gates")
         return "pass"
 
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator._run_gates", _fake_run_gates, raising=False
-    )
+    monkeypatch.setattr("application_pipeline.gates_bundle.run_gates", _fake_run_gates)
 
     card_store = _make_card_store(tmp_path)
     run(

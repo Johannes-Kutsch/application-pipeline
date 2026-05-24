@@ -732,20 +732,13 @@ def run(
             # passed into the parser thread constructors.
             starting_order = 2 + len(parsers_list)
 
+            queries_per_parser = len(search_terms.keywords) * len(locations)
             for i, (parser, source) in enumerate(parsers_list):
                 parser_id = source.parser_type
                 metrics.register_parser(
                     parser_id,
                     order=2 + i,
-                    total_queries=len(
-                        [
-                            ParserQuery(
-                                keyword=kw, location=loc, max_results=source.max_results
-                            )
-                            for kw in search_terms.keywords
-                            for loc in locations
-                        ]
-                    ),
+                    total_queries=queries_per_parser,
                     has_native_enrich=native_enrich_by_type.get(parser_id, False),
                 )
 

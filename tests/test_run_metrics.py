@@ -65,22 +65,17 @@ def _last_body(display: FakeStatusDisplay, row: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_register_rows_creates_only_classify_and_judge_rows(
+def test_register_rows_creates_only_classify_row(
     run_log: RunLog,
 ) -> None:
-    """register_rows no longer registers per-gate rows; only llm rows."""
+    """register_rows no longer registers per-gate rows or the judge row; only the classify row."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(starting_order=10)
 
-    registered = _registers(display)
-    names = [r[0] for r in registered]
-    assert "pipeline_prefilter" not in names
-    assert "pipeline_freshness" not in names
-    assert "pipeline_content" not in names
-    assert "pipeline_dedup" not in names
-    assert ("llm_classify_relevance", 11, "running") in registered
-    assert ("llm_judge_match", 12, "running") in registered
+    assert _registers(display) == [
+        ("llm_classify_relevance", 11, "running"),
+    ]
 
 
 def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
@@ -89,7 +84,7 @@ def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
     metrics.register_rows(starting_order=0)
 
     orders = [c.kwargs["order"] for c in display.calls if c.method == "register"]
-    assert orders == [1, 2]
+    assert orders == [1]
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +123,7 @@ def test_pipeline_body_reflects_judge_errored(run_log: RunLog) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_classify_body_no_failures(run_log: RunLog) -> None:
+def test_classify_body_all_forwarded(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
@@ -137,15 +132,14 @@ def test_classify_body_no_failures(run_log: RunLog) -> None:
     metrics.classify_buffered(5)
     metrics.classify_batch_enqueued(5)
     metrics.classify_batch_dequeued(5)
-    metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
+    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm_classify_relevance")
-    assert body == "1/1 calls · 0 items in queue"
-    assert "calls_failed" not in body
-    assert "batches_failed" not in body
+    assert body == "5 queued · 5 forwarded"
+    assert "dropped" not in body
 
 
-def test_classify_body_with_failures(run_log: RunLog) -> None:
+def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
@@ -156,58 +150,23 @@ def test_classify_body_with_failures(run_log: RunLog) -> None:
     metrics.classify_batch_failed(items=3)
 
     body = _last_body(display, "llm_classify_relevance")
-    assert "calls_failed=1 items_failed=3" in body
-    assert "batches_failed" not in body
-    assert "items_errored" not in body
+    assert body == "3 queued · 3 dropped"
+    assert "forwarded" not in body
 
 
-def test_classify_body_pending_count(run_log: RunLog) -> None:
+def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.classify_buffered(4)
     metrics.classify_buffered(2)
-    metrics.classify_batch_enqueued(4)
 
     body = _last_body(display, "llm_classify_relevance")
-    assert "6 items in queue" in body
+    assert body == "6 queued"
 
 
-def test_classify_denominator_increments_at_dequeue_not_enqueue(
-    run_log: RunLog,
-) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
-
-    metrics.classify_buffered(5)
-    metrics.classify_batch_enqueued(5)
-
-    body_after_enqueue = _last_body(display, "llm_classify_relevance")
-    assert body_after_enqueue.startswith("0/0 calls")
-
-    metrics.classify_batch_dequeued(5)
-
-    body_after_dequeue = _last_body(display, "llm_classify_relevance")
-    assert body_after_dequeue.startswith("0/1 calls")
-
-
-def test_classify_numerator_increments_on_failure(run_log: RunLog) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
-
-    metrics.classify_buffered(3)
-    metrics.classify_batch_enqueued(3)
-    metrics.classify_batch_dequeued(3)
-    metrics.classify_batch_failed(items=3)
-
-    body = _last_body(display, "llm_classify_relevance")
-    assert body.startswith("1/1 calls")
-
-
-def test_classify_idle_state_shows_n_over_n(run_log: RunLog) -> None:
+def test_classify_body_queued_cumulates_across_batches(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
@@ -220,72 +179,60 @@ def test_classify_idle_state_shows_n_over_n(run_log: RunLog) -> None:
         metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm_classify_relevance")
-    assert body == "2/2 calls · 0 items in queue"
+    assert body == "10 queued · 10 forwarded"
 
 
-def test_classify_body_updates_per_item_without_batch_flush(run_log: RunLog) -> None:
+def test_classify_body_updates_per_buffered_call(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     metrics.classify_buffered(1)
     body_after_first = _last_body(display, "llm_classify_relevance")
-    assert "1 items in queue" in body_after_first
+    assert body_after_first == "1 queued"
 
     metrics.classify_buffered(1)
     body_after_second = _last_body(display, "llm_classify_relevance")
-    assert "2 items in queue" in body_after_second
+    assert body_after_second == "2 queued"
 
 
 # ---------------------------------------------------------------------------
-# Judge-stage events → judge_match row body
+# Classify row — queued/dropped/forwarded format
 # ---------------------------------------------------------------------------
 
 
-def test_judge_body_no_errors(run_log: RunLog) -> None:
+def test_classify_body_queued_dropped_forwarded_format(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
     usage = _make_usage()
-    metrics.judge_enqueued()
-    metrics.judge_dequeued()
-    metrics.judge_complete(usage, source="linkedin")
-    metrics.judge_enqueued()
-    metrics.judge_dequeued()
-    metrics.judge_complete(usage, source="indeed")
+    metrics.classify_buffered(5)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
+    metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
 
-    body = _last_body(display, "llm_judge_match")
-    assert body == "2/2 calls · 0 items in queue"
-    assert "calls_failed" not in body
+    body = _last_body(display, "llm_classify_relevance")
+    assert body == "5 queued · 2 dropped · 3 forwarded"
 
 
-def test_judge_body_with_errors(run_log: RunLog) -> None:
+# ---------------------------------------------------------------------------
+# Judge-stage events — no persistent status row
+# ---------------------------------------------------------------------------
+
+
+def test_judge_failed_increments_pipeline_error_count(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows(0)
 
-    metrics.judge_enqueued()
-    metrics.judge_dequeued()
     metrics.judge_failed()
 
-    body = _last_body(display, "llm_judge_match")
-    assert "calls_failed=1" in body
+    body = _last_body(display, "pipeline")
+    assert "errors=1" in body
 
 
-def test_judge_body_pending_count(run_log: RunLog) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
-
-    metrics.judge_enqueued()
-    metrics.judge_enqueued()
-
-    body = _last_body(display, "llm_judge_match")
-    assert "2 items in queue" in body
-
-
-def test_judge_body_idle_steady_state_uses_calls_and_items_in_queue(
+def test_judge_events_produce_no_llm_judge_match_body_updates(
     run_log: RunLog,
 ) -> None:
     display = FakeStatusDisplay()
@@ -297,50 +244,27 @@ def test_judge_body_idle_steady_state_uses_calls_and_items_in_queue(
     metrics.judge_dequeued()
     metrics.judge_complete(usage, source="linkedin")
 
-    body = _last_body(display, "llm_judge_match")
-    assert body == "1/1 calls · 0 items in queue"
+    judge_updates = display.body_updates_for("llm_judge_match")
+    assert judge_updates == []
 
 
-def test_judge_body_denominator_unchanged_before_dequeue(run_log: RunLog) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
-
-    metrics.judge_enqueued()
-
-    body = _last_body(display, "llm_judge_match")
-    # denominator stays at 0 until the worker dequeues; queue increments to 1
-    assert body == "0/0 calls · 1 items in queue"
+# ---------------------------------------------------------------------------
+# Judge outcome — terminal log message
+# ---------------------------------------------------------------------------
 
 
-def test_judge_body_dequeue_increments_denominator_and_decrements_queue(
+def test_judge_top_n_complete_prints_card_count_as_terminal_message(
     run_log: RunLog,
 ) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
 
-    metrics.judge_enqueued()
-    metrics.judge_dequeued()
+    usage = _make_usage()
+    metrics.judge_top_n_complete(usage, card_count=3)
 
-    body = _last_body(display, "llm_judge_match")
-    # denominator=1 (started), queue=0 (dequeued), numerator still 0 (in flight)
-    assert body == "0/1 calls · 0 items in queue"
-
-
-def test_judge_body_failure_increments_numerator_and_shows_calls_failed(
-    run_log: RunLog,
-) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
-
-    metrics.judge_enqueued()
-    metrics.judge_dequeued()
-    metrics.judge_failed()
-
-    body = _last_body(display, "llm_judge_match")
-    assert body == "1/1 calls · 0 items in queue · calls_failed=1"
+    print_calls = [c for c in display.calls if c.method == "print"]
+    assert len(print_calls) == 1
+    assert "3" in str(print_calls[0].kwargs["message"])
 
 
 # ---------------------------------------------------------------------------

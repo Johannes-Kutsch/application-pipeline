@@ -89,6 +89,7 @@ class RunMetrics:
         self._classifier_dropped = 0
         self._classify_items_errored = 0
         self._total_batches = 0
+        self._classify_queued = 0
 
         # Pending-depth counters
         self._pending_classify = 0
@@ -119,9 +120,6 @@ class RunMetrics:
     def register_rows(self, starting_order: int) -> None:
         self._display.register(
             "llm_classify_relevance", order=starting_order + 1, phase="running"
-        )
-        self._display.register(
-            "llm_judge_match", order=starting_order + 2, phase="running"
         )
 
     def register_parser(
@@ -290,6 +288,7 @@ class RunMetrics:
     def classify_buffered(self, n: int) -> None:
         with self._classify_lock:
             self._pending_classify += n
+            self._classify_queued += n
             body = self._classify_body()
         self._display.update_body("llm_classify_relevance", body=body)
 
@@ -334,15 +333,11 @@ class RunMetrics:
     def judge_enqueued(self) -> None:
         with self._lock:
             self._pending_judge += 1
-            body = self._judge_body()
-        self._display.update_body("llm_judge_match", body=body)
 
     def judge_dequeued(self) -> None:
         with self._lock:
             self._pending_judge -= 1
             self._judge_started += 1
-            body = self._judge_body()
-        self._display.update_body("llm_judge_match", body=body)
 
     def judge_complete(self, usage: CallUsage, source: str) -> None:
         with self._lock:
@@ -356,16 +351,12 @@ class RunMetrics:
             self._written_per_source[source] = (
                 self._written_per_source.get(source, 0) + 1
             )
-            body = self._judge_body()
-        self._display.update_body("llm_judge_match", body=body)
 
     def judge_failed(self) -> None:
         with self._lock:
             self._judge_failed += 1
             self._judge_errored += 1
-            judge_body = self._judge_body()
             pipeline_body = self._pipeline_body()
-        self._display.update_body("llm_judge_match", body=judge_body)
         self._display.update_body("pipeline", body=pipeline_body)
 
     def judge_top_n_complete(self, usage: CallUsage, card_count: int) -> None:
@@ -378,8 +369,10 @@ class RunMetrics:
             self._judge_cost_usd += usage.cost_usd
             self._judge_total_s += usage.duration_s
             self._written += card_count
-            body = self._judge_body()
-        self._display.update_body("llm_judge_match", body=body)
+        self._display.print(
+            caller="llm_judge_match",
+            message=f"judge_top_n complete: wrote {card_count} cards",
+        )
 
     # -----------------------------------------------------------------------
     # Read-only accessors for run_complete event
@@ -622,24 +615,11 @@ class RunMetrics:
         )
 
     def _classify_body(self) -> str:
-        numerator = self._classify_calls + self._classify_failed
-        result = (
-            f"{numerator}/{self._total_batches} calls"
-            f" · {self._pending_classify} items in queue"
-        )
-        if self._classify_failed > 0 or self._classify_items_errored > 0:
-            result += (
-                f" · calls_failed={self._classify_failed}"
-                f" items_failed={self._classify_items_errored}"
-            )
-        return result
-
-    def _judge_body(self) -> str:
-        finished = self._judge_calls + self._judge_failed
-        result = (
-            f"{finished}/{self._judge_started} calls"
-            f" · {self._pending_judge} items in queue"
-        )
-        if self._judge_failed > 0:
-            result += f" · calls_failed={self._judge_failed}"
+        dropped = self._classifier_dropped + self._classify_items_errored
+        forwarded = self._classify_items - self._classifier_dropped
+        result = f"{self._classify_queued} queued"
+        if dropped > 0:
+            result += f" · {dropped} dropped"
+        if forwarded > 0:
+            result += f" · {forwarded} forwarded"
         return result

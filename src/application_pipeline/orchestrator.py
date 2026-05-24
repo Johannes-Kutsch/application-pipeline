@@ -411,7 +411,7 @@ class _EnrichThread(_QueueWorker):
             enrich_result = item.parser.enrich(item.stub)
         except EnrichFailedError:
             self._run_log.event(
-                "parser_orchestrator",
+                "pipeline_orchestrator",
                 "enrich_failed",
                 url=item.stub.url,
                 source=item.stub.source,

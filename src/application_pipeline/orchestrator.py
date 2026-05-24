@@ -51,7 +51,6 @@ from application_pipeline.parsers.types import City, EnrichFailedError, Location
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.freshness_gate import FreshnessGate
-from application_pipeline.gates_bundle import run_gates as _run_gates
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.renderer import render as render
@@ -143,17 +142,7 @@ class _ParserDead:
     traceback_str: str
 
 
-class _Skip:
-    __slots__ = ()
-
-
-class _SkipAndEndQuery:
-    __slots__ = ()
-
-
 _PARSER_DONE = _ParserDone()
-_SKIP = _Skip()
-_SKIP_AND_END_QUERY = _SkipAndEndQuery()
 
 
 class _QueryDone:
@@ -164,14 +153,14 @@ _QUERY_DONE = _QueryDone()
 
 
 # ---------------------------------------------------------------------------
-# Enrich queue protocol
+# Classify queue protocol
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class _EnrichRequest:
+class _ClassifyRequest:
     stub: PositionStub
-    parser: Parser
+    body: str
     parser_id: str
 
 
@@ -183,7 +172,7 @@ _NO_MORE_BATCHES = _NoMoreBatches()
 
 
 # ---------------------------------------------------------------------------
-# Pool collector â€” thread-safe accumulator for judge candidates
+# Pool collector — thread-safe accumulator for judge candidates
 # ---------------------------------------------------------------------------
 
 
@@ -273,7 +262,7 @@ class _QueueWorker(threading.Thread):
 
 
 # ---------------------------------------------------------------------------
-# Parser thread â€” pure stub producer (no enrich)
+# Parser thread — runs full pre-LLM pipeline per stub inline
 # ---------------------------------------------------------------------------
 
 
@@ -284,17 +273,33 @@ class _ParserThread(threading.Thread):
         parser: Parser,
         worklist: list[ParserQuery],
         outbound: queue.Queue[tuple[str, object]],
-        inbound: queue.Queue[object],
+        classify_queue: queue.Queue[object],
         *,
         run_log: RunLog,
+        run_state: _RunState,
+        freshness: FreshnessGate,
+        prefilter: PreFilterGate,
+        content_gate: ContentGate,
+        dedup: DeduplicationStore,
+        dedup_counters: DedupCounters,
+        pool_collector: _PoolCollector,
+        metrics: RunMetrics,
     ) -> None:
         super().__init__(name=f"parser-{parser_id}", daemon=True)
         self._parser_id = parser_id
         self._parser = parser
         self._worklist = worklist
         self._outbound = outbound
-        self._inbound = inbound
+        self._classify_queue = classify_queue
         self._run_log = run_log
+        self._run_state = run_state
+        self._freshness = freshness
+        self._prefilter = prefilter
+        self._content_gate = content_gate
+        self._dedup = dedup
+        self._dedup_counters = dedup_counters
+        self._pool_collector = pool_collector
+        self._metrics = metrics
 
     def run(self) -> None:
         try:
@@ -314,13 +319,12 @@ class _ParserThread(threading.Thread):
                     gen = iter(self._parser.discover(query))
                     try:
                         for item in gen:
-                            self._outbound.put((self._parser_id, item))
                             if isinstance(item, NotServedQuery):
+                                self._outbound.put((self._parser_id, item))
                                 continue
-                            decision = self._inbound.get()
-                            if decision is _SKIP_AND_END_QUERY:
+                            if self._run_state.is_aborted:
                                 break
-                            # else: _SKIP â€” continue to next stub
+                            self._process_stub(item)
                     finally:
                         close = getattr(gen, "close", None)
                         if close is not None:
@@ -339,6 +343,77 @@ class _ParserThread(threading.Thread):
             )
         else:
             self._outbound.put((self._parser_id, _PARSER_DONE))
+
+    def _process_stub(self, stub: PositionStub) -> None:
+        self._metrics.discovered(self._parser_id)
+
+        # Freshness gate (discover arm)
+        if not self._freshness.admit_stub(stub, gate_arm="discover"):
+            self._metrics.increment_freshness_dropped(self._parser_id)
+            return
+
+        # Dedup
+        result = self._dedup.is_seen(stub)
+        self._dedup_counters.record(result)
+        if result == "judge_pending":
+            self._pool_collector.add_judge_pending(stub)
+            return
+        if result != "miss":
+            self._metrics.increment_dedup_dropped(self._parser_id)
+            return
+
+        # Pre-Filter
+        if not self._prefilter.admit_stub(stub):
+            self._metrics.increment_prefilter_dropped(self._parser_id)
+            return
+
+        # Enrich (body fetch) — runs inline on the parser thread
+        try:
+            enrich_result = self._parser.enrich(stub)
+        except EnrichFailedError:
+            self._dedup.mark_enrich_failed(stub)
+            self._metrics.enrich_failed(self._parser_id)
+            self._metrics.increment_enrich_failed_count(self._parser_id)
+            return
+        except OversizedBodyError as exc:
+            self._run_log.event(
+                "llm_enricher",
+                "body_oversized",
+                url=exc.url,
+                source=exc.source,
+                body_len=exc.body_len,
+            )
+            return
+        except httpx.HTTPError as exc:
+            self._run_log.event(
+                "llm_enricher",
+                "fetch_transient_error",
+                url=stub.url,
+                source=stub.source,
+                error=str(exc),
+            )
+            return
+
+        self._metrics.enriched(self._parser_id, enrich_result.mode)
+        stub = enrich_result.stub
+        body = enrich_result.body
+
+        # Freshness gate (post-enrich arm)
+        if not self._freshness.admit_stub(stub, gate_arm="post_enrich"):
+            self._metrics.increment_freshness_dropped(self._parser_id)
+            return
+
+        # Content gate
+        if not self._content_gate.admit(body, stub):
+            self._metrics.increment_content_dropped(self._parser_id)
+            return
+
+        # Forward to classify queue
+        self._classify_queue.put(
+            _ClassifyRequest(stub=stub, body=body, parser_id=self._parser_id)
+        )
+        self._metrics.classify_buffered(1)
+        self._metrics.increment_forwarded(self._parser_id)
 
 
 # ---------------------------------------------------------------------------
@@ -361,103 +436,49 @@ def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Enrich thread â€” calls LLMEnricher per stub
+# Classify worker — runs only the LLM call + verdict handling
 # ---------------------------------------------------------------------------
 
 
-class _EnrichThread(_QueueWorker):
+class _ClassifyWorker(_QueueWorker):
     def __init__(
         self,
         *,
-        enrich_queue: queue.Queue[object],
+        classify_queue: queue.Queue[object],
         pool_collector: "_PoolCollector",
         llm_enricher: "_LLMEnricherLike",
         dedup_store: DeduplicationStore,
         metrics: "RunMetrics",
-        dedup_counters: "DedupCounters",
         run_state: _RunState,
         run_log: RunLog,
         quota_wall: "_quota.QuotaWall",
-        freshness: "FreshnessGate",
-        prefilter: "PreFilterGate",
-        content_gate: "ContentGate",
         worker_index: int = 0,
     ) -> None:
         super().__init__(
-            input_queue=enrich_queue,
+            input_queue=classify_queue,
             sentinel=_NO_MORE_BATCHES,
-            stage_name="enrich",
+            stage_name="classify",
             run_state=run_state,
         )
-        self.name = f"enrich-worker-{worker_index}"
+        self.name = f"classify-worker-{worker_index}"
         self._pool_collector = pool_collector
         self._llm_enricher = llm_enricher
         self._dedup_store = dedup_store
         self._metrics = metrics
-        self._dedup_counters = dedup_counters
         self._run_log = run_log
         self._quota_wall = quota_wall
-        self._freshness = freshness
-        self._prefilter = prefilter
-        self._content_gate = content_gate
 
     def _on_dequeue(self, item: object) -> None:
-        assert isinstance(item, _EnrichRequest)
+        assert isinstance(item, _ClassifyRequest)
         self._metrics.classify_batch_dequeued(1)
 
     def _process(self, item: object) -> None:
-        assert isinstance(item, _EnrichRequest)
-        try:
-            enrich_result = item.parser.enrich(item.stub)
-        except EnrichFailedError:
-            self._dedup_store.mark_enrich_failed(item.stub)
-            self._metrics.enrich_failed(item.stub.source)
-            return
-        except OversizedBodyError as exc:
-            self._run_log.event(
-                "llm_enricher",
-                "body_oversized",
-                url=exc.url,
-                source=exc.source,
-                body_len=exc.body_len,
-            )
-            return
-        except httpx.HTTPError as exc:
-            self._run_log.event(
-                "llm_enricher",
-                "fetch_transient_error",
-                url=item.stub.url,
-                source=item.stub.source,
-                error=str(exc),
-            )
-            return
-
-        self._metrics.enriched(item.parser_id, enrich_result.mode)
-        stub = enrich_result.stub
-        body = enrich_result.body
-
-        post_verdict = _run_gates(
-            stub,
-            run_log=self._run_log,
-            metrics=self._metrics,
-            dedup_counters=self._dedup_counters,
-            dedup=self._dedup_store,
-            prefilter=self._prefilter,
-            freshness=self._freshness,
-            content=self._content_gate,
-            body=body,
-            gate_arm="post_enrich",
-        )
-        if post_verdict == "drop":
-            return
-        if post_verdict == "judge_pending":
-            self._pool_collector.add_judge_pending(stub)
-            return
+        assert isinstance(item, _ClassifyRequest)
 
         while True:
             self._quota_wall.wait_if_blocked()
             try:
-                verdict = self._llm_enricher.enrich(stub, body)
+                verdict = self._llm_enricher.enrich(item.stub, item.body)
                 break
             except ClaudeUsageLimitError as err:
                 now = datetime.now(timezone.utc)
@@ -494,21 +515,20 @@ class _EnrichThread(_QueueWorker):
         )
 
         if verdict is None:
-            self._dedup_store.mark_enrich_failed(stub)
-            self._metrics.enrich_failed(stub.source)
+            self._dedup_store.mark_enrich_failed(item.stub)
+            self._metrics.enrich_failed(item.stub.source)
         elif not verdict.matches:
-            self._dedup_store.mark_out_of_domain(stub)
+            self._dedup_store.mark_out_of_domain(item.stub)
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 1)
         else:
-            self._dedup_store.mark_matched(stub)
-            self._pool_collector.add_matched(stub)
+            self._dedup_store.mark_matched(item.stub)
+            self._pool_collector.add_matched(item.stub)
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 0)
 
 
 @dataclass
 class _ParserState:
     parser_id: str
-    inbound: queue.Queue[object]
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_monotonic: float = field(default_factory=time.monotonic)
     last_event_monotonic: float = field(default_factory=time.monotonic)
@@ -516,49 +536,27 @@ class _ParserState:
 
 
 # ---------------------------------------------------------------------------
-# Outbound dispatcher
+# Outbound dispatcher — routes control signals only
 # ---------------------------------------------------------------------------
 
 
 class _OutboundDispatcher:
-    """Routes payloads from the outbound queue to the appropriate handlers."""
+    """Routes control signals from the outbound queue to the appropriate handlers."""
 
     def __init__(
         self,
         *,
         parser_states: dict[str, "_ParserState"],
-        parsers: dict[str, "Parser"],
-        dedup: DeduplicationStore,
         metrics: "RunMetrics",
-        dedup_counters: "DedupCounters",
-        enrich_queue: "queue.Queue[object]",
-        pool_collector: "_PoolCollector",
-        run_state: _RunState,
         run_log: RunLog,
-        freshness: FreshnessGate,
-        prefilter: PreFilterGate,
     ) -> None:
         self._parser_states = parser_states
-        self._parsers = parsers
-        self._dedup = dedup
         self._metrics = metrics
-        self._dedup_counters = dedup_counters
-        self._enrich_queue = enrich_queue
-        self._pool_collector = pool_collector
-        self._run_state = run_state
         self._run_log = run_log
-        self._freshness = freshness
-        self._prefilter = prefilter
 
     def dispatch(self, pid: str, payload: object) -> bool:
-        """Dispatch a payload to the appropriate handler.
-
-        Returns True if the parser has finished (PARSER_DONE or ParserDead).
-        """
-        state = self._parser_states[pid]
-        if isinstance(payload, PositionStub):
-            self._handle_stub(pid, state, payload)
-        elif isinstance(payload, NotServedQuery):
+        """Dispatch a control payload; returns True if the parser has finished."""
+        if isinstance(payload, NotServedQuery):
             self._handle_not_served(pid)
         elif payload is _QUERY_DONE:
             self._handle_query_done(pid)
@@ -569,36 +567,6 @@ class _OutboundDispatcher:
             self._handle_parser_dead(pid, payload)
             return True
         return False
-
-    def flush_residual(self, n: int = 1) -> None:
-        """Signal end of stubs to n enrich workers."""
-        for _ in range(n):
-            self._enrich_queue.put(_NO_MORE_BATCHES)
-
-    def _handle_stub(
-        self, pid: str, state: _ParserState, payload: PositionStub
-    ) -> None:
-        self._metrics.discovered(pid)
-        if self._run_state.is_aborted:
-            state.inbound.put(_SKIP_AND_END_QUERY)
-            return
-        verdict = _run_gates(
-            payload,
-            run_log=self._run_log,
-            metrics=self._metrics,
-            dedup_counters=self._dedup_counters,
-            dedup=self._dedup,
-            prefilter=self._prefilter,
-            freshness=self._freshness,
-        )
-        if verdict == "pass":
-            self._enrich_queue.put(
-                _EnrichRequest(stub=payload, parser=self._parsers[pid], parser_id=pid)
-            )
-            self._metrics.classify_buffered(1)
-        elif verdict == "judge_pending":
-            self._pool_collector.add_judge_pending(payload)
-        state.inbound.put(_SKIP)
 
     def _handle_not_served(self, pid: str) -> None:
         self._metrics.not_served_query(pid)
@@ -669,7 +637,7 @@ def run(
         try:
             cfg = config_module.load(config_path)
         except ConfigError as exc:
-            _log.error("startup failed â€” config: %s", exc)
+            _log.error("startup failed — config: %s", exc)
             raise
 
         if run_log is None:
@@ -682,7 +650,7 @@ def run(
             try:
                 prompts = load_prompts(cfg, search_terms)
             except PromptError as exc:
-                _log.error("startup failed â€” prompts: %s", exc)
+                _log.error("startup failed — prompts: %s", exc)
                 raise
             if extractor is None:
                 extractor = ClaudeExtractor(cfg, prompts, run_log=run_log)
@@ -711,7 +679,7 @@ def run(
                     cfg.seen_store_path, card_store=card_store
                 )
             except DedupStoreError as exc:
-                _log.error("startup failed â€” dedup store: %s", exc)
+                _log.error("startup failed — dedup store: %s", exc)
                 raise
 
         # Step 8: Build LLMEnricher if not injected
@@ -733,12 +701,12 @@ def run(
         try:
             ensure_initialized(daily_file_path)
         except ResultsFileError as exc:
-            _log.error("startup failed â€” results file: %s", exc)
+            _log.error("startup failed — results file: %s", exc)
             raise
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display, run_log=run_log)
-        enrich_queue: queue.Queue[object] = queue.Queue()
+        classify_queue: queue.Queue[object] = queue.Queue()
         pool_collector = _PoolCollector()
         _run_started_at = datetime.now(timezone.utc)
 
@@ -760,50 +728,29 @@ def run(
             ]
             dedup_run = stack.enter_context(dedup_store.run_scope())
 
-            parsers_dict: dict[str, Parser] = {
-                source.parser_type: parser for parser, source in parsers_list
-            }
+            # Create gate instances before starting parser threads so they can be
+            # passed into the parser thread constructors.
+            starting_order = 2 + len(parsers_list)
 
-            parser_states: dict[str, _ParserState] = {}
-            threads: list[tuple[str, _ParserThread]] = []
-
-            for parser, source in parsers_list:
+            for i, (parser, source) in enumerate(parsers_list):
                 parser_id = source.parser_type
-                inbound: queue.Queue[object] = queue.Queue()
-                worklist = [
-                    ParserQuery(
-                        keyword=kw, location=loc, max_results=source.max_results
-                    )
-                    for kw in search_terms.keywords
-                    for loc in locations
-                ]
-                parser_states[parser_id] = _ParserState(
-                    parser_id=parser_id,
-                    inbound=inbound,
-                )
-                t = _ParserThread(
-                    parser_id, parser, worklist, outbound, inbound, run_log=run_log
-                )
-                threads.append((parser_id, t))
-
-            for i, (pid, t) in enumerate(threads):
-                t.start()
-                state = parser_states[pid]
-                state.started_at = datetime.now(timezone.utc)
-                state.started_monotonic = time.monotonic()
-                state.last_event_monotonic = state.started_monotonic
-                _log.info("parser %s started", pid)
-                run_log.event("parser_" + pid, "parser started")
                 metrics.register_parser(
-                    pid,
+                    parser_id,
                     order=2 + i,
-                    total_queries=len(t._worklist),
-                    has_native_enrich=native_enrich_by_type.get(pid, False),
+                    total_queries=len(
+                        [
+                            ParserQuery(
+                                keyword=kw, location=loc, max_results=source.max_results
+                            )
+                            for kw in search_terms.keywords
+                            for loc in locations
+                        ]
+                    ),
+                    has_native_enrich=native_enrich_by_type.get(parser_id, False),
                 )
 
             status_display.remove("startup")
 
-            starting_order = 2 + len(threads)
             dedup_counters = DedupCounters(display=status_display, run_log=run_log)
             dedup_counters.register(starting_order)
             metrics.register_rows(starting_order=starting_order)
@@ -825,39 +772,67 @@ def run(
             )
             content_gate = ContentGate(display=status_display, run_log=run_log)
 
-            enrich_threads = [
-                _EnrichThread(
-                    enrich_queue=enrich_queue,
+            parser_states: dict[str, _ParserState] = {}
+            threads: list[tuple[str, _ParserThread]] = []
+
+            for parser, source in parsers_list:
+                parser_id = source.parser_type
+                worklist = [
+                    ParserQuery(
+                        keyword=kw, location=loc, max_results=source.max_results
+                    )
+                    for kw in search_terms.keywords
+                    for loc in locations
+                ]
+                parser_states[parser_id] = _ParserState(parser_id=parser_id)
+                t = _ParserThread(
+                    parser_id,
+                    parser,
+                    worklist,
+                    outbound,
+                    classify_queue,
+                    run_log=run_log,
+                    run_state=run_state,
+                    freshness=freshness,
+                    prefilter=prefilter,
+                    content_gate=content_gate,
+                    dedup=dedup_run,
+                    dedup_counters=dedup_counters,
+                    pool_collector=pool_collector,
+                    metrics=metrics,
+                )
+                threads.append((parser_id, t))
+
+            for i, (pid, t) in enumerate(threads):
+                t.start()
+                state = parser_states[pid]
+                state.started_at = datetime.now(timezone.utc)
+                state.started_monotonic = time.monotonic()
+                state.last_event_monotonic = state.started_monotonic
+                _log.info("parser %s started", pid)
+                run_log.event("parser_" + pid, "parser started")
+
+            classify_workers = [
+                _ClassifyWorker(
+                    classify_queue=classify_queue,
                     pool_collector=pool_collector,
                     llm_enricher=llm_enricher,
                     dedup_store=dedup_store,
                     metrics=metrics,
-                    dedup_counters=dedup_counters,
                     run_state=run_state,
                     run_log=run_log,
                     quota_wall=quota_wall,
-                    freshness=freshness,
-                    prefilter=prefilter,
-                    content_gate=content_gate,
                     worker_index=i,
                 )
                 for i in range(cfg.claude_classify_parallelism)
             ]
-            for et in enrich_threads:
-                et.start()
+            for cw in classify_workers:
+                cw.start()
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
-                parsers=parsers_dict,
-                dedup=dedup_run,
                 metrics=metrics,
-                dedup_counters=dedup_counters,
-                enrich_queue=enrich_queue,
-                pool_collector=pool_collector,
-                run_state=run_state,
                 run_log=run_log,
-                freshness=freshness,
-                prefilter=prefilter,
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())
@@ -924,13 +899,16 @@ def run(
             content_snapshot = content_gate.snapshot()
             dedup_counters.emit_run_complete()
             dedup_snapshot = dedup_counters.snapshot()
-            dispatcher.flush_residual(n=cfg.claude_classify_parallelism)
+
+            # Signal classify workers to drain and stop
+            for _ in range(cfg.claude_classify_parallelism):
+                classify_queue.put(_NO_MORE_BATCHES)
 
         first_exc: BaseException | None = None
-        for et in enrich_threads:
-            et.join()
-            if first_exc is None and et.exc is not None:
-                first_exc = et.exc
+        for cw in classify_workers:
+            cw.join()
+            if first_exc is None and cw.exc is not None:
+                first_exc = cw.exc
 
         if first_exc is not None:
             raise first_exc

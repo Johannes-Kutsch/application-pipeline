@@ -5554,3 +5554,186 @@ def test_transient_http_error_from_parser_enrich_does_not_mark_enrich_failed(
     assert _EF_URL not in seen_data, (
         "transient-error URL must not appear in seen.json so it is retried next run"
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #586: Enrich inline on parser thread
+# ---------------------------------------------------------------------------
+
+
+def test_body_fetch_runs_on_parser_thread_not_classify_worker(tmp_path: Path) -> None:
+    """parser.enrich() must be called on the parser thread, not an enrich/classify worker thread."""
+    import threading as _threading
+
+    enrich_thread_names: list[str] = []
+
+    class _TrackingParser(_StubParserBase):
+        def __enter__(self) -> "_TrackingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://track.example/0", title="Job 0", source="stub"
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enrich_thread_names.append(_threading.current_thread().name)
+            return EnrichResult(stub=stub, body="body text", mode="native")
+
+    card_store = _make_card_store(tmp_path)
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert len(enrich_thread_names) == 1, (
+        f"enrich() must be called once, got {enrich_thread_names}"
+    )
+    assert enrich_thread_names[0].startswith("parser-"), (
+        f"enrich() must run on parser thread, got thread name: {enrich_thread_names[0]!r}"
+    )
+
+
+def test_run_gates_bundle_not_called(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run_gates() must never be called — gate logic runs individually on the parser thread."""
+    called: list[str] = []
+
+    def _fake_run_gates(*args: object, **kwargs: object) -> object:
+        called.append("run_gates")
+        return "pass"
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator._run_gates", _fake_run_gates, raising=False
+    )
+
+    card_store = _make_card_store(tmp_path)
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert called == [], f"run_gates() must not be called, but was called: {called}"
+
+
+def test_enrich_failed_error_on_parser_enrich_increments_counter_run_continues(
+    tmp_path: Path,
+) -> None:
+    """EnrichFailedError from parser.enrich() increments enrich_failed; run continues for other stubs."""
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+    _URLS = [f"https://ef-test.example/{i}" for i in range(3)]
+
+    class _EnrichFailParser(_StubParserBase):
+        def __enter__(self) -> "_EnrichFailParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=_URLS[i], title=f"Job {i}", source="stub")
+                for i in range(3)
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            if stub.url == _URLS[1]:
+                raise EnrichFailedError("native fetch failed")
+            return EnrichResult(stub=stub, body="body", mode="native")
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _EnrichFailParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.enrich_failed == 1
+    assert summary.parsers_dead == 0, (
+        "EnrichFailedError must not kill the parser thread"
+    )
+    assert summary.written == 2, "other two stubs must still be processed"
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[_URLS[1]]["status"] == "enrich_failed"
+
+
+def test_classify_workers_sized_by_claude_classify_parallelism(tmp_path: Path) -> None:
+    """classify workers are named 'classify-worker-N', and enrich-worker-N no longer exists."""
+    import threading as _threading
+
+    classify_worker_names: list[str] = []
+    enrich_worker_names: list[str] = []
+
+    card_store = _make_card_store(tmp_path)
+
+    class _CapturingEnricher:
+        def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
+            name = _threading.current_thread().name
+            if name.startswith("classify-worker-"):
+                classify_worker_names.append(name)
+            elif name.startswith("enrich-worker-"):
+                enrich_worker_names.append(name)
+            card_store.put(
+                stub.url,
+                CardExtract(header="H", summary="S"),
+            )
+            return RelevanceVerdict(matches=True, header="H", summary="S")
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_parallelism=2,
+        ),
+        llm_enricher=_CapturingEnricher(),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert enrich_worker_names == [], (
+        "no enrich-worker threads must exist in the new architecture"
+    )
+    assert all(name.startswith("classify-worker-") for name in classify_worker_names), (
+        f"LLM classify must run on classify-worker threads, got: {classify_worker_names}"
+    )

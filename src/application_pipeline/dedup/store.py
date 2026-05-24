@@ -28,7 +28,6 @@ SeenStatus = Literal[
     "out_of_domain",
     "matched",
     "selected_by_judge",
-    "enrich_failed",
     "external_redirect",
     "expired",
 ]
@@ -36,7 +35,8 @@ SeenStatus = Literal[
 _LEGACY_STATUSES: frozenset[str] = frozenset(
     {"off_domain", "kept", "classified_in_domain"}
 )
-_KNOWN_STATUSES: frozenset[str] = frozenset(get_args(SeenStatus))
+# enrich_failed is retired but may still exist in seen.json; accept it on load.
+_KNOWN_STATUSES: frozenset[str] = frozenset(get_args(SeenStatus)) | {"enrich_failed"}
 SeenResult = Literal["url_hit", "tuple_hit", "judge_pending", "miss"]
 RunScopedSeenResult = Literal[
     "url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"
@@ -194,11 +194,6 @@ class DeduplicationStore:
     def mark_selected_by_judge(self, key: _SeenKey) -> None:
         with self._lock:
             self._mark(key, "selected_by_judge", overwrite_if="matched")
-            self._delete_from_stores(key.url)
-
-    def mark_enrich_failed(self, key: _SeenKey) -> None:
-        with self._lock:
-            self._mark(key, "enrich_failed", overwrite_if="matched")
             self._delete_from_stores(key.url)
 
     def mark_expired(self, key: _SeenKey) -> None:

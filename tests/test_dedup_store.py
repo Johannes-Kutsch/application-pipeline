@@ -99,17 +99,6 @@ def test_mark_selected_by_judge_persists_status(store_path: Path) -> None:
     assert on_disk["https://example.com/k"]["status"] == "selected_by_judge"
 
 
-def test_mark_enrich_failed_persists_status(store_path: Path) -> None:
-    store = dedup_load(store_path)
-    stub = StubLike(url="https://example.com/ef")
-    store.mark_enrich_failed(stub)
-
-    assert store.is_seen(stub) == "url_hit"
-
-    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk["https://example.com/ef"]["status"] == "enrich_failed"
-
-
 def test_second_mark_same_url_is_silent_no_op(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/y")

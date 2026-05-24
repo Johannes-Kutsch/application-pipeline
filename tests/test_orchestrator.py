@@ -5554,3 +5554,149 @@ def test_transient_http_error_from_parser_enrich_does_not_mark_enrich_failed(
     assert _EF_URL not in seen_data, (
         "transient-error URL must not appear in seen.json so it is retried next run"
     )
+
+
+# ---------------------------------------------------------------------------
+# Failure Report on parser dead (#574)
+# ---------------------------------------------------------------------------
+
+
+def test_parser_dead_writes_failure_report(tmp_path: Path) -> None:
+    """When a parser thread dies, a Failure Report .md file is written to failures_dir."""
+    card_store = _make_card_store(tmp_path)
+
+    class _DyingParser(_StubParserBase):
+        def __enter__(self) -> "_DyingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            raise RuntimeError("fatal error in parser")
+            yield  # pragma: no cover
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _DyingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    failures_dir = tmp_path / ".runtime-data" / "failures"
+    assert failures_dir.is_dir(), "failures dir must be created when parser dies"
+    failure_files = list(failures_dir.glob("*.md"))
+    assert len(failure_files) == 1, (
+        f"expected 1 failure report, got {len(failure_files)}"
+    )
+
+
+def test_parser_dead_failure_report_contains_parser_id_exception_type_and_traceback(
+    tmp_path: Path,
+) -> None:
+    """The Failure Report contains parser ID, exception type, and traceback."""
+    card_store = _make_card_store(tmp_path)
+
+    class _DyingParser(_StubParserBase):
+        def __enter__(self) -> "_DyingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery):  # type: ignore[return]
+            raise ValueError("something went wrong")
+            yield  # pragma: no cover
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _DyingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    failures_dir = tmp_path / ".runtime-data" / "failures"
+    body = next(failures_dir.glob("*.md")).read_text(encoding="utf-8")
+    assert "parser:bundesagentur_api" in body, "parser ID must appear in failure report"
+    assert "ValueError" in body, "exception type must appear in failure report"
+    assert "something went wrong" in body, (
+        "exception message must appear in failure report"
+    )
+    assert "Traceback" in body, "traceback must appear in failure report"
+
+
+def test_parser_dead_failure_reports_distinguish_exception_types(
+    tmp_path: Path,
+) -> None:
+    """Auth expiry (401), upstream error (503), and redirect (3xx) produce distinguishable reports."""
+    from application_pipeline.http import HttpParserFatalError, HttpRedirectResponse
+
+    error_cases = [
+        HttpParserFatalError("auth: https://api.example.com/jobs status=401"),
+        HttpParserFatalError("upstream: https://api.example.com/jobs status=503"),
+        HttpRedirectResponse(301, "https://new.example.com/jobs"),
+    ]
+
+    reports: list[str] = []
+    for i, exc in enumerate(error_cases):
+        exc_ref = exc
+
+        class _DyingParser(_StubParserBase):
+            def __enter__(self) -> "_DyingParser":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                pass
+
+            def discover(self, query: ParserQuery):  # type: ignore[return]
+                raise exc_ref  # noqa: B023
+                yield  # pragma: no cover
+
+        sub = tmp_path / str(i)
+        sub.mkdir()
+        card_store_i = _make_card_store(tmp_path, f"card_store_{i}.json")
+        run(
+            _write_config(
+                sub,
+                sources='[SourceEntry(parser_type="bundesagentur_api")]',
+                keywords='["python"]',
+                locations='["Hamburg"]',
+                include_remote=False,
+            ),
+            llm_enricher=_make_fake_llm_enricher(card_store_i),
+            extractor=_stub_extractor(),
+            card_store=card_store_i,
+            parser_registry=lambda _: _DyingParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(sub / ".seen.json"),
+        )
+        report_dir = sub / ".runtime-data" / "failures"
+        reports.append(next(report_dir.glob("*.md")).read_text(encoding="utf-8"))
+
+    auth_report, upstream_report, redirect_report = reports
+
+    assert "status=401" in auth_report, "auth report must mention HTTP 401"
+    assert "status=503" in upstream_report, "upstream report must mention HTTP 503"
+    assert "301" in redirect_report or "redirect" in redirect_report.lower(), (
+        "redirect report must mention redirect or status 301"
+    )
+    assert "HttpParserFatalError" in auth_report
+    assert "HttpParserFatalError" in upstream_report
+    assert "HttpRedirectResponse" in redirect_report
+    assert auth_report != upstream_report, "auth and upstream reports must differ"
+    assert auth_report != redirect_report, "auth and redirect reports must differ"

@@ -537,6 +537,7 @@ class _OutboundDispatcher:
         run_log: RunLog,
         freshness: FreshnessGate,
         prefilter: PreFilterGate,
+        failures_dir: Path,
     ) -> None:
         self._parser_states = parser_states
         self._parsers = parsers
@@ -549,6 +550,7 @@ class _OutboundDispatcher:
         self._run_log = run_log
         self._freshness = freshness
         self._prefilter = prefilter
+        self._failures_dir = failures_dir
 
     def dispatch(self, pid: str, payload: object) -> bool:
         """Dispatch a payload to the appropriate handler.
@@ -612,6 +614,12 @@ class _OutboundDispatcher:
     def _handle_parser_dead(self, pid: str, payload: _ParserDead) -> None:
         self._run_log.traceback("parser_" + pid, payload.traceback_str)
         self._metrics.parser_dead(pid)
+        _write_failure(
+            stage=f"parser:{pid}",
+            error=payload.exc,
+            log_tail=payload.traceback_str,
+            failures_dir=self._failures_dir,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -858,6 +866,7 @@ def run(
                 run_log=run_log,
                 freshness=freshness,
                 prefilter=prefilter,
+                failures_dir=cfg.failures_path,
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())

@@ -12,7 +12,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 ### Pipeline artifacts
 
-**Config**: `config.py` at `<cwd>/application-pipeline/` (ADR-0022) controlling pipeline shape — `SOURCES`, `LOCATIONS`, `INCLUDE_REMOTE`, optional `claude_cli_path`, `MAX_LISTING_AGE_DAYS: int` (default 180, `≥ 1`) driving the **Freshness Gate**, `claude_classify_parallelism: int` (default 4, `≥ 1`) sizing the classify worker pool (ADR-0031, ADR-0042). `claude_classify_batch_size` retired (ADR-0028). No path override knobs (ADR-0008 amended). `layout.py` retired (ADR-0033). `KEYWORDS`/`SKILLS`/`NEGATIVE_KEYWORDS` live in **SearchTerms** (ADR-0021). Materialised by `init`; never overwritten by `init --refresh`. Loaded by **Config Loader** into frozen typed `Config`. `max_results` retired (ADR-0041). Cron: weekdays 00:30 (ADR-0017). _Avoid_: config file, settings file, search config.
+**Config**: `config.py` at `<cwd>/application-pipeline/` (ADR-0022) controlling pipeline shape — `SOURCES`, `LOCATIONS`, `INCLUDE_REMOTE`, optional `claude_cli_path`, `MAX_LISTING_AGE_DAYS: int` (default 180, `≥ 1`) driving the **Freshness Gate**, `claude_classify_parallelism: int` (default 4, `≥ 1`) sizing the classify worker pool (ADR-0031, ADR-0042), `DEDUP_COOLDOWN_DAYS: int` (default 30, `≥ 1`) gating decay of `selected_by_judge` and `expired` entries (ADR-0044). `claude_classify_batch_size` retired (ADR-0028). No path override knobs (ADR-0008 amended). `layout.py` retired (ADR-0033). `KEYWORDS`/`SKILLS`/`NEGATIVE_KEYWORDS` live in **SearchTerms** (ADR-0021). Materialised by `init`; never overwritten by `init --refresh`. Loaded by **Config Loader** into frozen typed `Config`. `max_results` retired (ADR-0041). Cron: weekdays 00:30 (ADR-0017). _Avoid_: config file, settings file, search config.
 
 **SearchTerms**: User-authored search/filter knobs (ADR-0021) — `KEYWORDS`, `SKILLS`, `NEGATIVE_KEYWORDS`. Three markdown files under `<settings-dir>/user-info/search-terms/` (ADR-0024): `keywords.md`, `skills.md`, `negative-keywords.md`. Filename *is* the section. Flat `-` bullet entries; `skills.md` carries H2 **Skill Group** headings with `{...}` attributes (ADR-0025). Pipeline loader ignores headings/attributes, harvests bullet bodies as flat list. `keywords.md` missing/empty → `SearchTermsError`; others optional. Distinct from **Triage Profile** — different sub-dirs, different consumers (KEYWORDS → parser orchestration, NEGATIVE_KEYWORDS → **Domain Pre-Filter**, SKILLS → judge `{SKILLS}` slot). _Avoid_: search config, term file.
 
@@ -86,13 +86,14 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 ### Deduplication and run state
 
-**Deduplication**: Three-tier: in-run `RunScopedDedup` (absorbs Cartesian overlap) plus persistent **Deduplication Store** with URL-tier and tuple-tier `(company_lc, title_lc, location_lc)`. Tuple fires only when all three non-`None`. Tuple match records alias (ADR-0003). `is_seen` returns `SeenResult`: `url_hit`/`tuple_hit` skip; `judge_pending` routes to Pool; `miss` processes.
+**Deduplication**: Four-tier (ADR-0044): in-run `run_hit` (absorbs Cartesian overlap) plus persistent **Deduplication Store** with URL-tier, exact-tuple-tier `(company_lc, title_lc, location_lc)`, and fuzzy-tuple-tier (token-subset, min 4 tokens, shorter ⊂ longer, gender markers stripped). Tuple/fuzzy fire only when all three fields non-`None`. Both write alias on hit (ADR-0003). `is_seen` writes in-memory `pending` entry on miss (populates indexes immediately, no persist). Checked at two points: post-discover and post-enrich (backfilled fields). `is_seen` returns `RunScopedSeenResult`: `url_hit`/`tuple_hit`/`fuzzy_hit` skip; `judge_pending` routes to Pool (includes tuple/fuzzy hits on `matched` entries — first in run updates URL/title); `run_hit` skips within-run repeats; `miss` processes. Freshness-dropped listings: orchestrator calls `mark_expired(stub)` to populate indexes.
 
-**Dedup status enum** (ADR-0014/ADR-0034):
+**Dedup status enum** (ADR-0014/ADR-0034/ADR-0044):
 - `out_of_domain` — Pre-Filter or Classifier rejection. Terminal-skip.
-- `matched` — classifier `matches: true`, extract written. In the **Pool**.
-- `selected_by_judge` — judge picked, Card appended+fsynced. Extract deleted. Terminal-skip.
-- `expired` — Freshness Gate. Deletes extract on `matched → expired`. Terminal-skip.
+- `matched` — classifier `matches: true`, extract written. In the **Pool**. Tuple/fuzzy hit returns `judge_pending` (first in run) or `run_hit`.
+- `selected_by_judge` — judge picked, Card appended+fsynced. Extract deleted. Suppresses within `DEDUP_COOLDOWN_DAYS` (default 30); after cooldown decays to `judge_pending` (re-enters Pool, updates URL/title).
+- `expired` — Freshness Gate drop or `matched → expired`. Deletes extract on `matched → expired`. Suppresses within `DEDUP_COOLDOWN_DAYS`; after cooldown decays to `miss` (re-enters pipeline). `status_last_changed` refreshed on each freshness re-drop.
+- `pending` — in-memory only, not persisted. Claimed by first `is_seen` miss; overwritten by classify worker's `mark_*`.
 - ~~`enrich_failed`~~ — _retired_ (ADR-0039). URLs stay unrecorded, retried next run.
 - ~~`external_redirect`~~ — _retired_ (ADR-0032). Redirects followed silently.
 
@@ -104,7 +105,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 - **Body fetch failure** → stub skipped, URL unrecorded (ADR-0039). Native-enrich: 401/403/5xx/3xx/JSON decode → Failure Report + parser dead; 404/400/422/retries-exhausted → silent skip.
 - **Oversized/malformed LLM output** → stashed, no `seen.json` write, retried next run.
 
-State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthing, ADR-0002). Shape: `{url: {company_lc, title_lc, location_lc, status, first_seen}}`. `DeduplicationStore` exposes four methods: `mark_out_of_domain`, `mark_matched`, `mark_selected_by_judge`, `mark_expired`. Single-writer (ADR-0002); internal lock covers concurrent classify/judge writes. _Avoid_: duplicate filtering, URL filtering.
+State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthing, ADR-0002). Shape: `{url: {canonical_url, company_lc, title_lc, location_lc, status, status_last_changed}}` (renamed from `first_seen`, silent migration on load — ADR-0044). `DeduplicationStore` exposes four methods: `mark_out_of_domain`, `mark_matched`, `mark_selected_by_judge`, `mark_expired`. Single-writer (ADR-0002); internal lock covers concurrent classify/judge writes. Config: `DEDUP_COOLDOWN_DAYS: int = 30` (ADR-0044). _Avoid_: duplicate filtering, URL filtering.
 
 ### Display
 
@@ -164,7 +165,7 @@ Fail loud-and-fast (exit 2) if `config.py` missing. Cron weekdays 00:30 (ADR-001
 
 ## Relationships
 
-- A listing reaches a **Daily Results File** by passing (in order, ADR-0038/0042): parser thread — **Freshness Gate** (stub), **Dedup**, **Domain Pre-Filter** (title), **Parser.enrich()**, **Freshness Gate** (post-enrich), **Content Gate** (body) → classify queue → **Relevance Classifier** LLM call → post-LLM **Freshness Gate** → **Match Judge** picks **Daily Top-5**.
+- A listing reaches a **Daily Results File** by passing (in order, ADR-0038/0042/0044): parser thread — **Freshness Gate** (stub; drop → `mark_expired`), **Dedup** (post-discover), **Domain Pre-Filter** (title), **Parser.enrich()**, **Dedup** (post-enrich, backfilled fields), **Freshness Gate** (post-enrich), **Content Gate** (body) → classify queue → **Relevance Classifier** LLM call → post-LLM **Freshness Gate** → **Match Judge** picks **Daily Top-5**.
 - The **Pool** is `{url ∈ discovered_today : seen.json[url].status == matched}`.
 - The **Match Judge** runs once per run, takes Header + Summary + Skills + Triage Profile, returns ≤5 `{id, rank}`.
 - **Triage Profile** reaches LLM via `{SELF_DESCRIPTION}` + `{MATCH_CRITERIA}` (ADR-0034); **Skills** via `{SKILLS}` (judge only); `NEGATIVE_KEYWORDS` reaches **Domain Pre-Filter** directly.

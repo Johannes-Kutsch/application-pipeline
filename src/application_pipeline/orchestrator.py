@@ -348,7 +348,7 @@ class _ParserThread(threading.Thread):
         self._metrics.discovered(self._parser_id)
 
         # Freshness gate (discover arm)
-        if not self._freshness.admit_stub(stub, gate_arm="discover"):
+        if not self._freshness.admit(stub, gate_arm="discover"):
             self._metrics.increment_freshness_dropped(self._parser_id)
             return
 
@@ -404,7 +404,7 @@ class _ParserThread(threading.Thread):
         body = enrich_result.body
 
         # Freshness gate (post-enrich arm)
-        if not self._freshness.admit_stub(stub, gate_arm="post_enrich"):
+        if not self._freshness.admit(stub, gate_arm="post_enrich"):
             self._metrics.increment_freshness_dropped(self._parser_id)
             return
 

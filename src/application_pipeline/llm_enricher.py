@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import dataclasses
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -28,17 +28,6 @@ class LLMExtractor(Protocol):
     def classify_relevance(
         self, item: ClassifyItem
     ) -> tuple[RelevanceVerdict, CallUsage]: ...
-
-
-@dataclass
-class _EnrichedPosition:
-    stub: PositionStub
-    posted_date: date | None
-    deadline: date | None = None
-
-    @property
-    def title(self) -> str:
-        return self.stub.title
 
 
 def _parse_header_date(header: str) -> date | None:
@@ -110,9 +99,12 @@ class LLMEnricher:
             assert verdict.summary is not None
 
             if self.freshness_gate is not None:
-                posted_date = _parse_header_date(verdict.header)
-                enriched = _EnrichedPosition(stub=stub, posted_date=posted_date)
-                if not self.freshness_gate.admit(enriched):
+                updated_stub = dataclasses.replace(
+                    stub, posted_date=_parse_header_date(verdict.header)
+                )
+                if not self.freshness_gate.admit(
+                    updated_stub, gate_arm="post_llm", deadline=None
+                ):
                     return None
 
             self._card_store.put(

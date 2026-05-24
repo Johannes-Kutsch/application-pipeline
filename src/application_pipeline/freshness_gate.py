@@ -29,20 +29,6 @@ class _Stub(Protocol):
     def posted_date(self) -> date | None: ...
 
 
-class _Position(Protocol):
-    @property
-    def stub(self) -> _Stub: ...
-
-    @property
-    def title(self) -> str: ...
-
-    @property
-    def posted_date(self) -> date | None: ...
-
-    @property
-    def deadline(self) -> date | None: ...
-
-
 class _DedupStore(Protocol):
     def mark_expired(self, key: _Stub) -> None: ...
 
@@ -61,21 +47,25 @@ class FreshnessSnapshot:
     freshness_dropped: int = 0
 
 
-def _evaluate(
-    position: _Position,
+def _evaluate_freshness(
+    posted_date: date | None,
+    deadline: date | None,
     anchored_today: date,
     max_listing_age_days: int,
-) -> _FreshnessVerdict:
+) -> _FreshnessVerdict | None:
+    """Returns None when both dates are absent (silent no-op signal)."""
+    if posted_date is None and deadline is None:
+        return None
     age_days: int | None = None
     too_old = False
     deadline_passed = False
 
-    if position.posted_date is not None:
-        age_days = (anchored_today - position.posted_date).days
+    if posted_date is not None:
+        age_days = (anchored_today - posted_date).days
         too_old = age_days > max_listing_age_days
 
-    if position.deadline is not None:
-        deadline_passed = position.deadline <= anchored_today
+    if deadline is not None:
+        deadline_passed = deadline <= anchored_today
 
     if too_old and deadline_passed:
         return _FreshnessVerdict(
@@ -87,20 +77,6 @@ def _evaluate(
         return _FreshnessVerdict(
             passes=False, reason="deadline_passed", age_days=age_days
         )
-    return _FreshnessVerdict(passes=True, reason="passed", age_days=age_days)
-
-
-def _evaluate_stub(
-    stub: _Stub,
-    anchored_today: date,
-    max_listing_age_days: int,
-) -> _FreshnessVerdict | None:
-    """Evaluate freshness from stub posted_date only. Returns None if posted_date is absent."""
-    if stub.posted_date is None:
-        return None
-    age_days = (anchored_today - stub.posted_date).days
-    if age_days > max_listing_age_days:
-        return _FreshnessVerdict(passes=False, reason="too_old", age_days=age_days)
     return _FreshnessVerdict(passes=True, reason="passed", age_days=age_days)
 
 
@@ -127,18 +103,16 @@ class FreshnessGate:
             "too_old_and_deadline_passed": 0,
         }
 
-    def admit_stub(
+    def admit(
         self,
         stub: _Stub,
         *,
-        gate_arm: Literal["discover", "post_enrich"] = "discover",
+        gate_arm: Literal["discover", "post_enrich", "post_llm"],
+        deadline: date | None = None,
     ) -> bool:
-        """Stub arm: evaluate freshness from stub posted_date.
-
-        Returns True (pass through) when posted_date is absent. Returns False and
-        drops the stub when it is stale. gate_arm selects the transcript label.
-        """
-        verdict = _evaluate_stub(stub, self._anchored_today, self._max_listing_age_days)
+        verdict = _evaluate_freshness(
+            stub.posted_date, deadline, self._anchored_today, self._max_listing_age_days
+        )
         if verdict is None:
             return True
         self._run_log.transcript(
@@ -150,7 +124,7 @@ class FreshnessGate:
                 "posted_date": stub.posted_date.isoformat()
                 if stub.posted_date is not None
                 else None,
-                "deadline": None,
+                "deadline": deadline.isoformat() if deadline is not None else None,
                 "anchored_today": self._anchored_today.isoformat(),
                 "age_days": verdict.age_days,
                 "passes": verdict.passes,
@@ -162,35 +136,6 @@ class FreshnessGate:
             self._counts[verdict.reason] += 1
         if not verdict.passes:
             self._dedup.mark_expired(stub)
-        return verdict.passes
-
-    def admit(self, position: _Position) -> bool:
-        if position.posted_date is None and position.deadline is None:
-            return True
-        verdict = _evaluate(position, self._anchored_today, self._max_listing_age_days)
-        self._run_log.transcript(
-            "pipeline_freshness",
-            {
-                "url": position.stub.url,
-                "title": position.title,
-                "source": position.stub.source,
-                "posted_date": position.posted_date.isoformat()
-                if position.posted_date is not None
-                else None,
-                "deadline": position.deadline.isoformat()
-                if position.deadline is not None
-                else None,
-                "anchored_today": self._anchored_today.isoformat(),
-                "age_days": verdict.age_days,
-                "passes": verdict.passes,
-                "reason": verdict.reason,
-                "gate_arm": "post_llm",
-            },
-        )
-        with self._lock:
-            self._counts[verdict.reason] += 1
-        if not verdict.passes:
-            self._dedup.mark_expired(position.stub)
         return verdict.passes
 
     def snapshot(self) -> FreshnessSnapshot:

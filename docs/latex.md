@@ -26,7 +26,7 @@ The template reads the following files from `<settings-dir>/user-info/cv/`. All 
 
 | File | Purpose |
 |---|---|
-| `facts.tex` | Raw `\def`s for name, address, phone, email, social links, languages, hobbies (per ADR-0030) |
+| `facts.tex` | Raw `\def`s for name, address, phone, email, social links, languages, hobbies (per ADR-0023) |
 | `content_pool.tex` | Career items selected per application |
 | `profile.png` | Headshot (passport-style) |
 | `signature.png` | Handwritten signature scan |
@@ -61,6 +61,6 @@ All available on CTAN; MiKTeX's on-the-fly install fetches them on the first com
 - `etoolbox`
 - `graphicx`
 
-`moderncv` is **not** required from the host distro — the package vendors moderncv 1.2.0 under `src/application_pipeline/latex/` and isolates `.build/` from the host TEXMF via `TEXINPUTS` (per ADR-0034, supersedes ADR-0031). The host's moderncv version (typically v2.x on modern TeX Live / MiKTeX) is invisible to `compile-cv`.
+`moderncv` is **not** required from the host distro — the package vendors moderncv 1.2.0 under `src/application_pipeline/latex/` and isolates `.build/` from the host TEXMF via `TEXINPUTS` (per ADR-0026). The host's moderncv version (typically v2.x on modern TeX Live / MiKTeX) is invisible to `compile-cv`.
 
 If "install on the fly" is disabled, install the host-side packages explicitly from MiKTeX Console → *Packages*.

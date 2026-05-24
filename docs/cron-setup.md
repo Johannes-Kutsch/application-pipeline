@@ -34,9 +34,9 @@ This removes the tagged crontab line without affecting any other crontab entries
 
 ## Flock serialisation
 
-`cron.sh` acquires a global flock at `$SETTINGS_DIR/.cron.lock` before running. If a
+`cron.sh` acquires a global flock at `$SETTINGS_DIR/.runtime-data/.cron.lock` before running. If a
 previous tick is still executing — for example because it is sleeping through a Claude quota window
-(ADR-0023) — the next cron fire waits at the lock rather than spawning a parallel run. The waiting
+(ADR-0016) — the next cron fire waits at the lock rather than spawning a parallel run. The waiting
 fire will proceed as soon as the lock is released.
 
 When a run sleeps through quota and crosses midnight, the cron-anchored logical date (the date the
@@ -86,7 +86,7 @@ git-tag pull model. To migrate to the PyPI-based install:
    bash ~/application-pipeline/settings/setup/cron-install.sh
    ```
 
-4. Edit `config.py`, `layout.py`, and the `user-info/` files to match your previous configuration.
+4. Edit `config.py` and the `user-info/` files to match your previous configuration.
 
 No automatic state migration is provided — the first run after cutover processes all sources from
 scratch. Expect a higher classifier token volume on the first day; subsequent days return to

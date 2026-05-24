@@ -1,17 +1,14 @@
 # Claude Code CLI as the LLM backend
 
-**LLM Extractor** drives Claude via `claude -p --output-format json` headless subprocess from the Pi. Runs against the user's Claude Code subscription (auth via one-time `claude login`); Anthropic API off-limits as budget item.
+**LLM Extractor** drives Claude via `claude -p --output-format json` headless subprocess. Runs against the user's Claude Code subscription; Anthropic API off-limits as budget item.
 
 ## Why
 
-- **Pi 5 can't sustain local inference cheaply.** Inference off-device makes the Pi a thin coordinator — HTTP out, markdown in. No thermal headroom, no model pulls, no `keep_alive` tuning.
-- **Headless mode works unattended.** `claude -p` is a normal subprocess driveable from cron; subscription auth in `~/.claude/` inherits via the user's home.
-- **Quality ceiling lifts.** Claude beats Qwen on German listings without prompt-engineering acrobatics.
-- **Subprocess + envelope, not SDK.** `--output-format json` returns envelope with `usage` (input/output/cache-read tokens), `total_cost_usd`, `session_id`. Anthropic SDK and Claude Agent SDK both wrap the same CLI but default to API keys — rejected.
-- **Subscription rate-limit handling is structural.** Usage-limit errors surface in the envelope. See ADR-0023 for the sleep-and-retry behaviour.
+- Pi 5 can't sustain local inference. Headless `claude -p` works unattended from cron.
+- `--output-format json` returns envelope with `usage`, `total_cost_usd`, `session_id`. SDK rejected (defaults to API keys).
+- Usage-limit errors surface in the envelope — see ADR-0016 for sleep-and-retry.
 
 ## Consequences
 
-- `Config`: `claude_classify_batch_size: int` (default 100, see ADR-0014) and optional `claude_cli_path`.
-- Auth file `~/.claude/.credentials.json` lives outside `data/` deliberately — replicating OAuth through Syncthing is worse than a one-time re-auth.
-- Run-time cost shifts from electricity to subscription quota. Per-call-site Claude token/cost fields land in `pipeline_orchestrator.events.jsonl` (see ADR-0018).
+- Auth file `~/.claude/.credentials.json` lives outside the settings dir — replicating OAuth through Syncthing is worse than a one-time re-auth.
+- Run-time cost shifts from electricity to subscription quota.

@@ -363,7 +363,7 @@ class _ParserThread(threading.Thread):
             return
 
         # Pre-Filter
-        if not self._prefilter.admit_stub(stub):
+        if not self._prefilter.admit(stub):
             self._metrics.increment_prefilter_dropped(self._parser_id)
             return
 

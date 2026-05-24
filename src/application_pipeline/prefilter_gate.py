@@ -26,25 +26,8 @@ class _Stub(Protocol):
     def location(self) -> str | None: ...
 
 
-class _Position(Protocol):
-    @property
-    def stub(self) -> _Stub: ...
-
-    @property
-    def title(self) -> str: ...
-
-
 class _DedupStore(Protocol):
     def mark_out_of_domain(self, key: _Stub) -> None: ...
-
-
-@dataclass(frozen=True)
-class _StubAsPosition:
-    stub: _Stub
-
-    @property
-    def title(self) -> str:
-        return self.stub.title or ""
 
 
 @dataclass(frozen=True)
@@ -58,8 +41,9 @@ def _precompute_blacklist(negative_keywords: list[str]) -> list[str]:
     return [n for k in negative_keywords if (n := normalize(k))]
 
 
-def _evaluate(position: _Position, blacklist: list[str]) -> _PreFilterVerdict:
-    title_hay = normalize(position.title) or ""
+def _evaluate(stub: _Stub, blacklist: list[str]) -> _PreFilterVerdict:
+    # A stub whose title is None is treated as the empty string for blacklist matching.
+    title_hay = normalize(stub.title or "") or ""
     blacklist_matches = tuple(k for k in blacklist if k in title_hay)
     passes = not blacklist_matches
     return _PreFilterVerdict(
@@ -106,24 +90,21 @@ class PreFilterGate:
         self._dropped = 0
         self._blacklist_hits = 0
 
-    def admit_stub(self, stub: _Stub) -> bool:
-        """Check negative keyword blacklist on stub title, without requiring a Position."""
-        return self.admit(_StubAsPosition(stub))
-
-    def admit(self, position: _Position) -> bool:
-        verdict = _evaluate(position, self._blacklist)
+    def admit(self, stub: _Stub) -> bool:
+        verdict = _evaluate(stub, self._blacklist)
+        title = stub.title or ""
         self._run_log.transcript(
             "pipeline_prefilter",
             {
-                "url": position.stub.url,
-                "title": position.title,
-                "source": position.stub.source,
+                "url": stub.url,
+                "title": title,
+                "source": stub.source,
                 "passes": verdict.passes,
                 "reason": verdict.reason,
                 "blacklist_matches": [
                     {"term": term} for term in verdict.blacklist_matches
                 ],
-                "title_len": len(position.title),
+                "title_len": len(title),
             },
         )
         for term in verdict.blacklist_matches:
@@ -137,7 +118,7 @@ class PreFilterGate:
                 if verdict.blacklist_matches:
                     self._blacklist_hits += 1
         if not verdict.passes:
-            self._dedup.mark_out_of_domain(position.stub)
+            self._dedup.mark_out_of_domain(stub)
         return verdict.passes
 
     def snapshot(self) -> PreFilterSnapshot:

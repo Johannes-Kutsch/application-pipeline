@@ -763,7 +763,6 @@ def run(
             status_display.remove("startup")
 
             dedup_counters = DedupCounters(display=status_display, run_log=run_log)
-            dedup_counters.register(starting_order)
             metrics.register_rows(starting_order=starting_order)
 
             freshness = FreshnessGate(

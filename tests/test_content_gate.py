@@ -36,9 +36,7 @@ def run_log(logs_dir: Path) -> RunLog:
 
 @pytest.fixture
 def display() -> FakeStatusDisplay:
-    d = FakeStatusDisplay()
-    d.register("pipeline_content", order=3, phase="running")
-    return d
+    return FakeStatusDisplay()
 
 
 def _make_gate(run_log: RunLog, display: FakeStatusDisplay) -> ContentGate:
@@ -219,16 +217,12 @@ def test_snapshot_is_frozen_dataclass(
 # ---------------------------------------------------------------------------
 
 
-def test_status_display_body_reflects_content_counters(
+def test_admit_does_not_publish_to_pipeline_content_row(
     run_log: RunLog,
     display: FakeStatusDisplay,
 ) -> None:
+    """pipeline_content status row is retired; admit() no longer publishes to it."""
     gate = ContentGate(display=display, run_log=run_log)
     gate.admit("has body", _Stub(url="https://example.com/1"))
     gate.admit("", _Stub(url="https://example.com/2"))
-    bodies = display.body_updates_for("pipeline_content")
-    assert bodies, "expected at least one body update for pipeline_content"
-    last_body = bodies[-1]
-    assert "considered=2" in last_body
-    assert "passed=1" in last_body
-    assert "dropped=1" in last_body
+    assert display.body_updates_for("pipeline_content") == []

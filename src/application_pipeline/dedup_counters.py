@@ -32,9 +32,6 @@ class DedupCounters:
         self._dedup_misses = 0
         self._judge_resumed = 0
 
-    def register(self, order: int) -> None:
-        self._display.register("pipeline_dedup", order=order, phase="running")
-
     def record(self, result: RunScopedSeenResult) -> None:
         with self._lock:
             if result == "url_hit":
@@ -47,8 +44,6 @@ class DedupCounters:
                 self._judge_resumed += 1
             else:  # miss
                 self._dedup_misses += 1
-            body = self._body()
-        self._display.update_body("pipeline_dedup", body=body)
 
     def emit_run_complete(self) -> None:
         with self._lock:
@@ -76,11 +71,3 @@ class DedupCounters:
                 dedup_misses=self._dedup_misses,
                 judge_resumed=self._judge_resumed,
             )
-
-    def _body(self) -> str:
-        return (
-            f"url_hits={self._dedup_url_hits}"
-            f" tuple_hits={self._dedup_tuple_hits}"
-            f" run_hits={self._dedup_run_hits}"
-            f" misses={self._dedup_misses}"
-        )

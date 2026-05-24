@@ -160,10 +160,8 @@ class FreshnessGate:
         )
         with self._lock:
             self._counts[verdict.reason] += 1
-            dropped = self._dropped_count()
         if not verdict.passes:
             self._dedup.mark_expired(stub)
-            self._display.update_body("pipeline_freshness", body=f"dropped={dropped}")
         return verdict.passes
 
     def admit(self, position: _Position) -> bool:
@@ -189,10 +187,8 @@ class FreshnessGate:
         )
         with self._lock:
             self._counts[verdict.reason] += 1
-            dropped = self._dropped_count()
         if not verdict.passes:
             self._dedup.mark_expired(position.stub)
-            self._display.update_body("pipeline_freshness", body=f"dropped={dropped}")
         return verdict.passes
 
     def snapshot(self) -> FreshnessSnapshot:

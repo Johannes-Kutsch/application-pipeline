@@ -3186,7 +3186,7 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
 
 
 def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
-    """Parser row body contains queries/total and stubs; no enriched column when has_native_enrich=False."""
+    """Parser row body uses new counter format: K discovered · F forwarded."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3206,10 +3206,15 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
 
     bodies = display.body_updates_for("parser_bundesagentur_api")
     # _StubParser returns 3 stubs per call; 1 keyword × 1 location = 1 query → 3 stubs
-    # bundesagentur_api has has_native_enrich=False → no enriched column
+    # bundesagentur_api has has_native_enrich=False → enrich_failed counter absent
     final = bodies[-1]
-    assert final.startswith("1/1 queries · 3 stubs"), f"unexpected body: {final!r}"
-    assert "enriched" not in final, f"enriched column must be absent: {final!r}"
+    assert "discovered" in final, f"unexpected body: {final!r}"
+    assert "forwarded" in final, f"unexpected body: {final!r}"
+    assert "queries" not in final, f"old format still present: {final!r}"
+    assert "stubs" not in final, f"old format still present: {final!r}"
+    assert "enrich_failed" not in final, (
+        f"enrich_failed must be absent without native enrich: {final!r}"
+    )
 
 
 def test_parser_row_body_shows_native_enriched_counter(tmp_path: Path) -> None:
@@ -3254,8 +3259,10 @@ def test_parser_row_body_shows_native_enriched_counter(tmp_path: Path) -> None:
 
     bodies = display.body_updates_for("parser_bundesagentur_api")
     final = bodies[-1]
-    # All 3 stubs enriched natively → M == N == 3
-    assert "3/3 enriched" in final, f"expected '3/3 enriched' in {final!r}"
+    # All 3 stubs enriched natively → forwarded appears in body
+    assert "discovered" in final, f"expected 'discovered' in {final!r}"
+    assert "forwarded" in final, f"expected 'forwarded' in {final!r}"
+    assert "queries" not in final, f"old format still present: {final!r}"
 
 
 def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -> None:
@@ -3304,8 +3311,10 @@ def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -
 
     bodies = display.body_updates_for("parser_bundesagentur_api")
     final = bodies[-1]
-    # 1 native out of 3 total enrichments -> M=1, N=3
-    assert "1/3 enriched" in final, f"expected '1/3 enriched' in {final!r}"
+    # 3 stubs discovered; forwarded counter present in new format
+    assert "discovered" in final, f"expected 'discovered' in {final!r}"
+    assert "forwarded" in final, f"expected 'forwarded' in {final!r}"
+    assert "queries" not in final, f"old format still present: {final!r}"
 
 
 def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
@@ -3405,8 +3414,8 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
-    """dedup and prefilter rows are registered after all parser rows."""
+def test_dedup_and_prefilter_rows_not_registered(tmp_path: Path) -> None:
+    """pipeline_dedup and pipeline_prefilter rows are retired; not registered."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3425,30 +3434,14 @@ def test_dedup_and_prefilter_rows_registered(tmp_path: Path) -> None:
     )
 
     registered = display.registered_names()
-    assert "pipeline_dedup" in registered
-    assert "pipeline_prefilter" in registered
-
-    dedup_order = next(
-        c.kwargs["order"]
-        for c in display.calls
-        if c.method == "register" and c.name == "pipeline_dedup"
-    )
-    prefilter_order = next(
-        c.kwargs["order"]
-        for c in display.calls
-        if c.method == "register" and c.name == "pipeline_prefilter"
-    )
-    parser_order = next(
-        c.kwargs["order"]
-        for c in display.calls
-        if c.method == "register" and c.name == "parser_bundesagentur_api"
-    )
-    assert dedup_order > parser_order
-    assert prefilter_order == dedup_order + 1
+    assert "pipeline_dedup" not in registered
+    assert "pipeline_prefilter" not in registered
+    assert "pipeline_freshness" not in registered
+    assert "pipeline_content" not in registered
 
 
-def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:
-    """prefilter row body tracks considered, passed, and dropped counts."""
+def test_prefilter_row_not_published_to_display(tmp_path: Path) -> None:
+    """Retired pipeline_prefilter row receives no body updates."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3466,41 +3459,8 @@ def test_prefilter_row_body_updates_on_enrich_events(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("pipeline_prefilter")
-    assert bodies, "expected at least one body update for pipeline_prefilter row"
-    final = bodies[-1]
-    assert "considered=" in final
-    assert "passed=" in final
-    assert "dropped=" in final
-    assert "bl=" in final
-    assert "wl=" not in final
-
-
-def test_dedup_and_prefilter_rows_not_removed(tmp_path: Path) -> None:
-    """dedup and prefilter rows persist for the entire run (no mid-run removal)."""
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-    display = FakeStatusDisplay()
-
-    run(
-        config_path,
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
-    )
-
-    assert not any(
-        c.method == "remove" and c.name == "pipeline_dedup" for c in display.calls
-    ), "pipeline_dedup row must not be removed during run"
-    assert not any(
-        c.method == "remove" and c.name == "pipeline_prefilter" for c in display.calls
-    ), "pipeline_prefilter row must not be removed during run"
+    assert display.body_updates_for("pipeline_prefilter") == []
+    assert display.body_updates_for("pipeline_dedup") == []
 
 
 # ---------------------------------------------------------------------------
@@ -3536,7 +3496,7 @@ class _MixedLangParser199(_StubParserBase):
 
 
 def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
-    """classify_relevance and judge_match rows are registered below prefilter and adjacent."""
+    """classify_relevance and judge_match rows are registered with adjacent order values."""
     display = FakeStatusDisplay()
 
     run(
@@ -3550,11 +3510,6 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
     assert "llm_classify_relevance" in display.registered_names()
     assert "llm_judge_match" in display.registered_names()
 
-    prefilter_order = next(
-        c.kwargs["order"]
-        for c in display.calls
-        if c.method == "register" and c.name == "pipeline_prefilter"
-    )
     classify_order = next(
         c.kwargs["order"]
         for c in display.calls
@@ -3566,7 +3521,6 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
         if c.method == "register" and c.name == "llm_judge_match"
     )
 
-    assert classify_order > prefilter_order
     assert judge_order == classify_order + 1
 
 

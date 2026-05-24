@@ -63,8 +63,6 @@ class ContentGate:
                 self._content_passed += 1
             else:
                 self._content_dropped_empty_body += 1
-            body = self._body()
-        self._display.update_body("pipeline_content", body=body)
         return passes
 
     def snapshot(self) -> ContentSnapshot:
@@ -86,11 +84,4 @@ class ContentGate:
             content_considered=considered,
             content_passed=passed,
             content_dropped_empty_body=dropped,
-        )
-
-    def _body(self) -> str:
-        return (
-            f"considered={self._content_considered}"
-            f" passed={self._content_passed}"
-            f" dropped={self._content_dropped_empty_body}"
         )

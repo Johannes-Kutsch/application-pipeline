@@ -308,6 +308,65 @@ def test_discover_skips_item_with_missing_title_and_logs(tmp_path: Path) -> None
     assert any("notitle1" in str(row) for row in events_rows)
 
 
+def test_discover_writes_failure_report_when_title_missing(tmp_path: Path) -> None:
+    run_log = RunLog(tmp_path)
+    no_title_item = {"referenznummer": "notitle1"}
+    good_item = _item("good1", "Backend Engineer")
+    http = _make_http(
+        [_search_body([no_title_item, good_item]), _search_body([])], run_log
+    )
+    failures_dir = tmp_path / "failures"
+    with BundesagenturParser(
+        run_log=run_log, failures_dir=failures_dir, _http=http
+    ) as p:
+        stubs = list(p.discover(_query()))
+
+    assert len(stubs) == 1
+    assert isinstance(stubs[0], PositionStub)
+    assert stubs[0].title == "Backend Engineer"
+    failure_files = list(failures_dir.glob("*.md"))
+    assert len(failure_files) == 1
+
+
+def test_discover_writes_failure_report_for_empty_string_title(tmp_path: Path) -> None:
+    run_log = RunLog(tmp_path)
+    empty_title_item = {"referenznummer": "empty1", "stellenangebotsTitel": ""}
+    http = _make_http([_search_body([empty_title_item]), _search_body([])], run_log)
+    failures_dir = tmp_path / "failures"
+    with BundesagenturParser(
+        run_log=run_log, failures_dir=failures_dir, _http=http
+    ) as p:
+        stubs = list(p.discover(_query()))
+
+    assert stubs == []
+    failure_files = list(failures_dir.glob("*.md"))
+    assert len(failure_files) == 1
+
+
+def test_discover_continues_processing_after_missing_title(tmp_path: Path) -> None:
+    run_log = RunLog(tmp_path)
+    no_title_1 = {"referenznummer": "bad1"}
+    good = _item("good1", "Frontend Dev")
+    no_title_2 = {"referenznummer": "bad2"}
+    after = _item("after1", "Backend Dev")
+    http = _make_http(
+        [_search_body([no_title_1, good, no_title_2, after]), _search_body([])], run_log
+    )
+    failures_dir = tmp_path / "failures"
+    with BundesagenturParser(
+        run_log=run_log, failures_dir=failures_dir, _http=http
+    ) as p:
+        stubs = list(p.discover(_query()))
+
+    assert len(stubs) == 2
+    assert isinstance(stubs[0], PositionStub)
+    assert isinstance(stubs[1], PositionStub)
+    assert stubs[0].title == "Frontend Dev"
+    assert stubs[1].title == "Backend Dev"
+    failure_files = list(failures_dir.glob("*.md"))
+    assert len(failure_files) >= 1
+
+
 # ---------------------------------------------------------------------------
 # discover — fixture-based
 # ---------------------------------------------------------------------------

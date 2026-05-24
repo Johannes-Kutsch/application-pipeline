@@ -199,6 +199,14 @@ class BundesagenturParser:
                         "missing_title",
                         item=item,
                     )
+                    write_failure(
+                        stage=f"discover:bundesagentur_api:{ref}",
+                        error=ValueError(
+                            "stellenangebotsTitel missing or empty — API response may have changed shape"
+                        ),
+                        log_tail="",
+                        failures_dir=self._failures_dir,
+                    )
                     continue
                 lokationen: list[dict[str, Any]] = item.get("stellenlokationen") or []
                 first_address = lokationen[0].get("adresse") or {} if lokationen else {}

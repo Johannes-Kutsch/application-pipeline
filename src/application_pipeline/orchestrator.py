@@ -771,9 +771,7 @@ def run(
                 parser_id = source.parser_type
                 inbound: queue.Queue[object] = queue.Queue()
                 worklist = [
-                    ParserQuery(
-                        keyword=kw, location=loc, max_results=source.max_results
-                    )
+                    ParserQuery(keyword=kw, location=loc)
                     for kw in search_terms.keywords
                     for loc in locations
                 ]

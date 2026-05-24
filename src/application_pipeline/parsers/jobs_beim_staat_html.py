@@ -188,7 +188,6 @@ class JobsBeimStaatParser:
                 assert_never(unreachable)
 
         q = "" if query.keyword == "*" else query.keyword
-        count = 0
         step: int | None = None
         start = 0
         today = date.today()
@@ -242,12 +241,9 @@ class JobsBeimStaatParser:
                 break
 
             for stub in page_stubs:
-                if count >= query.max_results:
-                    return
                 if stub.url not in seen_urls:
                     seen_urls.add(stub.url)
                     yield stub
-                    count += 1
 
             start += step
 
@@ -264,7 +260,6 @@ if __name__ == "__main__":
     query = ParserQuery(
         keyword=_sys.argv[1] if len(_sys.argv) > 1 else "*",
         location=City("hamburg"),
-        max_results=5,
     )
     _run_log = RunLog(Path(tempfile.mkdtemp()))
     with JobsBeimStaatParser(run_log=_run_log) as p:

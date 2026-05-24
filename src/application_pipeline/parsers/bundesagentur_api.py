@@ -164,7 +164,6 @@ class BundesagenturParser:
                 return
 
         seen: set[str] = set()
-        count = 0
         page = 1
         while True:
             params: dict[str, object] = {
@@ -189,8 +188,6 @@ class BundesagenturParser:
                 break
 
             for item in items:
-                if count >= query.max_results:
-                    return
                 ref: str = item.get("referenznummer") or ""
                 if not ref or ref in seen:
                     continue
@@ -213,7 +210,6 @@ class BundesagenturParser:
                     company=item.get("firma") or None,
                     location=city,
                 )
-                count += 1
 
             page += 1
 
@@ -230,7 +226,7 @@ if __name__ == "__main__":
 
     keyword = sys.argv[1] if len(sys.argv) > 1 else "Python"
     location = sys.argv[2] if len(sys.argv) > 2 else "Hamburg"
-    query = ParserQuery(keyword=keyword, location=City(location), max_results=5)
+    query = ParserQuery(keyword=keyword, location=City(location))
     _run_log = RunLog(Path(tempfile.mkdtemp()))
     with BundesagenturParser(run_log=_run_log) as p:
         for stub in p.discover(query):

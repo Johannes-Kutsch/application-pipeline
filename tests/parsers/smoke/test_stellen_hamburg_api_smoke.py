@@ -16,7 +16,7 @@ def run_log(tmp_path: Path) -> RunLog:
 
 @pytest.mark.smoke
 def test_discover_hamburg_returns_stubs(run_log: RunLog) -> None:
-    query = ParserQuery(keyword="*", location=City("hamburg"), max_results=5)
+    query = ParserQuery(keyword="*", location=City("hamburg"))
     with StellenHamburgParser(run_log=run_log) as p:
         stubs = [s for s in p.discover(query) if isinstance(s, PositionStub)]
     assert len(stubs) >= 1

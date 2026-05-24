@@ -31,22 +31,12 @@ def write_config(
 
 
 def test_load_returns_populated_config(tmp_path: pathlib.Path) -> None:
-    path = write_config(
-        tmp_path,
-        """
-        from application_pipeline import SourceEntry
-
-        SOURCES = [SourceEntry(parser_type="bundesagentur_api", max_results=500)]
-        LOCATIONS = ["Hamburg"]
-        """,
-    )
+    path = write_config(tmp_path, REQUIRED_BODY)
 
     config = load(path)
 
     assert isinstance(config, Config)
-    assert config.sources == [
-        SourceEntry(parser_type="bundesagentur_api", max_results=500)
-    ]
+    assert config.sources == [SourceEntry(parser_type="bundesagentur_api")]
     assert config.locations == ["Hamburg"]
 
 
@@ -67,7 +57,7 @@ def test_load_raises_when_required_field_missing(
 
 
 def test_source_entry_is_frozen() -> None:
-    entry = SourceEntry(parser_type="bundesagentur_api", max_results=1000)
+    entry = SourceEntry(parser_type="bundesagentur_api")
     with pytest.raises(dataclasses.FrozenInstanceError):
         entry.parser_type = "other"  # type: ignore[misc]
 
@@ -78,9 +68,9 @@ def test_config_is_frozen() -> None:
         config.sources = []  # type: ignore[misc]
 
 
-def test_source_entry_max_results_defaults_to_1000() -> None:
-    entry = SourceEntry(parser_type="bundesagentur_api")
-    assert entry.max_results == 1000
+def test_source_entry_has_no_max_results_field() -> None:
+    field_names = {f.name for f in dataclasses.fields(SourceEntry)}
+    assert "max_results" not in field_names
 
 
 def test_load_defaults_when_optional_fields_absent(tmp_path: pathlib.Path) -> None:
@@ -398,7 +388,7 @@ def test_load_raises_on_duplicate_parser_type(tmp_path: pathlib.Path) -> None:
 
         SOURCES = [
             SourceEntry(parser_type="bundesagentur_api"),
-            SourceEntry(parser_type="bundesagentur_api", max_results=10),
+            SourceEntry(parser_type="bundesagentur_api"),
         ]
         LOCATIONS = ["Hamburg"]
         """,
@@ -411,15 +401,7 @@ def test_load_raises_on_duplicate_parser_type(tmp_path: pathlib.Path) -> None:
 @pytest.mark.parametrize("bad_parser_type", ["", "   "])
 def test_source_entry_rejects_empty_parser_type(bad_parser_type: str) -> None:
     with pytest.raises(ConfigError, match="parser_type"):
-        SourceEntry(parser_type=bad_parser_type, max_results=10)
-
-
-@pytest.mark.parametrize("bad_max_results", [0, -1])
-def test_source_entry_rejects_non_positive_max_results(
-    bad_max_results: int,
-) -> None:
-    with pytest.raises(ConfigError, match="max_results"):
-        SourceEntry(parser_type="bundesagentur_api", max_results=bad_max_results)
+        SourceEntry(parser_type=bad_parser_type)
 
 
 def test_legacy_keywords_silently_ignored(tmp_path: pathlib.Path) -> None:

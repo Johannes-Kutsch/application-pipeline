@@ -22,13 +22,10 @@ Location = City | Remote
 class ParserQuery:
     keyword: str
     location: Location
-    max_results: int
 
     def __post_init__(self) -> None:
         if not self.keyword:
             raise ValueError("keyword must be non-empty")
-        if self.max_results <= 0:
-            raise ValueError("max_results must be positive")
 
 
 @dataclass(frozen=True)

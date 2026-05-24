@@ -82,7 +82,6 @@ def _query(**kwargs: object) -> ParserQuery:
     defaults: dict = {
         "keyword": "python",
         "location": City("Hamburg"),
-        "max_results": 100,
     }
     defaults.update(kwargs)
     return ParserQuery(**defaults)  # type: ignore[arg-type]
@@ -467,19 +466,6 @@ def test_discover_location_none_omits_wo_param(run_log: RunLog) -> None:
         list(p.discover(_query(location=Remote())))
 
     assert all("wo=" not in u for u in urls)
-
-
-# ---------------------------------------------------------------------------
-# discover — max_results
-# ---------------------------------------------------------------------------
-
-
-def test_discover_respects_max_results(run_log: RunLog) -> None:
-    items = [_item(f"id{i}") for i in range(10)]
-    http = _make_http([_search_body(items)], run_log)
-    with BundesagenturParser(run_log=run_log, _http=http) as p:
-        stubs = list(p.discover(_query(max_results=3)))
-    assert len(stubs) == 3
 
 
 # ---------------------------------------------------------------------------

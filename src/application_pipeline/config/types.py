@@ -31,17 +31,10 @@ def resolve_data_paths(data_dir: pathlib.Path) -> DataPaths:
 @dataclass(frozen=True)
 class SourceEntry:
     parser_type: str
-    max_results: int = 1000
 
     def __post_init__(self) -> None:
         if not isinstance(self.parser_type, str) or not self.parser_type.strip():
             raise ConfigError("parser_type must be a non-empty, non-whitespace string")
-        if (
-            isinstance(self.max_results, bool)
-            or not isinstance(self.max_results, int)
-            or self.max_results <= 0
-        ):
-            raise ConfigError("max_results must be a positive integer")
 
 
 @dataclass(frozen=True)

@@ -223,6 +223,18 @@ def test_admit_multiple_blacklist_matches_in_transcript(
 # ---------------------------------------------------------------------------
 
 
+def test_admit_null_title_treated_as_empty_passes(
+    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+) -> None:
+    """A stub with title=None is admitted (empty haystack matches no blacklist term)."""
+    gate = _make_gate(run_log, display, dedup, blacklist=["python"])
+    result = gate.admit(_make_stub(title=None))
+    assert result is True
+    rows = _read_transcripts(logs_dir)
+    assert rows[0]["title"] == ""
+    assert rows[0]["title_len"] == 0
+
+
 def test_admit_does_not_publish_to_pipeline_prefilter_row(
     run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
 ) -> None:

@@ -12,15 +12,14 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from application_pipeline.http import HttpNotRetryableError
 from application_pipeline.parser_log import RunLog
 
-from .body_fetch import fetch_and_strip
 from .errors import ParserError
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
     City,
+    EnrichFailedError,
     EnrichResult,
     NotServedQuery,
     ParserQuery,
@@ -104,8 +103,6 @@ def _backfill_posted_date(stub: PositionStub, data: dict[str, Any]) -> PositionS
 
 
 class BundesagenturParser:
-    _body_selector: str | None = None
-
     def __init__(
         self,
         *,
@@ -136,21 +133,14 @@ class BundesagenturParser:
                 f"{_DETAIL_URL}/{ref_b64}",
                 error_prefix="Bundesagentur jobdetails failed",
             )
-            data: dict[str, Any] = json.loads(raw)
-            description_html: str = data.get("stellenangebotsBeschreibung") or ""
-            body = _strip_html(description_html)
-            updated_stub = _backfill_posted_date(stub, data)
-            return EnrichResult(stub=updated_stub, body=body, mode="native")
-        except (ParserError, HttpNotRetryableError, json.JSONDecodeError):
-            pass
-
-        body = fetch_and_strip(
-            stub.url,
-            body_selector=self._body_selector,
-            source=stub.source,
-            failures_dir=self._failures_dir,
-        )
-        return EnrichResult(stub=stub, body=body, mode="fallback")
+        except ParserError as exc:
+            raise EnrichFailedError(str(exc)) from exc
+        # HttpParserFatalError, HttpRedirectResponse propagate as parser-fatal
+        data: dict[str, Any] = json.loads(raw)
+        description_html: str = data.get("stellenangebotsBeschreibung") or ""
+        body = _strip_html(description_html)
+        updated_stub = _backfill_posted_date(stub, data)
+        return EnrichResult(stub=updated_stub, body=body, mode="native")
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         extra_params: dict[str, object]

@@ -7,11 +7,13 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-import httpx
 import pytest
-import respx
 
-from application_pipeline.http import HttpParserFatalError
+from application_pipeline.http import (
+    HttpParserFatalError,
+    HttpRedirectResponse,
+    HttpStubNotRetryableError,
+)
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserError, ParserQuery, PositionStub
 from application_pipeline.parsers.bundesagentur_api import (
@@ -521,73 +523,72 @@ def test_enrich_native_returns_mode_native_with_body_from_jobdetails(
     assert result.body
 
 
-def test_enrich_falls_back_to_html_when_jobdetails_fails_recoverably(
+def test_enrich_raises_enrich_failed_error_on_native_404(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def failing_get(url: str, timeout: float) -> bytes:
-        raise OSError("connection refused")
+    def not_found_get(url: str, timeout: float) -> bytes:
+        raise HttpStubNotRetryableError("not found: ...")
 
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = ParserHttp(run_log=run_log, _http_get=failing_get, retries=1)
-    with respx.mock:
-        respx.get(stub.url).mock(
-            return_value=httpx.Response(
-                200,
-                text="<html><body><p>Fallback job description text here.</p></body></html>",
-            )
-        )
-        with BundesagenturParser(
-            run_log=run_log, failures_dir=tmp_path, _http=http
-        ) as p:
-            result = p.enrich(stub)
-    assert result.mode == "fallback"
-    assert result.body
+    http = ParserHttp(run_log=run_log, _http_get=not_found_get)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
 
 
-def test_enrich_raises_enrich_failed_error_when_both_paths_fail_with_404(
+def test_enrich_propagates_parser_fatal_error_on_native_401(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def failing_get(url: str, timeout: float) -> bytes:
-        raise OSError("connection refused")
+    def auth_error_get(url: str, timeout: float) -> bytes:
+        raise HttpParserFatalError("auth: forbidden")
 
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = ParserHttp(run_log=run_log, _http_get=failing_get, retries=1)
-    with respx.mock:
-        respx.get(stub.url).mock(return_value=httpx.Response(404))
-        with BundesagenturParser(
-            run_log=run_log, failures_dir=tmp_path, _http=http
-        ) as p:
-            with pytest.raises(EnrichFailedError):
-                p.enrich(stub)
+    http = ParserHttp(run_log=run_log, _http_get=auth_error_get)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(HttpParserFatalError):
+            p.enrich(stub)
 
 
-def test_enrich_propagates_transient_http_error_when_fallback_gets_5xx(
+def test_enrich_propagates_redirect_response_on_native_3xx(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def failing_get(url: str, timeout: float) -> bytes:
-        raise OSError("connection refused")
+    def redirect_get(url: str, timeout: float) -> bytes:
+        raise HttpRedirectResponse(301, "https://new.example.com/")
 
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = ParserHttp(run_log=run_log, _http_get=failing_get, retries=1)
-    with respx.mock:
-        respx.get(stub.url).mock(return_value=httpx.Response(503))
-        with BundesagenturParser(
-            run_log=run_log, failures_dir=tmp_path, _http=http
-        ) as p:
-            with pytest.raises(httpx.HTTPStatusError):
-                p.enrich(stub)
+    http = ParserHttp(run_log=run_log, _http_get=redirect_get)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(HttpRedirectResponse):
+            p.enrich(stub)
+
+
+def test_enrich_propagates_json_decode_error_on_malformed_response(
+    run_log: RunLog, tmp_path: Path
+) -> None:
+    def bad_json_get(url: str, timeout: float) -> bytes:
+        return b"not valid json {"
+
+    stub = PositionStub(
+        url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http = ParserHttp(run_log=run_log, _http_get=bad_json_get)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(json.JSONDecodeError):
+            p.enrich(stub)
 
 
 def test_enrich_native_backfills_posted_date_when_stub_has_none(
@@ -636,32 +637,22 @@ def test_enrich_native_calls_v4_api_with_base64_encoded_ref(
 
 
 # ---------------------------------------------------------------------------
-# enrich — fallback when native raises HttpNotRetryableError
+# enrich — exclusive native path (no fallback)
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_falls_back_to_html_when_jobdetails_raises_http_not_retryable(
+def test_enrich_raises_enrich_failed_error_when_native_api_retries_exhausted(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def fatal_get(url: str, timeout: float) -> bytes:
-        raise HttpParserFatalError("auth: forbidden")
+    def failing_get(url: str, timeout: float) -> bytes:
+        raise OSError("connection refused")
 
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = ParserHttp(run_log=run_log, _http_get=fatal_get)
-    with respx.mock:
-        respx.get(stub.url).mock(
-            return_value=httpx.Response(
-                200,
-                text="<html><body><p>Fallback job description text here.</p></body></html>",
-            )
-        )
-        with BundesagenturParser(
-            run_log=run_log, failures_dir=tmp_path, _http=http
-        ) as p:
-            result = p.enrich(stub)
-    assert result.mode == "fallback"
-    assert result.body
+    http = ParserHttp(run_log=run_log, _http_get=failing_get, retries=1)
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)

@@ -128,12 +128,10 @@ class DeduplicationStore:
     def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
         """Return which dedup tier matched ``key``; on tuple match, write alias.
 
-        Side effect (per ADR-0003): when the URL tier misses but the
-        ``(company_lc, title_lc, location_lc)`` tuple matches a prior entry,
-        an alias entry is written under ``key.url`` carrying the original
-        record's ``status`` and ``status_last_changed`` so future runs short-circuit
-        on the cheap URL lookup. The return value is unaffected by the
-        alias write.
+        Tuple-tier is status-aware: a hit on a ``matched`` entry returns
+        ``judge_pending`` (first hit in a run updates the canonical record's
+        URL and title; subsequent hits within the same ``run_scope`` return
+        ``run_hit``). Non-``matched`` tuple hits write an alias per ADR-0003.
         Returns ``run_hit`` only while a ``run_scope()`` context is active.
         """
         with self._lock:
@@ -147,6 +145,15 @@ class DeduplicationStore:
 
             canonical_url = self._tuple_lookup(key)
             if canonical_url is not None:
+                original_status = self._records[canonical_url].get("status")
+                if original_status == "matched":
+                    if self._in_run is not None and canonical_url in self._in_run:
+                        return "run_hit"
+                    self._update_matched_record(key, canonical_url)
+                    if self._in_run is not None:
+                        self._in_run.add(canonical_url)
+                        self._in_run.add(key.url)
+                    return "judge_pending"
                 self._write_alias(key.url, canonical_url)
                 return "tuple_hit"
 
@@ -260,6 +267,14 @@ class DeduplicationStore:
         self._tuple_index = {
             tkey: u for tkey, u in self._tuple_index.items() if u not in pending_urls
         }
+
+    def _update_matched_record(self, key: _SeenKey, canonical_url: str) -> None:
+        """Update canonical record's URL and title in memory. Caller must hold self._lock."""
+        original = self._records[canonical_url]
+        title_lc = normalize(key.title)
+        original["canonical_url"] = key.url
+        if title_lc is not None:
+            original["title_lc"] = title_lc
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]

@@ -31,6 +31,7 @@ _FUZZY_MIN_TOKENS = 4
 
 if TYPE_CHECKING:
     from application_pipeline.extracts.card_store import CardStore
+    from application_pipeline.parser_log import RunLog
 
 SeenStatus = Literal[
     "out_of_domain",
@@ -89,6 +90,7 @@ class DeduplicationStore:
         *,
         card_store: "CardStore | None" = None,
         cooldown_days: int = 30,
+        run_log: "RunLog | None" = None,
     ) -> None:
         self._path = path
         self._records = records
@@ -102,6 +104,7 @@ class DeduplicationStore:
         self._in_run: set[str] | None = None
         self._card_store = card_store
         self._cooldown_days = cooldown_days
+        self._run_log = run_log
 
     @staticmethod
     def _validate_record(url: str, record: dict[str, Any]) -> None:
@@ -203,6 +206,25 @@ class DeduplicationStore:
                 return url
         return None
 
+    def _log_hit(
+        self,
+        event: str,
+        key: _SeenKey,
+        canonical_url: str,
+    ) -> None:
+        """Write a JSONL hit event. Caller must hold ``self._lock``."""
+        if self._run_log is None:
+            return
+        canonical_record = self._records.get(canonical_url, {})
+        self._run_log.event(
+            "pipeline_dedup",
+            event,
+            new_url=key.url,
+            canonical_url=canonical_url,
+            new_title=key.title,
+            canonical_title=canonical_record.get("title_lc"),
+        )
+
     def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
         """Return which dedup tier matched ``key``; on tuple/fuzzy match, write alias.
 
@@ -234,12 +256,14 @@ class DeduplicationStore:
                     ):
                         return "miss"
                     self._write_alias(key.url, canonical_url)
+                    self._log_hit("tuple_hit", key, canonical_url)
                     return "tuple_hit"
                 canonical_url = self._fuzzy_lookup(key)
                 if canonical_url is not None and canonical_url != key.url:
                     self._write_alias(key.url, canonical_url)
                     if self._records[canonical_url].get("status") == "matched":
                         return "judge_pending"
+                    self._log_hit("fuzzy_hit", key, canonical_url)
                     return "fuzzy_hit"
                 self._write_pending(key)
                 if self._in_run is not None and key.url in self._in_run:
@@ -285,6 +309,7 @@ class DeduplicationStore:
                 ):
                     return "miss"
                 self._write_alias(key.url, canonical_url)
+                self._log_hit("tuple_hit", key, canonical_url)
                 return "tuple_hit"
 
             canonical_url = self._fuzzy_lookup(key)
@@ -299,6 +324,7 @@ class DeduplicationStore:
                         self._in_run.add(key.url)
                     return "judge_pending"
                 self._write_alias(key.url, canonical_url)
+                self._log_hit("fuzzy_hit", key, canonical_url)
                 return "fuzzy_hit"
 
             if self._in_run is not None:
@@ -472,10 +498,15 @@ def load(
     *,
     card_store: "CardStore | None" = None,
     cooldown_days: int = 30,
+    run_log: "RunLog | None" = None,
 ) -> DeduplicationStore:
     if not path.exists():
         return DeduplicationStore(
-            path, {}, card_store=card_store, cooldown_days=cooldown_days
+            path,
+            {},
+            card_store=card_store,
+            cooldown_days=cooldown_days,
+            run_log=run_log,
         )
 
     try:
@@ -525,5 +556,5 @@ def load(
                 )
 
     return DeduplicationStore(
-        path, data, card_store=card_store, cooldown_days=cooldown_days
+        path, data, card_store=card_store, cooldown_days=cooldown_days, run_log=run_log
     )

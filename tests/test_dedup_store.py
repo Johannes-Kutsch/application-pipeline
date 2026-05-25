@@ -1381,3 +1381,133 @@ def test_url_hit_on_selected_by_judge_after_cooldown_returns_judge_pending(
     store = dedup_load(store_path, cooldown_days=30)
     same = StubLike(url="https://example.com/original")
     assert store.is_seen(same) == "judge_pending"
+
+
+# ---------------------------------------------------------------------------
+# JSONL hit logging — tuple_hit and fuzzy_hit
+# ---------------------------------------------------------------------------
+
+
+def _read_dedup_events(logs_dir: Path) -> list[dict]:
+    path = logs_dir / "pipeline" / "dedup.events.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def test_tuple_hit_writes_event_to_jsonl(store_path: Path, tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    store = dedup_load(store_path, run_log=run_log)
+    canonical = StubLike(url="https://example.com/original", title="Software Engineer")
+    new_job = StubLike(url="https://example.com/new-url", title="software engineer")
+    store.mark_out_of_domain(canonical)
+
+    result = store.is_seen(new_job)
+
+    assert result == "tuple_hit"
+    events = _read_dedup_events(logs_dir)
+    assert len(events) == 1
+    evt = events[0]
+    assert evt["event"] == "tuple_hit"
+    assert evt["new_url"] == new_job.url
+    assert evt["canonical_url"] == canonical.url
+    assert evt["new_title"] == new_job.title
+    assert evt["canonical_title"] == "software engineer"
+
+
+def test_fuzzy_hit_writes_event_to_jsonl(store_path: Path, tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    store = dedup_load(store_path, run_log=run_log)
+    canonical = StubLike(
+        url="https://example.com/canonical",
+        title="Senior Software Engineer Backend",
+    )
+    new_job = StubLike(
+        url="https://example.com/new-url",
+        title="Senior Software Engineer Backend Developer",
+    )
+    store.mark_out_of_domain(canonical)
+
+    result = store.is_seen(new_job)
+
+    assert result == "fuzzy_hit"
+    events = _read_dedup_events(logs_dir)
+    assert len(events) == 1
+    evt = events[0]
+    assert evt["event"] == "fuzzy_hit"
+    assert evt["new_url"] == new_job.url
+    assert evt["canonical_url"] == canonical.url
+    assert evt["new_title"] == new_job.title
+    assert evt["canonical_title"] == "senior software engineer backend"
+
+
+def test_url_hit_does_not_write_to_jsonl(store_path: Path, tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    store = dedup_load(store_path, run_log=run_log)
+    stub = StubLike(url="https://example.com/x")
+    store.mark_out_of_domain(stub)
+
+    result = store.is_seen(stub)
+
+    assert result == "url_hit"
+    assert _read_dedup_events(logs_dir) == []
+
+
+def test_run_hit_does_not_write_to_jsonl(store_path: Path, tmp_path: Path) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    store = dedup_load(store_path, run_log=run_log)
+    stub = StubLike(url="https://example.com/x")
+
+    with store.run_scope() as scope:
+        scope.is_seen(stub)  # miss → registers in run
+        result = scope.is_seen(stub)  # run_hit
+
+    assert result == "run_hit"
+    assert _read_dedup_events(logs_dir) == []
+
+
+def test_tuple_hit_concurrent_writes_produce_valid_jsonl(
+    store_path: Path, tmp_path: Path
+) -> None:
+    """Multiple threads hitting is_seen simultaneously must not interleave JSONL lines."""
+    from application_pipeline.parser_log import RunLog
+
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    store = dedup_load(store_path, run_log=run_log)
+
+    canonical = StubLike(url="https://example.com/canonical")
+    store.mark_out_of_domain(canonical)
+
+    errors: list[Exception] = []
+
+    def worker(i: int) -> None:
+        try:
+            new_key = StubLike(url=f"https://example.com/job-{i}")
+            store.is_seen(new_key)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
+    events = _read_dedup_events(logs_dir)
+    # All events must be valid JSON (no interleaved lines)
+    assert all("event" in e for e in events)
+    assert all(e["event"] == "tuple_hit" for e in events)

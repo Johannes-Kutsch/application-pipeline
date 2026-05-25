@@ -217,7 +217,7 @@ def test_classifying_segment_present_after_dequeue_before_complete(
 ) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.classify_buffered(5)
     metrics.classify_batch_enqueued(5)
@@ -230,7 +230,7 @@ def test_classifying_segment_present_after_dequeue_before_complete(
 def test_classifying_segment_absent_after_complete(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     usage = _make_usage()
     metrics.classify_buffered(5)
@@ -245,7 +245,7 @@ def test_classifying_segment_absent_after_complete(run_log: RunLog) -> None:
 def test_classifying_segment_absent_after_failed(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.classify_buffered(3)
     metrics.classify_batch_enqueued(3)
@@ -261,7 +261,7 @@ def test_classifying_segment_position_between_queued_and_dropped(
 ) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.classify_buffered(10)
     metrics.classify_batch_enqueued(5)
@@ -275,7 +275,7 @@ def test_classifying_segment_position_between_queued_and_dropped(
 def test_classifying_reflects_partial_completions(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     usage = _make_usage()
     metrics.classify_buffered(6)

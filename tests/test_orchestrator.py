@@ -453,15 +453,20 @@ def test_integration_dedup_counter_breakdown(
             ]
 
     dedup = MagicMock()
-    # 4 misses, 2 url_hits, 1 tuple_hit
+    # 4 misses, 2 url_hits, 1 tuple_hit at pre-discover; the 4 misses each
+    # trigger a post-enrich is_seen call that returns run_hit (no new match).
     dedup.is_seen.side_effect = [
-        "miss",
-        "miss",
-        "url_hit",
-        "miss",
-        "tuple_hit",
-        "url_hit",
-        "miss",
+        "miss",  # stub0 pre-discover
+        "run_hit",  # stub0 post-enrich (no new match)
+        "miss",  # stub1 pre-discover
+        "run_hit",  # stub1 post-enrich
+        "url_hit",  # stub2 pre-discover (dedup drop, no post-enrich call)
+        "miss",  # stub3 pre-discover
+        "run_hit",  # stub3 post-enrich
+        "tuple_hit",  # stub4 pre-discover (dedup drop, no post-enrich call)
+        "url_hit",  # stub5 pre-discover (dedup drop, no post-enrich call)
+        "miss",  # stub6 pre-discover
+        "run_hit",  # stub6 post-enrich
     ]
     _wire_run_scope(dedup)
 
@@ -621,7 +626,8 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
             return super().enrich(stub, body)
 
     dedup = MagicMock()
-    dedup.is_seen.side_effect = ["url_hit"] * 80 + ["miss"]
+    # 80 url_hits, 1 miss at pre-discover; the miss triggers a post-enrich call (run_hit = no new match).
+    dedup.is_seen.side_effect = ["url_hit"] * 80 + ["miss", "run_hit"]
     _wire_run_scope(dedup)
 
     summary = run(
@@ -5820,3 +5826,153 @@ def test_parser_dead_failure_reports_distinguish_exception_types(
     assert "HttpRedirectResponse" in redirect_report
     assert auth_report != upstream_report, "auth and upstream reports must differ"
     assert auth_report != redirect_report, "auth and redirect reports must differ"
+
+
+# ---------------------------------------------------------------------------
+# Post-enrich dedup check (issue #613)
+# ---------------------------------------------------------------------------
+
+
+def test_post_enrich_dedup_drops_listing_with_backfilled_company(
+    tmp_path: Path,
+) -> None:
+    """A listing with company=None at discover that gets company backfilled is skipped."""
+    import dataclasses as _dc
+
+    existing_url = "https://dedup-test.example/existing"
+    new_url = "https://dedup-test.example/new"
+    seen_path = tmp_path / ".runtime-data" / "seen.json"
+    seen_path.parent.mkdir(parents=True)
+    seen_path.write_text(
+        json.dumps(
+            {
+                existing_url: {
+                    "canonical_url": existing_url,
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "out_of_domain",
+                    "status_last_changed": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _BackfillParser(_StubParserBase):
+        def __enter__(self) -> "_BackfillParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=new_url,
+                    title="Engineer",
+                    source="stub",
+                    company=None,
+                    location=None,
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enriched = _dc.replace(stub, company="Acme", location="Hamburg")
+            return EnrichResult(stub=enriched, body="body " + "x" * 91, mode="fallback")
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _BackfillParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.discovered == 1
+    assert summary.dedup_tuple_hits == 1
+    assert summary.skipped == 1
+    assert summary.written == 0
+
+
+def test_post_enrich_dedup_judge_pending_routes_to_pool(tmp_path: Path) -> None:
+    """Post-enrich dedup hit on a matched entry routes the new stub to the pool."""
+    import dataclasses as _dc
+
+    matched_url = "https://dedup-test.example/matched"
+    new_url = "https://dedup-test.example/new-matched"
+    seen_path = tmp_path / ".runtime-data" / "seen.json"
+    seen_path.parent.mkdir(parents=True)
+    extracts_path = tmp_path / ".runtime-data" / "extracts.json"
+    extracts_path.write_text(
+        json.dumps(
+            {
+                matched_url: {
+                    "header": "Matched Job · ACME · Hamburg",
+                    "summary": "A matched job description.",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    seen_path.write_text(
+        json.dumps(
+            {
+                matched_url: {
+                    "canonical_url": matched_url,
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "matched",
+                    "status_last_changed": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    card_store = load_card_store(extracts_path)
+
+    class _BackfillMatchedParser(_StubParserBase):
+        def __enter__(self) -> "_BackfillMatchedParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=new_url,
+                    title="Engineer",
+                    source="stub",
+                    company=None,
+                    location=None,
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enriched = _dc.replace(stub, company="Acme", location="Hamburg")
+            return EnrichResult(stub=enriched, body="body " + "x" * 91, mode="fallback")
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _BackfillMatchedParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.discovered == 1
+    assert summary.judge_resumed == 1

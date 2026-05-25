@@ -137,6 +137,21 @@ class DeduplicationStore:
         Returns ``run_hit`` only while a ``run_scope()`` context is active.
         """
         with self._lock:
+            existing = self._records.get(key.url)
+            if existing is not None and existing.get("status") == "pending":
+                # Post-enrich path: fields may be backfilled; check for new tuple match
+                # against a different URL (exclude self-references from pending write).
+                canonical_url = self._tuple_lookup(key)
+                if canonical_url is not None and canonical_url != key.url:
+                    self._write_alias(key.url, canonical_url)
+                    if self._records[canonical_url].get("status") == "matched":
+                        return "judge_pending"
+                    return "tuple_hit"
+                self._write_pending(key)
+                if self._in_run is not None and key.url in self._in_run:
+                    return "run_hit"
+                return "url_hit"
+
             if self._in_run is not None and key.url in self._in_run:
                 return "run_hit"
 
@@ -232,6 +247,8 @@ class DeduplicationStore:
             if prior_status == "matched":
                 self._mark(key, "expired", overwrite_if="matched")
                 self._delete_from_stores(key.url)
+            elif prior_status == "expired":
+                self._mark(key, "expired", overwrite_if="expired")
             else:
                 self._mark(key, "expired")
 

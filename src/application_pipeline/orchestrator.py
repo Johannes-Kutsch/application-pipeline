@@ -403,6 +403,17 @@ class _ParserThread(threading.Thread):
         stub = enrich_result.stub
         body = enrich_result.body
 
+        # Post-enrich dedup check (catches backfilled company/location fields)
+        post_enrich_result = self._dedup.is_seen(stub)
+        if post_enrich_result == "judge_pending":
+            self._dedup_counters.record(post_enrich_result)
+            self._pool_collector.add_judge_pending(stub)
+            return
+        if post_enrich_result == "tuple_hit":
+            self._dedup_counters.record(post_enrich_result)
+            self._metrics.increment_dedup_dropped(self._parser_id)
+            return
+
         # Freshness gate (post-enrich arm)
         if not self._freshness.admit(stub, gate_arm="post_enrich"):
             self._metrics.increment_freshness_dropped(self._parser_id)

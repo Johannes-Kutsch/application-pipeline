@@ -775,6 +775,36 @@ def test_expired_status_survives_reload(store_path: Path) -> None:
     assert on_disk["https://example.com/exp-reload"]["status"] == "expired"
 
 
+def test_mark_expired_on_already_expired_refreshes_status_last_changed(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/re-expired": {
+                    "canonical_url": "https://example.com/re-expired",
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "expired",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/re-expired")
+    store.mark_expired(stub)
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk["https://example.com/re-expired"]["status"] == "expired"
+    assert (
+        on_disk["https://example.com/re-expired"]["status_last_changed"]
+        == date.today().isoformat()
+    )
+
+
 def test_expired_status_in_seen_json_does_not_raise_on_load(store_path: Path) -> None:
     store_path.write_text(
         json.dumps(
@@ -895,3 +925,26 @@ def test_pending_entry_absent_from_disk_when_other_url_is_marked(
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     assert pending_stub.url not in on_disk
     assert real_stub.url in on_disk
+
+
+# ---------------------------------------------------------------------------
+# Post-enrich is_seen: pending URL with backfilled fields
+# ---------------------------------------------------------------------------
+
+
+def test_post_enrich_is_seen_catches_tuple_match_after_company_backfill(
+    store: DeduplicationStore,
+) -> None:
+    """A pending URL with company=None that gets company backfilled hits an existing tuple."""
+    existing = StubLike(url="https://example.com/existing")
+    store.mark_out_of_domain(existing)
+
+    # First call: company=None, no tuple index entry written for url_a
+    url_a_pre = StubLike(url="https://example.com/a", company=None)
+    assert store.is_seen(url_a_pre) == "miss"
+
+    # Post-enrich: company now backfilled, same tuple as existing
+    url_a_enriched = StubLike(url="https://example.com/a", company="Acme")
+    result = store.is_seen(url_a_enriched)
+
+    assert result == "tuple_hit"

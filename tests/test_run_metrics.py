@@ -139,8 +139,9 @@ def test_classify_body_all_forwarded(run_log: RunLog) -> None:
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm classify relevance")
-    assert body == "5 queued · 5 forwarded"
+    assert body == "5 forwarded"
     assert "dropped" not in body
+    assert "queued" not in body
 
 
 def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
@@ -154,8 +155,9 @@ def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     metrics.classify_batch_failed(items=3)
 
     body = _last_body(display, "llm classify relevance")
-    assert body == "3 queued · 3 dropped"
+    assert body == "3 dropped"
     assert "forwarded" not in body
+    assert "queued" not in body
 
 
 def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
@@ -183,7 +185,8 @@ def test_classify_body_queued_cumulates_across_batches(run_log: RunLog) -> None:
         metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm classify relevance")
-    assert body == "10 queued · 10 forwarded"
+    assert body == "10 forwarded"
+    assert "queued" not in body
 
 
 def test_classify_body_updates_per_buffered_call(run_log: RunLog) -> None:
@@ -198,6 +201,59 @@ def test_classify_body_updates_per_buffered_call(run_log: RunLog) -> None:
     metrics.classify_buffered(1)
     body_after_second = _last_body(display, "llm classify relevance")
     assert body_after_second == "2 queued"
+
+
+# ---------------------------------------------------------------------------
+# Classify row — queued shows current depth, hidden when zero
+# ---------------------------------------------------------------------------
+
+
+def test_classify_queued_hidden_when_all_items_complete(run_log: RunLog) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    usage = _make_usage()
+    metrics.classify_buffered(5)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
+    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+
+    body = _last_body(display, "llm classify relevance")
+    assert "queued" not in body
+
+
+def test_classify_queued_hidden_when_all_items_errored(run_log: RunLog) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    metrics.classify_buffered(3)
+    metrics.classify_batch_enqueued(3)
+    metrics.classify_batch_dequeued(3)
+    metrics.classify_batch_failed(items=3)
+
+    body = _last_body(display, "llm classify relevance")
+    assert "queued" not in body
+
+
+def test_classify_queued_decreases_as_batches_complete(run_log: RunLog) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    usage = _make_usage()
+    metrics.classify_buffered(10)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
+
+    body_mid = _last_body(display, "llm classify relevance")
+    assert "10 queued" in body_mid
+
+    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+
+    body_after = _last_body(display, "llm classify relevance")
+    assert "5 queued" in body_after
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +273,8 @@ def test_classify_body_queued_dropped_forwarded_format(run_log: RunLog) -> None:
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
 
     body = _last_body(display, "llm classify relevance")
-    assert body == "5 queued · 2 dropped · 3 forwarded"
+    assert body == "2 dropped · 3 forwarded"
+    assert "queued" not in body
 
 
 # ---------------------------------------------------------------------------

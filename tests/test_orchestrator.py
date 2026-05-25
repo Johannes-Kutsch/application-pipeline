@@ -3917,8 +3917,8 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
     classify_bodies = display.body_updates_for("llm classify relevance")
     assert classify_bodies, "expected at least one classify body update"
     last_classify_body = classify_bodies[-1]
-    assert "queued" in last_classify_body, (
-        f"Classify body missing 'queued' at end-of-run: {last_classify_body!r}"
+    assert "queued" not in last_classify_body, (
+        f"Classify body still shows 'queued' at end-of-run (depth should be 0): {last_classify_body!r}"
     )
 
 

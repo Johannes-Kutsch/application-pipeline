@@ -621,13 +621,18 @@ class RunMetrics:
         )
 
     def _classify_body(self) -> str:
+        depth = (
+            self._classify_queued - self._classify_items - self._classify_items_errored
+        )
         dropped = self._classifier_dropped + self._classify_items_errored
         forwarded = self._classify_items - self._classifier_dropped
-        result = f"{self._classify_queued} queued"
+        parts = []
+        if depth > 0:
+            parts.append(f"{depth} queued")
         if self._classifying > 0:
-            result += f" · {self._classifying} classifying"
+            parts.append(f"{self._classifying} classifying")
         if dropped > 0:
-            result += f" · {dropped} dropped"
+            parts.append(f"{dropped} dropped")
         if forwarded > 0:
-            result += f" · {forwarded} forwarded"
-        return result
+            parts.append(f"{forwarded} forwarded")
+        return " · ".join(parts)

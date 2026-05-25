@@ -252,16 +252,14 @@ class DeduplicationStore:
 
     def _evict_pending(self) -> None:
         """Remove in-memory pending entries that were never promoted. Caller must hold ``self._lock``."""
-        pending_urls = [
+        pending_urls = {
             url for url, rec in self._records.items() if rec.get("status") == "pending"
-        ]
+        }
         for url in pending_urls:
-            rec = self._records.pop(url)
-            tkey = (rec.get("company_lc"), rec.get("title_lc"), rec.get("location_lc"))
-            if all(isinstance(v, str) and v for v in tkey):
-                typed_tkey: tuple[str, str, str] = tkey  # type: ignore[assignment]
-                if self._tuple_index.get(typed_tkey) == url:
-                    del self._tuple_index[typed_tkey]
+            del self._records[url]
+        self._tuple_index = {
+            tkey: u for tkey, u in self._tuple_index.items() if u not in pending_urls
+        }
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]

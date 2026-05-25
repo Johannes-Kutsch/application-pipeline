@@ -197,12 +197,14 @@ class RunMetrics:
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
             self._display.update_body("parser_" + parser_id, body=parser_body)
+            self._display.update_phase("parser_" + parser_id, phase="dead")
 
     def parser_done(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).lifecycle = "done"
             body = self._parser_body(parser_id)
         self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_phase("parser_" + parser_id, phase="done")
 
     def not_served_query(self, parser_id: str) -> None:
         with self._lock:
@@ -601,12 +603,7 @@ class RunMetrics:
         if c.content_dropped:
             parts.append(f"{c.content_dropped} content")
         parts.append(f"{c.forwarded} forwarded")
-        body = " · ".join(parts)
-        if c.lifecycle == "done":
-            body += " · done"
-        elif c.lifecycle == "dead":
-            body += " · dead"
-        return body
+        return " · ".join(parts)
 
     def _pipeline_body(self) -> str:
         return (

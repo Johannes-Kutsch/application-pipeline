@@ -1,7 +1,7 @@
-"""Deduplication Store — URL-tier + tuple-tier with alias write.
+"""Deduplication Store — URL-tier + tuple-tier + fuzzy-tier with alias write.
 
 Single-writer module (Pi only, per ADR-0002): no cross-process locking.
-``is_seen`` is intentionally side-effecting on tuple-tier hits — it writes
+``is_seen`` is intentionally side-effecting on tuple/fuzzy-tier hits — it writes
 an alias entry under the new URL so subsequent runs short-circuit on the
 cheap URL lookup. See ADR-0003; do not "fix" this back to a pure read.
 """
@@ -9,6 +9,7 @@ cheap URL lookup. See ADR-0003; do not "fix" this back to a pure read.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -20,6 +21,13 @@ from application_pipeline.atomic_write import write_atomic
 from application_pipeline.text import normalize
 
 from .errors import DedupStoreError
+
+# Gender markers stripped before fuzzy tokenization (ADR-0044).
+_GENDER_MARKER_RE = re.compile(
+    r"\(\s*(?:m\s*/\s*w\s*/\s*d(?:ivers)?|w\s*/\s*m\s*/\s*d(?:ivers)?|a\*)\s*\)",
+    re.IGNORECASE,
+)
+_FUZZY_MIN_TOKENS = 4
 
 if TYPE_CHECKING:
     from application_pipeline.extracts.card_store import CardStore
@@ -38,9 +46,9 @@ _LEGACY_STATUSES: frozenset[str] = frozenset(
 )
 # enrich_failed is retired but may still exist in seen.json; accept it on load.
 _KNOWN_STATUSES: frozenset[str] = frozenset(get_args(SeenStatus)) | {"enrich_failed"}
-SeenResult = Literal["url_hit", "tuple_hit", "judge_pending", "miss"]
+SeenResult = Literal["url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "miss"]
 RunScopedSeenResult = Literal[
-    "url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"
+    "url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "run_hit", "miss"
 ]
 
 
@@ -59,6 +67,20 @@ class _SeenKey(Protocol):
     def location(self) -> str | None: ...
 
 
+def _tokenize_title(title_lc: str) -> frozenset[str]:
+    """Strip gender markers, split into tokens, return as frozenset."""
+    stripped = _GENDER_MARKER_RE.sub("", title_lc)
+    return frozenset(stripped.split())
+
+
+def _fuzzy_subset(tokens_a: frozenset[str], tokens_b: frozenset[str]) -> bool:
+    """Return True if shorter is a subset of longer and has >= _FUZZY_MIN_TOKENS tokens."""
+    shorter, longer = (
+        (tokens_a, tokens_b) if len(tokens_a) <= len(tokens_b) else (tokens_b, tokens_a)
+    )
+    return len(shorter) >= _FUZZY_MIN_TOKENS and shorter <= longer
+
+
 class DeduplicationStore:
     def __init__(
         self,
@@ -71,6 +93,9 @@ class DeduplicationStore:
         self._records = records
         self._tuple_index: dict[tuple[str, str, str], str] = self._build_tuple_index(
             records
+        )
+        self._fuzzy_index: dict[tuple[str, str], list[tuple[frozenset[str], str]]] = (
+            self._build_fuzzy_index(records)
         )
         self._lock = threading.Lock()
         self._in_run: set[str] | None = None
@@ -111,6 +136,29 @@ class DeduplicationStore:
                 index.setdefault((company_lc, title_lc, location_lc), url)
         return index
 
+    @staticmethod
+    def _build_fuzzy_index(
+        records: dict[str, dict[str, Any]],
+    ) -> dict[tuple[str, str], list[tuple[frozenset[str], str]]]:
+        index: dict[tuple[str, str], list[tuple[frozenset[str], str]]] = {}
+        for url, record in records.items():
+            company_lc = record.get("company_lc")
+            title_lc = record.get("title_lc")
+            location_lc = record.get("location_lc")
+            if (
+                isinstance(company_lc, str)
+                and isinstance(title_lc, str)
+                and isinstance(location_lc, str)
+                and company_lc
+                and title_lc
+                and location_lc
+            ):
+                fkey = (company_lc, location_lc)
+                tokens = _tokenize_title(title_lc)
+                bucket = index.setdefault(fkey, [])
+                bucket.append((tokens, url))
+        return index
+
     def _tuple_key(self, key: _SeenKey) -> tuple[str, str, str] | None:
         company_lc = normalize(key.company)
         title_lc = normalize(key.title)
@@ -125,26 +173,49 @@ class DeduplicationStore:
             return None
         return self._tuple_index.get(tkey)
 
-    def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
-        """Return which dedup tier matched ``key``; on tuple match, write alias.
+    def _fuzzy_lookup(self, key: _SeenKey) -> str | None:
+        """Return the URL of the first fuzzy-index entry that token-subset matches key."""
+        company_lc = normalize(key.company)
+        title_lc = normalize(key.title)
+        location_lc = normalize(key.location)
+        if not company_lc or not title_lc or not location_lc:
+            return None
+        fkey = (company_lc, location_lc)
+        bucket = self._fuzzy_index.get(fkey)
+        if bucket is None:
+            return None
+        key_tokens = _tokenize_title(title_lc)
+        for stored_tokens, url in bucket:
+            if _fuzzy_subset(key_tokens, stored_tokens):
+                return url
+        return None
 
-        Tuple-tier is status-aware: a hit on a ``matched`` entry returns
+    def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
+        """Return which dedup tier matched ``key``; on tuple/fuzzy match, write alias.
+
+        Tuple and fuzzy tiers are status-aware: a hit on a ``matched`` entry returns
         ``judge_pending`` (first hit in a run updates the canonical record's
         URL and title; subsequent hits within the same ``run_scope`` return
-        ``run_hit``). Non-``matched`` tuple hits write an alias per ADR-0003.
+        ``run_hit``). Non-``matched`` hits write an alias per ADR-0003.
         Returns ``run_hit`` only while a ``run_scope()`` context is active.
         """
         with self._lock:
             existing = self._records.get(key.url)
             if existing is not None and existing.get("status") == "pending":
-                # Post-enrich path: fields may be backfilled; check for new tuple match
-                # against a different URL (exclude self-references from pending write).
+                # Post-enrich path: fields may be backfilled; check for new tuple/fuzzy
+                # match against a different URL (exclude self-references from pending write).
                 canonical_url = self._tuple_lookup(key)
                 if canonical_url is not None and canonical_url != key.url:
                     self._write_alias(key.url, canonical_url)
                     if self._records[canonical_url].get("status") == "matched":
                         return "judge_pending"
                     return "tuple_hit"
+                canonical_url = self._fuzzy_lookup(key)
+                if canonical_url is not None and canonical_url != key.url:
+                    self._write_alias(key.url, canonical_url)
+                    if self._records[canonical_url].get("status") == "matched":
+                        return "judge_pending"
+                    return "fuzzy_hit"
                 self._write_pending(key)
                 if self._in_run is not None and key.url in self._in_run:
                     return "run_hit"
@@ -172,6 +243,20 @@ class DeduplicationStore:
                 self._write_alias(key.url, canonical_url)
                 return "tuple_hit"
 
+            canonical_url = self._fuzzy_lookup(key)
+            if canonical_url is not None:
+                original_status = self._records[canonical_url].get("status")
+                if original_status == "matched":
+                    if self._in_run is not None and canonical_url in self._in_run:
+                        return "run_hit"
+                    self._update_matched_record(key, canonical_url)
+                    if self._in_run is not None:
+                        self._in_run.add(canonical_url)
+                        self._in_run.add(key.url)
+                    return "judge_pending"
+                self._write_alias(key.url, canonical_url)
+                return "fuzzy_hit"
+
             if self._in_run is not None:
                 self._in_run.add(key.url)
             self._write_pending(key)
@@ -192,6 +277,10 @@ class DeduplicationStore:
         }
         if company_lc and title_lc and location_lc:
             self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
+            fkey = (company_lc, location_lc)
+            tokens = _tokenize_title(title_lc)
+            bucket = self._fuzzy_index.setdefault(fkey, [])
+            bucket.append((tokens, key.url))
 
     def _mark(
         self,
@@ -232,6 +321,11 @@ class DeduplicationStore:
         self._records = new_records
         if company_lc and title_lc and location_lc:
             self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
+            fkey = (company_lc, location_lc)
+            tokens = _tokenize_title(title_lc)
+            bucket = self._fuzzy_index.setdefault(fkey, [])
+            if not any(u == key.url for _, u in bucket):
+                bucket.append((tokens, key.url))
 
     def _delete_from_stores(self, url: str) -> None:
         if self._card_store is not None:
@@ -283,6 +377,11 @@ class DeduplicationStore:
             del self._records[url]
         self._tuple_index = {
             tkey: u for tkey, u in self._tuple_index.items() if u not in pending_urls
+        }
+        self._fuzzy_index = {
+            fkey: kept
+            for fkey, entries in self._fuzzy_index.items()
+            if (kept := [(tokens, u) for tokens, u in entries if u not in pending_urls])
         }
 
     def _update_matched_record(self, key: _SeenKey, canonical_url: str) -> None:

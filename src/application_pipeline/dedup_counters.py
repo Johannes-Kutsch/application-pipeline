@@ -12,13 +12,19 @@ from application_pipeline.status_display import StatusDisplay
 class DedupSnapshot:
     dedup_url_hits: int = 0
     dedup_tuple_hits: int = 0
+    dedup_fuzzy_hits: int = 0
     dedup_run_hits: int = 0
     dedup_misses: int = 0
     judge_resumed: int = 0
 
     @property
     def skipped(self) -> int:
-        return self.dedup_url_hits + self.dedup_tuple_hits + self.dedup_run_hits
+        return (
+            self.dedup_url_hits
+            + self.dedup_tuple_hits
+            + self.dedup_fuzzy_hits
+            + self.dedup_run_hits
+        )
 
 
 class DedupCounters:
@@ -28,6 +34,7 @@ class DedupCounters:
         self._lock = threading.Lock()
         self._dedup_url_hits = 0
         self._dedup_tuple_hits = 0
+        self._dedup_fuzzy_hits = 0
         self._dedup_run_hits = 0
         self._dedup_misses = 0
         self._judge_resumed = 0
@@ -38,6 +45,8 @@ class DedupCounters:
                 self._dedup_url_hits += 1
             elif result == "tuple_hit":
                 self._dedup_tuple_hits += 1
+            elif result == "fuzzy_hit":
+                self._dedup_fuzzy_hits += 1
             elif result == "run_hit":
                 self._dedup_run_hits += 1
             elif result == "judge_pending":
@@ -49,6 +58,7 @@ class DedupCounters:
         with self._lock:
             url_hits = self._dedup_url_hits
             tuple_hits = self._dedup_tuple_hits
+            fuzzy_hits = self._dedup_fuzzy_hits
             run_hits = self._dedup_run_hits
             misses = self._dedup_misses
             judge_resumed = self._judge_resumed
@@ -57,6 +67,7 @@ class DedupCounters:
             "run_complete",
             dedup_url_hits=url_hits,
             dedup_tuple_hits=tuple_hits,
+            dedup_fuzzy_hits=fuzzy_hits,
             dedup_run_hits=run_hits,
             dedup_misses=misses,
             judge_resumed=judge_resumed,
@@ -67,6 +78,7 @@ class DedupCounters:
             return DedupSnapshot(
                 dedup_url_hits=self._dedup_url_hits,
                 dedup_tuple_hits=self._dedup_tuple_hits,
+                dedup_fuzzy_hits=self._dedup_fuzzy_hits,
                 dedup_run_hits=self._dedup_run_hits,
                 dedup_misses=self._dedup_misses,
                 judge_resumed=self._judge_resumed,

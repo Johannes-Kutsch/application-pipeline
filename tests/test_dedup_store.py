@@ -702,11 +702,25 @@ def test_run_scope_re_entering_starts_fresh(store: DeduplicationStore) -> None:
         assert scope2.is_seen(stub) == "miss"
 
 
-def test_run_scoped_seen_result_has_five_variants() -> None:
+def test_run_scoped_seen_result_has_six_variants() -> None:
     from typing import get_args
 
     args = get_args(RunScopedSeenResult)
-    assert set(args) == {"url_hit", "tuple_hit", "judge_pending", "run_hit", "miss"}
+    assert set(args) == {
+        "url_hit",
+        "tuple_hit",
+        "fuzzy_hit",
+        "judge_pending",
+        "run_hit",
+        "miss",
+    }
+
+
+def test_seen_result_includes_fuzzy_hit() -> None:
+    from typing import get_args
+
+    args = get_args(SeenResult)
+    assert "fuzzy_hit" in args
 
 
 def test_run_scope_concurrent_is_seen(store: DeduplicationStore) -> None:
@@ -1002,6 +1016,160 @@ def test_pending_entry_absent_from_disk_when_other_url_is_marked(
 # ---------------------------------------------------------------------------
 # Post-enrich is_seen: pending URL with backfilled fields
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Fuzzy-tuple tier
+# ---------------------------------------------------------------------------
+
+
+def test_fuzzy_hit_when_exact_tuple_misses_but_token_subset_matches(
+    store_path: Path,
+) -> None:
+    """Seen: 'Senior Software Engineer Backend' (4 tokens) → new: 'Senior Software Engineer Backend Developer' should fuzzy-match."""
+    a = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend",
+        location="Hamburg",
+    )
+    b = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path)
+    store.mark_out_of_domain(a)
+    # exact tuple misses (different title_lc), fuzzy should match
+    assert store.is_seen(b) == "fuzzy_hit"
+
+
+def test_fuzzy_hit_direction_independent_longer_seen_first(
+    store_path: Path,
+) -> None:
+    """Longer title seen first; shorter new title should still fuzzy-match."""
+    a = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    b = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path)
+    store.mark_out_of_domain(a)
+    assert store.is_seen(b) == "fuzzy_hit"
+
+
+def test_fuzzy_hit_does_not_fire_when_shorter_has_fewer_than_four_tokens(
+    store_path: Path,
+) -> None:
+    """3-token shorter title must not trigger fuzzy tier."""
+    a = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Software Engineer Backend",
+        location="Hamburg",
+    )
+    b = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Software Engineer Backend Developer Extra",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path)
+    store.mark_out_of_domain(a)
+    # shorter ("Software Engineer Backend") has 3 tokens — must not fire
+    assert store.is_seen(b) == "miss"
+
+
+def test_fuzzy_hit_gender_markers_stripped_before_tokenization(
+    store_path: Path,
+) -> None:
+    """Gender markers like (m/w/d) must be stripped so they don't affect token count or matching."""
+    a = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend (m/w/d)",
+        location="Hamburg",
+    )
+    b = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer (w/m/d)",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path)
+    store.mark_out_of_domain(a)
+    # after stripping gender markers: 4 tokens ⊆ 5 tokens
+    assert store.is_seen(b) == "fuzzy_hit"
+
+
+def test_fuzzy_hit_writes_persistent_alias(store_path: Path) -> None:
+    """Fuzzy hit on non-matched entry writes a persistent alias (same as tuple tier)."""
+    a = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend",
+        location="Hamburg",
+    )
+    b = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path)
+    store.mark_out_of_domain(a)
+    store.is_seen(b)  # fuzzy_hit — alias write should fire
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert b.url in on_disk
+    assert on_disk[b.url]["status"] == "out_of_domain"
+    assert on_disk[b.url]["canonical_url"] == a.url
+
+
+def test_fuzzy_hit_on_matched_returns_judge_pending(store_path: Path) -> None:
+    """Fuzzy hit on a matched entry returns judge_pending (status-aware routing)."""
+    a = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend",
+        location="Hamburg",
+    )
+    b = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path)
+    store.mark_matched(a)
+    assert store.is_seen(b) == "judge_pending"
+
+
+def test_pending_entry_populates_fuzzy_index_on_miss(store_path: Path) -> None:
+    """On miss, pending entry is written and populates fuzzy index so a second call fuzzy-matches."""
+    a = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend",
+        location="Hamburg",
+    )
+    b = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path)
+    assert store.is_seen(a) == "miss"  # writes pending, populates fuzzy index
+    assert store.is_seen(b) == "fuzzy_hit"
 
 
 def test_post_enrich_is_seen_catches_tuple_match_after_company_backfill(

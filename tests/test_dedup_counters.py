@@ -83,6 +83,17 @@ def test_record_miss_increments_misses(
     assert snap.dedup_misses == 1
 
 
+def test_record_fuzzy_hit_increments_fuzzy_hits(
+    run_log: RunLog, display: FakeStatusDisplay
+) -> None:
+    counters = _make(run_log, display)
+    counters.record("fuzzy_hit")
+    snap = counters.snapshot()
+    assert snap.dedup_fuzzy_hits == 1
+    assert snap.dedup_tuple_hits == 0
+    assert snap.dedup_url_hits == 0
+
+
 def test_record_judge_pending_increments_judge_resumed_only(
     run_log: RunLog, display: FakeStatusDisplay
 ) -> None:
@@ -108,11 +119,12 @@ def test_skipped_is_sum_of_hit_variants(
     counters.record("url_hit")
     counters.record("url_hit")
     counters.record("tuple_hit")
+    counters.record("fuzzy_hit")
     counters.record("run_hit")
     counters.record("miss")  # does not contribute to skipped
     counters.record("judge_pending")  # does not contribute to skipped
     snap = counters.snapshot()
-    assert snap.skipped == 4
+    assert snap.skipped == 5
 
 
 def test_snapshot_is_frozen(run_log: RunLog, display: FakeStatusDisplay) -> None:
@@ -150,6 +162,7 @@ def test_emit_run_complete_writes_event_with_counters(
     counters.record("url_hit")
     counters.record("url_hit")
     counters.record("tuple_hit")
+    counters.record("fuzzy_hit")
     counters.record("run_hit")
     counters.record("miss")
     counters.record("judge_pending")
@@ -161,6 +174,7 @@ def test_emit_run_complete_writes_event_with_counters(
     assert evt["event"] == "run_complete"
     assert evt["dedup_url_hits"] == 2
     assert evt["dedup_tuple_hits"] == 1
+    assert evt["dedup_fuzzy_hits"] == 1
     assert evt["dedup_run_hits"] == 1
     assert evt["dedup_misses"] == 1
     assert evt["judge_resumed"] == 1

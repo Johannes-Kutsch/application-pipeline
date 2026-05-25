@@ -161,7 +161,7 @@ Distributed via PyPI (ADR-0020). Install: `.venv/bin/pip install application-pip
 - `application-pipeline init [--refresh]` seeds into `<cwd>/application-pipeline/`.
 - `application-pipeline compile-cv <app_dir>` compiles per-listing draft from slot-map. Windows paths normalized to POSIX for `\def\CvDataDir{...}` (ADR-0024, ADR-0023).
 
-Fail loud-and-fast (exit 2) if `config.py` missing. Cron weekdays 00:30 (ADR-0017). Each tick: `pip install --upgrade` (×2), `init --refresh`, `run`. **`init --refresh`** overwrites `setup/*.sh`, `cv-template/`, package-owned `.claude/skills/` dirs (ADR-0035), deletes `layout.py` (ADR-0033) and obsolete `skills/` dir (ADR-0035). Seeds-if-missing for `config.py`, `user-info/*`, `.gitignore` (ADR-0037). Never touches `.runtime-data/`. Templates organised into routing buckets (ADR-0035). `flock` at `.runtime-data/.cron.lock` (ADR-0037) serialises overlapping ticks. `pycastle/` in this repo is an unrelated RALPH Loop plugin used to *build* this project.
+Fail loud-and-fast (exit 2) if `config.py` missing. Cron weekdays 00:30 (ADR-0017). Each tick: `pip install --upgrade` (×2), `init --refresh`, `run`. **`init --refresh`** overwrites `setup/*.sh`, `cv-template/`, package-owned `.claude/skills/` dirs (ADR-0035), deletes `layout.py` (ADR-0033) and obsolete `skills/` dir (ADR-0035). Seeds-if-missing for `config.py`, `user-info/*`, `.gitignore` (ADR-0037). Never touches `.runtime-data/`. Templates organised into routing buckets (ADR-0035). No flock — single-writer on the Pi, overlapping ticks cannot occur. `pycastle/` in this repo is an unrelated RALPH Loop plugin used to *build* this project.
 
 ## Relationships
 

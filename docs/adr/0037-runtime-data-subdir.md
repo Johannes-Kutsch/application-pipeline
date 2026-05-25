@@ -1,6 +1,6 @@
 # Pipeline-written paths grouped under `.runtime-data/`
 
-All pipeline-written paths move into `<settings-dir>/.runtime-data/`: `seen.json` (renamed from `.seen.json`), `extracts.json`, `logs/`, `failures/`, `.cron.lock`. `results/` and `applications/` stay at root — user-consumed, not run-internal.
+All pipeline-written paths move into `<settings-dir>/.runtime-data/`: `seen.json` (renamed from `.seen.json`), `extracts.json`, `logs/`, `failures/`. `results/` and `applications/` stay at root — user-consumed, not run-internal.
 
 `.seen.json` loses its leading dot (redundant inside a dot-prefixed parent). `.gitignore` seeded by `init` ignores `.runtime-data/`.
 

@@ -70,7 +70,7 @@ def _fallback_bare_fence(text: str) -> tuple[Any, bool]:
     try:
         return json.loads(stripped), True
     except json.JSONDecodeError:
-        raise AgentOutputProtocolError("tag_missing")
+        raise AgentOutputProtocolError("tag_missing") from None
 
 
 def _strip_fence(body: str) -> str:

@@ -76,6 +76,12 @@ def test_extract_json_block_bare_fence_fallback_returns_json_and_signals_fallbac
     assert is_fallback is True
 
 
+def test_extract_json_block_bare_fence_with_malformed_json_raises_tag_missing() -> None:
+    with pytest.raises(AgentOutputProtocolError) as exc_info:
+        extract_json_block("```json\nnot valid json\n```", "verdict")
+    assert exc_info.value.kind == "tag_missing"
+
+
 # ---------------------------------------------------------------------------
 # extract_json_block: tag_missing
 # ---------------------------------------------------------------------------

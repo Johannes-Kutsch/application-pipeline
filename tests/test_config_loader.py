@@ -633,3 +633,50 @@ def test_claude_classify_parallelism_accepts_1(tmp_path: pathlib.Path) -> None:
     config = load(path)
 
     assert config.claude_classify_parallelism == 1
+
+
+# --- dedup_cooldown_days ---
+
+
+def test_dedup_cooldown_days_defaults_to_30(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.dedup_cooldown_days == 30
+
+
+def test_dedup_cooldown_days_reads_configured_value(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nDEDUP_COOLDOWN_DAYS = 14\n")
+
+    config = load(path)
+
+    assert config.dedup_cooldown_days == 14
+
+
+def test_dedup_cooldown_days_accepts_1(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nDEDUP_COOLDOWN_DAYS = 1\n")
+
+    config = load(path)
+
+    assert config.dedup_cooldown_days == 1
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_dedup_cooldown_days_raises_when_less_than_1(
+    tmp_path: pathlib.Path, value: int
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + f"\nDEDUP_COOLDOWN_DAYS = {value}\n")
+
+    with pytest.raises(ConfigError, match="DEDUP_COOLDOWN_DAYS"):
+        load(path)
+
+
+@pytest.mark.parametrize("value", ["'30'", "30.0", "True", "False"])
+def test_dedup_cooldown_days_raises_when_not_int(
+    tmp_path: pathlib.Path, value: str
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + f"\nDEDUP_COOLDOWN_DAYS = {value}\n")
+
+    with pytest.raises(ConfigError, match="DEDUP_COOLDOWN_DAYS"):
+        load(path)

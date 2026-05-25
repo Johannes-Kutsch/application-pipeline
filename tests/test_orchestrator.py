@@ -2476,12 +2476,13 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
     parser_done_idx = next(
         i
         for i, c in enumerate(display.calls)
-        if c.method == "update_body"
-        and str(c.kwargs.get("body", "")).endswith(" · done")
+        if c.method == "update_phase"
+        and c.name.startswith("parser_")
+        and c.kwargs.get("phase") == "done"
     )
 
     assert first_classify_idx < parser_done_idx, (
-        "classify_relevance update_body must precede parser-done update_body"
+        "classify_relevance update_body must precede parser-done update_phase"
     )
 
 
@@ -3156,7 +3157,7 @@ def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
 
 
 def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
-    """Parser row body gains '· done' suffix when parser completes; row is not removed."""
+    """Parser phase column is set to 'done' when parser completes; row is not removed."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3174,10 +3175,14 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("parser_bundesagentur_api")
-    assert bodies, "expected at least one body update for parser row"
-    assert bodies[-1].endswith("· done"), (
-        f"last body {bodies[-1]!r} must end with '· done'"
+    phase_calls = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "parser_bundesagentur_api"
+    ]
+    assert phase_calls, "expected update_phase call for parser row"
+    assert phase_calls[-1].kwargs["phase"] == "done", (
+        f"last phase {phase_calls[-1].kwargs['phase']!r} must be 'done'"
     )
     assert not any(
         c.method == "remove" and c.name == "parser_bundesagentur_api"
@@ -3318,7 +3323,7 @@ def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -
 
 
 def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
-    """Parser row body gains '· dead' suffix when parser thread crashes."""
+    """Parser phase column is set to 'dead' when parser thread crashes."""
 
     class _DeadParserForRow(_StubParserBase):
         def __enter__(self) -> "_DeadParserForRow":
@@ -3348,10 +3353,14 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("parser_bundesagentur_api")
-    assert bodies, "expected at least one body update for dead parser row"
-    assert bodies[-1].endswith("· dead"), (
-        f"last body {bodies[-1]!r} must end with '· dead'"
+    phase_calls = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "parser_bundesagentur_api"
+    ]
+    assert phase_calls, "expected update_phase call for dead parser row"
+    assert phase_calls[-1].kwargs["phase"] == "dead", (
+        f"last phase {phase_calls[-1].kwargs['phase']!r} must be 'dead'"
     )
     assert not any(
         c.method == "remove" and c.name == "parser_bundesagentur_api"

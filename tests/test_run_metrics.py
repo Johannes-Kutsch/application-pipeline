@@ -1077,3 +1077,41 @@ def test_parser_body_forwarded_updates_display_immediately(run_log: RunLog) -> N
     assert after == before + 1
     body = _last_body(display, "parser_p")
     assert "1 forwarded" in body
+
+
+def test_parser_done_sets_phase_column_to_done(run_log: RunLog) -> None:
+    """parser_done() sets the phase column to 'done'; body does not contain '· done'."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=1, total_queries=1)
+
+    metrics.discovered("p")
+    metrics.parser_done("p")
+
+    phase_calls = [
+        c for c in display.calls if c.method == "update_phase" and c.name == "parser_p"
+    ]
+    assert phase_calls, "expected update_phase call for parser_p"
+    assert phase_calls[-1].kwargs["phase"] == "done"
+
+    body = _last_body(display, "parser_p")
+    assert "· done" not in body
+
+
+def test_parser_dead_sets_phase_column_to_dead(run_log: RunLog) -> None:
+    """parser_dead() sets the phase column to 'dead'; body does not contain '· dead'."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=1, total_queries=1)
+
+    metrics.discovered("p")
+    metrics.parser_dead("p")
+
+    phase_calls = [
+        c for c in display.calls if c.method == "update_phase" and c.name == "parser_p"
+    ]
+    assert phase_calls, "expected update_phase call for parser_p"
+    assert phase_calls[-1].kwargs["phase"] == "dead"
+
+    body = _last_body(display, "parser_p")
+    assert "· dead" not in body

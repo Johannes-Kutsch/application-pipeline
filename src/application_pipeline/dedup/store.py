@@ -66,6 +66,7 @@ class DeduplicationStore:
         records: dict[str, dict[str, Any]],
         *,
         card_store: "CardStore | None" = None,
+        cooldown_days: int = 30,
     ) -> None:
         self._path = path
         self._records = records
@@ -75,6 +76,7 @@ class DeduplicationStore:
         self._lock = threading.Lock()
         self._in_run: set[str] | None = None
         self._card_store = card_store
+        self._cooldown_days = cooldown_days
 
     @staticmethod
     def _validate_record(url: str, record: dict[str, Any]) -> None:
@@ -111,6 +113,17 @@ class DeduplicationStore:
                 index.setdefault((company_lc, title_lc, location_lc), url)
         return index
 
+    def _cooldown_expired(self, record: dict[str, Any]) -> bool:
+        """Return True if status_last_changed is older than cooldown_days."""
+        slc = record.get("status_last_changed")
+        if not isinstance(slc, str):
+            return False
+        try:
+            changed = date.fromisoformat(slc)
+        except ValueError:
+            return False
+        return (date.today() - changed).days > self._cooldown_days
+
     def _tuple_key(self, key: _SeenKey) -> tuple[str, str, str] | None:
         company_lc = normalize(key.company)
         title_lc = normalize(key.title)
@@ -141,9 +154,21 @@ class DeduplicationStore:
                 # against a different URL (exclude self-references from pending write).
                 canonical_url = self._tuple_lookup(key)
                 if canonical_url is not None and canonical_url != key.url:
-                    self._write_alias(key.url, canonical_url)
-                    if self._records[canonical_url].get("status") == "matched":
+                    canonical_record = self._records[canonical_url]
+                    canonical_status = canonical_record.get("status")
+                    if canonical_status == "matched":
+                        self._write_alias(key.url, canonical_url)
                         return "judge_pending"
+                    if (
+                        canonical_status == "selected_by_judge"
+                        and self._cooldown_expired(canonical_record)
+                    ):
+                        return "judge_pending"
+                    if canonical_status == "expired" and self._cooldown_expired(
+                        canonical_record
+                    ):
+                        return "miss"
+                    self._write_alias(key.url, canonical_url)
                     return "tuple_hit"
                 self._write_pending(key)
                 if self._in_run is not None and key.url in self._in_run:
@@ -154,13 +179,20 @@ class DeduplicationStore:
                 return "run_hit"
 
             if key.url in self._records:
-                if self._records[key.url].get("status") == "matched":
+                record = self._records[key.url]
+                status = record.get("status")
+                if status == "matched":
                     return "judge_pending"
+                if status == "selected_by_judge" and self._cooldown_expired(record):
+                    return "judge_pending"
+                if status == "expired" and self._cooldown_expired(record):
+                    return "miss"
                 return "url_hit"
 
             canonical_url = self._tuple_lookup(key)
             if canonical_url is not None:
-                original_status = self._records[canonical_url].get("status")
+                original_record = self._records[canonical_url]
+                original_status = original_record.get("status")
                 if original_status == "matched":
                     if self._in_run is not None and canonical_url in self._in_run:
                         return "run_hit"
@@ -169,6 +201,18 @@ class DeduplicationStore:
                         self._in_run.add(canonical_url)
                         self._in_run.add(key.url)
                     return "judge_pending"
+                if original_status == "selected_by_judge" and self._cooldown_expired(
+                    original_record
+                ):
+                    self._update_matched_record(key, canonical_url)
+                    if self._in_run is not None:
+                        self._in_run.add(canonical_url)
+                        self._in_run.add(key.url)
+                    return "judge_pending"
+                if original_status == "expired" and self._cooldown_expired(
+                    original_record
+                ):
+                    return "miss"
                 self._write_alias(key.url, canonical_url)
                 return "tuple_hit"
 
@@ -328,9 +372,12 @@ def load(
     path: Path,
     *,
     card_store: "CardStore | None" = None,
+    cooldown_days: int = 30,
 ) -> DeduplicationStore:
     if not path.exists():
-        return DeduplicationStore(path, {}, card_store=card_store)
+        return DeduplicationStore(
+            path, {}, card_store=card_store, cooldown_days=cooldown_days
+        )
 
     try:
         raw = path.read_bytes()
@@ -378,4 +425,6 @@ def load(
                     f"(see wipe instruction in the store migration guide)"
                 )
 
-    return DeduplicationStore(path, data, card_store=card_store)
+    return DeduplicationStore(
+        path, data, card_store=card_store, cooldown_days=cooldown_days
+    )

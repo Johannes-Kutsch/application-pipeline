@@ -454,10 +454,11 @@ def test_cron_sh_self_locates_via_dirname(tmp_path: Path) -> None:
     assert cd_pos < cron_sh.index("application-pipeline ")
 
 
-def test_cron_sh_flock_uses_project_root_relative_path(tmp_path: Path) -> None:
+def test_cron_sh_has_no_flock_or_cron_lock(tmp_path: Path) -> None:
     init(tmp_path)
     cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
-    assert "application-pipeline/.runtime-data/.cron.lock" in cron_sh
+    assert "flock" not in cron_sh
+    assert ".cron.lock" not in cron_sh
 
 
 def test_cron_sh_pip_upgrade_warns_and_continues_on_failure(tmp_path: Path) -> None:
@@ -488,7 +489,7 @@ def test_cron_sh_pip_warning_names_attempt_number(tmp_path: Path) -> None:
 def test_cron_sh_pip_warning_includes_captured_stderr(tmp_path: Path) -> None:
     init(tmp_path)
     cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
-    assert re.search(r"\$\(pip install.*2>&1", cron_sh)
+    assert re.search(r"\$\(\.venv/bin/pip install.*2>&1", cron_sh)
     assert re.search(r"WARNING.*\$_pip_stderr", cron_sh)
 
 

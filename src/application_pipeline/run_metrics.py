@@ -16,7 +16,6 @@ from application_pipeline.status_display import StatusDisplay
 @dataclass
 class _ParserCounters:
     total_queries: int = 0
-    lifecycle: str = ""  # "" | "done" | "dead"
     discovered: int = 0
     enrich_failed: int = 0
     not_served_queries: int = 0
@@ -191,7 +190,6 @@ class RunMetrics:
             if parser_id:
                 entry = self._parser_entry(parser_id)
                 entry.parsers_dead += 1
-                entry.lifecycle = "dead"
             pipeline_body = self._pipeline_body()
             parser_body = self._parser_body(parser_id) if parser_id else None
         self._display.update_body("pipeline", body=pipeline_body)
@@ -201,7 +199,7 @@ class RunMetrics:
 
     def parser_done(self, parser_id: str) -> None:
         with self._lock:
-            self._parser_entry(parser_id).lifecycle = "done"
+            self._parser_entry(parser_id)
             body = self._parser_body(parser_id)
         self._display.update_body("parser_" + parser_id, body=body)
         self._display.update_phase("parser_" + parser_id, phase="done")

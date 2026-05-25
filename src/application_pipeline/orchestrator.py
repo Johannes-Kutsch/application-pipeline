@@ -748,14 +748,12 @@ def run(
 
             # Create gate instances before starting parser threads so they can be
             # passed into the parser thread constructors.
-            starting_order = 2 + len(parsers_list)
-
             queries_per_parser = len(search_terms.keywords) * len(locations)
             for i, (parser, source) in enumerate(parsers_list):
                 parser_id = source.parser_type
                 metrics.register_parser(
                     parser_id,
-                    order=2 + i,
+                    order=2 + i * 2,
                     total_queries=queries_per_parser,
                     has_native_enrich=native_enrich_by_type.get(parser_id, False),
                 )
@@ -763,7 +761,7 @@ def run(
             status_display.remove("startup")
 
             dedup_counters = DedupCounters(display=status_display, run_log=run_log)
-            metrics.register_rows(starting_order=starting_order)
+            metrics.register_rows()
 
             freshness = FreshnessGate(
                 anchored_today=anchored_today,

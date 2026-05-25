@@ -117,10 +117,8 @@ class RunMetrics:
     # Row registration
     # -----------------------------------------------------------------------
 
-    def register_rows(self, starting_order: int) -> None:
-        self._display.register(
-            "llm_classify_relevance", order=starting_order + 1, phase="running"
-        )
+    def register_rows(self) -> None:
+        self._display.register("llm_classify_relevance", order=1001, phase="running")
 
     def register_parser(
         self,

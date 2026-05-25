@@ -1071,7 +1071,7 @@ def test_tuple_hit_on_selected_by_judge_after_cooldown_updates_url_and_title(
     store = dedup_load(store_path, cooldown_days=30)
     b = StubLike(url="https://example.com/new-url")  # same tuple: acme/engineer/hamburg
     assert store.is_seen(b) == "judge_pending"
-    # Trigger a persist to check in-memory state
+    # Any mark call flushes the full record dict to disk; use it to read back.
     store.mark_out_of_domain(StubLike(url="https://example.com/other", company="Other"))
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     canonical_record = on_disk["https://example.com/original"]

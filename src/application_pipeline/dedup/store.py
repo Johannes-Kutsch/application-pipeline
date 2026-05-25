@@ -196,7 +196,7 @@ class DeduplicationStore:
                 if original_status == "matched":
                     if self._in_run is not None and canonical_url in self._in_run:
                         return "run_hit"
-                    self._update_matched_record(key, canonical_url)
+                    self._update_canonical_record(key, canonical_url)
                     if self._in_run is not None:
                         self._in_run.add(canonical_url)
                         self._in_run.add(key.url)
@@ -204,7 +204,7 @@ class DeduplicationStore:
                 if original_status == "selected_by_judge" and self._cooldown_expired(
                     original_record
                 ):
-                    self._update_matched_record(key, canonical_url)
+                    self._update_canonical_record(key, canonical_url)
                     if self._in_run is not None:
                         self._in_run.add(canonical_url)
                         self._in_run.add(key.url)
@@ -329,7 +329,7 @@ class DeduplicationStore:
             tkey: u for tkey, u in self._tuple_index.items() if u not in pending_urls
         }
 
-    def _update_matched_record(self, key: _SeenKey, canonical_url: str) -> None:
+    def _update_canonical_record(self, key: _SeenKey, canonical_url: str) -> None:
         """Update canonical record's URL and title in memory. Caller must hold self._lock."""
         original = self._records[canonical_url]
         title_lc = normalize(key.title)

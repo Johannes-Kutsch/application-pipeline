@@ -3858,7 +3858,7 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     classify_bodies = display.body_updates_for("llm classify relevance")
     assert classify_bodies, "expected at least one classify_relevance body update"
     last_body = classify_bodies[-1]
-    assert "dropped" in last_body
+    assert "malformed" in last_body
 
 
 def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:

@@ -155,9 +155,10 @@ def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     metrics.classify_batch_failed(items=3)
 
     body = _last_body(display, "llm classify relevance")
-    assert body == "3 dropped"
+    assert body == "3 malformed"
     assert "forwarded" not in body
     assert "queued" not in body
+    assert "dropped" not in body
 
 
 def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
@@ -275,6 +276,74 @@ def test_classify_body_queued_dropped_forwarded_format(run_log: RunLog) -> None:
     body = _last_body(display, "llm classify relevance")
     assert body == "2 dropped · 3 forwarded"
     assert "queued" not in body
+    assert "malformed" not in body
+
+
+def test_classify_body_malformed_hidden_when_zero(run_log: RunLog) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    usage = _make_usage()
+    metrics.classify_buffered(5)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
+    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+
+    body = _last_body(display, "llm classify relevance")
+    assert "malformed" not in body
+
+
+def test_classify_body_malformed_and_dropped_both_present(run_log: RunLog) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    usage = _make_usage()
+    # First batch: 2 items succeed, 1 classifier-dropped
+    metrics.classify_buffered(3)
+    metrics.classify_batch_enqueued(3)
+    metrics.classify_batch_dequeued(3)
+    metrics.classify_batch_complete(usage, items=3, classifier_dropped=1)
+    # Second batch: 2 items fail with LLM error
+    metrics.classify_buffered(2)
+    metrics.classify_batch_enqueued(2)
+    metrics.classify_batch_dequeued(2)
+    metrics.classify_batch_failed(items=2)
+
+    body = _last_body(display, "llm classify relevance")
+    assert body == "2 malformed · 1 dropped · 2 forwarded"
+    assert "queued" not in body
+
+
+def test_classify_body_malformed_ordering_between_queued_and_dropped(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    # Queue some items that aren't yet dequeued
+    metrics.classify_buffered(10)
+    # Fail one batch that was already dequeued
+    metrics.classify_batch_enqueued(3)
+    metrics.classify_batch_dequeued(3)
+    metrics.classify_batch_failed(items=3)
+    # Complete one batch with a classifier drop
+    usage = _make_usage()
+    metrics.classify_batch_enqueued(3)
+    metrics.classify_batch_dequeued(3)
+    metrics.classify_batch_complete(usage, items=3, classifier_dropped=1)
+
+    body = _last_body(display, "llm classify relevance")
+    # queued shows remaining depth; malformed before dropped; forwarded last
+    assert "queued" in body
+    assert "malformed" in body
+    assert "dropped" in body
+    assert "forwarded" in body
+    assert body.index("queued") < body.index("malformed")
+    assert body.index("malformed") < body.index("dropped")
+    assert body.index("dropped") < body.index("forwarded")
 
 
 # ---------------------------------------------------------------------------

@@ -624,15 +624,16 @@ class RunMetrics:
         depth = (
             self._classify_queued - self._classify_items - self._classify_items_errored
         )
-        dropped = self._classifier_dropped + self._classify_items_errored
         forwarded = self._classify_items - self._classifier_dropped
         parts = []
         if depth > 0:
             parts.append(f"{depth} queued")
         if self._classifying > 0:
             parts.append(f"{self._classifying} classifying")
-        if dropped > 0:
-            parts.append(f"{dropped} dropped")
+        if self._classify_items_errored > 0:
+            parts.append(f"{self._classify_items_errored} malformed")
+        if self._classifier_dropped > 0:
+            parts.append(f"{self._classifier_dropped} dropped")
         if forwarded > 0:
             parts.append(f"{forwarded} forwarded")
         return " · ".join(parts)

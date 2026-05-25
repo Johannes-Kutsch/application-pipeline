@@ -288,7 +288,7 @@ def test_tuple_match_writes_alias_with_original_status_and_status_last_changed(
 def test_alias_status_last_changed_is_originals_not_today(
     store_path: Path,
 ) -> None:
-    # Seed a store with a backdated original; alias must copy that date.
+    # Seed a store with an out_of_domain record (no cooldown); alias must copy its date.
     store_path.write_text(
         json.dumps(
             {
@@ -296,7 +296,7 @@ def test_alias_status_last_changed_is_originals_not_today(
                     "company_lc": "acme",
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
-                    "status": "selected_by_judge",
+                    "status": "out_of_domain",
                     "status_last_changed": "2024-01-15",
                 }
             }
@@ -321,7 +321,7 @@ def test_load_silently_migrates_legacy_first_seen(
                     "company_lc": "acme",
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
-                    "status": "selected_by_judge",
+                    "status": "out_of_domain",
                     "first_seen": "2024-01-15",
                 }
             }
@@ -463,7 +463,7 @@ def test_tuple_index_built_at_load_time(store_path: Path) -> None:
                     "company_lc": "acme",
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
-                    "status": "selected_by_judge",
+                    "status": "out_of_domain",
                     "first_seen": "2024-01-01",
                 }
             }
@@ -900,7 +900,7 @@ def test_expired_status_in_seen_json_does_not_raise_on_load(store_path: Path) ->
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
                     "status": "expired",
-                    "first_seen": "2025-01-01",
+                    "status_last_changed": date.today().isoformat(),
                 }
             }
         ),
@@ -1188,3 +1188,196 @@ def test_post_enrich_is_seen_catches_tuple_match_after_company_backfill(
     result = store.is_seen(url_a_enriched)
 
     assert result == "tuple_hit"
+
+
+# ---------------------------------------------------------------------------
+# Cooldown decay: selected_by_judge and expired
+# ---------------------------------------------------------------------------
+
+
+def test_tuple_hit_on_selected_by_judge_after_cooldown_returns_judge_pending(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/original": {
+                    "canonical_url": "https://example.com/original",
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "selected_by_judge",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    b = StubLike(url="https://example.com/new-url")
+    assert store.is_seen(b) == "judge_pending"
+
+
+def test_tuple_hit_on_selected_by_judge_after_cooldown_updates_url_and_title(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/original": {
+                    "canonical_url": "https://example.com/original",
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "selected_by_judge",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    b = StubLike(url="https://example.com/new-url")  # same tuple: acme/engineer/hamburg
+    assert store.is_seen(b) == "judge_pending"
+    # Any mark call flushes the full record dict to disk; use it to read back.
+    store.mark_out_of_domain(StubLike(url="https://example.com/other", company="Other"))
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    canonical_record = on_disk["https://example.com/original"]
+    assert canonical_record["canonical_url"] == "https://example.com/new-url"
+
+
+def test_cooldown_days_from_config_controls_decay_threshold(
+    store_path: Path,
+) -> None:
+    # With cooldown_days=1, a record 2 days old is expired; same record within cooldown_days=30 is not.
+    from datetime import timedelta
+
+    two_days_ago = (date.today() - timedelta(days=2)).isoformat()
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/original": {
+                    "canonical_url": "https://example.com/original",
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "selected_by_judge",
+                    "status_last_changed": two_days_ago,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    short_cooldown = dedup_load(store_path, cooldown_days=1)
+    long_cooldown = dedup_load(store_path, cooldown_days=30)
+    b = StubLike(url="https://example.com/new-url")
+    assert short_cooldown.is_seen(b) == "judge_pending"
+    assert long_cooldown.is_seen(b) == "tuple_hit"
+
+
+def test_tuple_hit_on_selected_by_judge_within_cooldown_returns_tuple_hit(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path, cooldown_days=30)
+    a = StubLike(url="https://example.com/original")
+    store.mark_matched(a)
+    store.mark_selected_by_judge(a)
+    b = StubLike(url="https://example.com/new-url")
+    assert store.is_seen(b) == "tuple_hit"
+
+
+def test_tuple_hit_on_expired_within_cooldown_returns_tuple_hit(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path, cooldown_days=30)
+    a = StubLike(url="https://example.com/original")
+    store.mark_expired(a)
+    b = StubLike(url="https://example.com/new-url")
+    assert store.is_seen(b) == "tuple_hit"
+
+
+def test_url_hit_on_selected_by_judge_within_cooldown_returns_url_hit(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path, cooldown_days=30)
+    stub = StubLike(url="https://example.com/original")
+    store.mark_matched(stub)
+    store.mark_selected_by_judge(stub)
+    assert store.is_seen(stub) == "url_hit"
+
+
+def test_url_hit_on_expired_within_cooldown_returns_url_hit(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path, cooldown_days=30)
+    stub = StubLike(url="https://example.com/original")
+    store.mark_expired(stub)
+    assert store.is_seen(stub) == "url_hit"
+
+
+def test_url_hit_on_expired_after_cooldown_returns_miss(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/expired": {
+                    "canonical_url": "https://example.com/expired",
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "expired",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    assert store.is_seen(StubLike(url="https://example.com/expired")) == "miss"
+
+
+def test_tuple_hit_on_expired_after_cooldown_returns_miss(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/original": {
+                    "canonical_url": "https://example.com/original",
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "expired",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    b = StubLike(url="https://example.com/new-url")
+    assert store.is_seen(b) == "miss"
+
+
+def test_url_hit_on_selected_by_judge_after_cooldown_returns_judge_pending(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/original": {
+                    "canonical_url": "https://example.com/original",
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "selected_by_judge",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    same = StubLike(url="https://example.com/original")
+    assert store.is_seen(same) == "judge_pending"

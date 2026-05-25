@@ -12,5 +12,7 @@ MAX_LISTING_AGE_DAYS = 180  # Freshness Gate threshold: listings older than this
 
 CLAUDE_CLASSIFY_PARALLELISM = 4  # Relevance Classifier parallel worker pool size (>= 1); increase to classify faster, decrease to reduce Claude API concurrency.
 
+DEDUP_COOLDOWN_DAYS = 30  # How long (in days) a seen entry in state "selected_by_judge" or "expired" suppresses duplicate detection before decaying (>= 1).
+
 # LAYOUT defaults to layout.py in the same directory as this file (required).
 # Set LAYOUT = None to skip and use the built-in minimal template instead.

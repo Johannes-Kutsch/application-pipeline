@@ -61,6 +61,12 @@ def load(path: pathlib.Path) -> Config:
     if raw_parallelism < 1:
         raise ConfigError("CLAUDE_CLASSIFY_PARALLELISM must be >= 1")
 
+    raw_cooldown = getattr(module, "DEDUP_COOLDOWN_DAYS", 30)
+    if isinstance(raw_cooldown, bool) or not isinstance(raw_cooldown, int):
+        raise ConfigError("DEDUP_COOLDOWN_DAYS must be an integer")
+    if raw_cooldown < 1:
+        raise ConfigError("DEDUP_COOLDOWN_DAYS must be >= 1")
+
     if hasattr(module, "INCLUSION_KEYWORDS"):
         _log.info(
             "config has unused field 'INCLUSION_KEYWORDS' — safe to remove, see ADR-0026"
@@ -78,6 +84,7 @@ def load(path: pathlib.Path) -> Config:
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
         max_listing_age_days=max_listing_age_days,
         claude_classify_parallelism=raw_parallelism,
+        dedup_cooldown_days=raw_cooldown,
     )
     _validate(config)
     return config

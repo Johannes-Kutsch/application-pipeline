@@ -118,7 +118,7 @@ class RunMetrics:
     # -----------------------------------------------------------------------
 
     def register_rows(self) -> None:
-        self._display.register("llm_classify_relevance", order=1001, phase="running")
+        self._display.register("llm classify relevance", order=1001, phase="running")
 
     def register_parser(
         self,
@@ -134,7 +134,10 @@ class RunMetrics:
             entry.has_native_enrich = has_native_enrich
             body = self._parser_body(parser_id)
         self._display.register(
-            "parser_" + parser_id, order=order, phase="running", body=body
+            "parser " + parser_id.replace("_", " "),
+            order=order,
+            phase="running",
+            body=body,
         )
 
     # -----------------------------------------------------------------------
@@ -170,7 +173,9 @@ class RunMetrics:
             parser_body = self._parser_body(parser_id) if parser_id else None
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
-            self._display.update_body("parser_" + parser_id, body=parser_body)
+            self._display.update_body(
+                "parser " + parser_id.replace("_", " "), body=parser_body
+            )
 
     def enrich_failed(self, parser_id: str = "") -> None:
         with self._lock:
@@ -181,7 +186,9 @@ class RunMetrics:
             parser_body = self._parser_body(parser_id) if parser_id else None
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
-            self._display.update_body("parser_" + parser_id, body=parser_body)
+            self._display.update_body(
+                "parser " + parser_id.replace("_", " "), body=parser_body
+            )
 
     def parser_dead(self, parser_id: str = "") -> None:
         with self._lock:
@@ -193,33 +200,39 @@ class RunMetrics:
             parser_body = self._parser_body(parser_id) if parser_id else None
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
-            self._display.update_body("parser_" + parser_id, body=parser_body)
-            self._display.update_phase("parser_" + parser_id, phase="dead")
+            self._display.update_body(
+                "parser " + parser_id.replace("_", " "), body=parser_body
+            )
+            self._display.update_phase(
+                "parser " + parser_id.replace("_", " "), phase="dead"
+            )
 
     def parser_done(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id)
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
-        self._display.update_phase("parser_" + parser_id, phase="done")
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
+        self._display.update_phase(
+            "parser " + parser_id.replace("_", " "), phase="done"
+        )
 
     def not_served_query(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).not_served_queries += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def unparseable_date(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).unparseable_dates += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def query_done(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).queries_done += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def enriched(self, parser_id: str, mode: str) -> None:
         with self._lock:
@@ -228,43 +241,43 @@ class RunMetrics:
             if mode == "native":
                 entry.native_enriched += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def increment_freshness_dropped(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).freshness_dropped += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def increment_dedup_dropped(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).dedup_dropped += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def increment_prefilter_dropped(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).prefilter_dropped += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def increment_enrich_failed_count(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).enrich_failed_count += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def increment_content_dropped(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).content_dropped += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def increment_forwarded(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).forwarded += 1
             body = self._parser_body(parser_id)
-        self._display.update_body("parser_" + parser_id, body=body)
+        self._display.update_body("parser " + parser_id.replace("_", " "), body=body)
 
     def parser_summary(
         self, parser_id: str, end_monotonic: float, started_monotonic: float
@@ -289,12 +302,12 @@ class RunMetrics:
             self._pending_classify += n
             self._classify_queued += n
             body = self._classify_body()
-        self._display.update_body("llm_classify_relevance", body=body)
+        self._display.update_body("llm classify relevance", body=body)
 
     def classify_batch_enqueued(self, n: int) -> None:
         with self._classify_lock:
             body = self._classify_body()
-        self._display.update_body("llm_classify_relevance", body=body)
+        self._display.update_body("llm classify relevance", body=body)
 
     def classify_batch_dequeued(self, n: int) -> None:
         with self._classify_lock:
@@ -302,7 +315,7 @@ class RunMetrics:
             self._pending_classify -= n
             self._classifying += n
             body = self._classify_body()
-        self._display.update_body("llm_classify_relevance", body=body)
+        self._display.update_body("llm classify relevance", body=body)
 
     def classify_batch_complete(
         self, usage: CallUsage, items: int, classifier_dropped: int
@@ -318,7 +331,7 @@ class RunMetrics:
             self._classifier_dropped += classifier_dropped
             self._classifying -= items
             body = self._classify_body()
-        self._display.update_body("llm_classify_relevance", body=body)
+        self._display.update_body("llm classify relevance", body=body)
 
     def classify_batch_failed(self, items: int) -> None:
         with self._classify_lock:
@@ -326,7 +339,7 @@ class RunMetrics:
             self._classify_items_errored += items
             self._classifying -= items
             body = self._classify_body()
-        self._display.update_body("llm_classify_relevance", body=body)
+        self._display.update_body("llm classify relevance", body=body)
 
     # -----------------------------------------------------------------------
     # Judge-stage events

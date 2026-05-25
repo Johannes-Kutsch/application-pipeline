@@ -2471,13 +2471,13 @@ def test_parser_classify_overlap(tmp_path: Path) -> None:
     first_classify_idx = next(
         i
         for i, c in enumerate(display.calls)
-        if c.method == "update_body" and c.name == "llm_classify_relevance"
+        if c.method == "update_body" and c.name == "llm classify relevance"
     )
     parser_done_idx = next(
         i
         for i, c in enumerate(display.calls)
         if c.method == "update_phase"
-        and c.name.startswith("parser_")
+        and c.name.startswith("parser ")
         and c.kwargs.get("phase") == "done"
     )
 
@@ -3118,11 +3118,11 @@ def test_parser_row_registered_per_parser(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    assert "parser_bundesagentur_api" in display.registered_names()
+    assert "parser bundesagentur api" in display.registered_names()
     reg = next(
         c
         for c in display.calls
-        if c.method == "register" and c.name == "parser_bundesagentur_api"
+        if c.method == "register" and c.name == "parser bundesagentur api"
     )
     assert reg.kwargs["order"] >= 2
 
@@ -3151,7 +3151,7 @@ def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
         i for i, m, n in indexed if m == "register" and n == "startup"
     )
     parser_reg_idx = next(
-        i for i, m, n in indexed if m == "register" and n == "parser_bundesagentur_api"
+        i for i, m, n in indexed if m == "register" and n == "parser bundesagentur api"
     )
     assert parser_reg_idx > startup_reg_idx
 
@@ -3178,14 +3178,14 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
     phase_calls = [
         c
         for c in display.calls
-        if c.method == "update_phase" and c.name == "parser_bundesagentur_api"
+        if c.method == "update_phase" and c.name == "parser bundesagentur api"
     ]
     assert phase_calls, "expected update_phase call for parser row"
     assert phase_calls[-1].kwargs["phase"] == "done", (
         f"last phase {phase_calls[-1].kwargs['phase']!r} must be 'done'"
     )
     assert not any(
-        c.method == "remove" and c.name == "parser_bundesagentur_api"
+        c.method == "remove" and c.name == "parser bundesagentur api"
         for c in display.calls
     ), "parser row must not be removed during run"
 
@@ -3209,7 +3209,7 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("parser_bundesagentur_api")
+    bodies = display.body_updates_for("parser bundesagentur api")
     # _StubParser returns 3 stubs per call; 1 keyword × 1 location = 1 query → 3 stubs
     # bundesagentur_api has has_native_enrich=False → enrich_failed counter absent
     final = bodies[-1]
@@ -3262,7 +3262,7 @@ def test_parser_row_body_shows_native_enriched_counter(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    bodies = display.body_updates_for("parser_bundesagentur_api")
+    bodies = display.body_updates_for("parser bundesagentur api")
     final = bodies[-1]
     # All 3 stubs enriched natively → forwarded appears in body
     assert "discovered" in final, f"expected 'discovered' in {final!r}"
@@ -3314,7 +3314,7 @@ def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -
         status_display=display,
     )
 
-    bodies = display.body_updates_for("parser_bundesagentur_api")
+    bodies = display.body_updates_for("parser bundesagentur api")
     final = bodies[-1]
     # 3 stubs discovered; forwarded counter present in new format
     assert "discovered" in final, f"expected 'discovered' in {final!r}"
@@ -3356,14 +3356,14 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
     phase_calls = [
         c
         for c in display.calls
-        if c.method == "update_phase" and c.name == "parser_bundesagentur_api"
+        if c.method == "update_phase" and c.name == "parser bundesagentur api"
     ]
     assert phase_calls, "expected update_phase call for dead parser row"
     assert phase_calls[-1].kwargs["phase"] == "dead", (
         f"last phase {phase_calls[-1].kwargs['phase']!r} must be 'dead'"
     )
     assert not any(
-        c.method == "remove" and c.name == "parser_bundesagentur_api"
+        c.method == "remove" and c.name == "parser bundesagentur api"
         for c in display.calls
     ), "dead parser row must not be removed"
 
@@ -3400,18 +3400,18 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
     )
 
     registered = display.registered_names()
-    assert "parser_bundesagentur_api" in registered
-    assert "parser_stellen_hamburg_api" in registered
+    assert "parser bundesagentur api" in registered
+    assert "parser stellen hamburg api" in registered
 
     order_a = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "parser_bundesagentur_api"
+        if c.method == "register" and c.name == "parser bundesagentur api"
     )
     order_b = next(
         c.kwargs["order"]
         for c in display.calls
-        if c.method == "register" and c.name == "parser_stellen_hamburg_api"
+        if c.method == "register" and c.name == "parser stellen hamburg api"
     )
     assert order_a >= 2
     assert order_b >= 2
@@ -3516,7 +3516,7 @@ def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    assert "llm_classify_relevance" in display.registered_names()
+    assert "llm classify relevance" in display.registered_names()
     assert "llm_judge_match" not in display.registered_names()
 
 
@@ -3540,7 +3540,7 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
     )
 
     assert not any(
-        c.method == "remove" and c.name == "llm_classify_relevance"
+        c.method == "remove" and c.name == "llm classify relevance"
         for c in display.calls
     ), "classify_relevance row must not be removed during run"
 
@@ -3847,7 +3847,7 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    classify_bodies = display.body_updates_for("llm_classify_relevance")
+    classify_bodies = display.body_updates_for("llm classify relevance")
     assert classify_bodies, "expected at least one classify_relevance body update"
     last_body = classify_bodies[-1]
     assert "dropped" in last_body
@@ -3865,7 +3865,7 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    for body in display.body_updates_for("llm_classify_relevance"):
+    for body in display.body_updates_for("llm classify relevance"):
         assert "calls_failed=" not in body
         assert "items_failed=" not in body
 
@@ -3912,7 +3912,7 @@ def test_pending_drains_to_zero_on_clean_run(tmp_path: Path) -> None:
         status_display=display,
     )
 
-    classify_bodies = display.body_updates_for("llm_classify_relevance")
+    classify_bodies = display.body_updates_for("llm classify relevance")
     assert classify_bodies, "expected at least one classify body update"
     last_classify_body = classify_bodies[-1]
     assert "queued" in last_classify_body, (

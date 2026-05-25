@@ -74,8 +74,21 @@ def test_register_rows_creates_only_classify_row(
     metrics.register_rows()
 
     assert _registers(display) == [
-        ("llm_classify_relevance", 1001, "running"),
+        ("llm classify relevance", 1001, "running"),
     ]
+
+
+def test_register_rows_classify_row_name_uses_spaces(
+    run_log: RunLog,
+) -> None:
+    """The classify row name visible in the Status Display uses spaces, not underscores."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    names = [c.name for c in display.calls if c.method == "register"]
+    assert "llm classify relevance" in names
+    assert "llm_classify_relevance" not in names
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +138,7 @@ def test_classify_body_all_forwarded(run_log: RunLog) -> None:
     metrics.classify_batch_dequeued(5)
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert body == "5 queued · 5 forwarded"
     assert "dropped" not in body
 
@@ -140,7 +153,7 @@ def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     metrics.classify_batch_dequeued(3)
     metrics.classify_batch_failed(items=3)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert body == "3 queued · 3 dropped"
     assert "forwarded" not in body
 
@@ -153,7 +166,7 @@ def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
     metrics.classify_buffered(4)
     metrics.classify_buffered(2)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert body == "6 queued"
 
 
@@ -169,7 +182,7 @@ def test_classify_body_queued_cumulates_across_batches(run_log: RunLog) -> None:
         metrics.classify_batch_dequeued(5)
         metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert body == "10 queued · 10 forwarded"
 
 
@@ -179,11 +192,11 @@ def test_classify_body_updates_per_buffered_call(run_log: RunLog) -> None:
     metrics.register_rows()
 
     metrics.classify_buffered(1)
-    body_after_first = _last_body(display, "llm_classify_relevance")
+    body_after_first = _last_body(display, "llm classify relevance")
     assert body_after_first == "1 queued"
 
     metrics.classify_buffered(1)
-    body_after_second = _last_body(display, "llm_classify_relevance")
+    body_after_second = _last_body(display, "llm classify relevance")
     assert body_after_second == "2 queued"
 
 
@@ -203,7 +216,7 @@ def test_classify_body_queued_dropped_forwarded_format(run_log: RunLog) -> None:
     metrics.classify_batch_dequeued(5)
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert body == "5 queued · 2 dropped · 3 forwarded"
 
 
@@ -223,7 +236,7 @@ def test_classifying_segment_present_after_dequeue_before_complete(
     metrics.classify_batch_enqueued(5)
     metrics.classify_batch_dequeued(5)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert "5 classifying" in body
 
 
@@ -238,7 +251,7 @@ def test_classifying_segment_absent_after_complete(run_log: RunLog) -> None:
     metrics.classify_batch_dequeued(5)
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert "classifying" not in body
 
 
@@ -252,7 +265,7 @@ def test_classifying_segment_absent_after_failed(run_log: RunLog) -> None:
     metrics.classify_batch_dequeued(3)
     metrics.classify_batch_failed(items=3)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert "classifying" not in body
 
 
@@ -268,7 +281,7 @@ def test_classifying_segment_position_between_queued_and_dropped(
     metrics.classify_batch_dequeued(5)
     # 5 more still buffered but not yet dequeued — only the 5 dequeued are classifying
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert body == "10 queued · 5 classifying"
 
 
@@ -283,7 +296,7 @@ def test_classifying_reflects_partial_completions(run_log: RunLog) -> None:
     metrics.classify_batch_dequeued(6)
     metrics.classify_batch_complete(usage, items=3, classifier_dropped=0)
 
-    body = _last_body(display, "llm_classify_relevance")
+    body = _last_body(display, "llm classify relevance")
     assert "3 classifying" in body
 
 
@@ -998,7 +1011,7 @@ def test_parser_body_shows_discovered_and_forwarded_not_queries(
     metrics.discovered("p")
     metrics.discovered("p")
 
-    body = _last_body(display, "parser_p")
+    body = _last_body(display, "parser p")
     assert "2 discovered" in body
     assert "queries" not in body
     assert "stubs" not in body
@@ -1012,7 +1025,7 @@ def test_parser_body_zero_drop_counters_hidden(run_log: RunLog) -> None:
 
     metrics.discovered("p")
 
-    body = _last_body(display, "parser_p")
+    body = _last_body(display, "parser p")
     assert "freshness" not in body
     assert "dedup" not in body
     assert "pre-filter" not in body
@@ -1038,7 +1051,7 @@ def test_parser_body_nonzero_drop_counters_appear_inline(run_log: RunLog) -> Non
     # Trigger display update
     metrics.parser_done("p")
 
-    body = _last_body(display, "parser_p")
+    body = _last_body(display, "parser p")
     assert "3 freshness" in body
     assert "1 dedup" in body
     assert "1 pre-filter" in body
@@ -1059,7 +1072,7 @@ def test_parser_body_enrich_failed_hidden_without_native_enrich(
     metrics.increment_enrich_failed_count("p")
     metrics.parser_done("p")
 
-    body = _last_body(display, "parser_p")
+    body = _last_body(display, "parser p")
     assert "enrich_failed" not in body
 
 
@@ -1070,12 +1083,12 @@ def test_parser_body_forwarded_updates_display_immediately(run_log: RunLog) -> N
     metrics.register_parser("p", order=1, total_queries=2)
 
     metrics.discovered("p")
-    before = len(display.body_updates_for("parser_p"))
+    before = len(display.body_updates_for("parser p"))
     metrics.increment_forwarded("p")
-    after = len(display.body_updates_for("parser_p"))
+    after = len(display.body_updates_for("parser p"))
 
     assert after == before + 1
-    body = _last_body(display, "parser_p")
+    body = _last_body(display, "parser p")
     assert "1 forwarded" in body
 
 
@@ -1089,12 +1102,12 @@ def test_parser_done_sets_phase_column_to_done(run_log: RunLog) -> None:
     metrics.parser_done("p")
 
     phase_calls = [
-        c for c in display.calls if c.method == "update_phase" and c.name == "parser_p"
+        c for c in display.calls if c.method == "update_phase" and c.name == "parser p"
     ]
-    assert phase_calls, "expected update_phase call for parser_p"
+    assert phase_calls, "expected update_phase call for parser p"
     assert phase_calls[-1].kwargs["phase"] == "done"
 
-    body = _last_body(display, "parser_p")
+    body = _last_body(display, "parser p")
     assert "· done" not in body
 
 
@@ -1108,10 +1121,10 @@ def test_parser_dead_sets_phase_column_to_dead(run_log: RunLog) -> None:
     metrics.parser_dead("p")
 
     phase_calls = [
-        c for c in display.calls if c.method == "update_phase" and c.name == "parser_p"
+        c for c in display.calls if c.method == "update_phase" and c.name == "parser p"
     ]
-    assert phase_calls, "expected update_phase call for parser_p"
+    assert phase_calls, "expected update_phase call for parser p"
     assert phase_calls[-1].kwargs["phase"] == "dead"
 
-    body = _last_body(display, "parser_p")
+    body = _last_body(display, "parser p")
     assert "· dead" not in body

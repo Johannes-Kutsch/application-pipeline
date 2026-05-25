@@ -217,6 +217,86 @@ def test_classify_body_queued_dropped_forwarded_format(run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Classify row — classifying (in-flight) segment
+# ---------------------------------------------------------------------------
+
+
+def test_classifying_segment_present_after_dequeue_before_complete(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows(0)
+
+    metrics.classify_buffered(5)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
+
+    body = _last_body(display, "llm_classify_relevance")
+    assert "5 classifying" in body
+
+
+def test_classifying_segment_absent_after_complete(run_log: RunLog) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows(0)
+
+    usage = _make_usage()
+    metrics.classify_buffered(5)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
+    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+
+    body = _last_body(display, "llm_classify_relevance")
+    assert "classifying" not in body
+
+
+def test_classifying_segment_absent_after_failed(run_log: RunLog) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows(0)
+
+    metrics.classify_buffered(3)
+    metrics.classify_batch_enqueued(3)
+    metrics.classify_batch_dequeued(3)
+    metrics.classify_batch_failed(items=3)
+
+    body = _last_body(display, "llm_classify_relevance")
+    assert "classifying" not in body
+
+
+def test_classifying_segment_position_between_queued_and_dropped(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows(0)
+
+    metrics.classify_buffered(10)
+    metrics.classify_batch_enqueued(5)
+    metrics.classify_batch_dequeued(5)
+    # 5 more still buffered but not yet dequeued — only the 5 dequeued are classifying
+
+    body = _last_body(display, "llm_classify_relevance")
+    assert body == "10 queued · 5 classifying"
+
+
+def test_classifying_reflects_partial_completions(run_log: RunLog) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows(0)
+
+    usage = _make_usage()
+    metrics.classify_buffered(6)
+    metrics.classify_batch_enqueued(6)
+    metrics.classify_batch_dequeued(6)
+    metrics.classify_batch_complete(usage, items=3, classifier_dropped=0)
+
+    body = _last_body(display, "llm_classify_relevance")
+    assert "3 classifying" in body
+
+
+# ---------------------------------------------------------------------------
 # Judge-stage events — no persistent status row
 # ---------------------------------------------------------------------------
 

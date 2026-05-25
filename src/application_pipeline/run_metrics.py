@@ -90,6 +90,7 @@ class RunMetrics:
         self._classify_items_errored = 0
         self._total_batches = 0
         self._classify_queued = 0
+        self._classifying = 0
 
         # Pending-depth counters
         self._pending_classify = 0
@@ -301,6 +302,7 @@ class RunMetrics:
         with self._classify_lock:
             self._total_batches += 1
             self._pending_classify -= n
+            self._classifying += n
             body = self._classify_body()
         self._display.update_body("llm_classify_relevance", body=body)
 
@@ -316,6 +318,7 @@ class RunMetrics:
             self._classify_cost_usd += usage.cost_usd
             self._classify_total_s += usage.duration_s
             self._classifier_dropped += classifier_dropped
+            self._classifying -= items
             body = self._classify_body()
         self._display.update_body("llm_classify_relevance", body=body)
 
@@ -323,6 +326,7 @@ class RunMetrics:
         with self._classify_lock:
             self._classify_failed += 1
             self._classify_items_errored += items
+            self._classifying -= items
             body = self._classify_body()
         self._display.update_body("llm_classify_relevance", body=body)
 
@@ -618,6 +622,8 @@ class RunMetrics:
         dropped = self._classifier_dropped + self._classify_items_errored
         forwarded = self._classify_items - self._classifier_dropped
         result = f"{self._classify_queued} queued"
+        if self._classifying > 0:
+            result += f" · {self._classifying} classifying"
         if dropped > 0:
             result += f" · {dropped} dropped"
         if forwarded > 0:

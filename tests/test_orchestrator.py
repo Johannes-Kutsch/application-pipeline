@@ -56,7 +56,7 @@ class _StubParserBase:
         pass
 
     def enrich(self, stub: PositionStub) -> EnrichResult:
-        return EnrichResult(stub=stub, body="stub body", mode="fallback")
+        return EnrichResult(stub=stub, body="stub body " + "x" * 91, mode="fallback")
 
 
 # ---------------------------------------------------------------------------
@@ -3243,7 +3243,9 @@ def test_parser_row_body_shows_native_enriched_counter(tmp_path: Path) -> None:
             ]
 
         def enrich(self, stub: PositionStub) -> EnrichResult:
-            return EnrichResult(stub=stub, body="native body", mode="native")
+            return EnrichResult(
+                stub=stub, body="native body " + "x" * 89, mode="native"
+            )
 
     config_path = _write_config(
         tmp_path,
@@ -3294,8 +3296,8 @@ def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -
         def enrich(self, stub: PositionStub) -> EnrichResult:
             call_count[0] += 1
             if call_count[0] == 1:
-                return EnrichResult(stub=stub, body="body", mode="native")
-            return EnrichResult(stub=stub, body="body", mode="fallback")
+                return EnrichResult(stub=stub, body="body " + "x" * 96, mode="native")
+            return EnrichResult(stub=stub, body="body " + "x" * 96, mode="fallback")
 
     config_path = _write_config(
         tmp_path,
@@ -5043,7 +5045,9 @@ def test_gates_bundle_passing_stub_parser_enrich_called(tmp_path: Path) -> None:
 
         def enrich(self, stub: PositionStub) -> EnrichResult:
             enrich_calls.append(stub.url)
-            return EnrichResult(stub=stub, body="job body text", mode="fallback")
+            return EnrichResult(
+                stub=stub, body="job body text " + "x" * 87, mode="fallback"
+            )
 
     class _TrackingLLMEnricher(_FakeLLMEnricherHelper):
         def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None":
@@ -5105,7 +5109,9 @@ def test_post_enrich_gates_drops_stub_with_expired_posted_date_backfilled(
                 source=stub.source,
                 posted_date=expired_date,
             )
-            return EnrichResult(stub=enriched, body="job body", mode="native")
+            return EnrichResult(
+                stub=enriched, body="job body " + "x" * 92, mode="native"
+            )
 
     card_store = _make_card_store(tmp_path)
 
@@ -5179,7 +5185,7 @@ def test_post_enrich_expired_stub_absent_from_llm_classify_events(
                     source=stub.source,
                     posted_date=expired_date,
                 ),
-                body="job body",
+                body="job body " + "x" * 92,
                 mode="native",
             )
 
@@ -5235,7 +5241,9 @@ def test_post_enrich_non_expired_stub_reaches_llm_enricher(
                 source=stub.source,
                 posted_date=recent_date,
             )
-            return EnrichResult(stub=enriched, body="fresh job body", mode="native")
+            return EnrichResult(
+                stub=enriched, body="fresh job body " + "x" * 86, mode="native"
+            )
 
     card_store = _make_card_store(tmp_path)
 
@@ -5262,7 +5270,7 @@ def test_post_enrich_non_expired_stub_reaches_llm_enricher(
     assert len(llm_calls) == 1, "fresh stub must reach LLM Enricher exactly once"
     url_received, body_received = llm_calls[0]
     assert url_received == fresh_url
-    assert body_received == "fresh job body"
+    assert body_received == "fresh job body " + "x" * 86
 
 
 def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
@@ -5541,7 +5549,7 @@ def test_body_fetch_runs_on_parser_thread_not_classify_worker(tmp_path: Path) ->
 
         def enrich(self, stub: PositionStub) -> EnrichResult:
             enrich_thread_names.append(_threading.current_thread().name)
-            return EnrichResult(stub=stub, body="body text", mode="native")
+            return EnrichResult(stub=stub, body="body text " + "x" * 91, mode="native")
 
     card_store = _make_card_store(tmp_path)
     run(
@@ -5591,7 +5599,7 @@ def test_enrich_failed_error_on_parser_enrich_increments_counter_run_continues(
         def enrich(self, stub: PositionStub) -> EnrichResult:
             if stub.url == _URLS[1]:
                 raise EnrichFailedError("native fetch failed")
-            return EnrichResult(stub=stub, body="body", mode="native")
+            return EnrichResult(stub=stub, body="body " + "x" * 96, mode="native")
 
     summary = run(
         _write_config(

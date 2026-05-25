@@ -44,6 +44,7 @@ class RunSummary:
     content_considered: int = 0
     content_passed: int = 0
     content_dropped_empty_body: int = 0
+    content_dropped_too_short: int = 0
     dedup_url_hits: int = 0
     dedup_tuple_hits: int = 0
     dedup_run_hits: int = 0
@@ -516,6 +517,7 @@ class RunMetrics:
                 content_considered=content.content_considered,
                 content_passed=content.content_passed,
                 content_dropped_empty_body=content.content_dropped_empty_body,
+                content_dropped_too_short=content.content_dropped_too_short,
                 dedup_url_hits=dedup.dedup_url_hits,
                 dedup_tuple_hits=dedup.dedup_tuple_hits,
                 dedup_run_hits=dedup.dedup_run_hits,

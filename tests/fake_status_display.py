@@ -47,5 +47,5 @@ class FakeStatusDisplay:
         return [
             str(c.kwargs["body"])
             for c in self.calls
-            if c.method == "update_body" and c.name == name
+            if c.method in ("register", "update_body") and c.name == name
         ]

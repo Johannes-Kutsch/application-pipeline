@@ -194,7 +194,7 @@ class ClaudeExtractor:
         # ClaudeUsageLimitError propagates as-is for abort handling
 
         try:
-            parsed = extract_json_block(response.raw_response, site.tag)
+            parsed, is_fallback = extract_json_block(response.raw_response, site.tag)
         except AgentOutputProtocolError as exc:
             self._write_transcript(
                 site=site,
@@ -211,6 +211,17 @@ class ClaudeExtractor:
                     msg, prompt=prompt, raw_response=response.raw_response
                 ) from exc
             raise site.protocol_error_cls(msg) from exc
+
+        if is_fallback:
+            self._write_transcript(
+                site=site,
+                prompt=prompt,
+                status="protocol_fallback",
+                duration_s=time.monotonic() - t0,
+                extra=extra,
+                raw_response=response.raw_response,
+            )
+            return parsed, response
 
         transcript_entry: dict[str, object] = {
             "call": site.call,

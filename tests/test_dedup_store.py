@@ -87,7 +87,7 @@ def test_mark_out_of_domain_persists_status(store_path: Path) -> None:
     assert record["company_lc"] == "acme"
     assert record["title_lc"] == "engineer"
     assert record["location_lc"] == "hamburg"
-    assert record["first_seen"] == date.today().isoformat()
+    assert record["status_last_changed"] == date.today().isoformat()
 
 
 def test_mark_selected_by_judge_persists_status(store_path: Path) -> None:
@@ -112,7 +112,7 @@ def test_second_mark_same_url_is_silent_no_op(store_path: Path) -> None:
     assert second["https://example.com/y"]["status"] == "selected_by_judge"
 
 
-def test_first_seen_preserved_across_reload(store_path: Path) -> None:
+def test_status_last_changed_persisted_across_reload(store_path: Path) -> None:
     store = dedup_load(store_path)
     stub = StubLike(url="https://example.com/keep")
     store.mark_selected_by_judge(stub)
@@ -121,7 +121,10 @@ def test_first_seen_preserved_across_reload(store_path: Path) -> None:
     assert reloaded.is_seen(stub) == "url_hit"
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk["https://example.com/keep"]["first_seen"] == date.today().isoformat()
+    assert (
+        on_disk["https://example.com/keep"]["status_last_changed"]
+        == date.today().isoformat()
+    )
 
 
 def test_missing_file_initialises_empty(tmp_path: Path) -> None:
@@ -264,7 +267,7 @@ def test_tuple_match_under_new_url_returns_tuple_hit(store_path: Path) -> None:
     assert store.is_seen(b) == "tuple_hit"
 
 
-def test_tuple_match_writes_alias_with_original_status_and_first_seen(
+def test_tuple_match_writes_alias_with_original_status_and_status_last_changed(
     store_path: Path,
 ) -> None:
     store = dedup_load(store_path)
@@ -278,11 +281,11 @@ def test_tuple_match_writes_alias_with_original_status_and_first_seen(
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
     assert b.url in on_disk
     assert on_disk[b.url]["status"] == original["status"]
-    assert on_disk[b.url]["first_seen"] == original["first_seen"]
+    assert on_disk[b.url]["status_last_changed"] == original["status_last_changed"]
     assert on_disk[b.url]["canonical_url"] == a.url
 
 
-def test_alias_first_seen_is_originals_not_today(
+def test_alias_status_last_changed_is_originals_not_today(
     store_path: Path,
 ) -> None:
     # Seed a store with a backdated original; alias must copy that date.
@@ -294,7 +297,7 @@ def test_alias_first_seen_is_originals_not_today(
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
                     "status": "selected_by_judge",
-                    "first_seen": "2024-01-15",
+                    "status_last_changed": "2024-01-15",
                 }
             }
         ),
@@ -304,8 +307,31 @@ def test_alias_first_seen_is_originals_not_today(
     b = StubLike(url="https://stellen.hamburg/new")
     store.is_seen(b)
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk[b.url]["first_seen"] == "2024-01-15"
-    assert on_disk[b.url]["first_seen"] != date.today().isoformat()
+    assert on_disk[b.url]["status_last_changed"] == "2024-01-15"
+    assert on_disk[b.url]["status_last_changed"] != date.today().isoformat()
+
+
+def test_load_silently_migrates_legacy_first_seen(
+    store_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/legacy": {
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "selected_by_judge",
+                    "first_seen": "2024-01-15",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with caplog.at_level("WARNING"):
+        store = dedup_load(store_path)
+    assert store.is_seen(StubLike(url="https://example.com/legacy")) == "url_hit"
+    assert caplog.records == []
 
 
 def test_after_alias_reload_resolves_via_url_tier(store_path: Path) -> None:
@@ -566,7 +592,7 @@ def test_mark_matched_persists_correct_record(
     record = on_disk["https://example.com/cid2"]
     assert record["status"] == "matched"
     assert record["canonical_url"] == "https://example.com/cid2"
-    assert record["first_seen"] == date.today().isoformat()
+    assert record["status_last_changed"] == date.today().isoformat()
     assert record["company_lc"] == "acme"
     assert record["title_lc"] == "engineer"
     assert record["location_lc"] == "hamburg"
@@ -734,7 +760,7 @@ def test_mark_expired_persists_status(store_path: Path) -> None:
     assert record["company_lc"] == "acme"
     assert record["title_lc"] == "engineer"
     assert record["location_lc"] == "hamburg"
-    assert record["first_seen"] == date.today().isoformat()
+    assert record["status_last_changed"] == date.today().isoformat()
 
 
 def test_expired_status_survives_reload(store_path: Path) -> None:

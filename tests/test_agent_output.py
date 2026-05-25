@@ -20,36 +20,66 @@ from application_pipeline.llm.agent_output import (
 def test_extract_json_block_returns_parsed_naked_json() -> None:
     payload = [{"id": "1", "in_domain": True}]
     text = f"<verdicts>{json.dumps(payload)}</verdicts>"
-    assert extract_json_block(text, "verdicts") == payload
+    result, is_fallback = extract_json_block(text, "verdicts")
+    assert result == payload
+    assert is_fallback is False
 
 
 def test_extract_json_block_returns_parsed_json_fence_with_lang() -> None:
     payload = [{"id": "1", "in_domain": True}]
     body = json.dumps(payload)
     text = f"<verdicts>\n```json\n{body}\n```\n</verdicts>"
-    assert extract_json_block(text, "verdicts") == payload
+    result, is_fallback = extract_json_block(text, "verdicts")
+    assert result == payload
+    assert is_fallback is False
 
 
 def test_extract_json_block_returns_parsed_json_bare_fence() -> None:
     payload = [{"id": "2", "in_domain": False}]
     body = json.dumps(payload)
     text = f"<verdicts>\n```\n{body}\n```\n</verdicts>"
-    assert extract_json_block(text, "verdicts") == payload
+    result, is_fallback = extract_json_block(text, "verdicts")
+    assert result == payload
+    assert is_fallback is False
 
 
 def test_extract_json_block_ignores_preamble_before_tag() -> None:
     payload = {"tier": "green", "matched": ["python"], "missing": [], "summary": "ok"}
     body = json.dumps(payload)
     text = f"Sure, here is my answer:\n\n<verdict>{body}</verdict>"
-    assert extract_json_block(text, "verdict") == payload
+    result, is_fallback = extract_json_block(text, "verdict")
+    assert result == payload
+    assert is_fallback is False
 
 
 def test_extract_json_block_handles_stray_opening_tag_in_body() -> None:
     """Walk-back recovers when the JSON body contains a stray copy of the opening tag."""
     inner = json.dumps([{"id": "<verdicts>stray", "in_domain": True}])
     text = f"<verdicts>{inner}</verdicts>"
-    result = extract_json_block(text, "verdicts")
+    result, _ = extract_json_block(text, "verdicts")
     assert result[0]["id"] == "<verdicts>stray"
+
+
+# ---------------------------------------------------------------------------
+# extract_json_block: bare-fence fallback (tags absent)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_json_block_bare_fence_fallback_returns_json_and_signals_fallback() -> (
+    None
+):
+    payload = {"matches": False}
+    body = json.dumps(payload)
+    text = f"```json\n{body}\n```"
+    result, is_fallback = extract_json_block(text, "verdict")
+    assert result == payload
+    assert is_fallback is True
+
+
+def test_extract_json_block_bare_fence_with_malformed_json_raises_tag_missing() -> None:
+    with pytest.raises(AgentOutputProtocolError) as exc_info:
+        extract_json_block("```json\nnot valid json\n```", "verdict")
+    assert exc_info.value.kind == "tag_missing"
 
 
 # ---------------------------------------------------------------------------

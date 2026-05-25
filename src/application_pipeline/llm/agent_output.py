@@ -9,21 +9,30 @@ class AgentOutputProtocolError(Exception):
         self.kind = kind
 
 
-def extract_json_block(text: str, tag: str) -> Any:
+def extract_json_block(text: str, tag: str) -> tuple[Any, bool]:
     """Extract a JSON payload from a tag-wrapped agent response.
 
-    Finds the rightmost closing tag, walks back through all openers before it,
-    strips any markdown code fence, and returns the first successfully parsed body.
+    Returns ``(parsed_value, is_fallback)`` where ``is_fallback`` is ``True``
+    when the value was recovered from a bare markdown code fence (no XML tags).
 
-    Raises AgentOutputProtocolError("tag_missing") if the tag is absent.
-    Raises AgentOutputProtocolError("json_malformed") if every candidate body fails json.loads.
+    Normal path: finds the rightmost closing tag, walks back through all
+    openers before it, strips any markdown code fence, and returns the first
+    successfully parsed body.
+
+    Fallback path: when no tags are present, attempts to parse a bare markdown
+    code fence directly.
+
+    Raises AgentOutputProtocolError("tag_missing") if the tag is absent and
+    no bare-fence fallback can be recovered.
+    Raises AgentOutputProtocolError("json_malformed") if every candidate body
+    fails json.loads.
     """
     closing_tag = f"</{tag}>"
     opening_tag = f"<{tag}>"
 
     close_pos = text.rfind(closing_tag)
     if close_pos == -1:
-        raise AgentOutputProtocolError("tag_missing")
+        return _fallback_bare_fence(text)
 
     candidates: list[int] = []
     search_start = 0
@@ -35,17 +44,33 @@ def extract_json_block(text: str, tag: str) -> Any:
         search_start = pos + 1
 
     if not candidates:
-        raise AgentOutputProtocolError("tag_missing")
+        return _fallback_bare_fence(text)
 
     for open_pos in reversed(candidates):
         body = text[open_pos + len(opening_tag) : close_pos].strip()
         body = _strip_fence(body)
         try:
-            return json.loads(body)
+            return json.loads(body), False
         except json.JSONDecodeError:
             continue
 
     raise AgentOutputProtocolError("json_malformed")
+
+
+def _fallback_bare_fence(text: str) -> tuple[Any, bool]:
+    """Try to recover a JSON value from a bare markdown code fence.
+
+    Raises AgentOutputProtocolError("tag_missing") if no fence is found or
+    the fence body is not valid JSON.
+    """
+    t = text.strip()
+    stripped = _strip_fence(t)
+    if stripped is t:
+        raise AgentOutputProtocolError("tag_missing")
+    try:
+        return json.loads(stripped), True
+    except json.JSONDecodeError:
+        raise AgentOutputProtocolError("tag_missing") from None
 
 
 def _strip_fence(body: str) -> str:

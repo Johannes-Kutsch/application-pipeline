@@ -1,4 +1,4 @@
-"""Tests for ClaudeExtractor v2 call shapes â€” classify_relevance and judge_top_n."""
+"""Tests for ClaudeExtractor v2 call shapes - classify_relevance and judge_top_n."""
 
 from __future__ import annotations
 
@@ -373,3 +373,91 @@ def test_judge_top_n_candidates_appear_in_prompt(
     prompt_sent = invoker.call.call_args.args[0]
     assert "cand-0" in prompt_sent
     assert "cand-1" in prompt_sent
+
+
+# ---------------------------------------------------------------------------
+# classify_relevance: protocol_fallback — bare-fence recovery
+# ---------------------------------------------------------------------------
+
+
+def _bare_fence_classify_response(verdict: object) -> ClaudeResponse:
+    """Response that omits the <verdict> tags but has a markdown code fence."""
+    body = json.dumps(verdict)
+    return ClaudeResponse(
+        raw_response=f"```json\n{body}\n```",
+        usage=_usage(),
+        cost_usd=0.001,
+        duration_s=0.5,
+        session_id="s-fallback",
+    )
+
+
+def _read_transcripts(run_log: RunLog, component_id: str) -> list[dict]:  # type: ignore[type-arg]
+    path = (
+        run_log.logs_dir
+        / "llm"
+        / f"{component_id.removeprefix('llm_')}.transcripts.jsonl"
+    )
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def _read_events(run_log: RunLog, component_id: str) -> list[dict]:  # type: ignore[type-arg]
+    path = (
+        run_log.logs_dir / "llm" / f"{component_id.removeprefix('llm_')}.events.jsonl"
+    )
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def test_classify_relevance_bare_fence_fallback_returns_verdict(
+    run_log: RunLog,
+) -> None:
+    invoker = _fake_invoker(
+        _bare_fence_classify_response({"matches": True, "header": "h", "summary": "s"})
+    )
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    result, _ = extractor.classify_relevance(_item())
+    assert result.matches is True
+    assert result.header == "h"
+    assert result.summary == "s"
+
+
+def test_classify_relevance_bare_fence_fallback_logs_protocol_fallback_transcript(
+    run_log: RunLog,
+) -> None:
+    invoker = _fake_invoker(_bare_fence_classify_response({"matches": False}))
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    extractor.classify_relevance(_item())
+    transcripts = _read_transcripts(run_log, "llm_classify_relevance")
+    assert len(transcripts) == 1
+    assert transcripts[0]["status"] == "protocol_fallback"
+
+
+def test_classify_relevance_bare_fence_fallback_logs_protocol_fallback_event(
+    run_log: RunLog,
+) -> None:
+    invoker = _fake_invoker(_bare_fence_classify_response({"matches": False}))
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    extractor.classify_relevance(_item())
+    events = _read_events(run_log, "llm_classify_relevance")
+    assert any(e.get("status") == "protocol_fallback" for e in events)
+
+
+def test_classify_relevance_bare_fence_fallback_schema_invalid_raises_malformed(
+    run_log: RunLog,
+) -> None:
+    invoker = _fake_invoker(_bare_fence_classify_response({"not_a_valid_field": True}))
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    with pytest.raises(ExtractorMalformedError):
+        extractor.classify_relevance(_item())

@@ -811,3 +811,87 @@ def test_unknown_status_raises_on_load(store_path: Path) -> None:
     )
     with pytest.raises(DedupStoreError, match="totally_unknown_status"):
         dedup_load(store_path)
+
+
+# ---------------------------------------------------------------------------
+# pending entry on miss
+# ---------------------------------------------------------------------------
+
+
+def test_miss_writes_pending_so_same_tuple_different_url_returns_tuple_hit(
+    store: DeduplicationStore,
+) -> None:
+    a = StubLike(url="https://example.com/a")
+    b = StubLike(url="https://example.com/b")
+    assert store.is_seen(a) == "miss"
+    assert store.is_seen(b) == "tuple_hit"
+
+
+def test_miss_in_run_scope_second_same_url_returns_run_hit(
+    store: DeduplicationStore,
+) -> None:
+    stub = StubLike(url="https://example.com/x")
+    with store.run_scope() as scope:
+        assert scope.is_seen(stub) == "miss"
+        assert scope.is_seen(stub) == "run_hit"
+
+
+def test_pending_entry_not_written_to_disk(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/pending")
+    store.is_seen(stub)
+    assert not store_path.exists()
+
+
+@pytest.mark.parametrize(
+    "mark_method,expected_status",
+    [
+        ("mark_out_of_domain", "out_of_domain"),
+        ("mark_matched", "matched"),
+        ("mark_expired", "expired"),
+    ],
+)
+def test_mark_overwrites_pending_and_persists_real_status(
+    store_path: Path, mark_method: str, expected_status: str
+) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/q")
+    store.is_seen(stub)  # creates pending entry
+
+    getattr(store, mark_method)(stub)
+
+    assert store.is_seen(stub) in ("url_hit", "judge_pending")
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk[stub.url]["status"] == expected_status
+
+
+def test_mark_selected_by_judge_overwrites_pending_and_persists(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    stub = StubLike(url="https://example.com/q2")
+    store.is_seen(stub)
+    store.mark_matched(stub)
+    store.mark_selected_by_judge(stub)
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk[stub.url]["status"] == "selected_by_judge"
+
+
+def test_pending_entry_absent_from_disk_when_other_url_is_marked(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    pending_stub = StubLike(
+        url="https://example.com/pending",
+        company="Beta",
+        title="Dev",
+        location="Berlin",
+    )
+    real_stub = StubLike(url="https://example.com/real")
+    store.is_seen(pending_stub)  # pending in memory, no disk write
+    store.mark_matched(real_stub)  # triggers _persist
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert pending_stub.url not in on_disk
+    assert real_stub.url in on_disk

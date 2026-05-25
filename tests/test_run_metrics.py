@@ -71,20 +71,11 @@ def test_register_rows_creates_only_classify_row(
     """register_rows no longer registers per-gate rows or the judge row; only the classify row."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(starting_order=10)
+    metrics.register_rows()
 
     assert _registers(display) == [
-        ("llm_classify_relevance", 11, "running"),
+        ("llm_classify_relevance", 1001, "running"),
     ]
-
-
-def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(starting_order=0)
-
-    orders = [c.kwargs["order"] for c in display.calls if c.method == "register"]
-    assert orders == [1]
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +86,7 @@ def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
 def test_pipeline_body_matches_main_stats_format(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.discovered()
     metrics.discovered()
@@ -111,7 +102,7 @@ def test_pipeline_body_matches_main_stats_format(run_log: RunLog) -> None:
 def test_pipeline_body_reflects_judge_errored(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.judge_failed()
     body = _last_body(display, "pipeline")
@@ -126,7 +117,7 @@ def test_pipeline_body_reflects_judge_errored(run_log: RunLog) -> None:
 def test_classify_body_all_forwarded(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     usage = _make_usage()
     metrics.classify_buffered(5)
@@ -142,7 +133,7 @@ def test_classify_body_all_forwarded(run_log: RunLog) -> None:
 def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.classify_buffered(3)
     metrics.classify_batch_enqueued(3)
@@ -157,7 +148,7 @@ def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
 def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.classify_buffered(4)
     metrics.classify_buffered(2)
@@ -169,7 +160,7 @@ def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
 def test_classify_body_queued_cumulates_across_batches(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     usage = _make_usage()
     for _ in range(2):
@@ -185,7 +176,7 @@ def test_classify_body_queued_cumulates_across_batches(run_log: RunLog) -> None:
 def test_classify_body_updates_per_buffered_call(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.classify_buffered(1)
     body_after_first = _last_body(display, "llm_classify_relevance")
@@ -204,7 +195,7 @@ def test_classify_body_updates_per_buffered_call(run_log: RunLog) -> None:
 def test_classify_body_queued_dropped_forwarded_format(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     usage = _make_usage()
     metrics.classify_buffered(5)
@@ -304,7 +295,7 @@ def test_classifying_reflects_partial_completions(run_log: RunLog) -> None:
 def test_judge_failed_increments_pipeline_error_count(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.judge_failed()
 
@@ -317,7 +308,7 @@ def test_judge_events_produce_no_llm_judge_match_body_updates(
 ) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     usage = _make_usage()
     metrics.judge_enqueued()
@@ -414,7 +405,7 @@ def _format_run_divider(
 def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> RunMetrics:
     """Returns a RunMetrics with representative events covering all counter types."""
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     metrics.discovered()
     metrics.discovered()
@@ -853,7 +844,7 @@ def test_parser_summary_reflects_events_for_that_parser_id(run_log: RunLog) -> N
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     started = time.monotonic()
     metrics.discovered("parser_a")
@@ -904,7 +895,7 @@ def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     started = time.monotonic()
     metrics.discovered("p")
@@ -945,7 +936,7 @@ def test_interleaved_parsers_produce_independent_per_parser_totals(
 
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows(0)
+    metrics.register_rows()
 
     started = time.monotonic()
     for _ in range(3):

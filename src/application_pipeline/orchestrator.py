@@ -708,6 +708,7 @@ def run(
                     cfg.seen_store_path,
                     card_store=card_store,
                     cooldown_days=cfg.dedup_cooldown_days,
+                    run_log=run_log,
                 )
             except DedupStoreError as exc:
                 _log.error("startup failed — dedup store: %s", exc)

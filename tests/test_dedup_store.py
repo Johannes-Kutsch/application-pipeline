@@ -638,16 +638,13 @@ def test_legacy_status_raises_on_load(store_path: Path) -> None:
             dedup_load(store_path)
 
 
-def test_tuple_alias_of_matched_returns_judge_pending(
+def test_tuple_hit_on_matched_returns_judge_pending_directly(
     store_path: Path,
 ) -> None:
     store = dedup_load(store_path)
     a = StubLike(url="https://example.com/original")
-    b = StubLike(url="https://example.com/alias")
+    b = StubLike(url="https://example.com/new-url")
     store.mark_matched(a)
-    # tuple hit writes alias with matched status
-    assert store.is_seen(b) == "tuple_hit"
-    # next is_seen on b resolves via URL tier → judge_pending
     assert store.is_seen(b) == "judge_pending"
 
 
@@ -744,6 +741,81 @@ def test_run_scope_concurrent_is_seen(store: DeduplicationStore) -> None:
 # ---------------------------------------------------------------------------
 # mark_expired
 # ---------------------------------------------------------------------------
+
+
+def test_tuple_hit_on_matched_updates_in_memory_url_and_title(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    # Same tuple, different URLs — b is a re-discovery of a's listing under a new URL
+    a = StubLike(url="https://example.com/original")
+    b = StubLike(url="https://example.com/new-url")
+    store.mark_matched(a)
+    store.is_seen(b)  # judge_pending — should update canonical record's url/title
+
+    # Trigger a persist via a different mark to observe in-memory state on disk
+    store.mark_out_of_domain(StubLike(url="https://example.com/other", company="Other"))
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    canonical_record = on_disk["https://example.com/original"]
+    assert canonical_record["canonical_url"] == b.url
+    # company, location, status, status_last_changed preserved from original
+    assert canonical_record["company_lc"] == "acme"
+    assert canonical_record["location_lc"] == "hamburg"
+    assert canonical_record["status"] == "matched"
+
+
+def test_second_tuple_hit_on_matched_within_run_scope_returns_run_hit(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    a = StubLike(url="https://example.com/original")
+    b = StubLike(url="https://example.com/new-url-1")
+    c = StubLike(url="https://example.com/new-url-2")
+    store.mark_matched(a)
+    with store.run_scope() as scope:
+        assert scope.is_seen(b) == "judge_pending"
+        assert scope.is_seen(c) == "run_hit"
+
+
+def test_tuple_hit_on_out_of_domain_still_returns_tuple_hit(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    a = StubLike(url="https://example.com/original")
+    b = StubLike(url="https://example.com/new-url")
+    store.mark_out_of_domain(a)
+    assert store.is_seen(b) == "tuple_hit"
+
+
+def test_tuple_hit_on_selected_by_judge_still_returns_tuple_hit(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    a = StubLike(url="https://example.com/original")
+    b = StubLike(url="https://example.com/new-url")
+    store.mark_matched(a)
+    store.mark_selected_by_judge(a)
+    assert store.is_seen(b) == "tuple_hit"
+
+
+def test_tuple_hit_on_non_matched_writes_alias(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    a = StubLike(url="https://example.com/original")
+    b = StubLike(url="https://example.com/new-url")
+    store.mark_out_of_domain(a)
+    store.is_seen(b)  # tuple_hit on out_of_domain — alias write should fire
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert b.url in on_disk
+
+
+def test_tuple_hit_on_matched_does_not_write_alias(store_path: Path) -> None:
+    store = dedup_load(store_path)
+    a = StubLike(url="https://example.com/original")
+    b = StubLike(url="https://example.com/new-url")
+    store.mark_matched(a)
+    store.is_seen(b)  # judge_pending — NO alias write for matched status
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert b.url not in on_disk
 
 
 def test_mark_expired_persists_status(store_path: Path) -> None:

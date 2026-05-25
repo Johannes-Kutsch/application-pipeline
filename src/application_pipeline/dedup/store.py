@@ -30,6 +30,7 @@ SeenStatus = Literal[
     "selected_by_judge",
     "external_redirect",
     "expired",
+    "pending",
 ]
 
 _LEGACY_STATUSES: frozenset[str] = frozenset(
@@ -151,7 +152,24 @@ class DeduplicationStore:
 
             if self._in_run is not None:
                 self._in_run.add(key.url)
+            self._write_pending(key)
             return "miss"
+
+    def _write_pending(self, key: _SeenKey) -> None:
+        """Write an in-memory pending entry for key. Caller must hold ``self._lock``."""
+        company_lc = normalize(key.company)
+        title_lc = normalize(key.title)
+        location_lc = normalize(key.location)
+        self._records[key.url] = {
+            "canonical_url": key.url,
+            "company_lc": company_lc,
+            "title_lc": title_lc,
+            "location_lc": location_lc,
+            "status": "pending",
+            "status_last_changed": date.today().isoformat(),
+        }
+        if company_lc and title_lc and location_lc:
+            self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
 
     def _mark(
         self,
@@ -164,9 +182,14 @@ class DeduplicationStore:
 
         If ``overwrite_if`` is given and the existing record has that status,
         the record is overwritten rather than skipped.
+        Pending entries are always overwritten.
         """
         existing = self._records.get(key.url)
-        if existing is not None and existing.get("status") != overwrite_if:
+        if (
+            existing is not None
+            and existing.get("status") != overwrite_if
+            and existing.get("status") != "pending"
+        ):
             return
 
         company_lc = normalize(key.company)
@@ -225,6 +248,20 @@ class DeduplicationStore:
         finally:
             with self._lock:
                 self._in_run = None
+                self._evict_pending()
+
+    def _evict_pending(self) -> None:
+        """Remove in-memory pending entries that were never promoted. Caller must hold ``self._lock``."""
+        pending_urls = [
+            url for url, rec in self._records.items() if rec.get("status") == "pending"
+        ]
+        for url in pending_urls:
+            rec = self._records.pop(url)
+            tkey = (rec.get("company_lc"), rec.get("title_lc"), rec.get("location_lc"))
+            if all(isinstance(v, str) and v for v in tkey):
+                typed_tkey: tuple[str, str, str] = tkey  # type: ignore[assignment]
+                if self._tuple_index.get(typed_tkey) == url:
+                    del self._tuple_index[typed_tkey]
 
     def _write_alias(self, new_url: str, canonical_url: str) -> None:
         original = self._records[canonical_url]
@@ -243,8 +280,11 @@ class DeduplicationStore:
         self._records = new_records
 
     def _persist(self, records: dict[str, dict[str, Any]]) -> None:
+        to_write = {
+            url: rec for url, rec in records.items() if rec.get("status") != "pending"
+        }
         payload = json.dumps(
-            records, indent=2, sort_keys=True, ensure_ascii=False
+            to_write, indent=2, sort_keys=True, ensure_ascii=False
         ).encode("utf-8")
         try:
             write_atomic(self._path, payload)

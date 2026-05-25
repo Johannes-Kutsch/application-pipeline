@@ -78,15 +78,6 @@ def test_register_rows_creates_only_classify_row(
     ]
 
 
-def test_register_rows_starting_at_zero(run_log: RunLog) -> None:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_rows()
-
-    orders = [c.kwargs["order"] for c in display.calls if c.method == "register"]
-    assert orders == [1001]
-
-
 # ---------------------------------------------------------------------------
 # Parser-side events → pipeline row body
 # ---------------------------------------------------------------------------

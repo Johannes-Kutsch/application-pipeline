@@ -172,7 +172,7 @@ def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
     assert body == "6 queued"
 
 
-def test_classify_body_queued_cumulates_across_batches(run_log: RunLog) -> None:
+def test_classify_body_forwarded_cumulates_across_batches(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()

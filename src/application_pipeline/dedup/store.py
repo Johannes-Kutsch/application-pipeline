@@ -78,7 +78,13 @@ class DeduplicationStore:
     @staticmethod
     def _validate_record(url: str, record: dict[str, Any]) -> None:
         """Raise DedupStoreError if record is missing any required alias field."""
-        for field in ("company_lc", "title_lc", "location_lc", "status", "first_seen"):
+        for field in (
+            "company_lc",
+            "title_lc",
+            "location_lc",
+            "status",
+            "status_last_changed",
+        ):
             if record.get(field) is None:
                 raise DedupStoreError(
                     f"record for {url!r} has missing or null required field {field!r}"
@@ -124,7 +130,7 @@ class DeduplicationStore:
         Side effect (per ADR-0003): when the URL tier misses but the
         ``(company_lc, title_lc, location_lc)`` tuple matches a prior entry,
         an alias entry is written under ``key.url`` carrying the original
-        record's ``status`` and ``first_seen`` so future runs short-circuit
+        record's ``status`` and ``status_last_changed`` so future runs short-circuit
         on the cheap URL lookup. The return value is unaffected by the
         alias write.
         Returns ``run_hit`` only while a ``run_scope()`` context is active.
@@ -172,7 +178,7 @@ class DeduplicationStore:
             "title_lc": title_lc,
             "location_lc": location_lc,
             "status": status,
-            "first_seen": date.today().isoformat(),
+            "status_last_changed": date.today().isoformat(),
         }
 
         new_records = dict(self._records)
@@ -229,7 +235,7 @@ class DeduplicationStore:
             "title_lc": original["title_lc"],
             "location_lc": original["location_lc"],
             "status": original["status"],
-            "first_seen": original["first_seen"],
+            "status_last_changed": original["status_last_changed"],
         }
         new_records = dict(self._records)
         new_records[new_url] = record
@@ -277,6 +283,14 @@ def load(
         raise DedupStoreError(
             f"dedup store at {path} must be a JSON object, got {type(data).__name__}"
         )
+
+    for record in data.values():
+        if (
+            isinstance(record, dict)
+            and "first_seen" in record
+            and "status_last_changed" not in record
+        ):
+            record["status_last_changed"] = record.pop("first_seen")
 
     for url, record in data.items():
         if isinstance(record, dict):

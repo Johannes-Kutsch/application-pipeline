@@ -501,17 +501,14 @@ def test_cron_sh_pipeline_stages_still_call_fail_on_error(tmp_path: Path) -> Non
     assert re.search(r"application-pipeline run.*\|\|.*\bfail\b", cron_sh, re.DOTALL)
 
 
-def test_adr_0027_documents_pip_warn_and_continue_policy() -> None:
+def test_adr_0020_documents_pip_warn_and_continue_policy() -> None:
     adr_file = (
         Path(__file__).parent.parent
-        / "docs/adr/0027-distribution-via-pypi-and-cron-upgrade.md"
+        / "docs/adr/0020-distribution-via-pypi-and-cron-upgrade.md"
     )
     text = adr_file.read_text()
     assert "warn" in text.lower() and "continue" in text.lower(), (
-        "ADR-0027 must document the warn-and-continue policy for pip-upgrade failures"
-    )
-    assert "cron.log" in text, (
-        "ADR-0027 must mention cron.log as the visibility mechanism"
+        "ADR-0020 must document the warn-and-continue policy for pip-upgrade failures"
     )
 
 

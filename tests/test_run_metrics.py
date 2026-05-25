@@ -1090,11 +1090,11 @@ def test_parser_body_zero_drop_counters_hidden(run_log: RunLog) -> None:
     assert "enrich_failed" not in body
 
 
-def test_parser_body_nonzero_drop_counters_appear_inline(run_log: RunLog) -> None:
-    """Nonzero drop counters appear as named inline counters between discovered and forwarded."""
+def test_parser_body_nonzero_drop_counters_go_to_gates_row(run_log: RunLog) -> None:
+    """Gate drop counters appear in the gates row, not the parser row."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_parser("p", order=1, total_queries=5, has_native_enrich=True)
+    metrics.register_parser("p", order=2, total_queries=5, has_native_enrich=True)
 
     metrics.discovered("p")
     metrics.increment_freshness_dropped("p")
@@ -1105,16 +1105,22 @@ def test_parser_body_nonzero_drop_counters_appear_inline(run_log: RunLog) -> Non
     metrics.increment_enrich_failed_count("p")
     metrics.increment_content_dropped("p")
     metrics.increment_forwarded("p")
-    # Trigger display update
     metrics.parser_done("p")
 
-    body = _last_body(display, "parser p")
-    assert "3 freshness" in body
-    assert "1 dedup" in body
-    assert "1 pre-filter" in body
-    assert "1 enrich_failed" in body
-    assert "1 content" in body
-    assert "1 forwarded" in body
+    parser_body = _last_body(display, "parser p")
+    assert "freshness" not in parser_body
+    assert "dedup" not in parser_body
+    assert "pre-filter" not in parser_body
+    assert "content" not in parser_body
+    assert "1 enrich_failed" in parser_body
+    assert "1 forwarded" in parser_body
+
+    gates_body = _last_body(display, "parser p gates")
+    assert "3 freshness" in gates_body
+    assert "1 dedup" in gates_body
+    assert "1 pre-filter" in gates_body
+    assert "1 content" in gates_body
+    assert "enrich_failed" not in gates_body
 
 
 def test_parser_body_enrich_failed_hidden_without_native_enrich(
@@ -1185,3 +1191,164 @@ def test_parser_dead_sets_phase_column_to_dead(run_log: RunLog) -> None:
 
     body = _last_body(display, "parser p")
     assert "· dead" not in body
+
+
+# ---------------------------------------------------------------------------
+# Parser row / gates row split (issue #604)
+# ---------------------------------------------------------------------------
+
+
+def test_gates_row_absent_when_all_drop_counters_zero(run_log: RunLog) -> None:
+    """No gates row is registered when there are no gate drops."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=2, total_queries=5)
+
+    metrics.discovered("p")
+    metrics.increment_forwarded("p")
+    metrics.parser_done("p")
+
+    registered = display.registered_names()
+    assert "parser p gates" not in registered
+
+
+def test_gates_row_appears_on_first_gate_drop(run_log: RunLog) -> None:
+    """Gates row is registered when the first gate drop arrives."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=2, total_queries=5)
+
+    metrics.discovered("p")
+    assert "parser p gates" not in display.registered_names()
+
+    metrics.increment_freshness_dropped("p")
+    assert "parser p gates" in display.registered_names()
+
+
+def test_gates_row_pinned_at_parser_order_plus_one(run_log: RunLog) -> None:
+    """Gates row order = parser order + 1."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=4, total_queries=5)
+
+    metrics.increment_dedup_dropped("p")
+
+    register_calls = [
+        c
+        for c in display.calls
+        if c.method == "register" and c.name == "parser p gates"
+    ]
+    assert len(register_calls) == 1
+    assert register_calls[0].kwargs["order"] == 5
+
+
+def test_gates_row_named_parser_type_gates(run_log: RunLog) -> None:
+    """Gates row name is 'parser <type> gates' with spaces."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("bundesagentur", order=2, total_queries=5)
+
+    metrics.increment_freshness_dropped("bundesagentur")
+
+    assert "parser bundesagentur gates" in display.registered_names()
+
+
+def test_gates_row_name_uses_spaces_not_underscores(run_log: RunLog) -> None:
+    """Parser type underscores become spaces in the gates row name."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("jobs_beim_staat", order=2, total_queries=5)
+
+    metrics.increment_content_dropped("jobs_beim_staat")
+
+    assert "parser jobs beim staat gates" in display.registered_names()
+    assert "parser jobs_beim_staat gates" not in display.registered_names()
+
+
+def test_parser_done_mirrors_phase_to_gates_row(run_log: RunLog) -> None:
+    """When parser transitions to done, gates row transitions to done too."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=2, total_queries=5)
+
+    metrics.increment_freshness_dropped("p")
+    metrics.parser_done("p")
+
+    phase_calls = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "parser p gates"
+    ]
+    assert phase_calls, "expected update_phase call for parser p gates"
+    assert phase_calls[-1].kwargs["phase"] == "done"
+
+
+def test_parser_dead_mirrors_phase_to_gates_row(run_log: RunLog) -> None:
+    """When parser transitions to dead, gates row transitions to dead too."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=2, total_queries=5)
+
+    metrics.increment_dedup_dropped("p")
+    metrics.parser_dead("p")
+
+    phase_calls = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "parser p gates"
+    ]
+    assert phase_calls, "expected update_phase call for parser p gates"
+    assert phase_calls[-1].kwargs["phase"] == "dead"
+
+
+def test_gates_row_phase_not_mirrored_when_no_gate_drops(run_log: RunLog) -> None:
+    """No phase update to gates row when parser completes with zero gate drops."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=2, total_queries=5)
+
+    metrics.parser_done("p")
+
+    phase_calls = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "parser p gates"
+    ]
+    assert phase_calls == []
+
+
+def test_gates_row_body_updates_on_each_drop(run_log: RunLog) -> None:
+    """Each subsequent gate drop updates the gates row body."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=2, total_queries=5)
+
+    metrics.increment_freshness_dropped("p")
+    first_body = _last_body(display, "parser p gates")
+    assert "1 freshness" in first_body
+
+    metrics.increment_freshness_dropped("p")
+    second_body = _last_body(display, "parser p gates")
+    assert "2 freshness" in second_body
+
+
+def test_parser_row_body_excludes_gate_drop_counters(run_log: RunLog) -> None:
+    """Parser row body shows only discovered, optional enrich_failed, and forwarded — no gate counters."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=2, total_queries=5, has_native_enrich=True)
+
+    metrics.discovered("p")
+    metrics.increment_freshness_dropped("p")
+    metrics.increment_dedup_dropped("p")
+    metrics.increment_prefilter_dropped("p")
+    metrics.increment_content_dropped("p")
+    metrics.increment_forwarded("p")
+
+    body = _last_body(display, "parser p")
+    assert "1 discovered" in body
+    assert "1 forwarded" in body
+    assert "freshness" not in body
+    assert "dedup" not in body
+    assert "pre-filter" not in body
+    assert "content" not in body

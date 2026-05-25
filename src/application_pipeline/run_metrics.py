@@ -31,6 +31,8 @@ class _ParserCounters:
     enrich_failed_count: int = 0
     content_dropped: int = 0
     forwarded: int = 0
+    order: int = 0
+    gates_registered: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,6 +124,10 @@ class RunMetrics:
     def _parser_row(parser_id: str) -> str:
         return "parser " + parser_id.replace("_", " ")
 
+    @staticmethod
+    def _gates_row(parser_id: str) -> str:
+        return "parser " + parser_id.replace("_", " ") + " gates"
+
     def register_rows(self) -> None:
         self._display.register("llm classify relevance", order=1001, phase="running")
 
@@ -137,12 +143,21 @@ class RunMetrics:
             entry = self._parser_entry(parser_id)
             entry.total_queries = total_queries
             entry.has_native_enrich = has_native_enrich
+            entry.order = order
             body = self._parser_body(parser_id)
         self._display.register(
             self._parser_row(parser_id),
             order=order,
             phase="running",
             body=body,
+        )
+
+    def _register_gates_row(self, parser_id: str, order: int, gates_body: str) -> None:
+        self._display.register(
+            self._gates_row(parser_id),
+            order=order + 1,
+            phase="running",
+            body=gates_body,
         )
 
     # -----------------------------------------------------------------------
@@ -197,19 +212,27 @@ class RunMetrics:
             if parser_id:
                 entry = self._parser_entry(parser_id)
                 entry.parsers_dead += 1
+                gates_registered = entry.gates_registered
+            else:
+                gates_registered = False
             pipeline_body = self._pipeline_body()
             parser_body = self._parser_body(parser_id) if parser_id else None
         self._display.update_body("pipeline", body=pipeline_body)
         if parser_id and parser_body is not None:
             self._display.update_body(self._parser_row(parser_id), body=parser_body)
             self._display.update_phase(self._parser_row(parser_id), phase="dead")
+            if gates_registered:
+                self._display.update_phase(self._gates_row(parser_id), phase="dead")
 
     def parser_done(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id)
             body = self._parser_body(parser_id)
+            gates_registered = self._per_parser[parser_id].gates_registered
         self._display.update_body(self._parser_row(parser_id), body=body)
         self._display.update_phase(self._parser_row(parser_id), phase="done")
+        if gates_registered:
+            self._display.update_phase(self._gates_row(parser_id), phase="done")
 
     def not_served_query(self, parser_id: str) -> None:
         with self._lock:
@@ -238,23 +261,42 @@ class RunMetrics:
             body = self._parser_body(parser_id)
         self._display.update_body(self._parser_row(parser_id), body=body)
 
-    def increment_freshness_dropped(self, parser_id: str) -> None:
+    def _increment_gate_drop(self, parser_id: str, field: str) -> tuple[bool, int, str]:
+        """Increment a gate drop counter; returns (first_drop, order, gates_body) under lock."""
         with self._lock:
-            self._parser_entry(parser_id).freshness_dropped += 1
-            body = self._parser_body(parser_id)
-        self._display.update_body(self._parser_row(parser_id), body=body)
+            entry = self._parser_entry(parser_id)
+            setattr(entry, field, getattr(entry, field) + 1)
+            first_drop = not entry.gates_registered
+            if first_drop:
+                entry.gates_registered = True
+            return first_drop, entry.order, self._gates_body(parser_id)
+
+    def increment_freshness_dropped(self, parser_id: str) -> None:
+        first_drop, order, gates_body = self._increment_gate_drop(
+            parser_id, "freshness_dropped"
+        )
+        if first_drop:
+            self._register_gates_row(parser_id, order, gates_body)
+        else:
+            self._display.update_body(self._gates_row(parser_id), body=gates_body)
 
     def increment_dedup_dropped(self, parser_id: str) -> None:
-        with self._lock:
-            self._parser_entry(parser_id).dedup_dropped += 1
-            body = self._parser_body(parser_id)
-        self._display.update_body(self._parser_row(parser_id), body=body)
+        first_drop, order, gates_body = self._increment_gate_drop(
+            parser_id, "dedup_dropped"
+        )
+        if first_drop:
+            self._register_gates_row(parser_id, order, gates_body)
+        else:
+            self._display.update_body(self._gates_row(parser_id), body=gates_body)
 
     def increment_prefilter_dropped(self, parser_id: str) -> None:
-        with self._lock:
-            self._parser_entry(parser_id).prefilter_dropped += 1
-            body = self._parser_body(parser_id)
-        self._display.update_body(self._parser_row(parser_id), body=body)
+        first_drop, order, gates_body = self._increment_gate_drop(
+            parser_id, "prefilter_dropped"
+        )
+        if first_drop:
+            self._register_gates_row(parser_id, order, gates_body)
+        else:
+            self._display.update_body(self._gates_row(parser_id), body=gates_body)
 
     def increment_enrich_failed_count(self, parser_id: str) -> None:
         with self._lock:
@@ -263,10 +305,13 @@ class RunMetrics:
         self._display.update_body(self._parser_row(parser_id), body=body)
 
     def increment_content_dropped(self, parser_id: str) -> None:
-        with self._lock:
-            self._parser_entry(parser_id).content_dropped += 1
-            body = self._parser_body(parser_id)
-        self._display.update_body(self._parser_row(parser_id), body=body)
+        first_drop, order, gates_body = self._increment_gate_drop(
+            parser_id, "content_dropped"
+        )
+        if first_drop:
+            self._register_gates_row(parser_id, order, gates_body)
+        else:
+            self._display.update_body(self._gates_row(parser_id), body=gates_body)
 
     def increment_forwarded(self, parser_id: str) -> None:
         with self._lock:
@@ -601,17 +646,22 @@ class RunMetrics:
     def _parser_body(self, parser_id: str) -> str:
         c = self._per_parser.get(parser_id, _ParserCounters())
         parts = [f"{c.discovered} discovered"]
+        if c.has_native_enrich and c.enrich_failed_count:
+            parts.append(f"{c.enrich_failed_count} enrich_failed")
+        parts.append(f"{c.forwarded} forwarded")
+        return " · ".join(parts)
+
+    def _gates_body(self, parser_id: str) -> str:
+        c = self._per_parser.get(parser_id, _ParserCounters())
+        parts = []
         if c.freshness_dropped:
             parts.append(f"{c.freshness_dropped} freshness")
         if c.dedup_dropped:
             parts.append(f"{c.dedup_dropped} dedup")
         if c.prefilter_dropped:
             parts.append(f"{c.prefilter_dropped} pre-filter")
-        if c.has_native_enrich and c.enrich_failed_count:
-            parts.append(f"{c.enrich_failed_count} enrich_failed")
         if c.content_dropped:
             parts.append(f"{c.content_dropped} content")
-        parts.append(f"{c.forwarded} forwarded")
         return " · ".join(parts)
 
     def _pipeline_body(self) -> str:

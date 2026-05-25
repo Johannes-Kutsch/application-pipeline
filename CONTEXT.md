@@ -12,9 +12,9 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 ### Pipeline artifacts
 
-**Config**: `config.py` at `<cwd>/application-pipeline/` (ADR-0022) controlling pipeline shape — `SOURCES`, `LOCATIONS`, `INCLUDE_REMOTE`, optional `claude_cli_path`, `MAX_LISTING_AGE_DAYS: int` (default 180, `≥ 1`) driving the **Freshness Gate**, `claude_classify_parallelism: int` (default 4, `≥ 1`) sizing the classify worker pool (ADR-0031, ADR-0042), `DEDUP_COOLDOWN_DAYS: int` (default 30, `≥ 1`) gating decay of `selected_by_judge` and `expired` entries (ADR-0044). `claude_classify_batch_size` retired (ADR-0028). No path override knobs (ADR-0008 amended). `layout.py` retired (ADR-0033). `KEYWORDS`/`SKILLS`/`NEGATIVE_KEYWORDS` live in **SearchTerms** (ADR-0021). Materialised by `init`; never overwritten by `init --refresh`. Loaded by **Config Loader** into frozen typed `Config`. `max_results` retired (ADR-0041). Cron: weekdays 00:30 (ADR-0017). _Avoid_: config file, settings file, search config.
+**Config**: `config.py` at `<cwd>/application-pipeline/` (ADR-0022) controlling pipeline shape — `SOURCES`, `LOCATIONS`, `INCLUDE_REMOTE`, optional `claude_cli_path`, `MAX_LISTING_AGE_DAYS: int` (default 180, `≥ 1`) driving the **Freshness Gate**, `claude_classify_parallelism: int` (default 4, `≥ 1`) sizing the classify worker pool (ADR-0031, ADR-0042), `DEDUP_COOLDOWN_DAYS: int` (default 30, `≥ 1`) gating decay of `selected_by_judge` and `expired` entries (ADR-0044). `claude_classify_batch_size` retired (ADR-0028). No path override knobs (ADR-0008 amended). `layout.py` retired (ADR-0033). `KEYWORDS`/`NEGATIVE_KEYWORDS` live in **SearchTerms** (ADR-0021). Materialised by `init`; never overwritten by `init --refresh`. Loaded by **Config Loader** into frozen typed `Config`. `max_results` retired (ADR-0041). Cron: weekdays 00:30 (ADR-0017). _Avoid_: config file, settings file, search config.
 
-**SearchTerms**: User-authored search/filter knobs (ADR-0021) — `KEYWORDS`, `SKILLS`, `NEGATIVE_KEYWORDS`. Three markdown files under `<settings-dir>/user-info/search-terms/` (ADR-0024): `keywords.md`, `skills.md`, `negative-keywords.md`. Filename *is* the section. Flat `-` bullet entries; `skills.md` carries H2 **Skill Group** headings with `{...}` attributes (ADR-0025). Pipeline loader ignores headings/attributes, harvests bullet bodies as flat list. `keywords.md` missing/empty → `SearchTermsError`; others optional. Distinct from **Triage Profile** — different sub-dirs, different consumers (KEYWORDS → parser orchestration, NEGATIVE_KEYWORDS → **Domain Pre-Filter**, SKILLS → judge `{SKILLS}` slot). _Avoid_: search config, term file.
+**SearchTerms**: User-authored search/filter knobs (ADR-0021) — `KEYWORDS`, `NEGATIVE_KEYWORDS`. Two markdown files under `<settings-dir>/user-info/search-terms/` (ADR-0024): `keywords.md`, `negative-keywords.md`. Filename *is* the section. Flat `-` bullet entries. `keywords.md` missing/empty → `SearchTermsError`; `negative-keywords.md` optional. `KEYWORDS` → parser orchestration, `NEGATIVE_KEYWORDS` → **Domain Pre-Filter**. `skills.md` relocated to **Triage Profile** dir (#615). _Avoid_: search config, term file.
 
 **Layout**: _Retired_ per ADR-0033. Card structure hardcoded in the **Renderer**. `init --refresh` deletes `layout.py`. _Avoid_: do not reintroduce.
 
@@ -36,7 +36,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 ### Filtering & scoring
 
-**Triage Profile**: Applicant self-description plus match rules. Lives in `<settings-dir>/user-info/triage-profile/` (ADR-0024, ADR-0034) as `self-description.md`, `match-criteria.md` (domain scope + preferences after ADR-0034 merged `domain-fit.md`), `writing-style.md` (v2 authoring only). Loader exposes `{SELF_DESCRIPTION}`, `{MATCH_CRITERIA}`, `{SKILLS}` slots (ADR-0034 amendment). Classifier and judge both consume `{SELF_DESCRIPTION}` + `{MATCH_CRITERIA}`; judge also `{SKILLS}` (ADR-0013). Bullets/keywords, German, concise (ADR-0019). Reused as v2 authoring context. _Avoid_: profile (unqualified), bio, CV Profile (retired), `domain-fit.md` (retired).
+**Triage Profile**: Pipeline-facing applicant data. Lives in `<settings-dir>/user-info/triage-profile/` (ADR-0024, ADR-0034) as three files: `gate-criteria.md` (flat domain-in/out + hard exclusions — classifier only), `candidate-profile.md` (who-the-candidate-is + ranking preferences — judge only), `skills.md` (relocated from `search-terms/`, judge `{SKILLS}` slot, #615). Loader exposes `{GATE_CRITERIA}`, `{CANDIDATE_PROFILE}`, `{SKILLS}` slots. Classifier consumes `{GATE_CRITERIA}` only; judge consumes `{CANDIDATE_PROFILE}` + `{SKILLS}`. `skills.md` attribute-stripped inline by `prompts.py`. Bullets/keywords, German, concise (ADR-0019). `writing-style.md` and `positive-exemplars.md` relocated to `cv/` (#615). _Avoid_: profile (unqualified), bio, CV Profile (retired), `domain-fit.md` (retired), `self-description.md` (retired), `match-criteria.md` (retired).
 
 ### CV authoring
 
@@ -48,7 +48,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Content Pool**: CV item macros at `<settings-dir>/user-info/cv/content_pool.tex` (ADR-0024). Each `\newcommand{\itemFoo}{...}` selected into `resume_*` slots. Per-item metadata: `always:`, `group:`, `relevance:`. Sections from `% ===== <name> =====` block headers. _Avoid_: item pool, CV pool.
 
-**Skill**: Hard-skill item from `SKILLS` (ADR-0021). Dual-consumed (ADR-0025): pipeline harvests flat list for judge `{SKILLS}` slot (ADR-0034 amendment); `/write-cv` reads full structure for `skills_block`. Judge-only — **Domain Pre-Filter** no longer reads it (ADR-0013). Optional `{always}` attribute (within-group floor). _Avoid_: keyword (when matching).
+**Skill**: Hard-skill item from `skills.md` in **Triage Profile** dir (#615, relocated from `search-terms/`). Dual-consumed (ADR-0025): `prompts.py` harvests flat list (attributes stripped inline) for judge `{SKILLS}` slot; `/write-cv` reads full structure for `skills_block`. Judge-only — **Domain Pre-Filter** no longer reads it (ADR-0013). Optional `{always}` attribute (within-group floor). _Avoid_: keyword (when matching).
 
 **Skill Group**: H2 heading in `skills.md` (ADR-0025) — also `\cvitem{<group>}{...}` label. Unit of LLM selection for `/write-cv`: always-groups render; others picked by relevance. File order = render order. Empty groups collapse silently. _Avoid_: skill category, section (overloaded).
 
@@ -66,7 +66,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Daily Top-5**: ≤5 **Positions** the **Match Judge** returns, drawn from today's **Pool**. Each winner gets `mark_selected_by_judge(stub)` after Card append+fsync. _Avoid_: top-N, shortlist.
 
-**Relevance Classifier**: Three-check LLM gatekeeper (ADR-0034): domain fit, skill floor, preference fit. Emits **Header** + **Summary** on pass. `classify_relevance(item) -> (RelevanceVerdict, CallUsage)`; output `<verdict>{"matches": true/false, ...}</verdict>`. One `claude -p` per listing (ADR-0028). Parallel pool of N workers (ADR-0031) draining classify queue (ADR-0042). Combined prompt via stdin (ADR-0029). Short-circuits on first failing check. Malformed → stash to `failures/malformed/`, no `seen.json` write. Runs only on candidates surviving all non-LLM gates. _Avoid_: filter, gate.
+**Relevance Classifier**: Single-check LLM gatekeeper (#615, supersedes ADR-0034 three-check): domain fit + hard exclusions from `{GATE_CRITERIA}`. No candidate profile, no skill-floor check — stretch/experience judgment deferred to **Match Judge**. Emits **Header** + **Summary** on pass. `classify_relevance(item) -> (RelevanceVerdict, CallUsage)`; output `<verdict>{"matches": true/false, ...}</verdict>`. One `claude -p` per listing (ADR-0028). Parallel pool of N workers (ADR-0031) draining classify queue (ADR-0042). Combined prompt via stdin (ADR-0029). Malformed → stash to `failures/malformed/`, no `seen.json` write. Runs only on candidates surviving all non-LLM gates. _Avoid_: filter, gate.
 
 **LLM Enricher**: Owns the classify LLM call. Receives `(stub, body)` via classify queue (ADR-0042), runs `classify_relevance`, runs post-LLM **Freshness Gate** arm, writes Card on `matches=True`. No httpx client, no body strip. Redirect-following lives in `parsers/body_fetch.py`. _Avoid_: enricher (unqualified), extractor.
 
@@ -82,7 +82,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Quota Wall**: Shared coordination for the parallel classify pool (ADR-0031). `raise_wall(reset_time)`, `wait_if_blocked()`, `is_active()`. `threading.Condition` + `reset_time`. One `event=quota_sleep` row per wall raise. _Avoid_: rate limiter, barrier.
 
-**Match Judge**: Picks **Daily Top-5** from **Pool**. Single `judge_top_n(candidates)` per run. Takes `list[JudgeCandidate]` (id + Header + Summary), returns ≤5 `{id, rank}`. Consumes `{SELF_DESCRIPTION}` + `{MATCH_CRITERIA}` + `{SKILLS}` (ADR-0034). On non-quota error → Failure Report, no daily file. _Avoid_: scorer.
+**Match Judge**: Picks **Daily Top-5** from **Pool**. Single `judge_top_n(candidates)` per run. Takes `list[JudgeCandidate]` (id + Header + Summary), returns ≤5 `{id, rank}`. Consumes `{CANDIDATE_PROFILE}` + `{SKILLS}` (#615). No gate criteria — listings already passed the classifier. On non-quota error → Failure Report, no daily file. _Avoid_: scorer.
 
 ### Deduplication and run state
 
@@ -167,5 +167,5 @@ Fail loud-and-fast (exit 2) if `config.py` missing. Cron weekdays 00:30 (ADR-001
 
 - A listing reaches a **Daily Results File** by passing (in order, ADR-0038/0042/0044): parser thread — **Freshness Gate** (stub; drop → `mark_expired`), **Dedup** (post-discover), **Domain Pre-Filter** (title), **Parser.enrich()**, **Dedup** (post-enrich, backfilled fields), **Freshness Gate** (post-enrich), **Content Gate** (body) → classify queue → **Relevance Classifier** LLM call → post-LLM **Freshness Gate** → **Match Judge** picks **Daily Top-5**.
 - The **Pool** is `{url ∈ discovered_today : seen.json[url].status == matched}`.
-- The **Match Judge** runs once per run, takes Header + Summary + Skills + Triage Profile, returns ≤5 `{id, rank}`.
-- **Triage Profile** reaches LLM via `{SELF_DESCRIPTION}` + `{MATCH_CRITERIA}` (ADR-0034); **Skills** via `{SKILLS}` (judge only); `NEGATIVE_KEYWORDS` reaches **Domain Pre-Filter** directly.
+- The **Match Judge** runs once per run, takes Header + Summary + Candidate Profile + Skills, returns ≤5 `{id, rank}`.
+- **Triage Profile** reaches LLM via two disjoint paths (#615): `{GATE_CRITERIA}` → classifier only; `{CANDIDATE_PROFILE}` + `{SKILLS}` → judge only. `NEGATIVE_KEYWORDS` reaches **Domain Pre-Filter** directly.

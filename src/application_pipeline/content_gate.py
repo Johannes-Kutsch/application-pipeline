@@ -33,9 +33,10 @@ class ContentSnapshot:
 
 
 def _evaluate(stripped_body: str) -> tuple[bool, _Reason]:
-    if not stripped_body.strip():
+    body = stripped_body.strip()
+    if not body:
         return False, "empty_body"
-    if len(stripped_body.strip()) < _MIN_BODY_LEN:
+    if len(body) < _MIN_BODY_LEN:
         return False, "too_short"
     return True, "passed"
 

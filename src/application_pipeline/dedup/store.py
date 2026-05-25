@@ -293,7 +293,7 @@ class DeduplicationStore:
                 if original_status == "matched":
                     if self._in_run is not None and canonical_url in self._in_run:
                         return "run_hit"
-                    self._update_matched_record(key, canonical_url)
+                    self._update_canonical_record(key, canonical_url)
                     if self._in_run is not None:
                         self._in_run.add(canonical_url)
                         self._in_run.add(key.url)

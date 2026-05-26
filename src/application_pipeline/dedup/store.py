@@ -578,21 +578,72 @@ class DeduplicationStore:
             )
         }
 
+    def url_to_id_snapshot(self) -> dict[str, int]:
+        """Return a snapshot of the URL-to-listing-ID index."""
+        with self._lock:
+            return dict(self._url_index)
+
+    def attach_card_store(self, card_store: "CardStore") -> None:
+        """Set the card store used for delete callbacks."""
+        with self._lock:
+            self._card_store = card_store
+
     def _persist(self, records: dict[int, dict[str, Any]]) -> None:
-        to_write = {
-            str(lid): rec
-            for lid, rec in records.items()
-            if rec.get("status") != "pending"
+        _persist_records(self._path, records)
+
+
+def _migrate_legacy_seen(
+    data: dict[str, Any],
+) -> tuple[dict[int, dict[str, Any]], dict[str, int]]:
+    """Convert URL-keyed legacy seen.json data to integer-keyed format.
+
+    Returns (integer-keyed records, url_to_id mapping covering all URLs including aliases).
+    """
+    canonical_entries: list[tuple[str, dict[str, Any]]] = []
+    alias_entries: list[tuple[str, str]] = []  # (alias_url, canonical_url)
+
+    for url, record in data.items():
+        canonical_url = record.get("canonical_url", url)
+        if canonical_url == url:
+            canonical_entries.append((url, record))
+        else:
+            alias_entries.append((url, canonical_url))
+
+    url_to_id: dict[str, int] = {}
+    id_to_record: dict[int, dict[str, Any]] = {}
+
+    for listing_id, (url, record) in enumerate(canonical_entries, start=1):
+        url_to_id[url] = listing_id
+        new_record: dict[str, Any] = {
+            k: v for k, v in record.items() if k not in ("canonical_url", "first_seen")
         }
-        payload = json.dumps(
-            to_write, indent=2, sort_keys=True, ensure_ascii=False
-        ).encode("utf-8")
-        try:
-            write_atomic(self._path, payload)
-        except OSError as exc:
-            raise DedupStoreError(
-                f"could not persist dedup store to {self._path}: {exc}"
-            ) from exc
+        if "first_seen" in record and "status_last_changed" not in record:
+            new_record["status_last_changed"] = record["first_seen"]
+        new_record["urls"] = [url]
+        id_to_record[listing_id] = new_record
+
+    for alias_url, canonical_url in alias_entries:
+        if canonical_url in url_to_id:
+            listing_id = url_to_id[canonical_url]
+            url_to_id[alias_url] = listing_id
+            id_to_record[listing_id]["urls"].append(alias_url)
+
+    return id_to_record, url_to_id
+
+
+def _persist_records(path: Path, records: dict[int, dict[str, Any]]) -> None:
+    to_write = {
+        str(lid): rec for lid, rec in records.items() if rec.get("status") != "pending"
+    }
+    payload = json.dumps(to_write, indent=2, sort_keys=True, ensure_ascii=False).encode(
+        "utf-8"
+    )
+    try:
+        write_atomic(path, payload)
+    except OSError as exc:
+        raise DedupStoreError(
+            f"could not persist dedup store to {path}: {exc}"
+        ) from exc
 
 
 def load(
@@ -601,7 +652,7 @@ def load(
     card_store: "CardStore | None" = None,
     cooldown_days: int = 30,
     run_log: "RunLog | None" = None,
-) -> DeduplicationStore:
+) -> "DeduplicationStore":
     if not path.exists():
         return DeduplicationStore(
             path,
@@ -633,24 +684,29 @@ def load(
             f"dedup store at {path} must be a JSON object, got {type(data).__name__}"
         )
 
-    records: dict[int, dict[str, Any]] = {}
-    for key, record in data.items():
-        try:
-            listing_id = int(key)
-        except (ValueError, TypeError):
-            raise DedupStoreError(
-                f"dedup store at {path} has non-integer key {key!r}; "
-                f"wipe the store to start fresh"
-            )
-        if not isinstance(record, dict):
-            raise DedupStoreError(
-                f"dedup store at {path} has non-object record for key {key!r}"
-            )
-        records[listing_id] = record
+    # Detect and silently migrate legacy URL-keyed format.
+    if data and not next(iter(data)).lstrip("-").isdigit():
+        records, _ = _migrate_legacy_seen(data)
+        _persist_records(path, records)
+    else:
+        records = {}
+        for key, record in data.items():
+            try:
+                listing_id = int(key)
+            except (ValueError, TypeError):
+                raise DedupStoreError(
+                    f"dedup store at {path} has non-integer key {key!r}; "
+                    f"wipe the store to start fresh"
+                )
+            if not isinstance(record, dict):
+                raise DedupStoreError(
+                    f"dedup store at {path} has non-object record for key {key!r}"
+                )
+            records[listing_id] = record
 
-    for record in records.values():
-        if "first_seen" in record and "status_last_changed" not in record:
-            record["status_last_changed"] = record.pop("first_seen")
+        for record in records.values():
+            if "first_seen" in record and "status_last_changed" not in record:
+                record["status_last_changed"] = record.pop("first_seen")
 
     for listing_id, record in records.items():
         status = record.get("status")

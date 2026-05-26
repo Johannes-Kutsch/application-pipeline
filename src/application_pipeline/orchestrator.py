@@ -462,6 +462,64 @@ def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Classify accumulator — fills batches sequentially from classify queue
+# ---------------------------------------------------------------------------
+
+
+class _ClassifyAccumulator(threading.Thread):
+    """Single thread that fills classify batches sequentially.
+
+    Pulls _ClassifyRequest items from classify_queue, assembles batches of
+    batch_size, and puts each complete batch onto dispatch_queue. On sentinel,
+    flushes any partial batch and then sends num_workers sentinels to workers.
+    """
+
+    def __init__(
+        self,
+        *,
+        classify_queue: queue.Queue[object],
+        dispatch_queue: "queue.Queue[object]",
+        batch_size: int,
+        num_workers: int,
+        metrics: "RunMetrics",
+        run_state: _RunState,
+    ) -> None:
+        super().__init__(name="classify-accumulator", daemon=True)
+        self._classify_queue = classify_queue
+        self._dispatch_queue = dispatch_queue
+        self._batch_size = batch_size
+        self._num_workers = num_workers
+        self._metrics = metrics
+        self._run_state = run_state
+        self.exc: BaseException | None = None
+
+    def run(self) -> None:
+        current_stage.set("classify-accumulator")
+        try:
+            batch: list[_ClassifyRequest] = []
+            while True:
+                item = self._classify_queue.get()
+                if item is _NO_MORE_BATCHES:
+                    if batch:
+                        self._metrics.classify_batch_dequeued(len(batch))
+                        self._dispatch_queue.put(batch)
+                    for _ in range(self._num_workers):
+                        self._dispatch_queue.put(_NO_MORE_BATCHES)
+                    break
+                assert isinstance(item, _ClassifyRequest)
+                batch.append(item)
+                if len(batch) >= self._batch_size:
+                    self._metrics.classify_batch_dequeued(len(batch))
+                    self._dispatch_queue.put(batch)
+                    batch = []
+        except BaseException as exc:
+            self.exc = exc
+            self._run_state.set_aborted(exc)
+            for _ in range(self._num_workers):
+                self._dispatch_queue.put(_NO_MORE_BATCHES)
+
+
+# ---------------------------------------------------------------------------
 # Classify worker — runs only the LLM call + verdict handling
 # ---------------------------------------------------------------------------
 
@@ -470,7 +528,7 @@ class _ClassifyWorker(_QueueWorker):
     def __init__(
         self,
         *,
-        classify_queue: queue.Queue[object],
+        dispatch_queue: "queue.Queue[object]",
         pool_collector: "_PoolCollector",
         llm_enricher: "_LLMEnricherLike",
         dedup_store: DeduplicationStore,
@@ -478,11 +536,10 @@ class _ClassifyWorker(_QueueWorker):
         run_state: _RunState,
         run_log: RunLog,
         quota_wall: "_quota.QuotaWall",
-        batch_size: int = 1,
         worker_index: int = 0,
     ) -> None:
         super().__init__(
-            input_queue=classify_queue,
+            input_queue=dispatch_queue,
             sentinel=_NO_MORE_BATCHES,
             stage_name="classify",
             run_state=run_state,
@@ -494,26 +551,18 @@ class _ClassifyWorker(_QueueWorker):
         self._metrics = metrics
         self._run_log = run_log
         self._quota_wall = quota_wall
-        self._batch_size = batch_size
 
     def run(self) -> None:
         current_stage.set(self._stage_name)
         try:
-            batch: list[_ClassifyRequest] = []
             while True:
                 item = self._input_queue.get()
                 if item is self._sentinel:
-                    if batch and not self._run_state.is_degraded:
-                        self._metrics.classify_batch_dequeued(len(batch))
-                        self._process_batch(batch)
                     break
-                assert isinstance(item, _ClassifyRequest)
-                batch.append(item)
-                if len(batch) >= self._batch_size:
-                    if not self._run_state.is_degraded:
-                        self._metrics.classify_batch_dequeued(len(batch))
-                        self._process_batch(batch)
-                    batch = []
+                assert isinstance(item, list)
+                batch: list[_ClassifyRequest] = item
+                if not self._run_state.is_degraded:
+                    self._process_batch(batch)
         except BaseException as exc:
             self.exc = exc
             self._run_state.set_aborted(exc)
@@ -868,9 +917,20 @@ def run(
                 _log.info("parser %s started", pid)
                 run_log.event("parser_" + pid, "parser started")
 
+            dispatch_queue: queue.Queue[object] = queue.Queue()
+            classify_accumulator = _ClassifyAccumulator(
+                classify_queue=classify_queue,
+                dispatch_queue=dispatch_queue,
+                batch_size=cfg.claude_classify_batch_size,
+                num_workers=cfg.claude_classify_parallelism,
+                metrics=metrics,
+                run_state=run_state,
+            )
+            classify_accumulator.start()
+
             classify_workers = [
                 _ClassifyWorker(
-                    classify_queue=classify_queue,
+                    dispatch_queue=dispatch_queue,
                     pool_collector=pool_collector,
                     llm_enricher=llm_enricher,
                     dedup_store=dedup_store,
@@ -878,7 +938,6 @@ def run(
                     run_state=run_state,
                     run_log=run_log,
                     quota_wall=quota_wall,
-                    batch_size=cfg.claude_classify_batch_size,
                     worker_index=i,
                 )
                 for i in range(cfg.claude_classify_parallelism)
@@ -958,11 +1017,14 @@ def run(
             dedup_counters.emit_run_complete()
             dedup_snapshot = dedup_counters.snapshot()
 
-            # Signal classify workers to drain and stop
-            for _ in range(cfg.claude_classify_parallelism):
-                classify_queue.put(_NO_MORE_BATCHES)
+            # Signal accumulator to flush partial batch and stop workers
+            classify_queue.put(_NO_MORE_BATCHES)
 
         first_exc: BaseException | None = None
+        classify_accumulator.join()
+        if classify_accumulator.exc is not None:
+            first_exc = classify_accumulator.exc
+
         for cw in classify_workers:
             cw.join()
             if first_exc is None and cw.exc is not None:

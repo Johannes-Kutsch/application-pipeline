@@ -4,6 +4,7 @@ import json
 import logging
 import urllib.parse
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -405,3 +406,108 @@ def test_enrich_propagates_transient_http_error_on_503(
         with StellenHamburgParser(run_log=run_log, failures_dir=tmp_path) as p:
             with pytest.raises(httpx.HTTPStatusError):
                 p.enrich(stub)
+
+
+# ---------------------------------------------------------------------------
+# discover — posted_date and deadline extraction
+# ---------------------------------------------------------------------------
+
+
+def _single_item_response(descriptor: dict) -> bytes:
+    return json.dumps(
+        {
+            "SearchResult": {
+                "SearchResultCountAll": 1,
+                "SearchResultItems": [
+                    {
+                        "MatchedObjectId": "99999",
+                        "MatchedObjectDescriptor": descriptor,
+                    }
+                ],
+            }
+        }
+    ).encode()
+
+
+def test_discover_stub_posted_date_extracted_from_publication_start_date(
+    run_log: RunLog,
+) -> None:
+    descriptor = {
+        "PositionTitle": "Test Job",
+        "PublicationStartDate": "2025-03-15",
+    }
+    get = _make_get({"api-stellen": _single_item_response(descriptor)})
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
+    assert stub.posted_date == date(2025, 3, 15)
+
+
+def test_discover_stub_posted_date_is_none_when_publication_start_date_absent(
+    run_log: RunLog,
+) -> None:
+    descriptor = {"PositionTitle": "Test Job"}
+    get = _make_get({"api-stellen": _single_item_response(descriptor)})
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
+    assert stub.posted_date is None
+
+
+def test_discover_stub_posted_date_is_none_when_publication_start_date_malformed(
+    run_log: RunLog,
+) -> None:
+    descriptor = {"PositionTitle": "Test Job", "PublicationStartDate": "not-a-date"}
+    get = _make_get({"api-stellen": _single_item_response(descriptor)})
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
+    assert stub.posted_date is None
+
+
+def test_discover_stub_deadline_extracted_from_publication_end_date(
+    run_log: RunLog,
+) -> None:
+    descriptor = {
+        "PositionTitle": "Test Job",
+        "PublicationEndDate": "2025-06-30",
+    }
+    get = _make_get({"api-stellen": _single_item_response(descriptor)})
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
+    assert stub.deadline == date(2025, 6, 30)
+
+
+def test_discover_stub_deadline_is_none_when_publication_end_date_absent(
+    run_log: RunLog,
+) -> None:
+    descriptor = {"PositionTitle": "Test Job"}
+    get = _make_get({"api-stellen": _single_item_response(descriptor)})
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
+    assert stub.deadline is None
+
+
+def test_discover_stub_deadline_is_none_when_publication_end_date_malformed(
+    run_log: RunLog,
+) -> None:
+    descriptor = {"PositionTitle": "Test Job", "PublicationEndDate": "bad-date"}
+    get = _make_get({"api-stellen": _single_item_response(descriptor)})
+    with StellenHamburgParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        (stub,) = list(p.discover(_query()))
+    assert isinstance(stub, PositionStub)
+    assert stub.deadline is None

@@ -32,6 +32,7 @@ def _bucket_roots(cwd: Path) -> dict[str, Path]:
 def init(cwd: Path, *, refresh: bool = False) -> None:
     pkg = importlib.resources.files("application_pipeline.templates")
     roots = _bucket_roots(cwd)
+    reports: list[tuple[str, str]] = []
     for bucket in pkg.iterdir():
         if bucket.name.startswith("__"):
             continue
@@ -41,31 +42,50 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
             continue
         if bucket.name not in roots:
             continue
-        _seed(bucket, roots[bucket.name], Path(), refresh=refresh, bucket=bucket.name)
+        reports.extend(
+            _seed(
+                bucket, roots[bucket.name], Path(), refresh=refresh, bucket=bucket.name
+            )
+        )
 
     if refresh:
         ap_root = roots["application-pipeline"]
         layout_path = ap_root / "layout.py"
         if layout_path.exists():
             layout_path.unlink()
-            print("removed layout.py")
-        _cleanup_legacy_skills_dir(ap_root)
+            reports.append(("removed", "layout.py"))
+        reports.extend(_cleanup_legacy_skills_dir(ap_root))
+
+        visible = [(v, d) for v, d in reports if v in ("overwrote", "removed")]
+        if visible:
+            for verb, display in visible:
+                print(f"{verb} {display}")
+        else:
+            print("directory is current — no files changed")
+    else:
+        for verb, display in reports:
+            if verb == "wrote":
+                print(f"wrote {display}")
+            elif verb == "skipped":
+                print(f"skipped {display} (already exists)")
 
 
-def _cleanup_legacy_skills_dir(ap_root: Path) -> None:
+def _cleanup_legacy_skills_dir(ap_root: Path) -> list[tuple[str, str]]:
+    actions: list[tuple[str, str]] = []
     legacy_skills = ap_root / "skills"
     if not legacy_skills.is_dir():
-        return
+        return actions
     legacy_skeleton = legacy_skills / "cv_skeleton.tex"
     if legacy_skeleton.exists():
         legacy_skeleton.unlink()
-        print("removed skills/cv_skeleton.tex")
+        actions.append(("removed", "skills/cv_skeleton.tex"))
     try:
         legacy_skills.rmdir()
     except OSError:
         # User left other files inside — do not delete their content.
-        return
-    print("removed skills/")
+        return actions
+    actions.append(("removed", "skills/"))
+    return actions
 
 
 def _seed(
@@ -75,13 +95,16 @@ def _seed(
     *,
     refresh: bool,
     bucket: str,
-) -> None:
+) -> list[tuple[str, str]]:
+    actions: list[tuple[str, str]] = []
     for item in node.iterdir():
         if item.name.startswith("__"):
             continue
         item_rel = rel / item.name
         if item.is_dir():
-            _seed(item, target_dir, item_rel, refresh=refresh, bucket=bucket)
+            actions.extend(
+                _seed(item, target_dir, item_rel, refresh=refresh, bucket=bucket)
+            )
         else:
             if len(rel.parts) == 0 and item.name in _EXCLUDE_FILES:
                 continue
@@ -90,16 +113,21 @@ def _seed(
             overwrite = refresh and _is_global(item_rel, bucket=bucket)
             if dest.exists():
                 if overwrite:
-                    dest.write_bytes(item.read_bytes())
-                    print(f"overwrote {display}")
+                    template_bytes = item.read_bytes()
+                    if dest.read_bytes() != template_bytes:
+                        dest.write_bytes(template_bytes)
+                        actions.append(("overwrote", display))
+                    else:
+                        actions.append(("unchanged", display))
                 elif refresh:
-                    print(f"skipped {display} (preserved)")
+                    actions.append(("preserved", display))
                 else:
-                    print(f"skipped {display} (already exists)")
+                    actions.append(("skipped", display))
             else:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(item.read_bytes())
-                print(f"wrote {display}")
+                actions.append(("wrote", display))
+    return actions
 
 
 def _is_global(rel: Path, *, bucket: str) -> bool:

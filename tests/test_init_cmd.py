@@ -560,19 +560,22 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
         "# custom\n"
     )
-    # Delete a global file to trigger "wrote"
+    # Delete a global file to trigger a new-file write
     (ap / "setup" / "cron-install.sh").unlink()
     capsys.readouterr()
 
     init(tmp_path, refresh=True)
 
     out = capsys.readouterr().out
+    # Modified global files appear
     assert "overwrote setup/cron.sh" in out
     assert "overwrote setup/cron-uninstall.sh" in out
-    assert "wrote setup/cron-install.sh" in out
-    assert "skipped config.py (preserved)" in out
+    # Legacy removal still appears
     assert "removed layout.py" in out
-    assert "skipped user-info/triage-profile/candidate-profile.md (preserved)" in out
+    # Suppressed: new file written during refresh, preserved user files
+    assert "cron-install.sh" not in out
+    assert "config.py" not in out
+    assert "user-info" not in out
 
 
 def test_refresh_removes_layout_py_if_present(
@@ -891,3 +894,83 @@ def test_refresh_preserves_gitignore_and_runtime_data(tmp_path: Path) -> None:
 
     assert seen.read_text() == '{"custom": true}'
     assert gitignore.read_text() == "# bespoke content\n"
+
+
+# --- --refresh quiet output (issue #664) ---
+
+
+def test_refresh_against_unmodified_dir_prints_only_confirmation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert not any(
+        line.startswith(("overwrote", "wrote", "skipped", "removed", "unchanged"))
+        for line in lines
+    )
+
+
+def test_refresh_with_one_modified_file_prints_only_that_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    (_ap(tmp_path) / "setup" / "cron.sh").write_text("# modified\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert lines == ["overwrote setup/cron.sh"]
+
+
+def test_refresh_config_and_gitignore_never_in_stdout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    out = capsys.readouterr().out
+    assert "config.py" not in out
+    assert ".gitignore" not in out
+
+
+def test_refresh_new_file_created_but_not_in_stdout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    (_ap(tmp_path) / "setup" / "cron-install.sh").unlink()
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert (_ap(tmp_path) / "setup" / "cron-install.sh").exists()
+    assert "cron-install.sh" not in capsys.readouterr().out
+
+
+def test_refresh_unchanged_file_preserves_mtime(tmp_path: Path) -> None:
+    init(tmp_path)
+    cron = _ap(tmp_path) / "setup" / "cron.sh"
+    mtime_before = cron.stat().st_mtime_ns
+
+    init(tmp_path, refresh=True)
+
+    assert cron.stat().st_mtime_ns == mtime_before
+
+
+def test_refresh_removed_lines_still_appear(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    (_ap(tmp_path) / "layout.py").write_text("# legacy\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert "removed layout.py" in capsys.readouterr().out

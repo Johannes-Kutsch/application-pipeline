@@ -69,7 +69,7 @@ def test_init_refresh_preserves_user_files(
     _run_main(["init", "--refresh"])
 
     out = capsys.readouterr().out
-    assert "skipped config.py (preserved)" in out
+    assert "config.py" not in out
 
 
 def test_init_refresh_is_idempotent(

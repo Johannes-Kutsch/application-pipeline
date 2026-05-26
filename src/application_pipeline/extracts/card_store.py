@@ -58,23 +58,8 @@ class CardStore:
             ) from exc
 
 
-def _migrate_legacy_extracts(
-    data: dict[str, dict[str, str]],
-    url_to_id: dict[str, int],
-) -> dict[int, dict[str, str]]:
-    """Convert URL-keyed legacy extracts to integer-keyed format, dropping orphans."""
-    records: dict[int, dict[str, str]] = {}
-    for url, extract in data.items():
-        listing_id = url_to_id.get(url)
-        if listing_id is not None:
-            records[listing_id] = extract
-    return records
-
-
 def load_card_store(
     path: Path,
-    *,
-    url_to_id: dict[str, int] | None = None,
 ) -> CardStore:
     if not path.exists():
         return CardStore(path, {})
@@ -101,12 +86,11 @@ def load_card_store(
             f"card store at {path} must be a JSON object, got {type(data).__name__}"
         )
 
-    # Detect and silently migrate legacy URL-keyed format.
     if data and not next(iter(data)).lstrip("-").isdigit():
-        records = _migrate_legacy_extracts(data, url_to_id or {})
-        store = CardStore(path, records)
-        store._persist(records)
-        return store
+        raise ExtractStoreError(
+            f"card store at {path} uses legacy URL-keyed format; "
+            f"delete the file to start fresh"
+        )
 
     try:
         records = {int(k): v for k, v in data.items()}

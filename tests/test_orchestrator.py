@@ -2840,6 +2840,151 @@ def test_25_items_batch_size_10_fires_3_enricher_calls(tmp_path: Path) -> None:
     assert sorted(batch_sizes_seen) == [5, 10, 10]
 
 
+def test_25_items_parallelism_4_batch_size_10_fires_3_enricher_calls(
+    tmp_path: Path,
+) -> None:
+    """With parallelism=4 and batch_size=10, 25 items → exactly 3 LLM calls (10, 10, 5).
+
+    The accumulator must fill batches sequentially regardless of worker count.
+    Without a dedicated accumulator thread, OS scheduling scatters items across
+    4 workers producing more than 3 partial batches.
+    """
+    card_store = _make_card_store(tmp_path)
+    batch_sizes_seen: list[int] = []
+
+    class _BatchTrackingEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> "list[RelevanceVerdict | None]":
+            batch_sizes_seen.append(len(items))
+            verdicts: list[RelevanceVerdict | None] = []
+            for listing_id, stub, body in items:
+                card_store.put(
+                    listing_id,
+                    CardExtract(
+                        header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                    ),
+                )
+                verdicts.append(
+                    RelevanceVerdict(
+                        matches=True,
+                        header=_FAKE_ENRICH_HEADER,
+                        summary=_FAKE_ENRICH_SUMMARY,
+                    )
+                )
+            return verdicts
+
+    class _TwentyFiveStubParser(_StubParserBase):
+        def __enter__(self) -> "_TwentyFiveStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://acc25.example/{i}",
+                    title=f"Job {i}",
+                    source="stub",
+                )
+                for i in range(25)
+            ]
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_batch_size=10,
+            claude_classify_parallelism=4,
+        ),
+        llm_enricher=_BatchTrackingEnricher(),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TwentyFiveStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert summary.classify_items == 25
+    assert len(batch_sizes_seen) == 3, f"expected 3 batches, got {batch_sizes_seen}"
+    assert sorted(batch_sizes_seen) == [5, 10, 10]
+
+
+def test_10_items_parallelism_4_batch_size_10_fires_1_enricher_call(
+    tmp_path: Path,
+) -> None:
+    """With parallelism=4 and batch_size=10, 10 items → exactly 1 LLM call of size 10.
+
+    Without a dedicated accumulator, 4 workers compete for items; a full batch
+    of 10 can scatter into e.g. 7+3 across two workers producing 2 partial calls.
+    """
+    card_store = _make_card_store(tmp_path)
+    batch_sizes_seen: list[int] = []
+
+    class _BatchTrackingEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> "list[RelevanceVerdict | None]":
+            batch_sizes_seen.append(len(items))
+            verdicts: list[RelevanceVerdict | None] = []
+            for listing_id, stub, body in items:
+                card_store.put(
+                    listing_id,
+                    CardExtract(
+                        header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                    ),
+                )
+                verdicts.append(
+                    RelevanceVerdict(
+                        matches=True,
+                        header=_FAKE_ENRICH_HEADER,
+                        summary=_FAKE_ENRICH_SUMMARY,
+                    )
+                )
+            return verdicts
+
+    class _TenStubParser(_StubParserBase):
+        def __enter__(self) -> "_TenStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://acc10.example/{i}",
+                    title=f"Job {i}",
+                    source="stub",
+                )
+                for i in range(10)
+            ]
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_batch_size=10,
+            claude_classify_parallelism=4,
+        ),
+        llm_enricher=_BatchTrackingEnricher(),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TenStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert summary.classify_items == 10
+    assert len(batch_sizes_seen) == 1, f"expected 1 batch, got {batch_sizes_seen}"
+    assert batch_sizes_seen == [10]
+
+
 def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     """Positions classified as off-domain by llm_enricher are not included in judge_top_n candidates."""
     seen_path = tmp_path / ".seen.json"

@@ -105,16 +105,7 @@ def load_card_store(
     if data and not next(iter(data)).lstrip("-").isdigit():
         records = _migrate_legacy_extracts(data, url_to_id or {})
         store = CardStore(path, records)
-        if records:
-            store._persist(records)
-        else:
-            payload = b"{}"
-            try:
-                write_atomic(path, payload)
-            except OSError as exc:
-                raise ExtractStoreError(
-                    f"could not persist card store to {path}: {exc}"
-                ) from exc
+        store._persist(records)
         return store
 
     try:

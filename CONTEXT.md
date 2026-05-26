@@ -113,9 +113,7 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthin
 
 **Card**: Fixed markdown block per winner (ADR-0033): `# **{rank}:** {title}` (blank line) metadata lines + URL (blank line) `{Summary}` (blank line) `---` (blank line) `{Raw Description}` (blank line) `---`. _Avoid_: card template, headline.
 
-**Renderer**: `render(rank, header, summary, url, body) -> str` — splits header at first newline to insert blank line after `#` title, appends URL after metadata, summary block, then `---`-fenced body, trailing `---` closes the card. _Avoid_: formatter, presenter.
-
-**Results File Manager**: `ensure_initialized(path)` (mkdir) and `append(path, rendered_block)` (write + flush + fsync). Path: `<settings-dir>/results/{cron_anchored_date}.md` (ADR-0015). _Avoid_: writer, output manager.
+**DailyResultsFile**: Module that owns both rendering and durability for the **Daily Results File** artefact. Card shape is hardcoded inside this module per ADR-0033. Write durability is `write + flush + fsync` per ADR-0015. Public interface: `ensure_initialized()` (mkdir parent dir) and `commit(*, rank, header, summary, url, body)` (render Card then append to file). `OSError` is wrapped as `ResultsFileError` at the public interface edge. Path bound at construction. _Avoid_: renderer, formatter, results file manager, writer, output manager.
 
 **Atomic Write Helper**: `write_atomic(path, payload: bytes)` — crash-safe atomic overwrite via `.tmp` sibling + `os.write` → `os.fsync` → `os.replace`. Used by **Deduplication Store** and **Extract Store**. _Avoid_: persistence helper, file writer (overloaded with Results File Manager's append).
 

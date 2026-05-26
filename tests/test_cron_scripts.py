@@ -265,22 +265,7 @@ def test_cron_sh_no_judge_passes_flag_to_run(tmp_path: Path) -> None:
 
     _write_stub(venv_bin, "pip", "", exit_code=0)
 
-    # Record args passed to application-pipeline
-    (venv_bin / "application-pipeline").write_text(
-        textwrap.dedent("""\
-            #!/usr/bin/env bash
-            echo "$*" >> /tmp/ap_calls_$$.txt
-            exit 0
-        """),
-        encoding="utf-8",
-    )
-    (venv_bin / "application-pipeline").chmod(
-        (venv_bin / "application-pipeline").stat().st_mode | stat.S_IEXEC
-    )
-
-    # Use a unique temp file per test
     calls_file = tmp_path / "ap_calls.txt"
-
     (venv_bin / "application-pipeline").write_text(
         textwrap.dedent(f"""\
             #!/usr/bin/env bash

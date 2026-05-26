@@ -19,26 +19,26 @@ class CardExtract:
 
 
 class CardStore:
-    def __init__(self, path: Path, records: dict[str, dict[str, str]]) -> None:
+    def __init__(self, path: Path, records: dict[int, dict[str, str]]) -> None:
         self._path = path
         self._records = records
         self._lock = threading.Lock()
 
-    def get(self, key: str) -> CardExtract | None:
+    def get(self, key: int) -> CardExtract | None:
         with self._lock:
             record = self._records.get(key)
         if record is None:
             return None
         return CardExtract(header=record["header"], summary=record["summary"])
 
-    def put(self, key: str, extract: CardExtract) -> None:
+    def put(self, key: int, extract: CardExtract) -> None:
         with self._lock:
             new_records = dict(self._records)
             new_records[key] = {"header": extract.header, "summary": extract.summary}
             self._persist(new_records)
             self._records = new_records
 
-    def delete(self, key: str) -> None:
+    def delete(self, key: int) -> None:
         with self._lock:
             if key not in self._records:
                 return
@@ -46,7 +46,7 @@ class CardStore:
             self._persist(new_records)
             self._records = new_records
 
-    def _persist(self, records: dict[str, dict[str, str]]) -> None:
+    def _persist(self, records: dict[int, dict[str, str]]) -> None:
         payload = json.dumps(
             records, indent=2, sort_keys=True, ensure_ascii=False
         ).encode("utf-8")
@@ -84,4 +84,11 @@ def load_card_store(path: Path) -> CardStore:
             f"card store at {path} must be a JSON object, got {type(data).__name__}"
         )
 
-    return CardStore(path, data)
+    try:
+        records: dict[int, dict[str, str]] = {int(k): v for k, v in data.items()}
+    except (ValueError, TypeError) as exc:
+        raise ExtractStoreError(
+            f"card store at {path} has non-integer key: {exc}"
+        ) from exc
+
+    return CardStore(path, records)

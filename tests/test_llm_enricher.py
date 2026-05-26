@@ -134,7 +134,7 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
         location="Hamburg",
     )
 
-    result = enricher.enrich(stub, body)
+    result = enricher.enrich(1, stub, body)
 
     assert result is not None
     assert result.matches is True
@@ -143,7 +143,7 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
     )
     assert result.summary == "Great ML role."
 
-    card = load_card_store(tmp_path / "extracts.json").get(stub.url)
+    card = load_card_store(tmp_path / "extracts.json").get(1)
     assert card is not None
     assert card.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
     assert card.summary == "Great ML role."
@@ -176,7 +176,7 @@ def test_enricher_stashes_malformed_llm_output(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(stub, body)
+        enricher.enrich(99, stub, body)
 
     slug = "example.com-job-99"
     stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
@@ -215,7 +215,7 @@ def test_enricher_malformed_error_produces_md_file_with_all_sections(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(stub, body)
+        enricher.enrich(99, stub, body)
 
     slug = "example.com-job-99"
     stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
@@ -254,7 +254,7 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
     )
 
     with pytest.raises(ExtractorMalformedJSONError):
-        enricher.enrich(stub, body)
+        enricher.enrich(99, stub, body)
 
     slug = "example.com-job-cli"
     stash_path = tmp_path / "failures" / "malformed" / f"src_cli-{slug}.md"
@@ -296,7 +296,7 @@ def test_enricher_malformed_llm_output_emits_log_event(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(stub, body)
+        enricher.enrich(99, stub, body)
 
     events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
     assert events_file.exists()
@@ -373,10 +373,10 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
         posted_date=None,  # no pre-LLM date
     )
 
-    result = enricher.enrich(stub, body)
+    result = enricher.enrich(1, stub, body)
 
     assert result is None
-    assert card_store.get(stub.url) is None
+    assert card_store.get(1) is None
 
 
 def test_enricher_freshness_drop_records_post_llm_transcript(
@@ -409,7 +409,7 @@ def test_enricher_freshness_drop_records_post_llm_transcript(
         posted_date=None,
     )
 
-    enricher.enrich(stub, body)
+    enricher.enrich(1, stub, body)
 
     rows = _read_freshness_transcripts(tmp_path)
     assert len(rows) == 1
@@ -456,11 +456,11 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
         posted_date=None,
     )
 
-    result = enricher.enrich(stub, body)
+    result = enricher.enrich(1, stub, body)
 
     assert result is not None
     assert result.matches is True
-    card = card_store.get(stub.url)
+    card = card_store.get(1)
     assert card is not None
     assert card.header == fresh_header
 
@@ -503,8 +503,8 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
         posted_date=None,
     )
 
-    result = enricher.enrich(stub, body)
+    result = enricher.enrich(1, stub, body)
 
     assert result is not None
     assert result.matches is True
-    assert card_store.get(stub.url) is not None
+    assert card_store.get(1) is not None

@@ -78,7 +78,7 @@ def _classify_response(verdict: object) -> ClaudeResponse:
     )
 
 
-def _judge_response(verdicts: list[dict[str, object]]) -> ClaudeResponse:
+def _judge_response(verdicts: list[dict[str, int]]) -> ClaudeResponse:
     return ClaudeResponse(
         raw_response=f"<verdicts>{json.dumps(verdicts)}</verdicts>",
         usage=_usage(),
@@ -318,7 +318,7 @@ def test_classify_relevance_legacy_in_domain_field_raises_malformed(
 
 def _make_candidates(n: int) -> list[JudgeCandidate]:
     return [
-        JudgeCandidate(id=f"cand-{i}", header=f"Title {i}\nCo", summary=f"Summary {i}")
+        JudgeCandidate(id=i, header=f"Title {i}\nCo", summary=f"Summary {i}")
         for i in range(n)
     ]
 
@@ -373,8 +373,8 @@ def test_judge_top_n_candidates_appear_in_prompt(
     )
     extractor.judge_top_n(candidates)
     prompt_sent = invoker.call.call_args.args[0]
-    assert "cand-0" in prompt_sent
-    assert "cand-1" in prompt_sent
+    assert "[Candidate id=0]" in prompt_sent
+    assert "[Candidate id=1]" in prompt_sent
 
 
 # ---------------------------------------------------------------------------

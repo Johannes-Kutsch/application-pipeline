@@ -94,14 +94,14 @@ class RelevanceVerdict:
 
 @dataclass(frozen=True)
 class JudgeCandidate:
-    id: str
+    id: int
     header: str
     summary: str
 
 
 @dataclass(frozen=True)
 class MatchVerdict:
-    id: str
+    id: int
     rank: int
 
     def __post_init__(self) -> None:

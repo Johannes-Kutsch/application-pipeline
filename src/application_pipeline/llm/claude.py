@@ -376,7 +376,7 @@ class ClaudeExtractor:
             )
         valid_ids = {c.id for c in candidates}
         seen_ranks: set[int] = set()
-        seen_ids: set[str] = set()
+        seen_ids: set[int] = set()
         verdicts: list[MatchVerdict] = []
         for entry in data:
             if not isinstance(entry, dict):
@@ -384,7 +384,7 @@ class ClaudeExtractor:
                     f"judge_top_n: verdict entry is not a dict: {entry!r}"
                 )
             entry_id = entry.get("id")
-            if not isinstance(entry_id, str) or entry_id not in valid_ids:
+            if not isinstance(entry_id, int) or entry_id not in valid_ids:
                 raise ExtractorBatchMalformedError(
                     f"judge_top_n: unknown or missing id in verdict: {entry_id!r}"
                 )

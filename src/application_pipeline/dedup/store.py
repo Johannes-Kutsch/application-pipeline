@@ -492,9 +492,9 @@ class DeduplicationStore:
             lid = self._write_pending(stub_key)
         return lid, stub_key
 
-    def _delete_from_stores(self, url: str) -> None:
+    def _delete_from_stores(self, listing_id: int) -> None:
         if self._card_store is not None:
-            self._card_store.delete(url)
+            self._card_store.delete(listing_id)
 
     def mark_out_of_domain(
         self,
@@ -504,7 +504,7 @@ class DeduplicationStore:
         with self._lock:
             listing_id, stub = self._resolve_listing_id(key_or_listing_id, stub)
             self._mark(listing_id, stub, "out_of_domain")
-            self._delete_from_stores(stub.url)
+            self._delete_from_stores(listing_id)
 
     def mark_selected_by_judge(
         self,
@@ -514,7 +514,7 @@ class DeduplicationStore:
         with self._lock:
             listing_id, stub = self._resolve_listing_id(key_or_listing_id, stub)
             self._mark(listing_id, stub, "selected_by_judge", overwrite_if="matched")
-            self._delete_from_stores(stub.url)
+            self._delete_from_stores(listing_id)
 
     def mark_expired(
         self,
@@ -527,7 +527,7 @@ class DeduplicationStore:
             prior_status = prior.get("status") if prior else None
             if prior_status == "matched":
                 self._mark(listing_id, stub, "expired", overwrite_if="matched")
-                self._delete_from_stores(stub.url)
+                self._delete_from_stores(listing_id)
             elif prior_status == "expired":
                 self._mark(listing_id, stub, "expired", overwrite_if="expired")
             else:

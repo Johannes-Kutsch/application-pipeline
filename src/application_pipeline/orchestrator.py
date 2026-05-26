@@ -88,7 +88,9 @@ class _LLMJudge(Protocol):
 
 
 class _LLMEnricherLike(Protocol):
-    def enrich(self, stub: PositionStub, body: str) -> "RelevanceVerdict | None": ...
+    def enrich(
+        self, listing_id: int, stub: PositionStub, body: str
+    ) -> "RelevanceVerdict | None": ...
 
 
 # ---------------------------------------------------------------------------
@@ -181,31 +183,31 @@ class _PoolCollector:
     """Collects PositionStubs from enrich-complete and judge-pending paths."""
 
     def __init__(self) -> None:
-        self._stubs: dict[str, PositionStub] = {}
+        self._stubs: dict[int, PositionStub] = {}
         self._lock = threading.Lock()
 
-    def add_matched(self, stub: PositionStub) -> None:
+    def add_matched(self, stub: PositionStub, listing_id: int) -> None:
         with self._lock:
-            self._stubs[stub.url] = stub
+            self._stubs[listing_id] = stub
 
-    def add_judge_pending(self, stub: PositionStub) -> None:
+    def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None:
         with self._lock:
-            self._stubs[stub.url] = stub
+            self._stubs[listing_id] = stub
 
-    def get_stub(self, url: str) -> PositionStub | None:
+    def get_stub(self, listing_id: int) -> PositionStub | None:
         with self._lock:
-            return self._stubs.get(url)
+            return self._stubs.get(listing_id)
 
     def build_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
         with self._lock:
             stubs = dict(self._stubs)
         candidates = []
-        for url in stubs:
-            card = card_store.get(url)
+        for listing_id in stubs:
+            card = card_store.get(listing_id)
             if card is None:
                 continue
             candidates.append(
-                JudgeCandidate(id=url, header=card.header, summary=card.summary)
+                JudgeCandidate(id=listing_id, header=card.header, summary=card.summary)
             )
         return candidates
 
@@ -357,7 +359,7 @@ class _ParserThread(threading.Thread):
         result = self._dedup.is_seen(stub)
         self._dedup_counters.record(result.kind)
         if result.kind == "judge_pending":
-            self._pool_collector.add_judge_pending(stub)
+            self._pool_collector.add_judge_pending(stub, result.listing_id)
             return
         if result.kind != "miss":
             self._metrics.increment_dedup_dropped(self._parser_id)
@@ -408,7 +410,7 @@ class _ParserThread(threading.Thread):
         post_enrich_result = self._dedup.is_seen(stub)
         if post_enrich_result.kind == "judge_pending":
             self._dedup_counters.record(post_enrich_result.kind)
-            self._pool_collector.add_judge_pending(stub)
+            self._pool_collector.add_judge_pending(stub, post_enrich_result.listing_id)
             return
         if post_enrich_result.kind == "tuple_hit":
             self._dedup_counters.record(post_enrich_result.kind)
@@ -500,7 +502,9 @@ class _ClassifyWorker(_QueueWorker):
         while True:
             self._quota_wall.wait_if_blocked()
             try:
-                verdict = self._llm_enricher.enrich(item.stub, item.body)
+                verdict = self._llm_enricher.enrich(
+                    item.listing_id, item.stub, item.body
+                )
                 break
             except ClaudeUsageLimitError as err:
                 now = datetime.now(timezone.utc)
@@ -543,7 +547,7 @@ class _ClassifyWorker(_QueueWorker):
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 1)
         else:
             self._dedup_store.mark_matched(item.listing_id, item.stub)
-            self._pool_collector.add_matched(item.stub)
+            self._pool_collector.add_matched(item.stub, item.listing_id)
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 0)
 
 
@@ -992,11 +996,7 @@ def run(
                         raise
                     stub = pool_collector.get_stub(verdict.id)
                     if stub is not None:
-                        listing_id = dedup_store.listing_id_for(stub.url)
-                        if listing_id is not None:
-                            dedup_store.mark_selected_by_judge(listing_id, stub)
-                        else:
-                            dedup_store.mark_selected_by_judge(stub)
+                        dedup_store.mark_selected_by_judge(verdict.id, stub)
                     daily_top_5_count += 1
                 metrics.judge_top_n_complete(judge_usage, daily_top_5_count)
                 run_log.event(

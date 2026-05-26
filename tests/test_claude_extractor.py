@@ -15,6 +15,7 @@ from application_pipeline.llm import (
     ClaudeMalformedEnvelopeError,
     ClaudeResponse,
     ClaudeUsage,
+    ExtractorBatchMalformedError,
     ExtractorMalformedError,
     ExtractorMalformedJSONError,
 )
@@ -375,6 +376,26 @@ def test_judge_top_n_candidates_appear_in_prompt(
     prompt_sent = invoker.call.call_args.args[0]
     assert "[Candidate id=0]" in prompt_sent
     assert "[Candidate id=1]" in prompt_sent
+
+
+def test_judge_top_n_rejects_non_integer_verdict_id(run_log: RunLog) -> None:
+    candidates = _make_candidates(3)
+    # id encoded as a JSON string — must be rejected even though "0" matches a
+    # candidate ID when coerced.
+    invoker = _fake_invoker(
+        ClaudeResponse(
+            raw_response='<verdicts>[{"id": "0", "rank": 1}]</verdicts>',
+            usage=_usage(),
+            cost_usd=0.003,
+            duration_s=2.0,
+            session_id="s-judge",
+        )
+    )
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    with pytest.raises(ExtractorBatchMalformedError):
+        extractor.judge_top_n(candidates)
 
 
 # ---------------------------------------------------------------------------

@@ -86,6 +86,15 @@ def test_load_rejects_non_object_json(store_path: Path) -> None:
         load_card_store(store_path)
 
 
+def test_load_rejects_non_integer_keys(store_path: Path) -> None:
+    store_path.write_text(
+        json.dumps({"https://example.com/job": {"header": "H", "summary": "S"}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ExtractStoreError):
+        load_card_store(store_path)
+
+
 def test_concurrent_writers_do_not_corrupt_file(store_path: Path) -> None:
     store = load_card_store(store_path)
     barrier = threading.Barrier(8)

@@ -59,4 +59,5 @@ class Config:
     claude_cli_path: str | None = None
     max_listing_age_days: int = 180
     claude_classify_parallelism: int = 4
+    claude_classify_batch_size: int = 10
     dedup_cooldown_days: int = 30

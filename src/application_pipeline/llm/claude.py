@@ -118,8 +118,9 @@ def _build_listings_block(items: list[ClassifyItem]) -> str:
     for i, item in enumerate(items):
         item_id = i + 1
         bullets = _build_item_bullets(item)
-        description = _strip_boilerplate(item.raw_description)
-        parts.append(f"## Stellenanzeige id={item_id}\n\n{bullets}\n\n{description}")
+        parts.append(
+            f"## Stellenanzeige id={item_id}\n\n{bullets}\n\n{item.raw_description}"
+        )
     return "\n\n".join(parts)
 
 

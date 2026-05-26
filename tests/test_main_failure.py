@@ -7,8 +7,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from application_pipeline.failure_report import write_failure
 
 _PYTHONPATH = os.pathsep.join(p for p in sys.path if p)
@@ -44,9 +42,7 @@ def test_write_failure_writes_directly_into_given_failures_dir(tmp_path: Path) -
     assert path.exists()
 
 
-def test_run_inside_data_dir_hints_cd_dotdot(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_run_inside_data_dir_hints_cd_dotdot(tmp_path: Path) -> None:
     data_dir = tmp_path / "application-pipeline"
     data_dir.mkdir()
     (data_dir / "config.py").write_text("")

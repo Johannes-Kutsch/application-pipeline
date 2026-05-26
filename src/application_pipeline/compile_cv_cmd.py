@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from application_pipeline.init_cmd import home_dir
+from application_pipeline.init_cmd import home_dir, missing_config_message
 from application_pipeline.latex import slot_map
 
 _BUILDS = ("cover", "resume", "combined")
@@ -18,18 +18,7 @@ _LATEX_SUFFIXES = frozenset({".tex", ".cls", ".sty"})
 def compile_cv(app_dir: Path) -> None:
     config_path = home_dir() / "config.py"
     if not config_path.exists():
-        from application_pipeline.init_cmd import inside_data_dir_message
-
-        cwd = Path.cwd()
-        hint = inside_data_dir_message(cwd)
-        if hint:
-            print(hint, file=sys.stderr)
-        else:
-            print(
-                f"no application-pipeline/config.py in {cwd}"
-                " — did you forget to cd, or run init?",
-                file=sys.stderr,
-            )
+        print(missing_config_message(Path.cwd()), file=sys.stderr)
         sys.exit(2)
 
     app_dir = app_dir.resolve()

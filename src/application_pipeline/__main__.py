@@ -66,17 +66,9 @@ def main() -> None:
         cwd = Path.cwd()
         config_path = cwd / "application-pipeline" / "config.py"
         if not config_path.exists():
-            from application_pipeline.init_cmd import inside_data_dir_message
+            from application_pipeline.init_cmd import missing_config_message
 
-            hint = inside_data_dir_message(cwd)
-            if hint:
-                print(hint, file=sys.stderr)
-            else:
-                print(
-                    f"no application-pipeline/config.py in {cwd}"
-                    " — did you forget to cd, or run init?",
-                    file=sys.stderr,
-                )
+            print(missing_config_message(cwd), file=sys.stderr)
             sys.exit(2)
     else:
         print("usage: application-pipeline run [--no-judge]", file=sys.stderr)

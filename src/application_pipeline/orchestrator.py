@@ -684,6 +684,7 @@ def run(
     run_log: RunLog | None = None,
     stall_threshold_s: float = _STALL_THRESHOLD_S,
     quota_wall: "_quota.QuotaWall | None" = None,
+    no_judge: bool = False,
 ) -> RunSummary:
     anchored_today: date = datetime.now(timezone.utc).date()
     cron_anchored_date = anchored_today.isoformat()
@@ -982,7 +983,7 @@ def run(
         pool_size = pool_collector.pool_size
 
         daily_top_5_count = 0
-        if candidates:
+        if candidates and not no_judge:
             metrics.judge_started(len(candidates))
             verdicts: list[MatchVerdict] | None = None
             judge_usage = None

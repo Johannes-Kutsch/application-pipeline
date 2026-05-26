@@ -259,6 +259,92 @@ def test_cron_sh_log_trimmed_to_10000_lines(tmp_path: Path) -> None:
     assert line_count <= 10000, f"Expected ≤10000 lines, got {line_count}"
 
 
+def test_cron_sh_no_judge_passes_flag_to_run(tmp_path: Path) -> None:
+    """./cron.sh --no-judge passes --no-judge to application-pipeline run."""
+    cron_sh, venv_bin, env = _make_script_env(tmp_path)
+
+    _write_stub(venv_bin, "pip", "", exit_code=0)
+
+    # Record args passed to application-pipeline
+    (venv_bin / "application-pipeline").write_text(
+        textwrap.dedent("""\
+            #!/usr/bin/env bash
+            echo "$*" >> /tmp/ap_calls_$$.txt
+            exit 0
+        """),
+        encoding="utf-8",
+    )
+    (venv_bin / "application-pipeline").chmod(
+        (venv_bin / "application-pipeline").stat().st_mode | stat.S_IEXEC
+    )
+
+    # Use a unique temp file per test
+    calls_file = tmp_path / "ap_calls.txt"
+
+    (venv_bin / "application-pipeline").write_text(
+        textwrap.dedent(f"""\
+            #!/usr/bin/env bash
+            echo "$*" >> {calls_file}
+            exit 0
+        """),
+        encoding="utf-8",
+    )
+    (venv_bin / "application-pipeline").chmod(
+        (venv_bin / "application-pipeline").stat().st_mode | stat.S_IEXEC
+    )
+
+    result = subprocess.run(
+        ["bash", str(cron_sh), "--no-judge"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    calls = calls_file.read_text(encoding="utf-8").splitlines()
+    run_calls = [c for c in calls if c.startswith("run")]
+    assert any("--no-judge" in c for c in run_calls), (
+        f"Expected 'run --no-judge' in application-pipeline calls, got: {calls}"
+    )
+
+
+def test_cron_sh_without_no_judge_does_not_pass_flag(tmp_path: Path) -> None:
+    """./cron.sh without --no-judge invokes application-pipeline run without --no-judge."""
+    cron_sh, venv_bin, env = _make_script_env(tmp_path)
+
+    _write_stub(venv_bin, "pip", "", exit_code=0)
+
+    calls_file = tmp_path / "ap_calls.txt"
+    (venv_bin / "application-pipeline").write_text(
+        textwrap.dedent(f"""\
+            #!/usr/bin/env bash
+            echo "$*" >> {calls_file}
+            exit 0
+        """),
+        encoding="utf-8",
+    )
+    (venv_bin / "application-pipeline").chmod(
+        (venv_bin / "application-pipeline").stat().st_mode | stat.S_IEXEC
+    )
+
+    result = subprocess.run(
+        ["bash", str(cron_sh)],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    calls = calls_file.read_text(encoding="utf-8").splitlines()
+    run_calls = [c for c in calls if c.startswith("run")]
+    assert run_calls, "application-pipeline run must be called"
+    assert not any("--no-judge" in c for c in run_calls), (
+        f"--no-judge must not appear in run call without the flag: {run_calls}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # cron-install.sh structural checks
 # ---------------------------------------------------------------------------

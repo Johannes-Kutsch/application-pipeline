@@ -54,7 +54,15 @@ def main() -> None:
         compile_cv(Path(args[1]))
         return
 
-    if args and args[0] == "run" and len(args) == 1:
+    if args and args[0] == "run":
+        run_flags = set(args[1:])
+        unknown = run_flags - {"--no-judge"}
+        if unknown:
+            print("usage: application-pipeline run [--no-judge]", file=sys.stderr)
+            print("       application-pipeline init [--refresh]", file=sys.stderr)
+            print("       application-pipeline compile-cv <dir>", file=sys.stderr)
+            sys.exit(2)
+        no_judge = "--no-judge" in run_flags
         cwd = Path.cwd()
         config_path = cwd / "application-pipeline" / "config.py"
         if not config_path.exists():
@@ -65,7 +73,7 @@ def main() -> None:
             )
             sys.exit(2)
     else:
-        print("usage: application-pipeline run", file=sys.stderr)
+        print("usage: application-pipeline run [--no-judge]", file=sys.stderr)
         print("       application-pipeline init [--refresh]", file=sys.stderr)
         print("       application-pipeline compile-cv <dir>", file=sys.stderr)
         sys.exit(2)
@@ -87,7 +95,9 @@ def main() -> None:
         else PlainStatusDisplay(run_log=run_log)
     )
     try:
-        summary = run(config_path, status_display=display, run_log=run_log)
+        summary = run(
+            config_path, status_display=display, run_log=run_log, no_judge=no_judge
+        )
     except Exception as exc:
         try:
             write_failure(

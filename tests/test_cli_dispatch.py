@@ -143,6 +143,34 @@ def test_run_exits_nonzero_on_bad_config(
     assert exc_info.value.code != 0
 
 
+def test_run_no_judge_flag_exits_2_without_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """run --no-judge without config.py exits 2 with the normal precheck message."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(["run", "--no-judge"])
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "no application-pipeline/config.py in" in stderr
+
+
+def test_run_unknown_flag_exits_nonzero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """run --unknown exits non-zero with usage."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(["run", "--unknown"])
+
+    assert exc_info.value.code != 0
+    stderr = capsys.readouterr().err
+    assert "usage" in stderr
+
+
 def test_project_scripts_entry_point_registered() -> None:
     """The installed package must expose an application-pipeline console script."""
     from importlib.metadata import entry_points

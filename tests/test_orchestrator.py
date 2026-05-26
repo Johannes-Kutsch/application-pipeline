@@ -908,6 +908,61 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     assert len(cards) == 4
 
 
+def test_no_judge_skips_judge_no_daily_file_listings_remain_matched(
+    tmp_path: Path,
+) -> None:
+    """no_judge=True: classify runs normally, judge skipped, no daily file, matched stays matched."""
+    seen_path = tmp_path / ".seen.json"
+    results_dir = tmp_path / "results"
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+        negative_keywords='["excluded"]',
+    )
+    card_store = _make_card_store(tmp_path)
+
+    judge_called = False
+
+    class _TrackingExtractor:
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            nonlocal judge_called
+            judge_called = True
+            return [], _ZERO_USAGE
+
+    summary = run(
+        config_path,
+        llm_enricher=_FakeLLMEnricherRejectJob1(card_store),
+        extractor=_TrackingExtractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+        no_judge=True,
+    )
+
+    assert not judge_called, "judge_top_n must not be called when no_judge=True"
+    assert not _read_all_results(results_dir), (
+        "no daily results file when no_judge=True"
+    )
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    statuses = {rec["status"] for rec in seen_data.values()}
+    assert "selected_by_judge" not in statuses, (
+        "no listing should become selected_by_judge when no_judge=True"
+    )
+    matched = [rec for rec in seen_data.values() if rec["status"] == "matched"]
+    assert len(matched) == 4, "4 classified listings should remain matched"
+
+    assert summary.discovered == 6
+    assert summary.classifier_dropped == 1
+    assert summary.prefilter_dropped == 1
+    assert summary.written == 0  # no judge ran, so nothing written to daily file
+
+
 def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     """Second run on same tmp_path â†' all 6 skipped, tier files unchanged."""
     seen_path = tmp_path / ".seen.json"

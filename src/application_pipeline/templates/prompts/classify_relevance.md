@@ -15,13 +15,13 @@ Prüfe in einem einzigen Schritt:
 - Trifft keiner der harten Ausschlussgründe aus den Gate-Kriterien zu (z. B. Werkstudent, vor-Ort-Pflicht)?
 </gate-rules>
 
-Wenn die Stelle außerhalb der Domäne liegt oder ein harter Ausschlussgrund zutrifft, gib sofort `<verdict>{{"matches": false}}</verdict>` aus und stoppe. Andernfalls erstelle die Zusammenfassung gemäß Schritt 2.
+Wenn die Stelle außerhalb der Domäne liegt oder ein harter Ausschlussgrund zutrifft, gib sofort `<verdict id="N">{{"matches": false}}</verdict>` aus und stoppe. Andernfalls erstelle die Zusammenfassung gemäß Schritt 2.
 
 ## 2. Zusammenfassung erstellen
 
-Gib genau ein JSON-Objekt mit den Feldern `matches`, `header` und `summary` aus, eingeschlossen in `<verdict>...</verdict>`:
+Gib genau ein JSON-Objekt mit den Feldern `matches`, `header` und `summary` aus, eingeschlossen in `<verdict id="N">...</verdict>`:
 
-<verdict>{{"matches": true, "header": "Jobtitel\nUnternehmen · Ort · Arbeitsmodell\nListing-Datum · Seniorität · Gehalt", "summary": "Zusammenfassung"}}</verdict>
+<verdict id="N">{{"matches": true, "header": "Jobtitel\nUnternehmen · Ort · Arbeitsmodell\nListing-Datum · Seniorität · Gehalt", "summary": "Zusammenfassung"}}</verdict>
 
 <header-rules>
 - Wenn ein Wert unter 'Zu klassifizierende Stellenanzeige' angegeben ist, übernimm ihn wortgenau.
@@ -40,10 +40,8 @@ Gib genau ein JSON-Objekt mit den Feldern `matches`, `header` und `summary` aus,
 - Analysiere nicht, wieso die Stelle passt.
 </summary-rules>
 
-Gib ausschließlich den `<verdict>...</verdict>`-Block aus — keine Begründung, keine Erklärung, kein zusätzlicher Text.
+Gib für jede Stelle genau ein `<verdict id="N">...</verdict>`-Tag aus — kein weiterer Text, keine Begründung.
 
-# Zu klassifizierende Stellenanzeige
+# Zu klassifizierende Stellenanzeigen
 
-{LISTING_BULLETS}
-
-{RAW_DESCRIPTION}
+{LISTINGS}

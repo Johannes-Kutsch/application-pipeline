@@ -7,7 +7,11 @@ from application_pipeline.config import Config
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prompts import Prompts
 
-from .agent_output import AgentOutputProtocolError, extract_json_block
+from .agent_output import (
+    AgentOutputProtocolError,
+    extract_id_tagged_verdicts,
+    extract_json_block,
+)
 from .claude_cli import (
     ClaudeCliError,
     ClaudeCliInvoker,
@@ -98,7 +102,7 @@ _JUDGE_TOP_N_SITE = _CallSite(
 )
 
 
-def _build_listing_bullets(item: ClassifyItem) -> str:
+def _build_item_bullets(item: ClassifyItem) -> str:
     lines = [f"- Jobtitel: {item.title}"]
     if item.company and item.company.strip():
         lines.append(f"- Unternehmen: {item.company}")
@@ -107,6 +111,16 @@ def _build_listing_bullets(item: ClassifyItem) -> str:
     if item.posted_date is not None:
         lines.append(f"- Listing-Datum: {item.posted_date}")
     return "\n".join(lines)
+
+
+def _build_listings_block(items: list[ClassifyItem]) -> str:
+    parts: list[str] = []
+    for i, item in enumerate(items):
+        item_id = i + 1
+        bullets = _build_item_bullets(item)
+        description = _strip_boilerplate(item.raw_description)
+        parts.append(f"## Stellenanzeige id={item_id}\n\n{bullets}\n\n{description}")
+    return "\n\n".join(parts)
 
 
 class ClaudeExtractor:
@@ -126,41 +140,88 @@ class ClaudeExtractor:
     def classify_relevance(
         self, items: list[ClassifyItem]
     ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
-        results: list[RelevanceVerdict | None] = []
-        combined: CallUsage | None = None
-        for item in items:
-            prompt = self._prompts.classify_relevance.render(
-                LISTING_BULLETS=_build_listing_bullets(item),
-                RAW_DESCRIPTION=item.raw_description,
-            )
-            parsed, response = self._invoke(_CLASSIFY_SITE, prompt, {})
-            usage = self._usage_from(response)
-            results.append(
-                self._parse_relevance(
-                    parsed, prompt=prompt, raw_response=response.raw_response
-                )
-            )
-            combined = (
-                usage
-                if combined is None
-                else CallUsage(
-                    input_tokens=combined.input_tokens + usage.input_tokens,
-                    output_tokens=combined.output_tokens + usage.output_tokens,
-                    cache_read_tokens=combined.cache_read_tokens
-                    + usage.cache_read_tokens,
-                    cost_usd=combined.cost_usd + usage.cost_usd,
-                    duration_s=combined.duration_s + usage.duration_s,
-                )
-            )
-        if combined is None:
-            combined = CallUsage(
+        if not items:
+            return [], CallUsage(
                 input_tokens=0,
                 output_tokens=0,
                 cache_read_tokens=0,
                 cost_usd=0.0,
                 duration_s=0.0,
             )
-        return results, combined
+        prompt = self._prompts.classify_relevance.render(
+            LISTINGS=_build_listings_block(items)
+        )
+        t0 = time.monotonic()
+        try:
+            response = self._invoker.call(
+                prompt,
+                model=_CLASSIFY_SITE.model,
+                effort=_CLASSIFY_SITE.effort,
+            )
+        except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
+            status = (
+                "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"
+            )
+            self._write_transcript(
+                site=_CLASSIFY_SITE,
+                prompt=prompt,
+                status=status,
+                duration_s=time.monotonic() - t0,
+                extra={},
+                exc=exc,
+            )
+            if isinstance(exc, ClaudeCliError):
+                raise ExtractorUnreachableError(
+                    str(exc), returncode=exc.returncode, stderr=exc.stderr
+                ) from exc
+            raise ExtractorMalformedJSONError(
+                str(exc),
+                returncode=exc.returncode,
+                stderr=exc.stderr,
+                prompt=prompt,
+                raw_response=None,
+            ) from exc
+
+        verdicts_by_id = extract_id_tagged_verdicts(response.raw_response)
+        results: list[RelevanceVerdict | None] = []
+        for i in range(len(items)):
+            item_id = i + 1
+            raw = verdicts_by_id.get(item_id)
+            if raw is None:
+                results.append(None)
+            else:
+                try:
+                    results.append(
+                        self._parse_relevance(
+                            raw,
+                            prompt=prompt,
+                            raw_response=response.raw_response,
+                        )
+                    )
+                except ExtractorMalformedError:
+                    results.append(None)
+
+        usage = self._usage_from(response)
+        transcript_entry: dict[str, object] = {
+            "call": _CLASSIFY_SITE.call,
+            "prompt": prompt,
+            "raw_response": response.raw_response,
+            "usage": {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "cache_read_tokens": response.usage.cache_read_tokens,
+            },
+            "cost_usd": response.cost_usd,
+            "duration_s": response.duration_s,
+        }
+        self._run_log.transcript(_CLASSIFY_SITE.component_id, transcript_entry)
+        self._run_log.event(
+            _CLASSIFY_SITE.component_id,
+            _CLASSIFY_SITE.call,
+            cost_usd=response.cost_usd,
+            duration_s=f"{response.duration_s:.3f}",
+        )
+        return results, usage
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]

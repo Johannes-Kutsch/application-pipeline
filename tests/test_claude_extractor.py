@@ -15,7 +15,6 @@ from application_pipeline.llm import (
     ClaudeMalformedEnvelopeError,
     ClaudeResponse,
     ClaudeUsage,
-    ExtractorMalformedError,
     ExtractorMalformedJSONError,
 )
 from application_pipeline.llm.types import (
@@ -51,7 +50,7 @@ def _config() -> Config:
 def _prompts() -> Prompts:
     return Prompts(
         classify_relevance=PromptTemplate(
-            "v2 {LISTING_BULLETS} {RAW_DESCRIPTION}",
+            "v2 {LISTINGS}",
             CLASSIFY_RELEVANCE_SLOTS,
         ),
         judge_top_n=PromptTemplate("v2 {CANDIDATES}", JUDGE_TOP_N_SLOTS),
@@ -70,7 +69,7 @@ def _fake_invoker(response: ClaudeResponse) -> MagicMock:
 
 def _classify_response(verdict: object) -> ClaudeResponse:
     return ClaudeResponse(
-        raw_response=f"<verdict>{json.dumps(verdict)}</verdict>",
+        raw_response=f'<verdict id="1">{json.dumps(verdict)}</verdict>',
         usage=_usage(),
         cost_usd=0.001,
         duration_s=0.5,
@@ -157,11 +156,11 @@ def test_classify_relevance_out_of_domain_returns_none_header_and_summary(
 
 
 # ---------------------------------------------------------------------------
-# classify_relevance: malformed responses
+# classify_relevance: malformed responses → None (batch protocol)
 # ---------------------------------------------------------------------------
 
 
-def test_classify_relevance_matched_missing_header_raises_malformed(
+def test_classify_relevance_matched_missing_header_returns_none(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(_classify_response({"matches": True, "summary": "ok"}))
@@ -171,11 +170,11 @@ def test_classify_relevance_matched_missing_header_raises_malformed(
         run_log=run_log,
         _invoker=invoker,
     )
-    with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance([_item()])
+    results, _ = extractor.classify_relevance([_item()])
+    assert results[0] is None
 
 
-def test_classify_relevance_matched_missing_summary_raises_malformed(
+def test_classify_relevance_matched_missing_summary_returns_none(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(
@@ -187,11 +186,11 @@ def test_classify_relevance_matched_missing_summary_raises_malformed(
         run_log=run_log,
         _invoker=invoker,
     )
-    with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance([_item()])
+    results, _ = extractor.classify_relevance([_item()])
+    assert results[0] is None
 
 
-def test_classify_relevance_matched_empty_header_raises_malformed(
+def test_classify_relevance_matched_empty_header_returns_none(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(
@@ -203,49 +202,13 @@ def test_classify_relevance_matched_empty_header_raises_malformed(
         run_log=run_log,
         _invoker=invoker,
     )
-    with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance([_item()])
+    results, _ = extractor.classify_relevance([_item()])
+    assert results[0] is None
 
 
 # ---------------------------------------------------------------------------
-# classify_relevance: malformed exceptions carry prompt and raw_response
+# classify_relevance: transport errors still raise
 # ---------------------------------------------------------------------------
-
-
-def test_classify_relevance_schema_mismatch_attaches_prompt_and_raw_response(
-    run_log: RunLog,
-) -> None:
-    response = _classify_response({"matches": True, "summary": "ok"})
-    invoker = _fake_invoker(response)
-    extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
-    )
-    with pytest.raises(ExtractorMalformedError) as excinfo:
-        extractor.classify_relevance([_item()])
-    sent_prompt = invoker.call.call_args.args[0]
-    assert excinfo.value.prompt == sent_prompt
-    assert excinfo.value.raw_response == response.raw_response
-
-
-def test_classify_relevance_protocol_error_attaches_prompt_and_raw_response(
-    run_log: RunLog,
-) -> None:
-    response = ClaudeResponse(
-        raw_response="no verdict block here",
-        usage=_usage(),
-        cost_usd=0.001,
-        duration_s=0.1,
-        session_id="s",
-    )
-    invoker = _fake_invoker(response)
-    extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
-    )
-    with pytest.raises(ExtractorMalformedError) as excinfo:
-        extractor.classify_relevance([_item()])
-    sent_prompt = invoker.call.call_args.args[0]
-    assert excinfo.value.prompt == sent_prompt
-    assert excinfo.value.raw_response == response.raw_response
 
 
 def test_classify_relevance_envelope_malformed_attaches_prompt_and_none_raw_response(
@@ -295,7 +258,7 @@ def test_classify_relevance_prompt_includes_company_and_location(
     assert "Berlin" in prompt_sent
 
 
-def test_classify_relevance_legacy_in_domain_field_raises_malformed(
+def test_classify_relevance_legacy_in_domain_field_returns_none(
     run_log: RunLog,
 ) -> None:
     invoker = _fake_invoker(
@@ -307,8 +270,8 @@ def test_classify_relevance_legacy_in_domain_field_raises_malformed(
         run_log=run_log,
         _invoker=invoker,
     )
-    with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance([_item()])
+    results, _ = extractor.classify_relevance([_item()])
+    assert results[0] is None
 
 
 # ---------------------------------------------------------------------------
@@ -377,23 +340,6 @@ def test_judge_top_n_candidates_appear_in_prompt(
     assert "cand-1" in prompt_sent
 
 
-# ---------------------------------------------------------------------------
-# classify_relevance: protocol_fallback — bare-fence recovery
-# ---------------------------------------------------------------------------
-
-
-def _bare_fence_classify_response(verdict: object) -> ClaudeResponse:
-    """Response that omits the <verdict> tags but has a markdown code fence."""
-    body = json.dumps(verdict)
-    return ClaudeResponse(
-        raw_response=f"```json\n{body}\n```",
-        usage=_usage(),
-        cost_usd=0.001,
-        duration_s=0.5,
-        session_id="s-fallback",
-    )
-
-
 def _read_transcripts(run_log: RunLog, component_id: str) -> list[dict]:  # type: ignore[type-arg]
     path = (
         run_log.logs_dir
@@ -414,54 +360,168 @@ def _read_events(run_log: RunLog, component_id: str) -> list[dict]:  # type: ign
     return [json.loads(line) for line in path.read_text().splitlines() if line]
 
 
-def test_classify_relevance_bare_fence_fallback_returns_verdict(
+# ---------------------------------------------------------------------------
+# classify_relevance: batch protocol — single call for N items
+# ---------------------------------------------------------------------------
+
+
+def _batch_prompts() -> Prompts:
+    """Prompts using the new LISTINGS slot for batch classify."""
+    return Prompts(
+        classify_relevance=PromptTemplate(
+            "batch {LISTINGS}",
+            frozenset({"LISTINGS"}),
+        ),
+        judge_top_n=PromptTemplate("v2 {CANDIDATES}", JUDGE_TOP_N_SLOTS),
+    )
+
+
+def _batch_classify_response(
+    id_verdict_pairs: list[tuple[int, object]],
+) -> ClaudeResponse:
+    parts = [
+        f'<verdict id="{id_}">{json.dumps(verdict)}</verdict>'
+        for id_, verdict in id_verdict_pairs
+    ]
+    return ClaudeResponse(
+        raw_response="\n".join(parts),
+        usage=_usage(),
+        cost_usd=0.002,
+        duration_s=1.0,
+        session_id="s-batch",
+    )
+
+
+def test_classify_relevance_batch_prompt_includes_sequential_ids(
     run_log: RunLog,
 ) -> None:
-    invoker = _fake_invoker(
-        _bare_fence_classify_response({"matches": True, "header": "h", "summary": "s"})
+    items = [_item(title=f"Job {i + 1}") for i in range(3)]
+    response = _batch_classify_response(
+        [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
     )
+    invoker = _fake_invoker(response)
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
     )
-    results, _ = extractor.classify_relevance([_item()])
-    result = results[0]
-    assert result is not None
-    assert result.matches is True
-    assert result.header == "h"
-    assert result.summary == "s"
+    extractor.classify_relevance(items)
+    prompt_sent = invoker.call.call_args.args[0]
+    assert "id=1" in prompt_sent
+    assert "id=2" in prompt_sent
+    assert "id=3" in prompt_sent
 
 
-def test_classify_relevance_bare_fence_fallback_logs_protocol_fallback_transcript(
+def test_classify_relevance_out_of_order_verdicts_map_to_correct_positions(
     run_log: RunLog,
 ) -> None:
-    invoker = _fake_invoker(_bare_fence_classify_response({"matches": False}))
-    extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    items = [_item(title=f"Job {i + 1}") for i in range(3)]
+    # verdicts arrive as id=3, id=1, id=2
+    response = _batch_classify_response(
+        [
+            (3, {"matches": True, "header": "h3", "summary": "s3"}),
+            (1, {"matches": True, "header": "h1", "summary": "s1"}),
+            (2, {"matches": False}),
+        ]
     )
-    extractor.classify_relevance([_item()])
-    transcripts = _read_transcripts(run_log, "llm_classify_relevance")
-    assert len(transcripts) == 1
-    assert transcripts[0]["status"] == "protocol_fallback"
+    invoker = _fake_invoker(response)
+    extractor = ClaudeExtractor(
+        _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
+    )
+    results, _ = extractor.classify_relevance(items)
+    assert len(results) == 3
+    assert results[0] is not None and results[0].header == "h1"
+    assert results[1] is not None and results[1].matches is False
+    assert results[2] is not None and results[2].header == "h3"
 
 
-def test_classify_relevance_bare_fence_fallback_logs_protocol_fallback_event(
+def test_classify_relevance_missing_verdict_tag_produces_none(
     run_log: RunLog,
 ) -> None:
-    invoker = _fake_invoker(_bare_fence_classify_response({"matches": False}))
+    items = [_item(title="Job 1"), _item(title="Job 2")]
+    # only id=1 present; id=2 missing
+    response = _batch_classify_response([(1, {"matches": False})])
+    invoker = _fake_invoker(response)
     extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+        _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
     )
-    extractor.classify_relevance([_item()])
-    events = _read_events(run_log, "llm_classify_relevance")
-    assert any(e.get("status") == "protocol_fallback" for e in events)
+    results, _ = extractor.classify_relevance(items)
+    assert results[0] is not None and results[0].matches is False
+    assert results[1] is None
 
 
-def test_classify_relevance_bare_fence_fallback_schema_invalid_raises_malformed(
+def test_classify_relevance_malformed_verdict_json_produces_none(
     run_log: RunLog,
 ) -> None:
-    invoker = _fake_invoker(_bare_fence_classify_response({"not_a_valid_field": True}))
-    extractor = ClaudeExtractor(
-        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    items = [_item(title="Job 1"), _item(title="Job 2")]
+    response = ClaudeResponse(
+        raw_response='<verdict id="1">{"matches": false}</verdict>'
+        '<verdict id="2">not valid json</verdict>',
+        usage=_usage(),
+        cost_usd=0.001,
+        duration_s=0.5,
+        session_id="s",
     )
-    with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance([_item()])
+    invoker = _fake_invoker(response)
+    extractor = ClaudeExtractor(
+        _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
+    )
+    results, _ = extractor.classify_relevance(items)
+    assert results[0] is not None and results[0].matches is False
+    assert results[1] is None
+
+
+def test_classify_relevance_all_verdicts_missing_returns_all_none_no_error(
+    run_log: RunLog,
+) -> None:
+    items = [_item(), _item()]
+    response = ClaudeResponse(
+        raw_response="no verdict tags here",
+        usage=_usage(),
+        cost_usd=0.001,
+        duration_s=0.5,
+        session_id="s",
+    )
+    invoker = _fake_invoker(response)
+    extractor = ClaudeExtractor(
+        _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
+    )
+    results, _ = extractor.classify_relevance(items)
+    assert results == [None, None]
+
+
+def test_classify_relevance_usage_reflects_single_call_tokens(
+    run_log: RunLog,
+) -> None:
+    items = [_item() for _ in range(3)]
+    response = ClaudeResponse(
+        raw_response=(
+            '<verdict id="1">{"matches": false}</verdict>'
+            '<verdict id="2">{"matches": false}</verdict>'
+            '<verdict id="3">{"matches": false}</verdict>'
+        ),
+        usage=ClaudeUsage(input_tokens=500, output_tokens=60, cache_read_tokens=200),
+        cost_usd=0.01,
+        duration_s=2.5,
+        session_id="s",
+    )
+    invoker = _fake_invoker(response)
+    extractor = ClaudeExtractor(
+        _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
+    )
+    _, usage = extractor.classify_relevance(items)
+    assert usage.input_tokens == 500
+    assert usage.output_tokens == 60
+    assert usage.cache_read_tokens == 200
+    assert usage.cost_usd == pytest.approx(0.01)
+
+
+def test_classify_relevance_batch_makes_single_call(run_log: RunLog) -> None:
+    items = [_item(title=f"Job {i + 1}") for i in range(3)]
+    response = _batch_classify_response(
+        [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
+    )
+    invoker = _fake_invoker(response)
+    extractor = ClaudeExtractor(
+        _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
+    )
+    extractor.classify_relevance(items)
+    assert invoker.call.call_count == 1

@@ -109,7 +109,7 @@ class LLMEnricher:
             raise
 
         results: list[RelevanceVerdict | None] = []
-        for (listing_id, stub, _), verdict in zip(items, raw_verdicts):
+        for (listing_id, stub, body), verdict in zip(items, raw_verdicts):
             if verdict is None:
                 results.append(None)
                 continue
@@ -130,7 +130,9 @@ class LLMEnricher:
 
                 self._card_store.put(
                     listing_id,
-                    CardExtract(header=verdict.header, summary=verdict.summary),
+                    CardExtract(
+                        header=verdict.header, summary=verdict.summary, body=body
+                    ),
                 )
                 if self._dedup_store is not None:
                     self._dedup_store.mark_matched(listing_id, stub)

@@ -1,4 +1,4 @@
-"""Card Extract Store — v2 schema: {stable_id: {header, summary}}."""
+"""Card Extract Store — v3 schema: {stable_id: {header, summary, body}}."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .errors import ExtractStoreError
 class CardExtract:
     header: str
     summary: str
+    body: str = ""
 
 
 class CardStore:
@@ -29,12 +30,20 @@ class CardStore:
             record = self._records.get(key)
         if record is None:
             return None
-        return CardExtract(header=record["header"], summary=record["summary"])
+        return CardExtract(
+            header=record["header"],
+            summary=record["summary"],
+            body=record.get("body", ""),
+        )
 
     def put(self, key: int, extract: CardExtract) -> None:
         with self._lock:
             new_records = dict(self._records)
-            new_records[key] = {"header": extract.header, "summary": extract.summary}
+            new_records[key] = {
+                "header": extract.header,
+                "summary": extract.summary,
+                "body": extract.body,
+            }
             self._persist(new_records)
             self._records = new_records
 

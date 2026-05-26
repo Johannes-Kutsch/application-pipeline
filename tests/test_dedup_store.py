@@ -329,30 +329,6 @@ def test_alias_status_last_changed_is_originals_not_today(
     )
 
 
-def test_load_silently_migrates_legacy_first_seen(
-    store_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    store_path.write_text(
-        json.dumps(
-            {
-                "1": {
-                    "urls": ["https://example.com/legacy"],
-                    "company_lc": "acme",
-                    "title_lc": "engineer",
-                    "location_lc": "hamburg",
-                    "status": "out_of_domain",
-                    "first_seen": "2024-01-15",
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    with caplog.at_level("WARNING"):
-        store = dedup_load(store_path)
-    assert store.is_seen(StubLike(url="https://example.com/legacy")).kind == "url_hit"
-    assert caplog.records == []
-
-
 def test_after_alias_reload_resolves_via_url_tier(store_path: Path) -> None:
     store = dedup_load(store_path)
     a = StubLike(url="https://bundesagentur.de/x")
@@ -484,7 +460,7 @@ def test_tuple_index_built_at_load_time(store_path: Path) -> None:
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
                     "status": "out_of_domain",
-                    "first_seen": "2024-01-01",
+                    "status_last_changed": "2024-01-01",
                 }
             }
         ),
@@ -1550,134 +1526,27 @@ def test_tuple_hit_concurrent_writes_produce_valid_jsonl(
     assert all(e["event"] == "tuple_hit" for e in events)
 
 
-# ---------------------------------------------------------------------------
-# On-load migration: URL-keyed → integer-keyed (issue #652)
-# ---------------------------------------------------------------------------
-
-_LEGACY_RECORD = {
-    "canonical_url": "https://example.com/job/1",
-    "company_lc": "acme",
-    "title_lc": "engineer",
-    "location_lc": "berlin",
-    "status": "matched",
-    "status_last_changed": "2024-01-01",
-}
-
-
-def test_legacy_url_keyed_seen_json_migrates_to_integer_keys(tmp_path: Path) -> None:
+def test_url_keyed_seen_json_raises_on_load(tmp_path: Path) -> None:
     seen_path = tmp_path / "seen.json"
-    legacy = {"https://example.com/job/1": _LEGACY_RECORD}
-    seen_path.write_text(json.dumps(legacy), encoding="utf-8")
-
-    dedup_load(seen_path)
-
-    on_disk = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert all(k.isdigit() for k in on_disk), (
-        f"Expected integer keys, got: {list(on_disk)}"
+    seen_path.write_text(
+        json.dumps(
+            {
+                "https://example.com/job/1": {
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "berlin",
+                    "status": "matched",
+                    "status_last_changed": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
     )
+    with pytest.raises(DedupStoreError, match="legacy URL-keyed format"):
+        dedup_load(seen_path)
 
 
-def test_legacy_migration_url_still_retrievable(tmp_path: Path) -> None:
-    seen_path = tmp_path / "seen.json"
-    legacy = {"https://example.com/job/1": _LEGACY_RECORD}
-    seen_path.write_text(json.dumps(legacy), encoding="utf-8")
-
-    store = dedup_load(seen_path)
-
-    assert store.listing_id_for("https://example.com/job/1") is not None
-
-
-def test_legacy_migration_alias_chains_collapsed(tmp_path: Path) -> None:
-    seen_path = tmp_path / "seen.json"
-    canonical_url = "https://canonical.com/job"
-    alias_url = "https://alias.com/job"
-    legacy = {
-        canonical_url: {
-            "canonical_url": canonical_url,
-            "company_lc": "acme",
-            "title_lc": "engineer",
-            "location_lc": "berlin",
-            "status": "matched",
-            "status_last_changed": "2024-01-01",
-        },
-        alias_url: {
-            "canonical_url": canonical_url,
-            "company_lc": "acme",
-            "title_lc": "engineer",
-            "location_lc": "berlin",
-            "status": "matched",
-            "status_last_changed": "2024-01-01",
-        },
-    }
-    seen_path.write_text(json.dumps(legacy), encoding="utf-8")
-
-    store = dedup_load(seen_path)
-
-    on_disk = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert len(on_disk) == 1, "Alias should be folded into canonical record"
-    record = next(iter(on_disk.values()))
-    assert canonical_url in record["urls"]
-    assert alias_url in record["urls"]
-
-    canonical_id = store.listing_id_for(canonical_url)
-    alias_id = store.listing_id_for(alias_url)
-    assert canonical_id is not None
-    assert canonical_id == alias_id, "Alias and canonical should map to same listing ID"
-
-
-def test_legacy_migration_assigns_sequential_ids_from_one(tmp_path: Path) -> None:
-    seen_path = tmp_path / "seen.json"
-    legacy = {
-        "https://example.com/job/a": {
-            "canonical_url": "https://example.com/job/a",
-            "company_lc": "alpha",
-            "title_lc": "dev",
-            "location_lc": "berlin",
-            "status": "out_of_domain",
-            "status_last_changed": "2024-01-01",
-        },
-        "https://example.com/job/b": {
-            "canonical_url": "https://example.com/job/b",
-            "company_lc": "beta",
-            "title_lc": "ops",
-            "location_lc": "munich",
-            "status": "out_of_domain",
-            "status_last_changed": "2024-01-02",
-        },
-    }
-    seen_path.write_text(json.dumps(legacy), encoding="utf-8")
-
-    dedup_load(seen_path)
-
-    on_disk = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert set(on_disk.keys()) == {"1", "2"}
-
-
-def test_legacy_migration_first_seen_renamed(tmp_path: Path) -> None:
-    seen_path = tmp_path / "seen.json"
-    legacy = {
-        "https://example.com/job/x": {
-            "canonical_url": "https://example.com/job/x",
-            "company_lc": "acme",
-            "title_lc": "engineer",
-            "location_lc": "berlin",
-            "status": "matched",
-            "first_seen": "2024-03-15",
-        }
-    }
-    seen_path.write_text(json.dumps(legacy), encoding="utf-8")
-
-    dedup_load(seen_path)
-
-    on_disk = json.loads(seen_path.read_text(encoding="utf-8"))
-    record = next(iter(on_disk.values()))
-    assert "status_last_changed" in record
-    assert "first_seen" not in record
-
-
-def test_already_integer_keyed_seen_json_loads_without_migration(
-    tmp_path: Path,
-) -> None:
+def test_integer_keyed_seen_json_loads_correctly(tmp_path: Path) -> None:
     seen_path = tmp_path / "seen.json"
     existing = {
         "1": {
@@ -1694,39 +1563,4 @@ def test_already_integer_keyed_seen_json_loads_without_migration(
 
     dedup_load(seen_path)
 
-    assert seen_path.stat().st_mtime == mtime_before, (
-        "File should not be rewritten if already integer-keyed"
-    )
-
-
-def test_empty_seen_json_loads_without_migration(tmp_path: Path) -> None:
-    seen_path = tmp_path / "seen.json"
-
-    store = dedup_load(seen_path)
-
-    assert store.is_seen(StubLike(url="https://example.com/x")).kind == "miss"
-
-
-def test_legacy_migration_round_trip_stable(tmp_path: Path) -> None:
-    seen_path = tmp_path / "seen.json"
-    legacy = {
-        "https://example.com/job/1": {
-            "canonical_url": "https://example.com/job/1",
-            "company_lc": "acme",
-            "title_lc": "engineer",
-            "location_lc": "berlin",
-            "status": "matched",
-            "status_last_changed": "2024-01-01",
-        }
-    }
-    seen_path.write_text(json.dumps(legacy), encoding="utf-8")
-
-    # First load: triggers migration
-    dedup_load(seen_path)
-    first_content = seen_path.read_text(encoding="utf-8")
-
-    # Second load: no migration (already integer-keyed), state identical
-    dedup_load(seen_path)
-    second_content = seen_path.read_text(encoding="utf-8")
-
-    assert first_content == second_content
+    assert seen_path.stat().st_mtime == mtime_before

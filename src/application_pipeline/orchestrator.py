@@ -747,9 +747,7 @@ def run(
                 _log.error("startup failed — dedup store: %s", exc)
                 raise
         if card_store is None:
-            card_store = load_card_store(
-                extracts_path, url_to_id=dedup_store.url_to_id_snapshot()
-            )
+            card_store = load_card_store(extracts_path)
             dedup_store.attach_card_store(card_store)
 
         # Step 8: Build LLMEnricher if not injected

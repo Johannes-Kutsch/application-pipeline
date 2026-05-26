@@ -5,8 +5,8 @@
 |---|---|
 | `gate-criteria.md` | binäres Gate — breite Domain-In/Out-Signale **und** harte Fit-Schwellen, die eine Bewerbung ohne weitere Prüfung ausschließen; bevorzugt für Miss bei harten Anforderungen |
 | `candidate-profile.md` | Identität, Werte und Ranking-Präferenzen — „wer ich bin und welche Rollen mich mehr oder weniger ansprechen" |
-| `writing-style.md` | Stimm-/Phrasing-**Regeln** **und** Cover-Strategie pro Slot (Fact-Cross-Check, Pivot-Treiber-Wahl, Hook-Verteilung, Meta-Beleg-Disziplin) — One-Liner bzw. knappe Bullets, deklarativ, keine Exemplare. "Vermeide X" → Don't-Zeile, "mach immer Y" → Do-Zeile, "Inhalts-/Bogen-Regel pro Slot" → Bullet in `## Cover-Strategie`. |
-| `positive-exemplars.md` | Stil-**Vorbilder** als Bullet-Snippets aus handgeschriebenen Briefen. "Der Ton von Brief X war besser" → neue Tonangabe-Annotation oder neues Vorbild. **Keine Negativ-Exemplare**, weder hier noch in `writing-style.md`. |
+| `cv/writing-style.md` | Stimm-/Phrasing-**Regeln** **und** Cover-Strategie pro Slot (Fact-Cross-Check, Pivot-Treiber-Wahl, Hook-Verteilung, Meta-Beleg-Disziplin) — One-Liner bzw. knappe Bullets, deklarativ, keine Exemplare. "Vermeide X" → Don't-Zeile, "mach immer Y" → Do-Zeile, "Inhalts-/Bogen-Regel pro Slot" → Bullet in `## Cover-Strategie`. |
+| `cv/positive-exemplars.md` | Stil-**Vorbilder** als Bullet-Snippets aus handgeschriebenen Briefen. "Der Ton von Brief X war besser" → neue Tonangabe-Annotation oder neues Vorbild. **Keine Negativ-Exemplare**, weder hier noch in `cv/writing-style.md`. |
 </triage-routing>
 
 <hard-rules>

@@ -26,7 +26,7 @@ Lies alle Inputs in den Speicher:
 - `application-pipeline/user-info/cv/writing-style.md` — Phrasing-Regeln und Cover-Strategie.
 - `application-pipeline/user-info/cv/positive-exemplars.md` — Stil-Vorbilder (vier Vorbild-Briefe).
 - `application-pipeline/user-info/cv/content_pool.tex` — jeder `%%% ITEM: …`-Block mit den drei Feldern `always`, `group` (optional), `relevance`. Section wird aus der nächstgelegenen vorausgehenden `% ===== <name> =====`-Blocküberschrift abgeleitet. **Die `\newcommand`-Bodies werden roh als TeX in den Prompt aufgenommen** — kein Stripper, keine Escape-Regeln.
-- `application-pipeline/user-info/search-terms/skills.md` — **Skills-Pool** laut ADR-0033. H2-Headings sind Skill-Gruppen (Heading-Text = `\cvitem{<group>}{...}`-Kategorie-Label), `-`-Bullets sind Skill-Namen. Optionaler pandoc-style `{...}`-Attributblock am Zeilenende: Gruppen tragen `always` (bare) und `<jobtype>=<high|medium|low>`-Relevanz-Einträge; Items tragen nur `always`. Bullets vor der ersten H2 werden ignoriert (`/write-cv` rendert nur gruppierte Skills). Unbekannte Attribute werden ignoriert. Source-of-Truth — keine Skill-Namen aus anderen Quellen.
+- `application-pipeline/user-info/triage-profile/skills.md` — **Skills-Pool** laut ADR-0033. H2-Headings sind Skill-Gruppen (Heading-Text = `\cvitem{<group>}{...}`-Kategorie-Label), `-`-Bullets sind Skill-Namen. Optionaler pandoc-style `{...}`-Attributblock am Zeilenende: Gruppen tragen `always` (bare) und `<jobtype>=<high|medium|low>`-Relevanz-Einträge; Items tragen nur `always`. Bullets vor der ersten H2 werden ignoriert (`/write-cv` rendert nur gruppierte Skills). Unbekannte Attribute werden ignoriert. Source-of-Truth — keine Skill-Namen aus anderen Quellen.
 - `application-pipeline/cv-template/cv_skeleton.tex` — das **CV-Skelett**. Diese Datei ist der Format-by-Example und die Source-of-Truth für die Slot-Liste. Jeder `%% SLOT: <name>`-Block enthält Prompt-Guidance-Kommentare (`% …`-Zeilen direkt nach dem Slot-Header) plus einen Beispiel-Body. Beide werden ausgewertet.
 
 ## CV Slot-Map entwerfen
@@ -45,7 +45,7 @@ Format-Spec, Header-Form, Body-Semantik und Slot-Listen-Source-of-Truth: siehe [
 
 **Resume-Slots (`resume_berufserfahrung`, `resume_ausbildung`, `resume_projekte`):** Content-Pool-Items, gewählt per untenstehender Auswahlregel, als Folge von `\<itemName>`-Macro-Aufrufen im Body. Die Macros sind in `content_pool.tex` definiert; `cv_template.tex` bindet das per `\input` ein.
 
-**Skills-Block (`skills_block`):** wird **mechanisch** aus `user-info/search-terms/skills.md` zusammengesetzt — siehe „Skills-Block-Assembly" unten. Keine freie Authoring-Hand, keine Skill-Namen außerhalb des Pools.
+**Skills-Block (`skills_block`):** wird **mechanisch** aus `user-info/triage-profile/skills.md` zusammengesetzt — siehe „Skills-Block-Assembly" unten. Keine freie Authoring-Hand, keine Skill-Namen außerhalb des Pools.
 
 ## Content-Pool-Auswahl
 
@@ -63,7 +63,7 @@ Items werden als reine `\<itemName>`-Macro-Aufrufe in den Body geschrieben, eine
 
 Der `skills_block`-Slot wird mechanisch aus dem Skills-Pool zusammengesetzt — die LLM-Rolle ist ausschließlich *Auswahl*, niemals *Erfindung* von Skill-Namen. Algorithmus laut ADR-0033:
 
-1. **Pool parsen.** Lies `application-pipeline/user-info/search-terms/skills.md` und parse die Gruppen + Items + Attribute strikt nach der ADR-0033-Grammatik (H2 = Gruppe, Bullet = Item, `{...}`-Attributblock optional am Zeilenende). Gruppen-Attribute: `always` (bare) und `<jobtype>=<high|medium|low>` Relevanzen. Item-Attribut: `always`. Unbekannte Tokens stillschweigend ignorieren. Bullets vor der ersten H2 verwerfen.
+1. **Pool parsen.** Lies `application-pipeline/user-info/triage-profile/skills.md` und parse die Gruppen + Items + Attribute strikt nach der ADR-0033-Grammatik (H2 = Gruppe, Bullet = Item, `{...}`-Attributblock optional am Zeilenende). Gruppen-Attribute: `always` (bare) und `<jobtype>=<high|medium|low>` Relevanzen. Item-Attribut: `always`. Unbekannte Tokens stillschweigend ignorieren. Bullets vor der ersten H2 verwerfen.
 2. **Jobtype aus dem Listing ableiten.** Bestimme den Jobtype des aktuellen Listings (z.B. `mle`, `games`, `agents`) per LLM-Judgment aus `analysis.md` (raw_description + Tailoring-Hooks). Der Jobtype-Schlüssel entspricht den Relevanz-Keys im Pool — wähle deine Bezeichnung passend zu den vorhandenen Keys.
 3. **Gruppen-Auswahl:**
    - Gruppen mit `{always}` werden **immer** in die Auswahl aufgenommen — unabhängig vom Jobtype.

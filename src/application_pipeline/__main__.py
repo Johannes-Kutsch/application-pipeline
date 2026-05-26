@@ -54,6 +54,88 @@ def main() -> None:
         compile_cv(Path(args[1]))
         return
 
+    if args and args[0] == "cron":
+        cron_flags = set(args[1:])
+        unknown = cron_flags - {"--no-judge"}
+        if unknown:
+            print("usage: application-pipeline cron [--no-judge]", file=sys.stderr)
+            print("       application-pipeline run [--no-judge]", file=sys.stderr)
+            print("       application-pipeline init [--refresh]", file=sys.stderr)
+            print("       application-pipeline compile-cv <dir>", file=sys.stderr)
+            sys.exit(2)
+        no_judge = "--no-judge" in cron_flags
+        cwd = Path.cwd()
+        config_path = cwd / "application-pipeline" / "config.py"
+        if not config_path.exists():
+            print(
+                f"no application-pipeline/config.py in {cwd}"
+                " — did you forget to cd, or run init?",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+        from application_pipeline.init_cmd import init as _init
+        from application_pipeline.parser_log import RunLog
+        from application_pipeline.config import resolve_data_paths
+        from application_pipeline.failure_report import write_failure
+        from application_pipeline.orchestrator import current_stage, run
+        from application_pipeline.status_display import (
+            PlainStatusDisplay,
+            RichStatusDisplay,
+        )
+
+        home = config_path.parent
+        failures_path = resolve_data_paths(home).failures_path
+
+        try:
+            _init(cwd, refresh=True)
+        except Exception as exc:
+            try:
+                write_failure("init --refresh", exc, _tail.tail(), failures_path)
+            except Exception:
+                pass
+            sys.exit(1)
+
+        run_log = RunLog(resolve_data_paths(home).logs_path)
+        display = (
+            RichStatusDisplay(run_log=run_log)
+            if sys.stdout.isatty()
+            else PlainStatusDisplay(run_log=run_log)
+        )
+        try:
+            summary = run(
+                config_path, status_display=display, run_log=run_log, no_judge=no_judge
+            )
+        except Exception as exc:
+            try:
+                write_failure(
+                    current_stage.get(),
+                    exc,
+                    _tail.tail(),
+                    failures_path,
+                )
+            except Exception:
+                pass
+            sys.exit(1)
+
+        print(
+            f"run complete:"
+            f"  discovered={summary.discovered}"
+            f"  skipped={summary.skipped}"
+            f"  prefilter_dropped={summary.prefilter_dropped}"
+            f"  classifier_dropped={summary.classifier_dropped}"
+            f"  written={summary.written}"
+            f"  enrich_failed={summary.enrich_failed}"
+            f"  errored={summary.errored}"
+            f"  classify_items={summary.classify_items}"
+            f"  claude_input_tokens={summary.claude_input_tokens}"
+            f"  claude_output_tokens={summary.claude_output_tokens}"
+            f"  claude_cache_read_tokens={summary.claude_cache_read_tokens}"
+            f"  claude_cost_usd={summary.claude_cost_usd:.6f}"
+            f"  duration={summary.duration_seconds:.1f}s"
+        )
+        return
+
     if args and args[0] == "run":
         run_flags = set(args[1:])
         unknown = run_flags - {"--no-judge"}

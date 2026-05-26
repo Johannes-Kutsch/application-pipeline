@@ -74,6 +74,7 @@ def _write_config(
     include_remote: bool = True,
     negative_keywords: str = "[]",
     claude_classify_parallelism: int | None = None,
+    claude_classify_batch_size: int = 1,
 ) -> Path:
     """Write a minimal valid config.py and a user-info dir into tmp_path."""
     config_path = tmp_path / "config.py"
@@ -91,6 +92,7 @@ def _write_config(
             LOCATIONS = {locations}
             INCLUDE_REMOTE = {include_remote!r}
             NEGATIVE_KEYWORDS = {negative_keywords}
+            CLAUDE_CLASSIFY_BATCH_SIZE = {claude_classify_batch_size}
         """)
         + parallelism_line,
         encoding="utf-8",
@@ -2486,13 +2488,13 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
 
 
 def _batch_size_config(tmp_path: Path, batch_size: int = 1) -> Path:
-    # batch_size is ignored â€" solo calls per position, no batching
     return _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
+        claude_classify_batch_size=batch_size,
     )
 
 
@@ -2715,6 +2717,72 @@ def test_mixed_listing_set_all_classified(tmp_path: Path) -> None:
 
     assert summary.written == 4
     assert call_count[0] == 4
+
+
+def test_25_items_batch_size_10_fires_3_enricher_calls(tmp_path: Path) -> None:
+    """25 items with batch_size=10 → enricher called 3 times (batches of 10, 10, 5)."""
+    card_store = _make_card_store(tmp_path)
+    batch_sizes_seen: list[int] = []
+
+    class _BatchTrackingEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> "list[RelevanceVerdict | None]":
+            batch_sizes_seen.append(len(items))
+            verdicts: list[RelevanceVerdict | None] = []
+            for listing_id, stub, body in items:
+                card_store.put(
+                    listing_id,
+                    CardExtract(
+                        header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
+                    ),
+                )
+                verdicts.append(
+                    RelevanceVerdict(
+                        matches=True,
+                        header=_FAKE_ENRICH_HEADER,
+                        summary=_FAKE_ENRICH_SUMMARY,
+                    )
+                )
+            return verdicts
+
+    class _TwentyFiveStubParser(_StubParserBase):
+        def __enter__(self) -> "_TwentyFiveStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=f"https://batch25.example/{i}",
+                    title=f"Job {i}",
+                    source="stub",
+                )
+                for i in range(25)
+            ]
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_batch_size=10,
+            claude_classify_parallelism=1,
+        ),
+        llm_enricher=_BatchTrackingEnricher(),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TwentyFiveStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert summary.classify_items == 25
+    assert len(batch_sizes_seen) == 3, f"expected 3 batches, got {batch_sizes_seen}"
+    assert sorted(batch_sizes_seen) == [5, 10, 10]
 
 
 def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:

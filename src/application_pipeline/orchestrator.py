@@ -478,6 +478,7 @@ class _ClassifyWorker(_QueueWorker):
         run_state: _RunState,
         run_log: RunLog,
         quota_wall: "_quota.QuotaWall",
+        batch_size: int = 1,
         worker_index: int = 0,
     ) -> None:
         super().__init__(
@@ -493,20 +494,39 @@ class _ClassifyWorker(_QueueWorker):
         self._metrics = metrics
         self._run_log = run_log
         self._quota_wall = quota_wall
+        self._batch_size = batch_size
 
-    def _on_dequeue(self, item: object) -> None:
-        assert isinstance(item, _ClassifyRequest)
-        self._metrics.classify_batch_dequeued(1)
+    def run(self) -> None:
+        current_stage.set(self._stage_name)
+        try:
+            batch: list[_ClassifyRequest] = []
+            while True:
+                item = self._input_queue.get()
+                if item is self._sentinel:
+                    if batch and not self._run_state.is_degraded:
+                        self._metrics.classify_batch_dequeued(len(batch))
+                        self._process_batch(batch)
+                    break
+                assert isinstance(item, _ClassifyRequest)
+                batch.append(item)
+                if len(batch) >= self._batch_size:
+                    if not self._run_state.is_degraded:
+                        self._metrics.classify_batch_dequeued(len(batch))
+                        self._process_batch(batch)
+                    batch = []
+        except BaseException as exc:
+            self.exc = exc
+            self._run_state.set_aborted(exc)
+        finally:
+            self._on_shutdown()
 
-    def _process(self, item: object) -> None:
-        assert isinstance(item, _ClassifyRequest)
+    def _process_batch(self, batch: list[_ClassifyRequest]) -> None:
+        items = [(req.listing_id, req.stub, req.body) for req in batch]
 
         while True:
             self._quota_wall.wait_if_blocked()
             try:
-                verdict = self._llm_enricher.enrich(
-                    [(item.listing_id, item.stub, item.body)]
-                )[0]
+                verdicts = self._llm_enricher.enrich(items)
                 break
             except ClaudeUsageLimitError as err:
                 now = datetime.now(timezone.utc)
@@ -527,7 +547,7 @@ class _ClassifyWorker(_QueueWorker):
                     )
             except ExtractorError as exc:
                 _log.warning("llm_enricher.enrich failed: %s", exc)
-                self._metrics.classify_batch_failed(1)
+                self._metrics.classify_batch_failed(len(batch))
                 self._run_log.event(
                     "llm_classify_relevance",
                     "classify_relevance",
@@ -536,21 +556,23 @@ class _ClassifyWorker(_QueueWorker):
                 )
                 return
 
-        self._run_log.event(
-            "llm_classify_relevance",
-            "classify_relevance",
-            matches=verdict.matches if verdict is not None else None,
-        )
+        dropped = 0
+        for req, verdict in zip(batch, verdicts):
+            self._run_log.event(
+                "llm_classify_relevance",
+                "classify_relevance",
+                matches=verdict.matches if verdict is not None else None,
+            )
+            if verdict is None:
+                self._metrics.enrich_failed(req.stub.source)
+            elif not verdict.matches:
+                self._dedup_store.mark_out_of_domain(req.listing_id, req.stub)
+                dropped += 1
+            else:
+                self._dedup_store.mark_matched(req.listing_id, req.stub)
+                self._pool_collector.add_matched(req.stub, req.listing_id)
 
-        if verdict is None:
-            self._metrics.enrich_failed(item.stub.source)
-        elif not verdict.matches:
-            self._dedup_store.mark_out_of_domain(item.listing_id, item.stub)
-            self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 1)
-        else:
-            self._dedup_store.mark_matched(item.listing_id, item.stub)
-            self._pool_collector.add_matched(item.stub, item.listing_id)
-            self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 0)
+        self._metrics.classify_batch_complete(_ZERO_USAGE, len(batch), dropped)
 
 
 @dataclass
@@ -857,6 +879,7 @@ def run(
                     run_state=run_state,
                     run_log=run_log,
                     quota_wall=quota_wall,
+                    batch_size=cfg.claude_classify_batch_size,
                     worker_index=i,
                 )
                 for i in range(cfg.claude_classify_parallelism)

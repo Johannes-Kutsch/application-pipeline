@@ -6509,3 +6509,133 @@ def test_post_enrich_dedup_judge_pending_routes_to_pool(tmp_path: Path) -> None:
 
     assert summary.discovered == 1
     assert summary.judge_resumed == 1
+
+
+# ---------------------------------------------------------------------------
+# Renderer integration: URL and body appear in Daily Results File (#673)
+# ---------------------------------------------------------------------------
+
+
+def test_rendered_card_includes_url_and_body(tmp_path: Path) -> None:
+    """Daily Results File card includes listing URL and raw body after the judge renders it."""
+    card_store = load_card_store(tmp_path / "card_store.json")
+    results_dir = tmp_path / "results"
+    stub_url = "https://render-test.example/job/42"
+    stub_body_prefix = "render test body"
+
+    class _SingleStubParser(_StubParserBase):
+        def __enter__(self) -> "_SingleStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=stub_url, title="Render Job", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            return EnrichResult(
+                stub=stub, body=stub_body_prefix + " x" * 50, mode="fallback"
+            )
+
+    class _BodyCapturingEnricher:
+        def __init__(self, cs: CardStore) -> None:
+            self._cs = cs
+
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> list[RelevanceVerdict | None]:
+            listing_id, stub, body = items[0]
+            self._cs.put(
+                listing_id,
+                CardExtract(header=_CARD_HEADER, summary=_CARD_SUMMARY, body=body),
+            )
+            return [
+                RelevanceVerdict(
+                    matches=True, header=_CARD_HEADER, summary=_CARD_SUMMARY
+                )
+            ]
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_BodyCapturingEnricher(card_store),
+        extractor=_FakeJudgeExtractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _SingleStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    content = _read_all_results(results_dir)
+    assert stub_url in content, "listing URL must appear in the rendered card"
+    assert stub_body_prefix in content, "raw body must appear in the rendered card"
+
+
+# ---------------------------------------------------------------------------
+# Post-enrich judge-pending body storage (#673)
+# ---------------------------------------------------------------------------
+
+
+def test_post_enrich_judge_pending_stores_body_in_card_store(tmp_path: Path) -> None:
+    """When post-enrich dedup returns judge_pending, the fetched body is stored in CardStore."""
+    card_store = _make_card_store(tmp_path)
+    listing_id = 7
+    fetched_body = "post-enrich body content " + "y" * 80
+    pre_existing_header = "Engineer\nAcme · Hamburg\n2026-01-01 · Senior"
+
+    # Pre-populate: listing 7 is matched (awaiting judge) but has no body yet.
+    card_store.put(
+        listing_id,
+        CardExtract(header=pre_existing_header, summary="Good fit.", body=""),
+    )
+
+    dedup = MagicMock()
+    dedup.is_seen.side_effect = [
+        dedup_module.RunScopedSeenResult("miss", listing_id),  # pre-enrich dedup
+        dedup_module.RunScopedSeenResult(
+            "judge_pending", listing_id
+        ),  # post-enrich dedup
+    ]
+    _wire_run_scope(dedup)
+
+    class _BodyEnrichParser(_StubParserBase):
+        def __enter__(self) -> "_BodyEnrichParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://pending.example/7", title="Engineer", source="stub"
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            return EnrichResult(stub=stub, body=fetched_body, mode="fallback")
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        card_store=card_store,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _BodyEnrichParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup,
+    )
+
+    card = card_store.get(listing_id)
+    assert card is not None
+    assert card.body == fetched_body, (
+        "body must be stored in CardStore on post-enrich judge_pending"
+    )

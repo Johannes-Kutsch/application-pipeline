@@ -29,7 +29,11 @@ from application_pipeline.dedup import (
     DedupStoreError,
     DeduplicationStore,
 )
-from application_pipeline.extracts.card_store import CardStore, load_card_store
+from application_pipeline.extracts.card_store import (
+    CardExtract,
+    CardStore,
+    load_card_store,
+)
 from application_pipeline.failure_report import write_failure as _write_failure
 from application_pipeline.llm import (
     ClaudeExtractor,
@@ -287,6 +291,7 @@ class _ParserThread(threading.Thread):
         dedup_counters: DedupCounters,
         pool_collector: _PoolCollector,
         metrics: RunMetrics,
+        card_store: CardStore,
     ) -> None:
         super().__init__(name=f"parser-{parser_id}", daemon=True)
         self._parser_id = parser_id
@@ -303,6 +308,7 @@ class _ParserThread(threading.Thread):
         self._dedup_counters = dedup_counters
         self._pool_collector = pool_collector
         self._metrics = metrics
+        self._card_store = card_store
 
     def run(self) -> None:
         try:
@@ -411,6 +417,14 @@ class _ParserThread(threading.Thread):
         if post_enrich_result.kind == "judge_pending":
             self._dedup_counters.record(post_enrich_result.kind)
             self._pool_collector.add_judge_pending(stub, post_enrich_result.listing_id)
+            existing = self._card_store.get(post_enrich_result.listing_id)
+            if existing is not None and body:
+                self._card_store.put(
+                    post_enrich_result.listing_id,
+                    CardExtract(
+                        header=existing.header, summary=existing.summary, body=body
+                    ),
+                )
             return
         if post_enrich_result.kind == "tuple_hit":
             self._dedup_counters.record(post_enrich_result.kind)
@@ -905,6 +919,7 @@ def run(
                     dedup_counters=dedup_counters,
                     pool_collector=pool_collector,
                     metrics=metrics,
+                    card_store=card_store,
                 )
                 threads.append((parser_id, t))
 
@@ -1079,13 +1094,16 @@ def run(
                     card = card_store.get(verdict.id)
                     if card is None:
                         continue
-                    rendered = render(verdict.rank, card.header, card.summary)
+                    stub = pool_collector.get_stub(verdict.id)
+                    url = stub.url if stub is not None else ""
+                    rendered = render(
+                        verdict.rank, card.header, card.summary, url, card.body
+                    )
                     try:
                         append(daily_file_path, rendered)
                     except ResultsFileError as exc:
                         _log.error("daily file append failed: %s", exc)
                         raise
-                    stub = pool_collector.get_stub(verdict.id)
                     if stub is not None:
                         dedup_store.mark_selected_by_judge(verdict.id, stub)
                     daily_top_5_count += 1

@@ -47,8 +47,12 @@ def _claude_template_bytes(rel: str) -> bytes:
 _TRIAGE_PROFILE_FILES = (
     "candidate-profile.md",
     "gate-criteria.md",
-    "writing-style.md",
     "skills.md",
+)
+
+_CV_MD_FILES = (
+    "writing-style.md",
+    "positive-exemplars.md",
 )
 
 _USER_INFO_ROOT_FILES = (
@@ -172,6 +176,10 @@ def test_fresh_seed_creates_user_info_tree(tmp_path: Path) -> None:
         dest = _ap(tmp_path) / "user-info" / "triage-profile" / fname
         assert dest.exists(), f"expected {dest} to be seeded"
         assert dest.read_bytes() == _triage_profile_template_bytes(fname)
+    for fname in _CV_MD_FILES:
+        dest = _ap(tmp_path) / "user-info" / "cv" / fname
+        assert dest.exists(), f"expected {dest} to be seeded"
+        assert dest.read_bytes() == _cv_template_bytes(fname)
     for fname in _USER_INFO_ROOT_FILES:
         dest = _ap(tmp_path) / "user-info" / fname
         assert dest.exists(), f"expected {dest} to be seeded"
@@ -200,6 +208,8 @@ def test_fresh_seed_prints_all_five_files(
     assert "layout.py" not in out
     for fname in _TRIAGE_PROFILE_FILES:
         assert f"wrote user-info/triage-profile/{fname}" in out
+    for fname in _CV_MD_FILES:
+        assert f"wrote user-info/cv/{fname}" in out
     for fname in _USER_INFO_ROOT_FILES:
         assert f"wrote user-info/{fname}" in out
 
@@ -228,6 +238,10 @@ def test_rerun_is_idempotent(tmp_path: Path) -> None:
             for f in _TRIAGE_PROFILE_FILES
         }
         | {
+            f"user-info/cv/{f}": (ap / "user-info" / "cv" / f).read_bytes()
+            for f in _CV_MD_FILES
+        }
+        | {
             f"user-info/{f}": (ap / "user-info" / f).read_bytes()
             for f in _USER_INFO_ROOT_FILES
         }
@@ -252,6 +266,8 @@ def test_rerun_prints_all_skipped(
     assert "layout.py" not in out
     for fname in _TRIAGE_PROFILE_FILES:
         assert f"skipped user-info/triage-profile/{fname} (already exists)" in out
+    for fname in _CV_MD_FILES:
+        assert f"skipped user-info/cv/{fname} (already exists)" in out
     for fname in _USER_INFO_ROOT_FILES:
         assert f"skipped user-info/{fname} (already exists)" in out
 
@@ -273,6 +289,8 @@ def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
             assert (ap / "user-info" / "triage-profile" / fname).exists(), (
                 f"{fname} should be seeded"
             )
+    for fname in _CV_MD_FILES:
+        assert (ap / "user-info" / "cv" / fname).exists(), f"{fname} should be seeded"
     for fname in _USER_INFO_ROOT_FILES:
         assert (ap / "user-info" / fname).exists(), f"{fname} should be seeded"
 
@@ -295,6 +313,8 @@ def test_per_file_skip_granular_output(
     for fname in _TRIAGE_PROFILE_FILES:
         if fname != "candidate-profile.md":
             assert f"wrote user-info/triage-profile/{fname}" in out
+    for fname in _CV_MD_FILES:
+        assert f"wrote user-info/cv/{fname}" in out
     for fname in _USER_INFO_ROOT_FILES:
         assert f"wrote user-info/{fname}" in out
 
@@ -329,7 +349,7 @@ def test_init_seeds_subdirs_under_user_info(tmp_path: Path) -> None:
     assert triage_names == set(_TRIAGE_PROFILE_FILES)
 
     cv_seeded = {p.name for p in (user_info / "cv").iterdir()}
-    assert cv_seeded == set(_LATEX_USER_INFO_FILES)
+    assert cv_seeded == set(_LATEX_USER_INFO_FILES) | set(_CV_MD_FILES)
 
 
 def test_rerun_skips_existing_latex_files(
@@ -580,6 +600,10 @@ def test_refresh_on_empty_dir_writes_all_files(tmp_path: Path) -> None:
         assert (
             ap / "user-info" / "triage-profile" / fname
         ).read_bytes() == _triage_profile_template_bytes(fname)
+    for fname in _CV_MD_FILES:
+        assert (ap / "user-info" / "cv" / fname).read_bytes() == _cv_template_bytes(
+            fname
+        )
     for fname in _USER_INFO_ROOT_FILES:
         assert (ap / "user-info" / fname).read_bytes() == _user_info_template_bytes(
             fname

@@ -29,7 +29,11 @@ from application_pipeline.dedup import (
     DedupStoreError,
     DeduplicationStore,
 )
-from application_pipeline.extracts.card_store import CardStore, load_card_store
+from application_pipeline.extracts.card_store import (
+    CardExtract,
+    CardStore,
+    load_card_store,
+)
 from application_pipeline.failure_report import write_failure as _write_failure
 from application_pipeline.llm import (
     ClaudeExtractor,
@@ -287,6 +291,7 @@ class _ParserThread(threading.Thread):
         dedup_counters: DedupCounters,
         pool_collector: _PoolCollector,
         metrics: RunMetrics,
+        card_store: CardStore,
     ) -> None:
         super().__init__(name=f"parser-{parser_id}", daemon=True)
         self._parser_id = parser_id
@@ -303,6 +308,7 @@ class _ParserThread(threading.Thread):
         self._dedup_counters = dedup_counters
         self._pool_collector = pool_collector
         self._metrics = metrics
+        self._card_store = card_store
 
     def run(self) -> None:
         try:
@@ -359,6 +365,7 @@ class _ParserThread(threading.Thread):
         result = self._dedup.is_seen(stub)
         self._dedup_counters.record(result.kind)
         if result.kind == "judge_pending":
+            self._maybe_backfill_body(stub, result.listing_id)
             self._pool_collector.add_judge_pending(stub, result.listing_id)
             return
         if result.kind != "miss":
@@ -440,6 +447,22 @@ class _ParserThread(threading.Thread):
         )
         self._metrics.classify_buffered(1)
         self._metrics.increment_forwarded(self._parser_id)
+
+    def _maybe_backfill_body(self, stub: PositionStub, listing_id: int) -> None:
+        """Migration shim: fetch and persist body for listings classified before body persistence."""
+        card = self._card_store.get(listing_id)
+        if card is None or card.body:
+            return
+        try:
+            enrich_result = self._parser.enrich(stub)
+        except Exception:
+            return
+        self._card_store.put(
+            listing_id,
+            CardExtract(
+                header=card.header, summary=card.summary, body=enrich_result.body
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -905,6 +928,7 @@ def run(
                     dedup_counters=dedup_counters,
                     pool_collector=pool_collector,
                     metrics=metrics,
+                    card_store=card_store,
                 )
                 threads.append((parser_id, t))
 

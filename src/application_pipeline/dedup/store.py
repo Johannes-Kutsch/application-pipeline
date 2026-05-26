@@ -578,11 +578,6 @@ class DeduplicationStore:
             )
         }
 
-    def url_to_id_snapshot(self) -> dict[str, int]:
-        """Return a snapshot of the URL-to-listing-ID index."""
-        with self._lock:
-            return dict(self._url_index)
-
     def attach_card_store(self, card_store: "CardStore") -> None:
         """Set the card store used for delete callbacks."""
         with self._lock:

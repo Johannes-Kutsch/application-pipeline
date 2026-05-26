@@ -4,7 +4,7 @@ Single-writer module (Pi only, per ADR-0002): no cross-process locking.
 ``is_seen`` is intentionally side-effecting on tuple/fuzzy-tier hits — it prepends
 the new URL to the canonical record's ``urls`` list and (for non-matched entries)
 persists the update so subsequent runs short-circuit on the cheap URL lookup.
-See ADR-0003 and ADR-0046.
+See ADR-0003.
 """
 
 from __future__ import annotations

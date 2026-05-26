@@ -24,7 +24,6 @@ _REMOVED_FIELDS = (
     "CLASSIFY_RELEVANCE_PROMPT",
     "JUDGE_MATCH_PROMPT",
     "USER_INFO_DIR",
-    "CLAUDE_CLASSIFY_BATCH_SIZE",
 )
 
 
@@ -61,6 +60,12 @@ def load(path: pathlib.Path) -> Config:
     if raw_parallelism < 1:
         raise ConfigError("CLAUDE_CLASSIFY_PARALLELISM must be >= 1")
 
+    raw_batch_size = getattr(module, "CLAUDE_CLASSIFY_BATCH_SIZE", 10)
+    if isinstance(raw_batch_size, bool) or not isinstance(raw_batch_size, int):
+        raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be an integer")
+    if raw_batch_size < 1:
+        raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be >= 1")
+
     raw_cooldown = getattr(module, "DEDUP_COOLDOWN_DAYS", 30)
     if isinstance(raw_cooldown, bool) or not isinstance(raw_cooldown, int):
         raise ConfigError("DEDUP_COOLDOWN_DAYS must be an integer")
@@ -84,6 +89,7 @@ def load(path: pathlib.Path) -> Config:
         claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
         max_listing_age_days=max_listing_age_days,
         claude_classify_parallelism=raw_parallelism,
+        claude_classify_batch_size=raw_batch_size,
         dedup_cooldown_days=raw_cooldown,
     )
     _validate(config)

@@ -64,7 +64,7 @@ Schritte 1–3 müssen abgeschlossen sein, bevor Schritt 4 emittiert wird.
 
 ### Triage-Profil challengen
 
-Wenn der User etwas sagt, das einem existierenden Bullet in einer der drei Profil-Files widerspricht: sofort aufdecken. *„In `match-criteria.md` steht X — du beschreibst hier eher Y. Was stimmt?"*
+Wenn der User etwas sagt, das einem existierenden Bullet in einer der drei Profil-Files widerspricht: sofort aufdecken. *„In `gate-criteria.md` steht X — du beschreibst hier eher Y. Was stimmt?"*
 
 ### Cross-Reference mit der raw_description
 
@@ -141,8 +141,8 @@ Referenziere `content_pool.tex` nicht — `/write-cv` matched Hooks selbst gegen
 Dieser Skill schreibt ausschließlich in:
 
 - `application-pipeline/applications/<today>-<slug>/analysis.md`
-- `application-pipeline/user-info/triage-profile/match-criteria.md`
-- `application-pipeline/user-info/triage-profile/self-description.md`
+- `application-pipeline/user-info/triage-profile/gate-criteria.md`
+- `application-pipeline/user-info/triage-profile/candidate-profile.md`
 
 Alles andere im Repo ist read-only — insbesondere `writing-style.md`.
 </hard-rules>

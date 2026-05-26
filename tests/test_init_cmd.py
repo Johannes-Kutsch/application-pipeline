@@ -754,14 +754,16 @@ def test_seeded_startup_triage_drops_domain_fit(tmp_path: Path) -> None:
     init(tmp_path)
     text = (_claude(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md").read_text()
     assert "domain-fit.md" not in text
-    assert "match-criteria.md" in text
+    assert "match-criteria.md" not in text
+    assert "gate-criteria.md" in text
 
 
 def test_seeded_triage_routing_drops_domain_fit(tmp_path: Path) -> None:
     init(tmp_path)
     text = (_claude(tmp_path) / "skills" / "_shared" / "TRIAGE-ROUTING.md").read_text()
     assert "domain-fit.md" not in text
-    assert "match-criteria.md" in text
+    assert "match-criteria.md" not in text
+    assert "gate-criteria.md" in text
 
 
 def test_seeded_write_cv_skill_references_new_cv_template_path(tmp_path: Path) -> None:

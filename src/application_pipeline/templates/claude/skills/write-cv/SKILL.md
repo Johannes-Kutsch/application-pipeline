@@ -22,7 +22,9 @@ Siehe [../_shared/APPLICATION-FOLDER-ARG.md](../_shared/APPLICATION-FOLDER-ARG.m
 Lies alle Inputs in den Speicher:
 
 - `analysis.md` — Raw Description + „Why apply"-Bullets + Listing-fordert / Hook / Anekdote-Tailoring-Hooks.
-- `application-pipeline/user-info/triage-profile/*.md` — Stimme + Identität + Match-Kriterien. Geladen: `writing-style.md` (Regeln), `positive-exemplars.md` (vier Vorbild-Briefe), `self-description.md`.
+- `application-pipeline/user-info/triage-profile/*.md` — Identität + Match-Kriterien. Geladen: `candidate-profile.md`.
+- `application-pipeline/user-info/cv/writing-style.md` — Phrasing-Regeln und Cover-Strategie.
+- `application-pipeline/user-info/cv/positive-exemplars.md` — Stil-Vorbilder (vier Vorbild-Briefe).
 - `application-pipeline/user-info/cv/content_pool.tex` — jeder `%%% ITEM: …`-Block mit den drei Feldern `always`, `group` (optional), `relevance`. Section wird aus der nächstgelegenen vorausgehenden `% ===== <name> =====`-Blocküberschrift abgeleitet. **Die `\newcommand`-Bodies werden roh als TeX in den Prompt aufgenommen** — kein Stripper, keine Escape-Regeln.
 - `application-pipeline/user-info/search-terms/skills.md` — **Skills-Pool** laut ADR-0033. H2-Headings sind Skill-Gruppen (Heading-Text = `\cvitem{<group>}{...}`-Kategorie-Label), `-`-Bullets sind Skill-Namen. Optionaler pandoc-style `{...}`-Attributblock am Zeilenende: Gruppen tragen `always` (bare) und `<jobtype>=<high|medium|low>`-Relevanz-Einträge; Items tragen nur `always`. Bullets vor der ersten H2 werden ignoriert (`/write-cv` rendert nur gruppierte Skills). Unbekannte Attribute werden ignoriert. Source-of-Truth — keine Skill-Namen aus anderen Quellen.
 - `application-pipeline/cv-template/cv_skeleton.tex` — das **CV-Skelett**. Diese Datei ist der Format-by-Example und die Source-of-Truth für die Slot-Liste. Jeder `%% SLOT: <name>`-Block enthält Prompt-Guidance-Kommentare (`% …`-Zeilen direkt nach dem Slot-Header) plus einen Beispiel-Body. Beide werden ausgewertet.
@@ -37,7 +39,7 @@ Format-Spec, Header-Form, Body-Semantik und Slot-Listen-Source-of-Truth: siehe [
 - Der Beispiel-Body im Skelett ist Format-by-Example: Stil, TeX-Konstrukte (`\href`, `\textit`, `\cventry`, …) und Mehrzeiligkeit zeigen, wie der echte Body aussehen soll. Nicht den Beispiel-Body wörtlich kopieren.
 - Die Prompt-Guidance-Kommentare aus dem Skelett werden **nicht** in `cv.tex` übernommen — die emittierte Datei enthält nur Slot-Header und Body.
 
-**Cover-Paragraph-Slots (`cover_intro`, `cover_pivot`, `cover_fit`, `cover_closing`) und `opening`:** Stimme und Strategie laut `writing-style.md` (inkl. Sektion `## Cover-Strategie`) und `positive-exemplars.md`. Geerdet in den „Why apply"-Bullets aus `analysis.md` und den Tailoring-Hooks. Erfinde **keine** Fakten; jede Behauptung lässt sich auf `analysis.md` oder eine Triage-Profil-Datei zurückführen.
+**Cover-Paragraph-Slots (`cover_intro`, `cover_pivot`, `cover_fit`, `cover_closing`) und `opening`:** Stimme und Strategie laut `cv/writing-style.md` (inkl. Sektion `## Cover-Strategie`) und `cv/positive-exemplars.md`. Geerdet in den „Why apply"-Bullets aus `analysis.md` und den Tailoring-Hooks. Erfinde **keine** Fakten; jede Behauptung lässt sich auf `analysis.md` oder eine Triage-Profil-Datei zurückführen.
 
 **Recipient-Slots:** Empfänger-Infos aus `analysis.md` ziehen. Slot-Semantik komplett laut Skeleton-Guidance.
 

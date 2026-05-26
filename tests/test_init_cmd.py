@@ -100,7 +100,9 @@ def test_first_bootstrap_prints_wrote_config(
     init(tmp_path)
 
     out = capsys.readouterr().out
-    assert "wrote config.py" in out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "wrote" in lines[0]
     assert "layout.py" not in out
 
 
@@ -113,7 +115,9 @@ def test_skip_existing_config_prints_correctly(
     init(tmp_path)
 
     out = capsys.readouterr().out
-    assert "skipped config.py (already exists)" in out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "skipped" in lines[0]
     assert "layout.py" not in out
 
 
@@ -127,7 +131,9 @@ def test_both_exist_prints_skipped_for_both(
     init(tmp_path)
 
     out = capsys.readouterr().out
-    assert "skipped config.py (already exists)" in out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "skipped" in lines[0]
     assert "layout.py" not in out
 
 
@@ -204,14 +210,10 @@ def test_fresh_seed_prints_all_five_files(
     init(tmp_path)
 
     out = capsys.readouterr().out
-    assert "wrote config.py" in out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "wrote" in lines[0]
     assert "layout.py" not in out
-    for fname in _TRIAGE_PROFILE_FILES:
-        assert f"wrote user-info/triage-profile/{fname}" in out
-    for fname in _CV_MD_FILES:
-        assert f"wrote user-info/cv/{fname}" in out
-    for fname in _USER_INFO_ROOT_FILES:
-        assert f"wrote user-info/{fname}" in out
 
 
 def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) -> None:
@@ -262,14 +264,10 @@ def test_rerun_prints_all_skipped(
     init(tmp_path)
 
     out = capsys.readouterr().out
-    assert "skipped config.py (already exists)" in out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "skipped" in lines[0]
     assert "layout.py" not in out
-    for fname in _TRIAGE_PROFILE_FILES:
-        assert f"skipped user-info/triage-profile/{fname} (already exists)" in out
-    for fname in _CV_MD_FILES:
-        assert f"skipped user-info/cv/{fname} (already exists)" in out
-    for fname in _USER_INFO_ROOT_FILES:
-        assert f"skipped user-info/{fname} (already exists)" in out
 
 
 def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
@@ -307,16 +305,56 @@ def test_per_file_skip_granular_output(
     init(tmp_path)
 
     out = capsys.readouterr().out
-    assert (
-        "skipped user-info/triage-profile/candidate-profile.md (already exists)" in out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "wrote" in lines[0]
+    assert "skipped" in lines[0]
+
+
+def test_fresh_init_prints_single_summary_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+
+    out = capsys.readouterr().out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert re.search(r"\d+", lines[0])
+    assert "wrote" in lines[0]
+
+
+def test_rerun_init_prints_single_summary_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    capsys.readouterr()
+
+    init(tmp_path)
+
+    out = capsys.readouterr().out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert re.search(r"\d+", lines[0])
+    assert "skipped" in lines[0]
+
+
+def test_partial_init_prints_single_summary_line_with_both_counts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ap = _ap(tmp_path)
+    (ap / "user-info" / "triage-profile").mkdir(parents=True)
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
+        "# custom\n"
     )
-    for fname in _TRIAGE_PROFILE_FILES:
-        if fname != "candidate-profile.md":
-            assert f"wrote user-info/triage-profile/{fname}" in out
-    for fname in _CV_MD_FILES:
-        assert f"wrote user-info/cv/{fname}" in out
-    for fname in _USER_INFO_ROOT_FILES:
-        assert f"wrote user-info/{fname}" in out
+
+    init(tmp_path)
+
+    out = capsys.readouterr().out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "wrote" in lines[0]
+    assert "skipped" in lines[0]
+    assert re.search(r"\d+", lines[0])
 
 
 def test_banner_does_not_trigger_prompt_error(tmp_path: Path) -> None:
@@ -361,8 +399,9 @@ def test_rerun_skips_existing_latex_files(
     init(tmp_path)
 
     out = capsys.readouterr().out
-    for fname in _LATEX_USER_INFO_FILES:
-        assert f"skipped user-info/cv/{fname} (already exists)" in out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "skipped" in lines[0]
 
 
 def test_rerun_preserves_latex_file_content(tmp_path: Path) -> None:
@@ -447,9 +486,10 @@ def test_init_skips_existing_setup_scripts(
 
     assert (ap / "setup" / "cron.sh").read_text() == custom
     out = capsys.readouterr().out
-    assert "skipped setup/cron.sh (already exists)" in out
-    assert "wrote setup/cron-install.sh" in out
-    assert "wrote setup/cron-uninstall.sh" in out
+    lines = out.strip().splitlines()
+    assert len(lines) == 1
+    assert "wrote" in lines[0]
+    assert "skipped" in lines[0]
 
 
 def test_cron_sh_invokes_init_refresh_without_path_arg(tmp_path: Path) -> None:

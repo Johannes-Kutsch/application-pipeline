@@ -78,11 +78,14 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
         else:
             print("directory is current — no files changed")
     else:
-        for verb, display in reports:
-            if verb == "wrote":
-                print(f"wrote {display}")
-            elif verb == "skipped":
-                print(f"skipped {display} (already exists)")
+        wrote = sum(1 for v, _ in reports if v == "wrote")
+        skipped = sum(1 for v, _ in reports if v == "skipped")
+        if wrote and skipped:
+            print(f"wrote {wrote} files, skipped {skipped}")
+        elif wrote:
+            print(f"wrote {wrote} files")
+        else:
+            print(f"skipped {skipped} files")
 
 
 def _cleanup_legacy_skills_dir(ap_root: Path) -> list[tuple[str, str]]:

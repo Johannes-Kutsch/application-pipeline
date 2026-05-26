@@ -2,7 +2,7 @@
 
 Supersedes ADR-0028. `classify_relevance(items: list[ClassifyItem]) -> list[RelevanceVerdict | None]` takes up to `claude_classify_batch_size` items (default 10, configurable). Each item gets a numbered id in the prompt; each verdict is returned as an individually-tagged `<verdict id="N">{...}</verdict>` block. Verdicts that fail to parse are returned as `None` — the corresponding listings stay unmarked and are re-discovered next run. No retry.
 
-Worker drains up to `batch_size` items from the classify queue, fires immediately when the batch is full or when the sentinel signals all parsers are done. Parallel worker pool (ADR-0031) unchanged at default 4.
+Amended by ADR-0047: single accumulator thread fills batches sequentially; dispatch workers run only the LLM call. Parallel worker pool (ADR-0031) unchanged at default 4.
 
 ## Why
 
@@ -14,6 +14,6 @@ Worker drains up to `batch_size` items from the classify queue, fires immediatel
 
 - `Config.claude_classify_batch_size: int` reintroduced (default 10, `≥ 1`).
 - Prompt switches from single `<verdict>` to multiple `<verdict id="N">` tags.
-- `_ClassifyWorker._process` accumulates up to `batch_size` items before calling.
+- `_ClassifyAccumulator` fills batches; `_ClassifyWorker` runs the LLM call only (ADR-0047).
 - Unparseable verdicts within a batch are silently dropped — listings re-enter next run via normal discovery.
 - Event/transcript volume drops proportionally (~20 rows/day vs ~200).

@@ -3,6 +3,7 @@
 N solo `claude -p` calls concurrently from a fixed pool. `Config.claude_classify_parallelism` (default 4, `≥ 1`). Solo-call protocol (ADR-0028), stdin-combined prompt (ADR-0029), and DeduplicationStore lock all preserved. Supersedes ADR-0028's explicit rejection of N>1.
 
 Amended by ADR-0042: workers now drain a classify queue and run only the LLM call, no body fetch.
+Amended by ADR-0047: single accumulator thread fills batches; workers receive pre-built batches only.
 
 ## Why
 

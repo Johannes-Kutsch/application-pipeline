@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import httpx
-
 from application_pipeline.llm.body_strip import strip_to_text
-from application_pipeline.parsers.types import EnrichFailedError
+from application_pipeline.parsers.http import ParserHttp
 
 _TOKEN_CAP_DEFAULT = 8_000
 _CHARS_PER_TOKEN = 4
@@ -33,25 +31,19 @@ def fetch_and_strip(
     body_selector: str | None,
     source: str,
     failures_dir: Path,
+    http: ParserHttp,
     token_cap: int = _TOKEN_CAP_DEFAULT,
 ) -> str:
-    """Fetch *url* and strip HTML to plaintext.
+    """Fetch *url* via *http* and strip HTML to plaintext.
 
-    Redirect-following is enabled. Raises EnrichFailedError on per-URL
-    unrecoverable HTTP failures (404, 400, 422). Auth and 5xx errors propagate
-    as httpx.HTTPError so callers can treat them as transient (retry next run).
-    Raises OversizedBodyError when the stripped body exceeds the token cap
-    (raw HTML is stashed to failures_dir/oversized/ before raising).
+    Delegates HTTP fetch (including retry-with-backoff, pacing, and error
+    classification) to *http.enrich_get()*. Raises EnrichFailedError on
+    non-retryable HTTP failures (404, 400, 422). Raises OversizedBodyError
+    when the stripped body exceeds the token cap (raw HTML is stashed to
+    failures_dir/oversized/ before raising).
     """
-    try:
-        with httpx.Client(follow_redirects=True) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            html = response.text
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code in (400, 404, 422):
-            raise EnrichFailedError(f"{url}: HTTP {exc.response.status_code}") from exc
-        raise
+    content = http.enrich_get(url, error_prefix=url)
+    html = content.decode("utf-8", errors="replace")
 
     text = strip_to_text(html, body_selector)
 

@@ -88,6 +88,7 @@ class StellenHamburgParser:
             body_selector=self._body_selector,
             source=stub.source,
             failures_dir=self._failures_dir,
+            http=self._http,
         )
         return EnrichResult(stub=stub, body=body, mode="fallback")
 

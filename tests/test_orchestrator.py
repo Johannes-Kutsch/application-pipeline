@@ -3616,6 +3616,65 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
     ), "classify_relevance row must not be removed during run"
 
 
+def test_classify_row_transitions_to_done_after_workers_finish(
+    tmp_path: Path,
+) -> None:
+    """classify_relevance row phase transitions to 'done' after all classify workers join."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    display = FakeStatusDisplay()
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        status_display=display,
+    )
+
+    phase_updates = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "llm classify relevance"
+    ]
+    assert phase_updates, (
+        "expected at least one phase update for 'llm classify relevance'"
+    )
+    assert phase_updates[-1].kwargs["phase"] == "done", (
+        "last phase update for classify row must be 'done'"
+    )
+
+
+def test_classify_row_done_when_no_sources(tmp_path: Path) -> None:
+    """classify_relevance row transitions to 'done' even when there are no sources."""
+    display = FakeStatusDisplay()
+
+    run(
+        _write_config(tmp_path),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: None,
+        dedup_store=MagicMock(),
+        status_display=display,
+    )
+
+    phase_updates = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "llm classify relevance"
+    ]
+    assert phase_updates, (
+        "expected phase update for 'llm classify relevance' even with no sources"
+    )
+    assert phase_updates[-1].kwargs["phase"] == "done", (
+        "classify row must show 'done' after classify shutdown even with no sources"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stuck-thread watchdog
 # ---------------------------------------------------------------------------

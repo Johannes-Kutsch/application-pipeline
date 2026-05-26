@@ -168,6 +168,7 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
     assert card is not None
     assert card.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
     assert card.summary == "Great ML role."
+    assert card.body == body
 
 
 # ---------------------------------------------------------------------------

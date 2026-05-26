@@ -2,6 +2,8 @@ from application_pipeline import SourceEntry
 
 SOURCES = [
     SourceEntry(parser_type="bundesagentur_api"),
+    # SourceEntry(parser_type="stellen_hamburg_api"),  # Hamburg public-sector job board (API)
+    # SourceEntry(parser_type="jobs_beim_staat_html"),  # German public-sector aggregator (HTML scrape)
 ]
 
 LOCATIONS: list[str] = []

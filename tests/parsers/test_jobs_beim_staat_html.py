@@ -399,6 +399,19 @@ def test_discover_paginates_across_multiple_pages(run_log: RunLog) -> None:
     assert len(stubs) == 42
 
 
+def test_discover_yields_duplicate_urls_across_pages(run_log: RunLog) -> None:
+    page1 = _make_list_page(start_id=1, count=21)
+    page2_duplicate = _make_list_page(start_id=1, count=21)
+    get = _make_get(
+        [_jobs_envelope(page1), _jobs_envelope(page2_duplicate), _empty_envelope()]
+    )
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        stubs = list(p.discover(_query()))
+    assert len(stubs) == 42
+
+
 # ---------------------------------------------------------------------------
 # discover — discover_page heartbeat
 # ---------------------------------------------------------------------------

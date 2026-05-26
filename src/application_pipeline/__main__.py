@@ -79,6 +79,7 @@ def main() -> None:
     from application_pipeline.parser_log import RunLog
     from application_pipeline.config import resolve_data_paths
     from application_pipeline.failure_report import write_failure
+    from application_pipeline.maintenance import run_maintenance
     from application_pipeline.orchestrator import current_stage, run
     from application_pipeline.status_display import (
         PlainStatusDisplay,
@@ -124,6 +125,12 @@ def main() -> None:
         f"  claude_cost_usd={summary.claude_cost_usd:.6f}"
         f"  duration={summary.duration_seconds:.1f}s"
     )
+
+    data_paths = resolve_data_paths(home)
+    try:
+        run_maintenance(data_paths.logs_path, data_paths.failures_path)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

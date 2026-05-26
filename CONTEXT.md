@@ -28,7 +28,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Raw Description**: Full body text, fetched and stripped by parser's `enrich()` (per-source CSS selector or generic library fallback). Fed to LLM but never persisted or rendered (ADR-0032). Empty body dropped by **Content Gate** (ADR-0030). Oversized stashed to `.runtime-data/failures/oversized/`, no `seen.json` mark. _Avoid_: description (when full text is meant).
 
-**Structured Extract**: _Retired_ per ADR-0032. Replaced by **Header** + **Summary**. `extracts.json` is `{stable_id: {header, summary}}`. _Avoid_: do not reintroduce.
+**Structured Extract**: _Retired_ per ADR-0032. Replaced by **Header** + **Summary**. `extracts.json` is `{listing_id: {header, summary}}`, keyed by **Listing ID** integer. _Avoid_: do not reintroduce.
 
 **Header**: Three-line block authored by the **LLM Enricher** at classify time (ADR-0032) — title, `company · location · work_model`, `posted_date · seniority · salary`. LLM substitutes known values, infers from body, or drops segments. Persisted in `extracts.json`. _Avoid_: card top, headline.
 
@@ -58,17 +58,19 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Negative Keyword**: Entry in `SearchTerms.NEGATIVE_KEYWORDS` (ADR-0021). Case-insensitive substring match in title only (ADR-0013). No length validation, no rescue. _Avoid_: blacklist, exclusion.
 
-**Match Verdict**: Judge output per winner — `{id, rank: 1..5}` (ADR-0032). Judge ranks only; Card's Summary is from classify-time. _Avoid_: score, rating, tier (retired).
+**Listing ID**: Auto-increment integer, primary key in `seen.json` and `extracts.json`. Assigned at first `is_seen` miss. Next ID derived as `max(existing IDs) + 1` on store load. URLs stored as `urls: [...]` list (most-recent-first) inside the record, with a reverse index for URL-tier dedup. `PositionStub` does not carry the ID — it is a parser-layer concept. The dedup layer assigns the ID; `RunScopedSeenResult` carries it downstream. `mark_*` methods take `listing_id: int`. _Avoid_: URL key, url id.
+
+**Match Verdict**: Judge output per winner — `{id, rank: 1..5}` where `id` is the **Listing ID** integer (ADR-0032). Judge prompt uses the real integer ID, not URLs. Judge ranks only; Card's Summary is from classify-time. _Avoid_: score, rating, tier (retired).
 
 **Rank**: Integer 1..5 assigned by the judge. Not a score, not a tier. _Avoid_: tier, score, position (overloaded).
 
-**Pool**: Implicit set of `status == matched` URLs re-discovered in the current run. Computed per-run from `seen.json` + today's parse output. Re-entry costs nothing (URL-tier dedup short-circuits). Enter: classified `matched`. Exit: judge picks it (`selected_by_judge`, extract deleted) or no longer re-discovered. No cap, no TTL in v1. _Avoid_: queue, candidate set — not the **Daily Top-5**.
+**Pool**: Implicit set of `status == matched` listings re-discovered in the current run, keyed by **Listing ID**. Computed per-run from `seen.json` + today's parse output. Re-entry costs nothing (URL-tier dedup short-circuits). Enter: classified `matched`. Exit: judge picks it (`selected_by_judge`, extract deleted) or no longer re-discovered. No cap, no TTL in v1. _Avoid_: queue, candidate set — not the **Daily Top-5**.
 
-**Daily Top-5**: ≤5 **Positions** the **Match Judge** returns, drawn from today's **Pool**. Each winner gets `mark_selected_by_judge(stub)` after Card append+fsync. _Avoid_: top-N, shortlist.
+**Daily Top-5**: ≤5 **Positions** the **Match Judge** returns, drawn from today's **Pool**. Each winner gets `mark_selected_by_judge(listing_id)` after Card append+fsync. _Avoid_: top-N, shortlist.
 
 **Relevance Classifier**: Single-check LLM gatekeeper (#615, supersedes ADR-0034 three-check): domain fit + hard exclusions from `{GATE_CRITERIA}`. No candidate profile, no skill-floor check — stretch/experience judgment deferred to **Match Judge**. Emits **Header** + **Summary** on pass. `classify_relevance(items) -> list[RelevanceVerdict | None]`; output `<verdict id="N">{...}</verdict>` per item. Up to `claude_classify_batch_size` (default 10) listings per `claude -p` call (ADR-0046, supersedes ADR-0028). Worker fires when batch full or parsers signal done. Unparseable verdicts → `None`, listing unmarked, re-discovered next run. Parallel pool of N workers (ADR-0031) draining classify queue (ADR-0042). Combined prompt via stdin (ADR-0029). Runs only on candidates surviving all non-LLM gates. _Avoid_: filter, gate.
 
-**LLM Enricher**: Owns the classify LLM call. Receives `(stub, body)` via classify queue (ADR-0042), runs `classify_relevance`, runs post-LLM **Freshness Gate** arm, writes Card on `matches=True`. No httpx client, no body strip. Redirect-following lives in `parsers/body_fetch.py`. _Avoid_: enricher (unqualified), extractor.
+**LLM Enricher**: Owns the classify LLM call. Receives `(listing_id, stub, body)` via classify queue (ADR-0042), runs `classify_relevance`, runs post-LLM **Freshness Gate** arm, writes Card on `matches=True` keyed by **Listing ID**. No httpx client, no body strip. Redirect-following lives in `parsers/body_fetch.py`. _Avoid_: enricher (unqualified), extractor.
 
 **Freshness Gate**: Drops temporally invalid candidates (ADR-0018, ADR-0032, ADR-0038). `admit(stub, *, gate_arm, deadline=None) -> bool` at three sites: post-discover, post-enrich, post-LLM. Drops when `posted_date` exceeds `MAX_LISTING_AGE_DAYS` or `deadline < anchored_today`. `None` = no signal. Writes `expired`; on `matched → expired` deletes extract. Parser-thread drops summed into one `freshness` counter (ADR-0043). _Avoid_: staleness filter, expiry gate.
 
@@ -82,11 +84,11 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Quota Wall**: Shared coordination for the parallel classify pool (ADR-0031). `raise_wall(reset_time)`, `wait_if_blocked()`, `is_active()`. `threading.Condition` + `reset_time`. One `event=quota_sleep` row per wall raise. _Avoid_: rate limiter, barrier.
 
-**Match Judge**: Picks **Daily Top-5** from **Pool**. Single `judge_top_n(candidates)` per run. Takes `list[JudgeCandidate]` (id + Header + Summary), returns ≤5 `{id, rank}`. Consumes `{CANDIDATE_PROFILE}` + `{SKILLS}` (#615). No gate criteria — listings already passed the classifier. On non-quota error → Failure Report, no daily file. _Avoid_: scorer.
+**Match Judge**: Picks **Daily Top-5** from **Pool**. Single `judge_top_n(candidates)` per run. Takes `list[JudgeCandidate]` (**Listing ID** + Header + Summary), returns ≤5 `{id, rank}` where `id` is the integer **Listing ID**. Consumes `{CANDIDATE_PROFILE}` + `{SKILLS}` (#615). No gate criteria — listings already passed the classifier. On non-quota error → Failure Report, no daily file. _Avoid_: scorer.
 
 ### Deduplication and run state
 
-**Deduplication**: Four-tier (ADR-0044): in-run `run_hit` (absorbs Cartesian overlap) plus persistent **Deduplication Store** with URL-tier, exact-tuple-tier `(company_lc, title_lc, location_lc)`, and fuzzy-tuple-tier (token-subset, min 4 tokens, shorter ⊂ longer, gender markers stripped). Tuple/fuzzy fire only when all three fields non-`None`. Both write alias on hit (ADR-0003). `is_seen` writes in-memory `pending` entry on miss (populates indexes immediately, no persist). Checked at two points: post-discover and post-enrich (backfilled fields). `is_seen` returns `RunScopedSeenResult`: `url_hit`/`tuple_hit`/`fuzzy_hit` skip; `judge_pending` routes to Pool (includes tuple/fuzzy hits on `matched` entries — first in run updates URL/title); `run_hit` skips within-run repeats; `miss` processes. Freshness-dropped listings: orchestrator calls `mark_expired(stub)` to populate indexes.
+**Deduplication**: Four-tier (ADR-0044): in-run `run_hit` (absorbs Cartesian overlap) plus persistent **Deduplication Store** with URL-tier (reverse index `{url → Listing ID}`), exact-tuple-tier `(company_lc, title_lc, location_lc)`, and fuzzy-tuple-tier (token-subset, min 4 tokens, shorter ⊂ longer, gender markers stripped). Tuple/fuzzy fire only when all three fields non-`None`. Tuple/fuzzy hits on existing records append the new URL to the record's `urls` list (no alias records). `is_seen` writes in-memory `pending` entry on miss, assigns **Listing ID** (populates indexes immediately, no persist). Checked at two points: post-discover and post-enrich (backfilled fields). `is_seen` returns `RunScopedSeenResult` carrying `listing_id: int`: `url_hit`/`tuple_hit`/`fuzzy_hit` skip; `judge_pending` routes to Pool (includes tuple/fuzzy hits on `matched` entries — first in run updates URL/title); `run_hit` skips within-run repeats; `miss` processes. Freshness-dropped listings: orchestrator calls `mark_expired(listing_id)` to populate indexes.
 
 **Dedup status enum** (ADR-0014/ADR-0034/ADR-0044):
 - `out_of_domain` — Pre-Filter or Classifier rejection. Terminal-skip.
@@ -105,7 +107,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 - **Body fetch failure** → stub skipped, URL unrecorded (ADR-0039). Native-enrich: 401/403/5xx/3xx/JSON decode → Failure Report + parser dead; 404/400/422/retries-exhausted → silent skip.
 - **Oversized/malformed LLM output** → stashed, no `seen.json` write, retried next run.
 
-State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthing, ADR-0002). Shape: `{url: {canonical_url, company_lc, title_lc, location_lc, status, status_last_changed}}` (renamed from `first_seen`, silent migration on load — ADR-0044). `DeduplicationStore` exposes four methods: `mark_out_of_domain`, `mark_matched`, `mark_selected_by_judge`, `mark_expired`. Single-writer (ADR-0002); internal lock covers concurrent classify/judge writes. Config: `DEDUP_COOLDOWN_DAYS: int = 30` (ADR-0044). _Avoid_: duplicate filtering, URL filtering.
+State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthing, ADR-0002). Shape: `{listing_id: {urls: [...], company_lc, title_lc, location_lc, status, status_last_changed}}` — keyed by **Listing ID** integer. `urls` list ordered most-recent-first; no alias records. On-load migration from legacy URL-keyed format (collapses alias chains into `urls` lists, assigns integer IDs). `DeduplicationStore` exposes four methods taking `listing_id: int`: `mark_out_of_domain`, `mark_matched`, `mark_selected_by_judge`, `mark_expired`. Single-writer (ADR-0002); internal lock covers concurrent classify/judge writes. Config: `DEDUP_COOLDOWN_DAYS: int = 30` (ADR-0044). _Avoid_: duplicate filtering, URL filtering.
 
 ### Display
 
@@ -133,7 +135,7 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthin
 
 **Parser**: Module in `src/application_pipeline/parsers/`. Two methods (ADR-0038): `discover(query) -> Iterable[PositionStub]` and `enrich(stub) -> EnrichResult`. Context manager owning `httpx.Client`; no shared mutable state (ADR-0004, amended ADR-0042 — threads now do `enrich()` I/O inline). Each thread runs: `discover → Freshness → Dedup → Pre-Filter → enrich → Freshness → Content Gate → classify queue` (ADR-0042). `has_native_enrich = True` → exclusive native path, no fallback (ADR-0040). `body_selector` is parser-private. In-parser dedup retired (ADR-0041). **Keyword-match invariant** (ADR-0013): every stub matches its query keyword in the title. _Avoid_: scraper, fetcher.
 
-**Position Stub**: Result of `discover()` — `url, title, source, posted_date?, company?, location?`. Required: url, title, source. Optional fields drive post-discover gates and Header pre-fills. `enrich()` may back-fill optional fields. _Avoid_: preview, summary.
+**Position Stub**: Result of `discover()` — `url, title, source, posted_date?, deadline?, company?, location?`. Required: url, title, source. Optional fields drive post-discover gates and Header pre-fills. `deadline` feeds the **Freshness Gate** `deadline` arm (`deadline < anchored_today` → drop). `enrich()` may back-fill optional fields. _Avoid_: preview, summary.
 
 **External Redirect**: _Retired_ per ADR-0032. Redirects followed silently in `parsers/body_fetch.py`. _Avoid_: do not reintroduce.
 
@@ -147,7 +149,7 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthin
 
 **Location Coverage**: Per-parser Protocol — `serves(name)`, `to_wire(name)`, `serves_remote`, `remote_wire()`. Validated at load time (ADR-0009). _Avoid_: location map, slug table.
 
-**LLM Extractor**: Protocol: `classify_relevance(items: list[ClassifyItem]) -> (list[RelevanceVerdict | None], CallUsage)` and `judge_top_n(candidates) -> (list[MatchVerdict], CallUsage)`. `RelevanceVerdict` = `{matches, header?, summary?}` (ADR-0034). `MatchVerdict` = `{id, rank}`. Production implementation: `ClaudeExtractor` via `claude -p` subprocess (ADR-0029 wire shape). Models: `haiku` classifier, `haiku --effort medium` judge (ADR-0010). Tags: `<verdict>`/`<verdicts>` via **Agent Output Protocol** (ADR-0010). _Avoid_: LLM, model (unqualified).
+**LLM Extractor**: Protocol: `classify_relevance(items: list[ClassifyItem]) -> (list[RelevanceVerdict | None], CallUsage)` and `judge_top_n(candidates) -> (list[MatchVerdict], CallUsage)`. `RelevanceVerdict` = `{matches, header?, summary?}` (ADR-0034). `MatchVerdict` = `{id: int, rank}` where `id` is the **Listing ID**. Production implementation: `ClaudeExtractor` via `claude -p` subprocess (ADR-0029 wire shape). Models: `haiku` classifier, `haiku --effort medium` judge (ADR-0010). Tags: `<verdict>`/`<verdicts>` via **Agent Output Protocol** (ADR-0010). _Avoid_: LLM, model (unqualified).
 
 **Agent Output Protocol**: `extract_json_block(text, tag) -> Any` + `AgentOutputProtocolError` (ADR-0010). Finds rightmost closing tag, walks back, strips optional fence, `json.loads`. Fallback: when tags absent, attempts bare-JSON extraction from markdown code fence; logs `protocol_fallback` on recovery. _Avoid_: output parser, response handler.
 

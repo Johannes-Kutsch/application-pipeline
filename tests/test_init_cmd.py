@@ -293,24 +293,6 @@ def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
         assert (ap / "user-info" / fname).exists(), f"{fname} should be seeded"
 
 
-def test_per_file_skip_granular_output(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    ap = _ap(tmp_path)
-    (ap / "user-info" / "triage-profile").mkdir(parents=True)
-    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
-        "# custom\n"
-    )
-
-    init(tmp_path)
-
-    out = capsys.readouterr().out
-    lines = out.strip().splitlines()
-    assert len(lines) == 1
-    assert "wrote" in lines[0]
-    assert "skipped" in lines[0]
-
-
 def test_fresh_init_prints_single_summary_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

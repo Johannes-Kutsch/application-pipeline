@@ -100,7 +100,6 @@ class StellenHamburgParser:
             case Resolved(_):
                 pass
 
-        seen: set[str] = set()
         page_number = 1
         while True:
             url = _search_url(query.keyword, page_number)
@@ -118,20 +117,17 @@ class StellenHamburgParser:
             if not items:
                 break
 
-            any_new = False
             for item in items:
                 obj_id: str = item.get("MatchedObjectId") or ""
-                if not obj_id or obj_id in seen:
+                if not obj_id:
                     continue
-                seen.add(obj_id)
-                any_new = True
                 descriptor: dict[str, Any] = item.get("MatchedObjectDescriptor") or {}
                 yield self._to_stub(descriptor, obj_id)
 
             total: int = result.get("SearchResultCountAll") or 0
             items_seen = (page_number - 1) * _PAGE_SIZE + len(items)
             page_number += 1
-            if not any_new or items_seen >= total:
+            if items_seen >= total:
                 break
 
     def _to_stub(self, descriptor: dict[str, Any], obj_id: str) -> PositionStub:

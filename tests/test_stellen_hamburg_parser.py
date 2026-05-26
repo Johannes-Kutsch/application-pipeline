@@ -290,23 +290,6 @@ def test_discover_stops_on_null_search_result_items(run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
-# discover — deduplication
-# ---------------------------------------------------------------------------
-
-
-def test_discover_deduplicates_same_object_id(run_log: RunLog) -> None:
-    shared = _item("same_id", "Dev")
-    page0 = _search_body([shared], total=2)
-    page1 = _search_body([shared], total=2)
-    get = _make_search_get([page0, page1])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
-        stubs = list(p.discover(_query()))
-    assert len(stubs) == 1
-
-
-# ---------------------------------------------------------------------------
 # discover — full pagination
 # ---------------------------------------------------------------------------
 

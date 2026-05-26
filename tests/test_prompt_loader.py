@@ -192,6 +192,34 @@ def test_load_prompts_raises_when_legacy_domain_fit_present(
     assert "gate-criteria.md" in str(exc_info.value)
 
 
+def test_load_prompts_raises_when_legacy_self_description_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    (config.user_info_dir / "triage-profile" / "self-description.md").write_text(
+        "legacy\n"
+    )
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+    assert "self-description.md" in str(exc_info.value)
+    assert "candidate-profile.md" in str(exc_info.value)
+
+
+def test_load_prompts_raises_when_legacy_match_criteria_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    (config.user_info_dir / "triage-profile" / "match-criteria.md").write_text(
+        "legacy\n"
+    )
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+    assert "match-criteria.md" in str(exc_info.value)
+    assert "gate-criteria.md" in str(exc_info.value)
+
+
 @pytest.mark.parametrize(
     "missing_file",
     ["candidate-profile.md", "gate-criteria.md"],

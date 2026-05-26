@@ -54,6 +54,16 @@ def load_prompts(config: Config) -> Prompts:
             f"{legacy_domain_fit}: legacy file retired per ADR-0043; merge its "
             "in-scope / out-of-scope content into gate-criteria.md and delete the file."
         )
+    legacy_self_description = triage_dir / "self-description.md"
+    if legacy_self_description.exists():
+        raise PromptError(
+            f"{legacy_self_description}: legacy filename retired; rename it to candidate-profile.md."
+        )
+    legacy_match_criteria = triage_dir / "match-criteria.md"
+    if legacy_match_criteria.exists():
+        raise PromptError(
+            f"{legacy_match_criteria}: legacy filename retired; rename it to gate-criteria.md."
+        )
 
     profile_values: dict[str, str] = {
         "CANDIDATE_PROFILE": _read_user_info(triage_dir, "candidate-profile.md"),

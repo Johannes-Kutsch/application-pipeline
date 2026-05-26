@@ -93,19 +93,14 @@ def test_cron_sh_has_no_log_truncation(cron_sh_text: str) -> None:
 
 def test_cron_sh_invokes_cron_not_init_or_run(cron_sh_text: str) -> None:
     """cron.sh must invoke 'application-pipeline cron', not 'init' or 'run' directly."""
-    assert (
-        "application-pipeline cron" in cron_sh_text
-        or 'application-pipeline" cron' in cron_sh_text
-        or "cron" in cron_sh_text
-    )
-    assert "init --refresh" not in cron_sh_text
-    # Must not invoke `run` as a standalone command (but `cron` is allowed)
     import re
 
+    assert re.search(r"application-pipeline\s+cron\b", cron_sh_text)
+    assert "init --refresh" not in cron_sh_text
     run_cmd_lines = [
         line
         for line in cron_sh_text.splitlines()
-        if re.search(r"application-pipeline\s+(run)\b", line)
+        if re.search(r"application-pipeline\s+run\b", line)
     ]
     assert run_cmd_lines == [], f"Lines invoking 'run' directly: {run_cmd_lines}"
 

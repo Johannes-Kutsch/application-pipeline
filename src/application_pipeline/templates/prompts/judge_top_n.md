@@ -8,17 +8,13 @@ Du bist ein Trefferbewerter für Stellenanzeigen.
 
 {SKILLS}
 
-# Match-Kriterien
-
-{GATE_CRITERIA}
-
 # Zu bewertende Stellenanzeigen
 
 {CANDIDATES}
 
 # Aufgabe
 
-Wähle die bis zu fünf am besten passenden zum Kanidatenprofil, Kompetenzprofil und Match-Kriterien passenden Stellenanzeigen aus. 
+Wähle die bis zu fünf am besten passenden zum Kanidatenprofil und Kompetenzprofil passenden Stellenanzeigen aus. 
 Ordne sie von rank 1 (besten) bis rank 5. Jeder rank darf nur einmal vergeben werden.
 
 Antworte ausschließlich mit einem JSON-Array in folgendem Format innerhalb von <verdicts>-Tags:

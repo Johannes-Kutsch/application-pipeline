@@ -94,7 +94,7 @@ def test_load_prompts_returns_prompt_template_per_call_site(
     assert isinstance(prompts.judge_top_n, PromptTemplate)
 
 
-def test_load_prompts_classify_embeds_both_named_sub_blocks(
+def test_load_prompts_classify_contains_gate_criteria_not_candidate_profile(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
@@ -104,13 +104,25 @@ def test_load_prompts_classify_embeds_both_named_sub_blocks(
         LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
     )
 
-    assert "# Kandidatenprofil" in rendered
-    assert "# Match-Kriterien" in rendered
-    assert "I am a developer" in rendered
     assert "Hamburg, remote" in rendered
+    assert "I am a developer" not in rendered
 
 
-def test_load_prompts_judge_embeds_both_named_sub_blocks(
+def test_load_prompts_classify_is_single_gate_check_no_skill_floor(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+
+    prompts = load_prompts(config)
+    rendered = prompts.classify_relevance.render(
+        LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
+    )
+
+    assert "Skill" not in rendered
+    assert "Erfahrungs" not in rendered
+
+
+def test_load_prompts_judge_contains_candidate_profile_and_skills_not_gate_criteria(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
@@ -118,10 +130,9 @@ def test_load_prompts_judge_embeds_both_named_sub_blocks(
     prompts = load_prompts(config)
     rendered = prompts.judge_top_n.render(CANDIDATES="x")
 
-    assert "# Kandidatenprofil" in rendered
-    assert "# Match-Kriterien" in rendered
     assert "I am a developer" in rendered
-    assert "Hamburg, remote" in rendered
+    assert "- Python" in rendered
+    assert "Hamburg, remote" not in rendered
 
 
 def test_load_prompts_classify_contains_verdict_tag_instruction(

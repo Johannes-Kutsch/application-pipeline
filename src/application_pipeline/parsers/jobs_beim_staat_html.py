@@ -23,13 +23,14 @@ from typing import Any, assert_never
 
 from bs4 import BeautifulSoup, Tag
 
+from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.parser_log import RunLog
 
-from .body_fetch import fetch_and_strip
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
 from .types import (
     City,
+    EnrichFailedError,
     EnrichResult,
     NotServedQuery,
     ParserQuery,
@@ -44,7 +45,7 @@ _DISPLAY_NAME = "jobs-beim-staat"
 _MAX_START = 10_000
 
 serves_remote = True
-has_native_enrich: bool = False
+has_native_enrich: bool = True
 
 
 def serves(name: str) -> bool:
@@ -111,6 +112,8 @@ def _parse_card(card: Tag, today: date) -> PositionStub | None:
     href = str(link.get("href") or "")
     if not href:
         return None
+    if href.startswith("/stellenangebote/"):
+        return None
     full_url = f"{_BASE_URL}{href}" if href.startswith("/") else href
     title = link.get_text(strip=True)
 
@@ -145,8 +148,6 @@ def _parse_card(card: Tag, today: date) -> PositionStub | None:
 
 
 class JobsBeimStaatParser:
-    _body_selector: str | None = None
-
     def __init__(
         self,
         *,
@@ -155,7 +156,6 @@ class JobsBeimStaatParser:
         _http: ParserHttp | None = None,
     ) -> None:
         self._run_log = run_log
-        self._failures_dir = failures_dir
         self._http = _http if _http is not None else ParserHttp(run_log=run_log)
 
     def __enter__(self) -> "JobsBeimStaatParser":
@@ -166,13 +166,24 @@ class JobsBeimStaatParser:
         self._http.__exit__(*args)
 
     def enrich(self, stub: PositionStub) -> EnrichResult:
-        body = fetch_and_strip(
+        outer_raw = self._http.get(
             stub.url,
-            body_selector=self._body_selector,
-            source=stub.source,
-            failures_dir=self._failures_dir,
+            error_prefix=f"jobs-beim-staat outer page fetch failed for {stub.url}",
         )
-        return EnrichResult(stub=stub, body=body, mode="fallback")
+        soup = BeautifulSoup(outer_raw, "html.parser")
+        iframe = soup.find(id="myiframe")
+        if not isinstance(iframe, Tag) or not iframe.get("src"):
+            raise EnrichFailedError(f"no iframe element found on {stub.url}")
+        iframe_src = str(iframe["src"])
+        iframe_url = (
+            f"{_BASE_URL}{iframe_src}" if iframe_src.startswith("/") else iframe_src
+        )
+        iframe_raw = self._http.enrich_get(
+            iframe_url,
+            error_prefix=f"jobs-beim-staat iframe fetch failed for {iframe_url}",
+        )
+        body = strip_to_text(iframe_raw.decode("utf-8"), None)
+        return EnrichResult(stub=stub, body=body, mode="native")
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:
         place: str

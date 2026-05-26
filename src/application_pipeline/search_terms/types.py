@@ -12,5 +12,4 @@ class SearchTermsError(UserSettingsError):
 @dataclass(frozen=True)
 class SearchTerms:
     keywords: tuple[str, ...]
-    skills: tuple[str, ...]
     negative_keywords: tuple[str, ...]

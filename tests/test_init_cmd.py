@@ -48,11 +48,11 @@ _TRIAGE_PROFILE_FILES = (
     "self-description.md",
     "match-criteria.md",
     "writing-style.md",
+    "skills.md",
 )
 
 _USER_INFO_ROOT_FILES = (
     "search-terms/keywords.md",
-    "search-terms/skills.md",
     "search-terms/negative-keywords.md",
 )
 
@@ -208,10 +208,7 @@ def test_seeded_config_and_user_info_load_prompts_without_error(tmp_path: Path) 
     init(tmp_path)
     config = load(_ap(tmp_path) / "config.py")
 
-    from application_pipeline.search_terms import load_search_terms
-
-    search_terms = load_search_terms(config.user_info_dir)
-    prompts = load_prompts(config, search_terms)
+    prompts = load_prompts(config)
 
     from application_pipeline import PromptTemplate
 
@@ -303,12 +300,10 @@ def test_per_file_skip_granular_output(
 
 
 def test_banner_does_not_trigger_prompt_error(tmp_path: Path) -> None:
-    from application_pipeline.search_terms import load_search_terms
-
     init(tmp_path)
     config = load(_ap(tmp_path) / "config.py")
 
-    load_prompts(config, load_search_terms(config.user_info_dir))
+    load_prompts(config)
 
 
 # --- LaTeX per-applicant file seeding ---

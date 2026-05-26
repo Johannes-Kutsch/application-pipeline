@@ -16,12 +16,6 @@ from application_pipeline.prompts import (
     CLASSIFY_RELEVANCE_SLOTS,
     JUDGE_TOP_N_SLOTS,
 )
-from application_pipeline.search_terms.types import SearchTerms
-
-
-_EMPTY_SEARCH_TERMS = SearchTerms(
-    keywords=("python",), skills=("Python", "Go"), negative_keywords=()
-)
 
 
 REQUIRED_BODY = """
@@ -41,6 +35,7 @@ def make_config_with_user_info(tmp_path: pathlib.Path) -> Config:
     triage.mkdir()
     (triage / "self-description.md").write_text("I am a developer\n")
     (triage / "match-criteria.md").write_text("Hamburg, remote\n")
+    (triage / "skills.md").write_text("- Python\n- SQL {always}\n")
     return Config(
         sources=[SourceEntry(parser_type="bundesagentur")],
         locations=["Hamburg"],
@@ -93,7 +88,7 @@ def test_load_prompts_returns_prompt_template_per_call_site(
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
-    prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
+    prompts = load_prompts(config)
 
     assert isinstance(prompts.classify_relevance, PromptTemplate)
     assert isinstance(prompts.judge_top_n, PromptTemplate)
@@ -104,7 +99,7 @@ def test_load_prompts_classify_embeds_both_named_sub_blocks(
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
-    prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
+    prompts = load_prompts(config)
     rendered = prompts.classify_relevance.render(
         LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
     )
@@ -120,7 +115,7 @@ def test_load_prompts_judge_embeds_both_named_sub_blocks(
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
-    prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
+    prompts = load_prompts(config)
     rendered = prompts.judge_top_n.render(CANDIDATES="x")
 
     assert "# Kandidatenprofil" in rendered
@@ -134,12 +129,25 @@ def test_load_prompts_classify_contains_verdict_tag_instruction(
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
-    prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
+    prompts = load_prompts(config)
     rendered = prompts.classify_relevance.render(
         LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
     )
 
     assert "<verdict>" in rendered
+
+
+def test_load_prompts_skills_slot_populated_attributes_stripped(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+
+    prompts = load_prompts(config)
+    rendered = prompts.judge_top_n.render(CANDIDATES="x")
+
+    assert "- Python" in rendered
+    assert "- SQL" in rendered
+    assert "{always}" not in rendered
 
 
 # --- load_prompts: legacy / missing / empty user-info files ---
@@ -152,7 +160,7 @@ def test_load_prompts_raises_when_legacy_domain_fit_present(
     (config.user_info_dir / "triage-profile" / "domain-fit.md").write_text("legacy\n")
 
     with pytest.raises(PromptError) as exc_info:
-        load_prompts(config, _EMPTY_SEARCH_TERMS)
+        load_prompts(config)
     assert "domain-fit.md" in str(exc_info.value)
     assert "match-criteria.md" in str(exc_info.value)
 
@@ -168,7 +176,7 @@ def test_load_prompts_raises_when_user_info_file_missing(
     (config.user_info_dir / "triage-profile" / missing_file).unlink()
 
     with pytest.raises(PromptError) as exc_info:
-        load_prompts(config, _EMPTY_SEARCH_TERMS)
+        load_prompts(config)
     assert missing_file in str(exc_info.value)
 
 
@@ -183,7 +191,7 @@ def test_load_prompts_raises_when_user_info_file_empty(
     (config.user_info_dir / "triage-profile" / empty_file).write_text("")
 
     with pytest.raises(PromptError) as exc_info:
-        load_prompts(config, _EMPTY_SEARCH_TERMS)
+        load_prompts(config)
     assert empty_file in str(exc_info.value)
 
 
@@ -201,7 +209,7 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     path.write_text(REQUIRED_BODY)
 
     config = load(path)
-    prompts = load_prompts(config, _EMPTY_SEARCH_TERMS)
+    prompts = load_prompts(config)
 
     assert isinstance(prompts.classify_relevance, PromptTemplate)
     assert isinstance(prompts.judge_top_n, PromptTemplate)

@@ -226,7 +226,7 @@ def test_admit_both_none_does_not_mark_expired(
     gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(url="https://example.com/noop")
     gate.admit(stub, gate_arm="post_llm")
-    assert dedup.is_seen(stub) == "miss"
+    assert dedup.is_seen(stub).kind == "miss"
 
 
 # ---------------------------------------------------------------------------
@@ -240,11 +240,14 @@ def test_admit_drop_marks_expired_in_dedup_store(
     gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(url="https://example.com/old", posted_date=date(2025, 12, 15))
     gate.admit(stub, gate_arm="post_llm")
-    assert dedup.is_seen(stub) == "url_hit"
+    assert dedup.is_seen(stub).kind == "url_hit"
     # Verify expired status in the persisted JSON
     seen_path = tmp_path / ".seen.json"
     data = json.loads(seen_path.read_text())
-    assert data["https://example.com/old"]["status"] == "expired"
+    record = next(
+        r for r in data.values() if "https://example.com/old" in r.get("urls", [])
+    )
+    assert record["status"] == "expired"
 
 
 def test_admit_drop_does_not_publish_to_pipeline_freshness_row(
@@ -396,7 +399,7 @@ def test_admit_stub_stale_marks_expired_in_dedup(
     gate = _make_gate(tmp_path, run_log, display, dedup)
     stub = _Stub(url="https://example.com/old", posted_date=date(2025, 12, 15))
     gate.admit(stub, gate_arm="discover")
-    assert dedup.is_seen(stub) == "url_hit"
+    assert dedup.is_seen(stub).kind == "url_hit"
 
 
 def test_admit_post_enrich_null_posted_date_is_silent_noop(

@@ -162,6 +162,7 @@ class _ClassifyRequest:
     stub: PositionStub
     body: str
     parser_id: str
+    listing_id: int = 0
 
 
 class _NoMoreBatches:
@@ -354,11 +355,11 @@ class _ParserThread(threading.Thread):
 
         # Dedup
         result = self._dedup.is_seen(stub)
-        self._dedup_counters.record(result)
-        if result == "judge_pending":
+        self._dedup_counters.record(result.kind)
+        if result.kind == "judge_pending":
             self._pool_collector.add_judge_pending(stub)
             return
-        if result != "miss":
+        if result.kind != "miss":
             self._metrics.increment_dedup_dropped(self._parser_id)
             return
 
@@ -405,12 +406,12 @@ class _ParserThread(threading.Thread):
 
         # Post-enrich dedup check (catches backfilled company/location fields)
         post_enrich_result = self._dedup.is_seen(stub)
-        if post_enrich_result == "judge_pending":
-            self._dedup_counters.record(post_enrich_result)
+        if post_enrich_result.kind == "judge_pending":
+            self._dedup_counters.record(post_enrich_result.kind)
             self._pool_collector.add_judge_pending(stub)
             return
-        if post_enrich_result == "tuple_hit":
-            self._dedup_counters.record(post_enrich_result)
+        if post_enrich_result.kind == "tuple_hit":
+            self._dedup_counters.record(post_enrich_result.kind)
             self._metrics.increment_dedup_dropped(self._parser_id)
             return
 
@@ -426,7 +427,12 @@ class _ParserThread(threading.Thread):
 
         # Forward to classify queue
         self._classify_queue.put(
-            _ClassifyRequest(stub=stub, body=body, parser_id=self._parser_id)
+            _ClassifyRequest(
+                stub=stub,
+                body=body,
+                parser_id=self._parser_id,
+                listing_id=post_enrich_result.listing_id,
+            )
         )
         self._metrics.classify_buffered(1)
         self._metrics.increment_forwarded(self._parser_id)
@@ -533,10 +539,10 @@ class _ClassifyWorker(_QueueWorker):
         if verdict is None:
             self._metrics.enrich_failed(item.stub.source)
         elif not verdict.matches:
-            self._dedup_store.mark_out_of_domain(item.stub)
+            self._dedup_store.mark_out_of_domain(item.listing_id, item.stub)
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 1)
         else:
-            self._dedup_store.mark_matched(item.stub)
+            self._dedup_store.mark_matched(item.listing_id, item.stub)
             self._pool_collector.add_matched(item.stub)
             self._metrics.classify_batch_complete(_ZERO_USAGE, 1, 0)
 
@@ -984,7 +990,11 @@ def run(
                         raise
                     stub = pool_collector.get_stub(verdict.id)
                     if stub is not None:
-                        dedup_store.mark_selected_by_judge(stub)
+                        listing_id = dedup_store.listing_id_for(stub.url)
+                        if listing_id is not None:
+                            dedup_store.mark_selected_by_judge(listing_id, stub)
+                        else:
+                            dedup_store.mark_selected_by_judge(stub)
                     daily_top_5_count += 1
                 metrics.judge_top_n_complete(judge_usage, daily_top_5_count)
                 run_log.event(

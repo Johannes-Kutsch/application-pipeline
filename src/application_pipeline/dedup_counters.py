@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from application_pipeline.dedup import RunScopedSeenResult
+from application_pipeline.dedup import RunScopedSeenKind
 from application_pipeline.parser_log import RunLog
 from application_pipeline.status_display import StatusDisplay
 
@@ -39,7 +39,7 @@ class DedupCounters:
         self._dedup_misses = 0
         self._judge_resumed = 0
 
-    def record(self, result: RunScopedSeenResult) -> None:
+    def record(self, result: RunScopedSeenKind) -> None:
         with self._lock:
             if result == "url_hit":
                 self._dedup_url_hits += 1

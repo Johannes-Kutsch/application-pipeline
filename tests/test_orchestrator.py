@@ -357,14 +357,15 @@ def test_integration_all_skipped_when_preseeded(tmp_path: Path) -> None:
     """Pre-seed all 6 URLs â†' discovered==6, skipped==6, written==0."""
     seen_path = tmp_path / ".seen.json"
     seen_data = {
-        url: {
+        str(i + 1): {
+            "urls": [url],
             "company_lc": None,
             "title_lc": None,
             "location_lc": None,
             "status": "out_of_domain",
             "first_seen": "2024-01-01",
         }
-        for url in _STUB_URLS
+        for i, url in enumerate(_STUB_URLS)
     }
     seen_path.write_text(json.dumps(seen_data), encoding="utf-8")
 
@@ -456,17 +457,25 @@ def test_integration_dedup_counter_breakdown(
     # 4 misses, 2 url_hits, 1 tuple_hit at pre-discover; the 4 misses each
     # trigger a post-enrich is_seen call that returns run_hit (no new match).
     dedup.is_seen.side_effect = [
-        "miss",  # stub0 pre-discover
-        "run_hit",  # stub0 post-enrich (no new match)
-        "miss",  # stub1 pre-discover
-        "run_hit",  # stub1 post-enrich
-        "url_hit",  # stub2 pre-discover (dedup drop, no post-enrich call)
-        "miss",  # stub3 pre-discover
-        "run_hit",  # stub3 post-enrich
-        "tuple_hit",  # stub4 pre-discover (dedup drop, no post-enrich call)
-        "url_hit",  # stub5 pre-discover (dedup drop, no post-enrich call)
-        "miss",  # stub6 pre-discover
-        "run_hit",  # stub6 post-enrich
+        dedup_module.RunScopedSeenResult("miss", 0),  # stub0 pre-discover
+        dedup_module.RunScopedSeenResult(
+            "run_hit", 0
+        ),  # stub0 post-enrich (no new match)
+        dedup_module.RunScopedSeenResult("miss", 0),  # stub1 pre-discover
+        dedup_module.RunScopedSeenResult("run_hit", 0),  # stub1 post-enrich
+        dedup_module.RunScopedSeenResult(
+            "url_hit", 0
+        ),  # stub2 pre-discover (dedup drop, no post-enrich call)
+        dedup_module.RunScopedSeenResult("miss", 0),  # stub3 pre-discover
+        dedup_module.RunScopedSeenResult("run_hit", 0),  # stub3 post-enrich
+        dedup_module.RunScopedSeenResult(
+            "tuple_hit", 0
+        ),  # stub4 pre-discover (dedup drop, no post-enrich call)
+        dedup_module.RunScopedSeenResult(
+            "url_hit", 0
+        ),  # stub5 pre-discover (dedup drop, no post-enrich call)
+        dedup_module.RunScopedSeenResult("miss", 0),  # stub6 pre-discover
+        dedup_module.RunScopedSeenResult("run_hit", 0),  # stub6 post-enrich
     ]
     _wire_run_scope(dedup)
 
@@ -569,7 +578,7 @@ def test_consecutive_url_hits_never_trigger_skip_and_end_query(tmp_path: Path) -
                 yield stub
 
     dedup = MagicMock()
-    dedup.is_seen.return_value = "url_hit"
+    dedup.is_seen.return_value = dedup_module.RunScopedSeenResult("url_hit", 0)
     _wire_run_scope(dedup)
 
     summary = run(
@@ -627,7 +636,12 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
 
     dedup = MagicMock()
     # 80 url_hits, 1 miss at pre-discover; the miss triggers a post-enrich call (run_hit = no new match).
-    dedup.is_seen.side_effect = ["url_hit"] * 80 + ["miss", "run_hit"]
+    dedup.is_seen.side_effect = [
+        dedup_module.RunScopedSeenResult("url_hit", 0)
+    ] * 80 + [
+        dedup_module.RunScopedSeenResult("miss", 0),
+        dedup_module.RunScopedSeenResult("run_hit", 0),
+    ]
     _wire_run_scope(dedup)
 
     summary = run(
@@ -713,7 +727,7 @@ def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:
 
     dedup = MagicMock()
     # Both runs: is_seen returns "miss" (in-run set does not carry across runs)
-    dedup.is_seen.return_value = "miss"
+    dedup.is_seen.return_value = dedup_module.RunScopedSeenResult("miss", 0)
     _wire_run_scope(dedup)
 
     summary1 = run(
@@ -851,10 +865,16 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     # .seen.json: 2 out_of_domain, 4 selected_by_judge
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     out_of_domain = [
-        url for url, rec in seen_data.items() if rec["status"] == "out_of_domain"
+        url
+        for rec in seen_data.values()
+        if rec["status"] == "out_of_domain"
+        for url in rec.get("urls", [])
     ]
     selected = [
-        url for url, rec in seen_data.items() if rec["status"] == "selected_by_judge"
+        url
+        for rec in seen_data.values()
+        if rec["status"] == "selected_by_judge"
+        for url in rec.get("urls", [])
     ]
     assert len(out_of_domain) == 2
     assert len(selected) == 4
@@ -1039,7 +1059,7 @@ def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> N
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     # First position must NOT be in seen store (left un-seen for retry)
-    assert _ERR_URLS[0] not in seen_data
+    assert not any(_ERR_URLS[0] in r.get("urls", []) for r in seen_data.values())
 
 
 def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
@@ -1062,8 +1082,18 @@ def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
     assert summary.written == 0
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_ERR_URLS[0]]["status"] == "matched"
-    assert seen_data[_ERR_URLS[1]]["status"] == "matched"
+    assert (
+        next(
+            r["status"] for r in seen_data.values() if _ERR_URLS[0] in r.get("urls", [])
+        )
+        == "matched"
+    )
+    assert (
+        next(
+            r["status"] for r in seen_data.values() if _ERR_URLS[1] in r.get("urls", [])
+        )
+        == "matched"
+    )
 
 
 def test_parser_error_on_enrich_skips_stub_and_increments_metric(
@@ -1113,7 +1143,7 @@ def test_parser_error_on_enrich_skips_stub_and_increments_metric(
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    assert _ERR_URLS[1] not in seen_data, (
+    assert not any(_ERR_URLS[1] in r.get("urls", []) for r in seen_data.values()), (
         "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
     )
 
@@ -1165,7 +1195,7 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    assert _ERR_URLS[1] not in seen_data, (
+    assert not any(_ERR_URLS[1] in r.get("urls", []) for r in seen_data.values()), (
         "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
     )
 
@@ -1185,7 +1215,7 @@ def test_parser_fatal_http_error_on_enrich_marks_parser_dead_surviving_parsers_c
 
         def discover(self, query: ParserQuery):  # type: ignore[return]
             raise RuntimeError("auth: stub_url status=401")
-            yield  # pragma: no cover â€” makes this a generator
+            yield  # pragma: no cover â€" makes this a generator
 
     class _HealthyParser(_StubParserBase):
         def __enter__(self) -> "_HealthyParser":
@@ -1283,7 +1313,7 @@ def test_external_redirect_skips_stub_and_increments_counter(
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    assert _ERR_URLS[0] not in seen_data, (
+    assert not any(_ERR_URLS[0] in r.get("urls", []) for r in seen_data.values()), (
         "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
     )
 
@@ -1433,7 +1463,12 @@ def test_judge_failure_leaves_status_matched(tmp_path: Path) -> None:
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "matched"
+    assert (
+        next(
+            r["status"] for r in seen_data.values() if _RESUME_URL in r.get("urls", [])
+        )
+        == "matched"
+    )
 
 
 def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
@@ -1448,7 +1483,8 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
     seen_path.write_text(
         json.dumps(
             {
-                _RESUME_URL: {
+                "1": {
+                    "urls": [_RESUME_URL],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -1505,7 +1541,8 @@ def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) 
     seen_path.write_text(
         json.dumps(
             {
-                _RESUME_URL: {
+                "1": {
+                    "urls": [_RESUME_URL],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -1533,7 +1570,12 @@ def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) 
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "selected_by_judge"
+    assert (
+        next(
+            r["status"] for r in seen_data.values() if _RESUME_URL in r.get("urls", [])
+        )
+        == "selected_by_judge"
+    )
 
 
 def test_judge_pending_failure_stays_matched(tmp_path: Path) -> None:
@@ -1543,7 +1585,8 @@ def test_judge_pending_failure_stays_matched(tmp_path: Path) -> None:
     seen_path.write_text(
         json.dumps(
             {
-                _RESUME_URL: {
+                "1": {
+                    "urls": [_RESUME_URL],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -1574,7 +1617,12 @@ def test_judge_pending_failure_stays_matched(tmp_path: Path) -> None:
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "matched"
+    assert (
+        next(
+            r["status"] for r in seen_data.values() if _RESUME_URL in r.get("urls", [])
+        )
+        == "matched"
+    )
 
 
 def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
@@ -1589,7 +1637,8 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
     seen_path.write_text(
         json.dumps(
             {
-                _RESUME_URL: {
+                "1": {
+                    "urls": [_RESUME_URL],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -1600,7 +1649,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write card store in v2 format â€” this is what build_candidates uses
+    # Write card store in v2 format â€" this is what build_candidates uses
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
         json.dumps({_RESUME_URL: _card}),
@@ -1669,7 +1718,9 @@ def test_judge_pending_enrich_failure_skips_stub_without_seen_write(
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    assert _enrich_failed_url not in seen_data, (
+    assert not any(
+        _enrich_failed_url in r.get("urls", []) for r in seen_data.values()
+    ), (
         "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
     )
 
@@ -1685,7 +1736,8 @@ def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
     seen_path.write_text(
         json.dumps(
             {
-                _RESUME_URL: {
+                "1": {
+                    "urls": [_RESUME_URL],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -1725,7 +1777,8 @@ def test_judge_pending_judge_failure_stays_matched_on_rerun(
     seen_path.write_text(
         json.dumps(
             {
-                _RESUME_URL: {
+                "1": {
+                    "urls": [_RESUME_URL],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -1756,7 +1809,12 @@ def test_judge_pending_judge_failure_stays_matched_on_rerun(
     )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_RESUME_URL]["status"] == "matched"
+    assert (
+        next(
+            r["status"] for r in seen_data.values() if _RESUME_URL in r.get("urls", [])
+        )
+        == "matched"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1776,7 +1834,7 @@ def test_parser_thread_dead_run_completes(tmp_path: Path) -> None:
 
         def discover(self, query: ParserQuery):  # type: ignore[return]
             raise RuntimeError("unexpected crash")
-            yield  # pragma: no cover â€” makes this a generator
+            yield  # pragma: no cover â€" makes this a generator
 
     summary = run(
         _write_config(
@@ -1884,8 +1942,9 @@ def test_append_failure_exits_nonzero_position_not_marked_seen(
     # No position must be marked kept
     kept = [
         url
-        for url, rec in seen_data.items()
+        for rec in seen_data.values()
         if rec.get("status") == "selected_by_judge"
+        for url in rec.get("urls", [])
     ]
     assert kept == []
 
@@ -2377,12 +2436,12 @@ def test_unparseable_date_warning_not_emitted_to_stderr(
 
 
 # ---------------------------------------------------------------------------
-# Batched classify pipeline â€” new tests for issue #187
+# Batched classify pipeline â€" new tests for issue #187
 # ---------------------------------------------------------------------------
 
 
 def _batch_size_config(tmp_path: Path, batch_size: int = 1) -> Path:
-    # batch_size is ignored â€” solo calls per position, no batching
+    # batch_size is ignored â€" solo calls per position, no batching
     return _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -2538,7 +2597,10 @@ def test_classify_thread_six_positions_happy_path(tmp_path: Path) -> None:
     # .seen.json: 5 URLs kept (top-5 from judge_top_n)
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     kept_urls = {
-        url for url, rec in seen_data.items() if rec["status"] == "selected_by_judge"
+        url
+        for rec in seen_data.values()
+        if rec["status"] == "selected_by_judge"
+        for url in rec.get("urls", [])
     }
     assert len(kept_urls) == 5
     assert kept_urls.issubset(_ALL_URLS)
@@ -2656,7 +2718,10 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     assert _OFF_URL not in judge_candidate_ids[0]
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[_OFF_URL]["status"] == "out_of_domain"
+    assert (
+        next(r["status"] for r in seen_data.values() if _OFF_URL in r.get("urls", []))
+        == "out_of_domain"
+    )
 
 
 def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
@@ -2698,7 +2763,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
     # First item must NOT be in seen store
-    assert _ERR_URLS[0] not in seen_data
+    assert not any(_ERR_URLS[0] in r.get("urls", []) for r in seen_data.values())
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
@@ -3052,7 +3117,7 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# StatusDisplay â€” startup row
+# StatusDisplay â€" startup row
 # ---------------------------------------------------------------------------
 
 
@@ -3096,7 +3161,7 @@ def test_startup_row_ordering(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# StatusDisplay â€” per-parser rows (issue #197)
+# StatusDisplay â€" per-parser rows (issue #197)
 # ---------------------------------------------------------------------------
 
 
@@ -3562,7 +3627,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
     logs_dir = tmp_path / "synched" / "logs"
     run_log = parser_log.RunLog(logs_dir)
 
-    _THRESHOLD = 0.05  # 50 ms â€” fast enough for tests
+    _THRESHOLD = 0.05  # 50 ms â€" fast enough for tests
 
     class _SleepyParser(_StubParserBase):
         def __enter__(self) -> "_SleepyParser":
@@ -3603,7 +3668,7 @@ def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
 
 
 def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
-    """Stall is logged at most once per silence period â€” not on every poll tick."""
+    """Stall is logged at most once per silence period â€" not on every poll tick."""
     import time
 
     import application_pipeline.parser_log as parser_log
@@ -3826,7 +3891,7 @@ def test_non_quota_worker_exception_writes_failure_report(
 
 
 # ---------------------------------------------------------------------------
-# Issue #229 â€” status-row body refreshed on error exit paths
+# Issue #229 â€" status-row body refreshed on error exit paths
 # ---------------------------------------------------------------------------
 
 
@@ -3896,7 +3961,7 @@ def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Issue #230 â€” live pending-depth signal
+# Issue #230 â€" live pending-depth signal
 # ---------------------------------------------------------------------------
 
 
@@ -4301,7 +4366,7 @@ def test_quota_judge_retries_and_completes(
 
 
 # ---------------------------------------------------------------------------
-# Daily cutover â€” issue #390
+# Daily cutover â€" issue #390
 # ---------------------------------------------------------------------------
 
 _DAILY390_URL = "https://daily390.example/job-1"
@@ -4369,7 +4434,8 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
     seen_path.write_text(
         json.dumps(
             {
-                stale_url: {
+                "1": {
+                    "urls": [stale_url],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -4427,7 +4493,10 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
     )
 
     seen_after = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_after[stale_url]["status"] == "expired"
+    assert (
+        next(r["status"] for r in seen_after.values() if stale_url in r.get("urls", []))
+        == "expired"
+    )
     # After expiry, the extracts.json entry should be deleted by the freshness gate
     if extracts_path.exists():
         extracts_after = json.loads(extracts_path.read_text(encoding="utf-8"))
@@ -4445,7 +4514,8 @@ def test_freshness_pool_reentry_fresh_position_stays_matched_and_reaches_judge(
     seen_path.write_text(
         json.dumps(
             {
-                fresh_url: {
+                "1": {
+                    "urls": [fresh_url],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -4507,7 +4577,14 @@ def test_freshness_pool_reentry_fresh_position_stays_matched_and_reaches_judge(
     )
 
     seen_data_after = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data_after[fresh_url]["status"] != "expired"
+    assert (
+        next(
+            r["status"]
+            for r in seen_data_after.values()
+            if fresh_url in r.get("urls", [])
+        )
+        != "expired"
+    )
     assert fresh_url in judge_candidate_ids
 
 
@@ -4744,7 +4821,10 @@ def test_parallel_classify_n1_recovers_serial_results(tmp_path: Path) -> None:
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     out_of_domain = [
-        url for url, rec in seen_data.items() if rec["status"] == "out_of_domain"
+        url
+        for rec in seen_data.values()
+        if rec["status"] == "out_of_domain"
+        for url in rec.get("urls", [])
     ]
     assert len(out_of_domain) == 2
 
@@ -4910,7 +4990,8 @@ def test_gates_bundle_dedup_hit_parser_enrich_not_called(tmp_path: Path) -> None
     seen_path.write_text(
         json.dumps(
             {
-                seen_url: {
+                "1": {
+                    "urls": [seen_url],
                     "company_lc": None,
                     "title_lc": None,
                     "location_lc": None,
@@ -5387,7 +5468,7 @@ def test_enrich_failed_error_from_parser_does_not_write_to_seen(
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    assert _EF_URL not in seen_data, (
+    assert not any(_EF_URL in r.get("urls", []) for r in seen_data.values()), (
         "EnrichFailedError must not write to seen.json — URL stays unrecorded for retry next run"
     )
 
@@ -5426,7 +5507,7 @@ def test_oversized_body_from_parser_enrich_does_not_mark_enrich_failed(
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    assert _EF_URL not in seen_data, (
+    assert not any(_EF_URL in r.get("urls", []) for r in seen_data.values()), (
         "oversized-body URL must not be permanently blacklisted"
     )
 
@@ -5518,7 +5599,7 @@ def test_transient_http_error_from_parser_enrich_does_not_mark_enrich_failed(
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    assert _EF_URL not in seen_data, (
+    assert not any(_EF_URL in r.get("urls", []) for r in seen_data.values()), (
         "transient-error URL must not appear in seen.json so it is retried next run"
     )
 
@@ -5626,7 +5707,7 @@ def test_enrich_failed_error_on_parser_enrich_increments_counter_run_continues(
     seen_data = (
         json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
     )
-    assert _URLS[1] not in seen_data, (
+    assert not any(_URLS[1] in r.get("urls", []) for r in seen_data.values()), (
         "EnrichFailedError must not write to seen.json (#572)"
     )
 
@@ -5841,8 +5922,8 @@ def test_post_enrich_dedup_drops_listing_with_backfilled_company(
     seen_path.write_text(
         json.dumps(
             {
-                existing_url: {
-                    "canonical_url": existing_url,
+                "1": {
+                    "urls": [existing_url],
                     "company_lc": "acme",
                     "title_lc": "engineer",
                     "location_lc": "hamburg",
@@ -5918,8 +5999,8 @@ def test_post_enrich_dedup_judge_pending_routes_to_pool(tmp_path: Path) -> None:
     seen_path.write_text(
         json.dumps(
             {
-                matched_url: {
-                    "canonical_url": matched_url,
+                "1": {
+                    "urls": [matched_url],
                     "company_lc": "acme",
                     "title_lc": "engineer",
                     "location_lc": "hamburg",

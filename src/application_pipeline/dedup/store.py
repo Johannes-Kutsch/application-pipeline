@@ -1,9 +1,10 @@
-"""Deduplication Store — URL-tier + tuple-tier + fuzzy-tier with alias write.
+"""Deduplication Store — URL-tier + tuple-tier + fuzzy-tier, integer-keyed records.
 
 Single-writer module (Pi only, per ADR-0002): no cross-process locking.
-``is_seen`` is intentionally side-effecting on tuple/fuzzy-tier hits — it writes
-an alias entry under the new URL so subsequent runs short-circuit on the
-cheap URL lookup. See ADR-0003; do not "fix" this back to a pure read.
+``is_seen`` is intentionally side-effecting on tuple/fuzzy-tier hits — it prepends
+the new URL to the canonical record's ``urls`` list and (for non-matched entries)
+persists the update so subsequent runs short-circuit on the cheap URL lookup.
+See ADR-0003 and ADR-0046.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import re
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, get_args, runtime_checkable
@@ -47,10 +49,17 @@ _LEGACY_STATUSES: frozenset[str] = frozenset(
 )
 # enrich_failed is retired but may still exist in seen.json; accept it on load.
 _KNOWN_STATUSES: frozenset[str] = frozenset(get_args(SeenStatus)) | {"enrich_failed"}
+
 SeenResult = Literal["url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "miss"]
-RunScopedSeenResult = Literal[
+RunScopedSeenKind = Literal[
     "url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "run_hit", "miss"
 ]
+
+
+@dataclass
+class RunScopedSeenResult:
+    kind: RunScopedSeenKind
+    listing_id: int
 
 
 @runtime_checkable
@@ -86,7 +95,7 @@ class DeduplicationStore:
     def __init__(
         self,
         path: Path,
-        records: dict[str, dict[str, Any]],
+        records: dict[int, dict[str, Any]],
         *,
         card_store: "CardStore | None" = None,
         cooldown_days: int = 30,
@@ -94,21 +103,27 @@ class DeduplicationStore:
     ) -> None:
         self._path = path
         self._records = records
-        self._tuple_index: dict[tuple[str, str, str], str] = self._build_tuple_index(
+        self._url_index: dict[str, int] = self._build_url_index(records)
+        self._tuple_index: dict[tuple[str, str, str], int] = self._build_tuple_index(
             records
         )
-        self._fuzzy_index: dict[tuple[str, str], list[tuple[frozenset[str], str]]] = (
+        self._fuzzy_index: dict[tuple[str, str], list[tuple[frozenset[str], int]]] = (
             self._build_fuzzy_index(records)
         )
         self._lock = threading.Lock()
-        self._in_run: set[str] | None = None
+        self._in_run: set[int] | None = None
         self._card_store = card_store
         self._cooldown_days = cooldown_days
         self._run_log = run_log
 
+    @property
+    def _next_id(self) -> int:
+        """One greater than the current maximum listing ID. Caller must hold self._lock."""
+        return max(self._records.keys(), default=0) + 1
+
     @staticmethod
-    def _validate_record(url: str, record: dict[str, Any]) -> None:
-        """Raise DedupStoreError if record is missing any required alias field."""
+    def _validate_record(listing_id: int, record: dict[str, Any]) -> None:
+        """Raise DedupStoreError if record is missing any required field."""
         for field in (
             "company_lc",
             "title_lc",
@@ -118,15 +133,24 @@ class DeduplicationStore:
         ):
             if record.get(field) is None:
                 raise DedupStoreError(
-                    f"record for {url!r} has missing or null required field {field!r}"
+                    f"record for listing {listing_id!r} has missing or null required field {field!r}"
                 )
 
     @staticmethod
+    def _build_url_index(records: dict[int, dict[str, Any]]) -> dict[str, int]:
+        index: dict[str, int] = {}
+        for listing_id, record in records.items():
+            for url in record.get("urls", []):
+                if isinstance(url, str):
+                    index.setdefault(url, listing_id)
+        return index
+
+    @staticmethod
     def _build_tuple_index(
-        records: dict[str, dict[str, Any]],
-    ) -> dict[tuple[str, str, str], str]:
-        index: dict[tuple[str, str, str], str] = {}
-        for url, record in records.items():
+        records: dict[int, dict[str, Any]],
+    ) -> dict[tuple[str, str, str], int]:
+        index: dict[tuple[str, str, str], int] = {}
+        for listing_id, record in records.items():
             company_lc = record.get("company_lc")
             title_lc = record.get("title_lc")
             location_lc = record.get("location_lc")
@@ -138,15 +162,15 @@ class DeduplicationStore:
                 and title_lc
                 and location_lc
             ):
-                index.setdefault((company_lc, title_lc, location_lc), url)
+                index.setdefault((company_lc, title_lc, location_lc), listing_id)
         return index
 
     @staticmethod
     def _build_fuzzy_index(
-        records: dict[str, dict[str, Any]],
-    ) -> dict[tuple[str, str], list[tuple[frozenset[str], str]]]:
-        index: dict[tuple[str, str], list[tuple[frozenset[str], str]]] = {}
-        for url, record in records.items():
+        records: dict[int, dict[str, Any]],
+    ) -> dict[tuple[str, str], list[tuple[frozenset[str], int]]]:
+        index: dict[tuple[str, str], list[tuple[frozenset[str], int]]] = {}
+        for listing_id, record in records.items():
             company_lc = record.get("company_lc")
             title_lc = record.get("title_lc")
             location_lc = record.get("location_lc")
@@ -161,7 +185,7 @@ class DeduplicationStore:
                 fkey = (company_lc, location_lc)
                 tokens = _tokenize_title(title_lc)
                 bucket = index.setdefault(fkey, [])
-                bucket.append((tokens, url))
+                bucket.append((tokens, listing_id))
         return index
 
     def _cooldown_expired(self, record: dict[str, Any]) -> bool:
@@ -183,14 +207,14 @@ class DeduplicationStore:
             return None
         return (company_lc, title_lc, location_lc)
 
-    def _tuple_lookup(self, key: _SeenKey) -> str | None:
+    def _tuple_lookup(self, key: _SeenKey) -> int | None:
         tkey = self._tuple_key(key)
         if tkey is None:
             return None
         return self._tuple_index.get(tkey)
 
-    def _fuzzy_lookup(self, key: _SeenKey) -> str | None:
-        """Return the URL of the first fuzzy-index entry that token-subset matches key."""
+    def _fuzzy_lookup(self, key: _SeenKey) -> int | None:
+        """Return the listing_id of the first fuzzy-index entry that token-subset matches key."""
         company_lc = normalize(key.company)
         title_lc = normalize(key.title)
         location_lc = normalize(key.location)
@@ -201,171 +225,216 @@ class DeduplicationStore:
         if bucket is None:
             return None
         key_tokens = _tokenize_title(title_lc)
-        for stored_tokens, url in bucket:
+        for stored_tokens, listing_id in bucket:
             if _fuzzy_subset(key_tokens, stored_tokens):
-                return url
+                return listing_id
         return None
 
     def _log_hit(
         self,
         event: str,
         key: _SeenKey,
-        canonical_url: str,
+        listing_id: int,
     ) -> None:
         """Write a JSONL hit event. Caller must hold ``self._lock``."""
         if self._run_log is None:
             return
-        canonical_record = self._records.get(canonical_url, {})
+        record = self._records.get(listing_id, {})
+        canonical_url = record.get("urls", [None])[0]
         self._run_log.event(
             "pipeline_dedup",
             event,
             new_url=key.url,
             canonical_url=canonical_url,
             new_title=key.title,
-            canonical_title=canonical_record.get("title_lc"),
+            canonical_title=record.get("title_lc"),
         )
 
+    def listing_id_for(self, url: str) -> int | None:
+        """Return the listing_id for a URL, or None if not registered."""
+        return self._url_index.get(url)
+
     def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
-        """Return which dedup tier matched ``key``; on tuple/fuzzy match, write alias.
+        """Return which dedup tier matched ``key``; on tuple/fuzzy match, update urls list.
 
         Tuple and fuzzy tiers are status-aware: a hit on a ``matched`` entry returns
-        ``judge_pending`` (first hit in a run updates the canonical record's
-        URL and title; subsequent hits within the same ``run_scope`` return
-        ``run_hit``). Non-``matched`` hits write an alias per ADR-0003.
+        ``judge_pending`` (first hit in a run prepends the new URL to the canonical
+        record's urls list in-memory; subsequent hits within the same ``run_scope``
+        return ``run_hit``). Non-``matched`` hits prepend the new URL and persist.
         Returns ``run_hit`` only while a ``run_scope()`` context is active.
         """
         with self._lock:
-            existing = self._records.get(key.url)
-            if existing is not None and existing.get("status") == "pending":
-                # Post-enrich path: fields may be backfilled; check for new tuple/fuzzy
-                # match against a different URL (exclude self-references from pending write).
-                canonical_url = self._tuple_lookup(key)
-                if canonical_url is not None and canonical_url != key.url:
-                    canonical_record = self._records[canonical_url]
-                    canonical_status = canonical_record.get("status")
-                    if canonical_status == "matched":
-                        self._write_alias(key.url, canonical_url)
-                        return "judge_pending"
-                    if (
-                        canonical_status == "selected_by_judge"
-                        and self._cooldown_expired(canonical_record)
+            existing_id = self._url_index.get(key.url)
+
+            if existing_id is not None:
+                existing = self._records[existing_id]
+                if existing.get("status") == "pending":
+                    # Post-enrich path: fields may be backfilled; check for new tuple/fuzzy
+                    # match against a different listing (exclude self-references).
+                    match_id = self._tuple_lookup(key)
+                    if match_id is not None and match_id != existing_id:
+                        match_record = self._records[match_id]
+                        match_status = match_record.get("status")
+                        if match_status == "matched":
+                            self._prepend_url(match_id, key.url, persist=False)
+                            return RunScopedSeenResult("judge_pending", match_id)
+                        if (
+                            match_status == "selected_by_judge"
+                            and self._cooldown_expired(match_record)
+                        ):
+                            return RunScopedSeenResult("judge_pending", match_id)
+                        if match_status == "expired" and self._cooldown_expired(
+                            match_record
+                        ):
+                            return RunScopedSeenResult("miss", existing_id)
+                        self._log_hit("tuple_hit", key, match_id)
+                        self._prepend_url(match_id, key.url, persist=True)
+                        return RunScopedSeenResult("tuple_hit", match_id)
+                    match_id = self._fuzzy_lookup(key)
+                    if match_id is not None and match_id != existing_id:
+                        match_status = self._records[match_id].get("status")
+                        if match_status == "matched":
+                            self._prepend_url(match_id, key.url, persist=False)
+                            return RunScopedSeenResult("judge_pending", match_id)
+                        self._log_hit("fuzzy_hit", key, match_id)
+                        self._prepend_url(match_id, key.url, persist=True)
+                        return RunScopedSeenResult("fuzzy_hit", match_id)
+                    # No cross-listing match; refresh pending with backfilled fields
+                    self._write_pending(key, listing_id=existing_id)
+                    if self._in_run is not None and existing_id in self._in_run:
+                        return RunScopedSeenResult("run_hit", existing_id)
+                    return RunScopedSeenResult("url_hit", existing_id)
+                else:
+                    # URL already seen with a real (non-pending) status
+                    if self._in_run is not None and existing_id in self._in_run:
+                        return RunScopedSeenResult("run_hit", existing_id)
+                    status = existing.get("status")
+                    if status == "matched":
+                        return RunScopedSeenResult("judge_pending", existing_id)
+                    if status == "selected_by_judge" and self._cooldown_expired(
+                        existing
                     ):
-                        return "judge_pending"
-                    if canonical_status == "expired" and self._cooldown_expired(
-                        canonical_record
-                    ):
-                        return "miss"
-                    self._write_alias(key.url, canonical_url)
-                    self._log_hit("tuple_hit", key, canonical_url)
-                    return "tuple_hit"
-                canonical_url = self._fuzzy_lookup(key)
-                if canonical_url is not None and canonical_url != key.url:
-                    self._write_alias(key.url, canonical_url)
-                    if self._records[canonical_url].get("status") == "matched":
-                        return "judge_pending"
-                    self._log_hit("fuzzy_hit", key, canonical_url)
-                    return "fuzzy_hit"
-                self._write_pending(key)
-                if self._in_run is not None and key.url in self._in_run:
-                    return "run_hit"
-                return "url_hit"
+                        return RunScopedSeenResult("judge_pending", existing_id)
+                    if status == "expired" and self._cooldown_expired(existing):
+                        return RunScopedSeenResult("miss", existing_id)
+                    return RunScopedSeenResult("url_hit", existing_id)
 
-            if self._in_run is not None and key.url in self._in_run:
-                return "run_hit"
-
-            if key.url in self._records:
-                record = self._records[key.url]
-                status = record.get("status")
-                if status == "matched":
-                    return "judge_pending"
-                if status == "selected_by_judge" and self._cooldown_expired(record):
-                    return "judge_pending"
-                if status == "expired" and self._cooldown_expired(record):
-                    return "miss"
-                return "url_hit"
-
-            canonical_url = self._tuple_lookup(key)
-            if canonical_url is not None:
-                original_record = self._records[canonical_url]
+            # URL not yet registered — check tuple, fuzzy, then miss
+            match_id = self._tuple_lookup(key)
+            if match_id is not None:
+                original_record = self._records[match_id]
                 original_status = original_record.get("status")
                 if original_status == "matched":
-                    if self._in_run is not None and canonical_url in self._in_run:
-                        return "run_hit"
-                    self._update_canonical_record(key, canonical_url)
+                    if self._in_run is not None and match_id in self._in_run:
+                        return RunScopedSeenResult("run_hit", match_id)
+                    self._prepend_url(match_id, key.url, persist=False)
                     if self._in_run is not None:
-                        self._in_run.add(canonical_url)
-                        self._in_run.add(key.url)
-                    return "judge_pending"
+                        self._in_run.add(match_id)
+                    return RunScopedSeenResult("judge_pending", match_id)
                 if original_status == "selected_by_judge" and self._cooldown_expired(
                     original_record
                 ):
-                    self._update_canonical_record(key, canonical_url)
+                    self._prepend_url(match_id, key.url, persist=False)
                     if self._in_run is not None:
-                        self._in_run.add(canonical_url)
-                        self._in_run.add(key.url)
-                    return "judge_pending"
+                        self._in_run.add(match_id)
+                    return RunScopedSeenResult("judge_pending", match_id)
                 if original_status == "expired" and self._cooldown_expired(
                     original_record
                 ):
-                    return "miss"
-                self._write_alias(key.url, canonical_url)
-                self._log_hit("tuple_hit", key, canonical_url)
-                return "tuple_hit"
+                    return RunScopedSeenResult("miss", self._next_id)
+                self._log_hit("tuple_hit", key, match_id)
+                self._prepend_url(match_id, key.url, persist=True)
+                return RunScopedSeenResult("tuple_hit", match_id)
 
-            canonical_url = self._fuzzy_lookup(key)
-            if canonical_url is not None:
-                original_status = self._records[canonical_url].get("status")
+            match_id = self._fuzzy_lookup(key)
+            if match_id is not None:
+                original_status = self._records[match_id].get("status")
                 if original_status == "matched":
-                    if self._in_run is not None and canonical_url in self._in_run:
-                        return "run_hit"
-                    self._update_canonical_record(key, canonical_url)
+                    if self._in_run is not None and match_id in self._in_run:
+                        return RunScopedSeenResult("run_hit", match_id)
+                    self._prepend_url(match_id, key.url, persist=False)
                     if self._in_run is not None:
-                        self._in_run.add(canonical_url)
-                        self._in_run.add(key.url)
-                    return "judge_pending"
-                self._write_alias(key.url, canonical_url)
-                self._log_hit("fuzzy_hit", key, canonical_url)
-                return "fuzzy_hit"
+                        self._in_run.add(match_id)
+                    return RunScopedSeenResult("judge_pending", match_id)
+                self._log_hit("fuzzy_hit", key, match_id)
+                self._prepend_url(match_id, key.url, persist=True)
+                return RunScopedSeenResult("fuzzy_hit", match_id)
 
+            new_id = self._write_pending(key)
             if self._in_run is not None:
-                self._in_run.add(key.url)
-            self._write_pending(key)
-            return "miss"
+                self._in_run.add(new_id)
+            return RunScopedSeenResult("miss", new_id)
 
-    def _write_pending(self, key: _SeenKey) -> None:
-        """Write an in-memory pending entry for key. Caller must hold ``self._lock``."""
+    def _write_pending(self, key: _SeenKey, *, listing_id: int | None = None) -> int:
+        """Write or refresh an in-memory pending entry for key. Caller must hold self._lock.
+
+        Returns the listing_id used.
+        """
         company_lc = normalize(key.company)
         title_lc = normalize(key.title)
         location_lc = normalize(key.location)
-        self._records[key.url] = {
-            "canonical_url": key.url,
+        if listing_id is None:
+            listing_id = self._next_id
+        existing = self._records.get(listing_id)
+        urls: list[str] = list(existing.get("urls", [])) if existing is not None else []
+        if key.url not in urls:
+            urls.insert(0, key.url)
+        self._records[listing_id] = {
+            "urls": urls,
             "company_lc": company_lc,
             "title_lc": title_lc,
             "location_lc": location_lc,
             "status": "pending",
             "status_last_changed": date.today().isoformat(),
         }
+        self._url_index[key.url] = listing_id
         if company_lc and title_lc and location_lc:
-            self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
+            self._tuple_index.setdefault(
+                (company_lc, title_lc, location_lc), listing_id
+            )
             fkey = (company_lc, location_lc)
             tokens = _tokenize_title(title_lc)
             bucket = self._fuzzy_index.setdefault(fkey, [])
-            bucket.append((tokens, key.url))
+            if not any(lid == listing_id for _, lid in bucket):
+                bucket.append((tokens, listing_id))
+        return listing_id
+
+    def _prepend_url(self, listing_id: int, new_url: str, *, persist: bool) -> None:
+        """Prepend new_url to the record's urls list and update the URL index.
+
+        Caller must hold self._lock.
+        persist=True: validate and write to disk (non-matched tuple/fuzzy hits).
+        persist=False: update in-memory only (matched/judge_pending paths).
+        """
+        record = self._records[listing_id]
+        if persist:
+            self._validate_record(listing_id, record)
+        urls: list[str] = list(record.get("urls", []))
+        if new_url not in urls:
+            urls.insert(0, new_url)
+            record["urls"] = urls
+        self._url_index[new_url] = listing_id
+        if persist:
+            new_records = dict(self._records)
+            new_records[listing_id] = record
+            self._persist(new_records)
+            self._records = new_records
 
     def _mark(
         self,
-        key: _SeenKey,
+        listing_id: int,
+        stub: _SeenKey,
         status: SeenStatus,
         *,
         overwrite_if: SeenStatus | None = None,
     ) -> None:
-        """Write a new record for key. Caller must hold ``self._lock``.
+        """Update a record's status and fields. Caller must hold self._lock.
 
         If ``overwrite_if`` is given and the existing record has that status,
         the record is overwritten rather than skipped.
         Pending entries are always overwritten.
         """
-        existing = self._records.get(key.url)
+        existing = self._records.get(listing_id)
         if (
             existing is not None
             and existing.get("status") != overwrite_if
@@ -373,11 +442,19 @@ class DeduplicationStore:
         ):
             return
 
-        company_lc = normalize(key.company)
-        title_lc = normalize(key.title)
-        location_lc = normalize(key.location)
+        company_lc = normalize(stub.company)
+        title_lc = normalize(stub.title)
+        location_lc = normalize(stub.location)
+
+        if existing is not None:
+            urls: list[str] = list(existing.get("urls", []))
+            if stub.url not in urls:
+                urls.insert(0, stub.url)
+        else:
+            urls = [stub.url]
+
         record = {
-            "canonical_url": key.url,
+            "urls": urls,
             "company_lc": company_lc,
             "title_lc": title_lc,
             "location_lc": location_lc,
@@ -386,46 +463,84 @@ class DeduplicationStore:
         }
 
         new_records = dict(self._records)
-        new_records[key.url] = record
+        new_records[listing_id] = record
         self._persist(new_records)
         self._records = new_records
+
+        for url in urls:
+            self._url_index.setdefault(url, listing_id)
         if company_lc and title_lc and location_lc:
-            self._tuple_index.setdefault((company_lc, title_lc, location_lc), key.url)
+            self._tuple_index.setdefault(
+                (company_lc, title_lc, location_lc), listing_id
+            )
             fkey = (company_lc, location_lc)
             tokens = _tokenize_title(title_lc)
             bucket = self._fuzzy_index.setdefault(fkey, [])
-            if not any(u == key.url for _, u in bucket):
-                bucket.append((tokens, key.url))
+            if not any(lid == listing_id for _, lid in bucket):
+                bucket.append((tokens, listing_id))
+
+    def _resolve_listing_id(
+        self, key_or_listing_id: "_SeenKey | int", stub: "_SeenKey | None"
+    ) -> "tuple[int, _SeenKey]":
+        """Return (listing_id, stub) from either calling form. Caller must hold self._lock."""
+        if isinstance(key_or_listing_id, int):
+            assert stub is not None
+            return key_or_listing_id, stub
+        stub_key = key_or_listing_id
+        lid = self._url_index.get(stub_key.url)
+        if lid is None:
+            lid = self._write_pending(stub_key)
+        return lid, stub_key
 
     def _delete_from_stores(self, url: str) -> None:
         if self._card_store is not None:
             self._card_store.delete(url)
 
-    def mark_out_of_domain(self, key: _SeenKey) -> None:
+    def mark_out_of_domain(
+        self,
+        key_or_listing_id: "_SeenKey | int",
+        stub: "_SeenKey | None" = None,
+    ) -> None:
         with self._lock:
-            self._mark(key, "out_of_domain")
-            self._delete_from_stores(key.url)
+            listing_id, stub = self._resolve_listing_id(key_or_listing_id, stub)
+            self._mark(listing_id, stub, "out_of_domain")
+            self._delete_from_stores(stub.url)
 
-    def mark_selected_by_judge(self, key: _SeenKey) -> None:
+    def mark_selected_by_judge(
+        self,
+        key_or_listing_id: "_SeenKey | int",
+        stub: "_SeenKey | None" = None,
+    ) -> None:
         with self._lock:
-            self._mark(key, "selected_by_judge", overwrite_if="matched")
-            self._delete_from_stores(key.url)
+            listing_id, stub = self._resolve_listing_id(key_or_listing_id, stub)
+            self._mark(listing_id, stub, "selected_by_judge", overwrite_if="matched")
+            self._delete_from_stores(stub.url)
 
-    def mark_expired(self, key: _SeenKey) -> None:
+    def mark_expired(
+        self,
+        key_or_listing_id: "_SeenKey | int",
+        stub: "_SeenKey | None" = None,
+    ) -> None:
         with self._lock:
-            prior = self._records.get(key.url)
+            listing_id, stub = self._resolve_listing_id(key_or_listing_id, stub)
+            prior = self._records.get(listing_id)
             prior_status = prior.get("status") if prior else None
             if prior_status == "matched":
-                self._mark(key, "expired", overwrite_if="matched")
-                self._delete_from_stores(key.url)
+                self._mark(listing_id, stub, "expired", overwrite_if="matched")
+                self._delete_from_stores(stub.url)
             elif prior_status == "expired":
-                self._mark(key, "expired", overwrite_if="expired")
+                self._mark(listing_id, stub, "expired", overwrite_if="expired")
             else:
-                self._mark(key, "expired")
+                self._mark(listing_id, stub, "expired")
 
-    def mark_matched(self, key: _SeenKey) -> None:
+    def mark_matched(
+        self,
+        key_or_listing_id: "_SeenKey | int",
+        stub: "_SeenKey | None" = None,
+    ) -> None:
         with self._lock:
-            self._mark(key, "matched")
+            listing_id, stub = self._resolve_listing_id(key_or_listing_id, stub)
+            self._mark(listing_id, stub, "matched")
 
     @contextmanager
     def run_scope(self) -> Generator[DeduplicationStore, None, None]:
@@ -439,48 +554,35 @@ class DeduplicationStore:
                 self._evict_pending()
 
     def _evict_pending(self) -> None:
-        """Remove in-memory pending entries that were never promoted. Caller must hold ``self._lock``."""
-        pending_urls = {
-            url for url, rec in self._records.items() if rec.get("status") == "pending"
+        """Remove in-memory pending entries that were never promoted. Caller must hold self._lock."""
+        pending_ids = {
+            lid for lid, rec in self._records.items() if rec.get("status") == "pending"
         }
-        for url in pending_urls:
-            del self._records[url]
+        for lid in pending_ids:
+            record = self._records.pop(lid)
+            for url in record.get("urls", []):
+                if self._url_index.get(url) == lid:
+                    del self._url_index[url]
         self._tuple_index = {
-            tkey: u for tkey, u in self._tuple_index.items() if u not in pending_urls
+            tkey: lid
+            for tkey, lid in self._tuple_index.items()
+            if lid not in pending_ids
         }
         self._fuzzy_index = {
             fkey: kept
             for fkey, entries in self._fuzzy_index.items()
-            if (kept := [(tokens, u) for tokens, u in entries if u not in pending_urls])
+            if (
+                kept := [
+                    (tokens, lid) for tokens, lid in entries if lid not in pending_ids
+                ]
+            )
         }
 
-    def _update_canonical_record(self, key: _SeenKey, canonical_url: str) -> None:
-        """Update canonical record's URL and title in memory. Caller must hold self._lock."""
-        original = self._records[canonical_url]
-        title_lc = normalize(key.title)
-        original["canonical_url"] = key.url
-        if title_lc is not None:
-            original["title_lc"] = title_lc
-
-    def _write_alias(self, new_url: str, canonical_url: str) -> None:
-        original = self._records[canonical_url]
-        self._validate_record(canonical_url, original)
-        record = {
-            "canonical_url": original.get("canonical_url", canonical_url),
-            "company_lc": original["company_lc"],
-            "title_lc": original["title_lc"],
-            "location_lc": original["location_lc"],
-            "status": original["status"],
-            "status_last_changed": original["status_last_changed"],
-        }
-        new_records = dict(self._records)
-        new_records[new_url] = record
-        self._persist(new_records)
-        self._records = new_records
-
-    def _persist(self, records: dict[str, dict[str, Any]]) -> None:
+    def _persist(self, records: dict[int, dict[str, Any]]) -> None:
         to_write = {
-            url: rec for url, rec in records.items() if rec.get("status") != "pending"
+            str(lid): rec
+            for lid, rec in records.items()
+            if rec.get("status") != "pending"
         }
         payload = json.dumps(
             to_write, indent=2, sort_keys=True, ensure_ascii=False
@@ -531,30 +633,44 @@ def load(
             f"dedup store at {path} must be a JSON object, got {type(data).__name__}"
         )
 
-    for record in data.values():
-        if (
-            isinstance(record, dict)
-            and "first_seen" in record
-            and "status_last_changed" not in record
-        ):
+    records: dict[int, dict[str, Any]] = {}
+    for key, record in data.items():
+        try:
+            listing_id = int(key)
+        except (ValueError, TypeError):
+            raise DedupStoreError(
+                f"dedup store at {path} has non-integer key {key!r}; "
+                f"wipe the store to start fresh"
+            )
+        if not isinstance(record, dict):
+            raise DedupStoreError(
+                f"dedup store at {path} has non-object record for key {key!r}"
+            )
+        records[listing_id] = record
+
+    for record in records.values():
+        if "first_seen" in record and "status_last_changed" not in record:
             record["status_last_changed"] = record.pop("first_seen")
 
-    for url, record in data.items():
-        if isinstance(record, dict):
-            status = record.get("status")
-            if status in _LEGACY_STATUSES:
-                raise DedupStoreError(
-                    f"dedup store at {path} contains legacy status {status!r} "
-                    f"for {url!r}; wipe the store to start fresh "
-                    f"(see wipe instruction in the store migration guide)"
-                )
-            if status is not None and status not in _KNOWN_STATUSES:
-                raise DedupStoreError(
-                    f"dedup store at {path} contains unknown status {status!r} "
-                    f"for {url!r}; wipe the store to start fresh "
-                    f"(see wipe instruction in the store migration guide)"
-                )
+    for listing_id, record in records.items():
+        status = record.get("status")
+        if status in _LEGACY_STATUSES:
+            raise DedupStoreError(
+                f"dedup store at {path} contains legacy status {status!r} "
+                f"for listing {listing_id!r}; wipe the store to start fresh "
+                f"(see wipe instruction in the store migration guide)"
+            )
+        if status is not None and status not in _KNOWN_STATUSES:
+            raise DedupStoreError(
+                f"dedup store at {path} contains unknown status {status!r} "
+                f"for listing {listing_id!r}; wipe the store to start fresh "
+                f"(see wipe instruction in the store migration guide)"
+            )
 
     return DeduplicationStore(
-        path, data, card_store=card_store, cooldown_days=cooldown_days, run_log=run_log
+        path,
+        records,
+        card_store=card_store,
+        cooldown_days=cooldown_days,
+        run_log=run_log,
     )

@@ -283,7 +283,26 @@ def test_discover_emits_discover_page_heartbeat_per_page(tmp_path: Path) -> None
     assert pages[0] < pages[-1]
 
 
-def test_discover_skips_item_with_missing_title_and_reports_failure(
+def test_discover_missing_title_does_not_generate_failure_report(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    no_title_item = {
+        "referenznummer": "notitle1",
+        "veroeffentlichungszeitraum": {"von": "2024-01-15"},
+    }
+    http = _make_http([_search_body([no_title_item]), _search_body([])], run_log)
+    failures_dir = tmp_path / "failures"
+    failures_dir.mkdir()
+    with BundesagenturParser(
+        run_log=run_log, failures_dir=failures_dir, _http=http
+    ) as p:
+        list(p.discover(_query()))
+
+    assert list(failures_dir.glob("*.md")) == []
+
+
+def test_discover_skips_item_with_missing_title_and_logs_info(
     tmp_path: Path,
 ) -> None:
     run_log = RunLog(tmp_path)
@@ -295,10 +314,7 @@ def test_discover_skips_item_with_missing_title_and_reports_failure(
     http = _make_http(
         [_search_body([no_title_item, good_item]), _search_body([])], run_log
     )
-    failures_dir = tmp_path / "failures"
-    with BundesagenturParser(
-        run_log=run_log, failures_dir=failures_dir, _http=http
-    ) as p:
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
 
     assert len(stubs) == 1
@@ -314,23 +330,15 @@ def test_discover_skips_item_with_missing_title_and_reports_failure(
     assert any(row.get("event") == "missing_title" for row in events_rows)
     assert any("notitle1" in str(row) for row in events_rows)
 
-    failure_files = list(failures_dir.glob("*.md"))
-    assert len(failure_files) == 1
-    assert "notitle1" in failure_files[0].read_text(encoding="utf-8")
 
-
-def test_discover_reports_failure_for_empty_string_title(tmp_path: Path) -> None:
+def test_discover_skips_item_with_empty_string_title(tmp_path: Path) -> None:
     run_log = RunLog(tmp_path)
     empty_title_item = {"referenznummer": "empty1", "stellenangebotsTitel": ""}
     http = _make_http([_search_body([empty_title_item]), _search_body([])], run_log)
-    failures_dir = tmp_path / "failures"
-    with BundesagenturParser(
-        run_log=run_log, failures_dir=failures_dir, _http=http
-    ) as p:
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
 
     assert stubs == []
-    assert len(list(failures_dir.glob("*.md"))) == 1
 
 
 # ---------------------------------------------------------------------------

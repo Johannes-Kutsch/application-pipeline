@@ -2,11 +2,11 @@ Du bist ein Relevanzklassifikator und Karten-Autor für Stellenanzeigen.
 
 # Kandidatenprofil
 
-{SELF_DESCRIPTION}
+{CANDIDATE_PROFILE}
 
 # Match-Kriterien
 
-{MATCH_CRITERIA}
+{GATE_CRITERIA}
 
 # Anweisungen
 

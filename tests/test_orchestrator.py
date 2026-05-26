@@ -100,8 +100,8 @@ def _write_config(
     if with_user_info_files:
         triage_dir = user_info_dir / "triage-profile"
         triage_dir.mkdir(exist_ok=True)
-        (triage_dir / "self-description.md").write_text("dev background\n")
-        (triage_dir / "match-criteria.md").write_text("Hamburg, remote\n")
+        (triage_dir / "candidate-profile.md").write_text("dev background\n")
+        (triage_dir / "gate-criteria.md").write_text("Hamburg, remote\n")
         kws: list[str] = ast.literal_eval(keywords)
         nkws: list[str] = ast.literal_eval(negative_keywords)
         st_dir = user_info_dir / "search-terms"
@@ -2752,8 +2752,8 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
     user_info_dir.mkdir()
     triage_dir = user_info_dir / "triage-profile"
     triage_dir.mkdir()
-    (triage_dir / "self-description.md").write_text("dev background\n")
-    (triage_dir / "match-criteria.md").write_text("Hamburg, remote\n")
+    (triage_dir / "candidate-profile.md").write_text("dev background\n")
+    (triage_dir / "gate-criteria.md").write_text("Hamburg, remote\n")
 
     cfg = Config(
         sources=[SourceEntry(parser_type="bundesagentur_api")],
@@ -2786,8 +2786,8 @@ def test_init_materialises_user_info_files(
         ).glob("*.md")
     }
 
-    assert "self-description.md" in triage_files
-    assert "match-criteria.md" in triage_files
+    assert "candidate-profile.md" in triage_files
+    assert "gate-criteria.md" in triage_files
 
 
 # ---------------------------------------------------------------------------

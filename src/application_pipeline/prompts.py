@@ -17,7 +17,7 @@ CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset(
 JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"CANDIDATES"})
 
 _PROFILE_SLOTS: frozenset[str] = frozenset(
-    {"SELF_DESCRIPTION", "MATCH_CRITERIA", "SKILLS"}
+    {"CANDIDATE_PROFILE", "GATE_CRITERIA", "SKILLS"}
 )
 
 
@@ -49,12 +49,12 @@ def load_prompts(config: Config, search_terms: SearchTerms) -> Prompts:
     if legacy_domain_fit.exists():
         raise PromptError(
             f"{legacy_domain_fit}: legacy file retired per ADR-0043; merge its "
-            "in-scope / out-of-scope content into match-criteria.md and delete the file."
+            "in-scope / out-of-scope content into gate-criteria.md and delete the file."
         )
 
     profile_values: dict[str, str] = {
-        "SELF_DESCRIPTION": _read_user_info(triage_dir, "self-description.md"),
-        "MATCH_CRITERIA": _read_user_info(triage_dir, "match-criteria.md"),
+        "CANDIDATE_PROFILE": _read_user_info(triage_dir, "candidate-profile.md"),
+        "GATE_CRITERIA": _read_user_info(triage_dir, "gate-criteria.md"),
         "SKILLS": "\n".join(f"- {s}" for s in search_terms.skills),
     }
 

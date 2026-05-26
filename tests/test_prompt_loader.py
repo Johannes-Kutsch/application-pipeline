@@ -39,8 +39,8 @@ def make_config_with_user_info(tmp_path: pathlib.Path) -> Config:
     user_info.mkdir(exist_ok=True)
     triage = user_info / "triage-profile"
     triage.mkdir()
-    (triage / "self-description.md").write_text("I am a developer\n")
-    (triage / "match-criteria.md").write_text("Hamburg, remote\n")
+    (triage / "candidate-profile.md").write_text("I am a developer\n")
+    (triage / "gate-criteria.md").write_text("Hamburg, remote\n")
     return Config(
         sources=[SourceEntry(parser_type="bundesagentur")],
         locations=["Hamburg"],
@@ -154,12 +154,12 @@ def test_load_prompts_raises_when_legacy_domain_fit_present(
     with pytest.raises(PromptError) as exc_info:
         load_prompts(config, _EMPTY_SEARCH_TERMS)
     assert "domain-fit.md" in str(exc_info.value)
-    assert "match-criteria.md" in str(exc_info.value)
+    assert "gate-criteria.md" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
     "missing_file",
-    ["self-description.md", "match-criteria.md"],
+    ["candidate-profile.md", "gate-criteria.md"],
 )
 def test_load_prompts_raises_when_user_info_file_missing(
     tmp_path: pathlib.Path, missing_file: str
@@ -174,7 +174,7 @@ def test_load_prompts_raises_when_user_info_file_missing(
 
 @pytest.mark.parametrize(
     "empty_file",
-    ["self-description.md", "match-criteria.md"],
+    ["candidate-profile.md", "gate-criteria.md"],
 )
 def test_load_prompts_raises_when_user_info_file_empty(
     tmp_path: pathlib.Path, empty_file: str
@@ -195,8 +195,8 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
     user_info.mkdir()
     triage = user_info / "triage-profile"
     triage.mkdir()
-    (triage / "self-description.md").write_text("background\n")
-    (triage / "match-criteria.md").write_text("Hamburg\n")
+    (triage / "candidate-profile.md").write_text("background\n")
+    (triage / "gate-criteria.md").write_text("Hamburg\n")
     path = tmp_path / "config.py"
     path.write_text(REQUIRED_BODY)
 

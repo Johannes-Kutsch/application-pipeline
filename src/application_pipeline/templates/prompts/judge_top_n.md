@@ -2,7 +2,7 @@ Du bist ein Trefferbewerter für Stellenanzeigen.
 
 # Kandidatenprofil
 
-{SELF_DESCRIPTION}
+{CANDIDATE_PROFILE}
 
 ## Kompetenzprofil
 
@@ -10,7 +10,7 @@ Du bist ein Trefferbewerter für Stellenanzeigen.
 
 # Match-Kriterien
 
-{MATCH_CRITERIA}
+{GATE_CRITERIA}
 
 # Zu bewertende Stellenanzeigen
 

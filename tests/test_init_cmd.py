@@ -45,8 +45,8 @@ def _claude_template_bytes(rel: str) -> bytes:
 
 
 _TRIAGE_PROFILE_FILES = (
-    "self-description.md",
-    "match-criteria.md",
+    "candidate-profile.md",
+    "gate-criteria.md",
     "writing-style.md",
 )
 
@@ -264,7 +264,7 @@ def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
 ) -> None:
     ap = _ap(tmp_path)
     (ap / "user-info" / "triage-profile").mkdir(parents=True)
-    existing = ap / "user-info" / "triage-profile" / "self-description.md"
+    existing = ap / "user-info" / "triage-profile" / "candidate-profile.md"
     original_content = "# operator content\n"
     existing.write_text(original_content)
 
@@ -272,7 +272,7 @@ def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
 
     assert existing.read_text() == original_content
     for fname in _TRIAGE_PROFILE_FILES:
-        if fname != "self-description.md":
+        if fname != "candidate-profile.md":
             assert (ap / "user-info" / "triage-profile" / fname).exists(), (
                 f"{fname} should be seeded"
             )
@@ -285,7 +285,7 @@ def test_per_file_skip_granular_output(
 ) -> None:
     ap = _ap(tmp_path)
     (ap / "user-info" / "triage-profile").mkdir(parents=True)
-    (ap / "user-info" / "triage-profile" / "self-description.md").write_text(
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
         "# custom\n"
     )
 
@@ -293,10 +293,10 @@ def test_per_file_skip_granular_output(
 
     out = capsys.readouterr().out
     assert (
-        "skipped user-info/triage-profile/self-description.md (already exists)" in out
+        "skipped user-info/triage-profile/candidate-profile.md (already exists)" in out
     )
     for fname in _TRIAGE_PROFILE_FILES:
-        if fname != "self-description.md":
+        if fname != "candidate-profile.md":
             assert f"wrote user-info/triage-profile/{fname}" in out
     for fname in _USER_INFO_ROOT_FILES:
         assert f"wrote user-info/{fname}" in out
@@ -542,7 +542,7 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
         (ap / "setup" / fname).write_text("# custom\n")
     (ap / "config.py").write_text("# custom\n")
     (ap / "layout.py").write_text("# legacy layout\n")
-    (ap / "user-info" / "triage-profile" / "self-description.md").write_text(
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
         "# custom\n"
     )
     # Delete a global file to trigger "wrote"
@@ -557,7 +557,7 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     assert "wrote setup/cron-install.sh" in out
     assert "skipped config.py (preserved)" in out
     assert "removed layout.py" in out
-    assert "skipped user-info/triage-profile/self-description.md (preserved)" in out
+    assert "skipped user-info/triage-profile/candidate-profile.md (preserved)" in out
 
 
 def test_refresh_removes_layout_py_if_present(
@@ -603,7 +603,7 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
     for fname in _SETUP_SCRIPTS:
         (ap / "setup" / fname).write_text(custom_setup)
     (ap / "config.py").write_text(custom_config)
-    (ap / "user-info" / "triage-profile" / "self-description.md").write_text(
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
         custom_user_info
     )
 
@@ -613,7 +613,7 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
         assert (ap / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
     assert (ap / "config.py").read_text() == custom_config
     assert (
-        ap / "user-info" / "triage-profile" / "self-description.md"
+        ap / "user-info" / "triage-profile" / "candidate-profile.md"
     ).read_text() == custom_user_info
 
 
@@ -666,14 +666,14 @@ def test_refresh_prints_overwrote_for_cv_skeleton(
 def test_refresh_preserves_user_info_when_skills_exist(tmp_path: Path) -> None:
     init(tmp_path)
     custom_user_info = "# my self-description\n"
-    (_ap(tmp_path) / "user-info" / "triage-profile" / "self-description.md").write_text(
-        custom_user_info
-    )
+    (
+        _ap(tmp_path) / "user-info" / "triage-profile" / "candidate-profile.md"
+    ).write_text(custom_user_info)
 
     init(tmp_path, refresh=True)
 
     assert (
-        _ap(tmp_path) / "user-info" / "triage-profile" / "self-description.md"
+        _ap(tmp_path) / "user-info" / "triage-profile" / "candidate-profile.md"
     ).read_text() == custom_user_info
 
 

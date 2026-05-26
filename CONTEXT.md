@@ -16,7 +16,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **SearchTerms**: User-authored search/filter knobs (ADR-0021) — `KEYWORDS`, `NEGATIVE_KEYWORDS`. Two markdown files under `<settings-dir>/user-info/search-terms/` (ADR-0024): `keywords.md`, `negative-keywords.md`. Filename *is* the section. Flat `-` bullet entries. `keywords.md` missing/empty → `SearchTermsError`; `negative-keywords.md` optional. `KEYWORDS` → parser orchestration, `NEGATIVE_KEYWORDS` → **Domain Pre-Filter**. `skills.md` relocated to **Triage Profile** dir (#615). _Avoid_: search config, term file.
 
-**Layout**: _Retired_ per ADR-0033. Card structure hardcoded in the **Renderer**. `init --refresh` deletes `layout.py`. _Avoid_: do not reintroduce.
+**Layout**: _Retired_ per ADR-0033. Card structure hardcoded in **DailyResultsFile**. `init --refresh` deletes `layout.py`. _Avoid_: do not reintroduce.
 
 **Daily Results File**: One dated markdown file at `<settings-dir>/results/YYYY-MM-DD.md`, holding **Daily Top-5** as **Cards** in **Rank** order. Date is cron-anchored (ADR-0015/0016). No preamble, no Run Divider. Write-once; synced read-only. _Avoid_: results file (without "daily"), `current.md`.
 
@@ -115,7 +115,7 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthin
 
 **DailyResultsFile**: Module that owns both rendering and durability for the **Daily Results File** artefact. Card shape is hardcoded inside this module per ADR-0033. Write durability is `write + flush + fsync` per ADR-0015. Public interface: `ensure_initialized()` (mkdir parent dir) and `commit(*, rank, header, summary, url, body)` (render Card then append to file). `OSError` is wrapped as `ResultsFileError` at the public interface edge. Path bound at construction. _Avoid_: renderer, formatter, results file manager, writer, output manager.
 
-**Atomic Write Helper**: `write_atomic(path, payload: bytes)` — crash-safe atomic overwrite via `.tmp` sibling + `os.write` → `os.fsync` → `os.replace`. Used by **Deduplication Store** and **Extract Store**. _Avoid_: persistence helper, file writer (overloaded with Results File Manager's append).
+**Atomic Write Helper**: `write_atomic(path, payload: bytes)` — crash-safe atomic overwrite via `.tmp` sibling + `os.write` → `os.fsync` → `os.replace`. Used by **Deduplication Store** and **Extract Store**. _Avoid_: persistence helper, file writer (overloaded with **DailyResultsFile**'s append).
 
 ### Observability
 

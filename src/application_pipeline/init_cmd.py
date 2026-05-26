@@ -22,6 +22,18 @@ def home_dir() -> Path:
     return Path.cwd() / "application-pipeline"
 
 
+def inside_data_dir_message(cwd: Path) -> str | None:
+    """Return a hint message if the user appears to be inside the data directory."""
+    if (cwd / "config.py").exists() and not (
+        cwd / "application-pipeline" / "config.py"
+    ).exists():
+        return (
+            f"you appear to be inside the data directory ({cwd})"
+            " — run from its parent: cd .."
+        )
+    return None
+
+
 def _bucket_roots(cwd: Path) -> dict[str, Path]:
     return {
         "application-pipeline": cwd / "application-pipeline",

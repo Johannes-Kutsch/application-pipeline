@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from application_pipeline.failure_report import write_failure
 
 _PYTHONPATH = os.pathsep.join(p for p in sys.path if p)
@@ -40,6 +42,29 @@ def test_write_failure_writes_directly_into_given_failures_dir(tmp_path: Path) -
         f"Expected report directly in {failures_dir}, got {path.parent}"
     )
     assert path.exists()
+
+
+def test_run_inside_data_dir_hints_cd_dotdot(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data_dir = tmp_path / "application-pipeline"
+    data_dir.mkdir()
+    (data_dir / "config.py").write_text("")
+    result = _run_main(data_dir)
+    assert result.returncode == 2
+    assert "inside the data directory" in result.stderr
+    assert "cd .." in result.stderr
+
+
+def test_run_no_config_anywhere_shows_original_message(
+    tmp_path: Path,
+) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = _run_main(empty)
+    assert result.returncode == 2
+    assert "no application-pipeline/config.py in" in result.stderr
+    assert "did you forget to cd, or run init?" in result.stderr
 
 
 def test_startup_failure_writes_to_home_failures_dir(tmp_path: Path) -> None:

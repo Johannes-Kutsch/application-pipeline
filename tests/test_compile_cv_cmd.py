@@ -399,6 +399,26 @@ def test_compile_cv_three_resume_slots_independently_substituted(
     assert "<<RESUME_PROJEKTE>>" not in content
 
 
+def test_compile_cv_inside_data_dir_hints_cd_dotdot(
+    app_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    data_dir = tmp_path / "application-pipeline"
+    data_dir.mkdir()
+    (data_dir / "config.py").write_text("")
+    monkeypatch.chdir(data_dir)
+
+    with pytest.raises(SystemExit) as exc_info:
+        compile_cv(app_dir)
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "inside the data directory" in err
+    assert "cd .." in err
+
+
 def test_compile_cv_missing_config_exits_2_without_build_dir(
     app_dir: Path,
     tmp_path: Path,

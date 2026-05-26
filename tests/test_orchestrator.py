@@ -1910,6 +1910,165 @@ def test_judge_pending_judge_failure_stays_matched_on_rerun(
 
 
 # ---------------------------------------------------------------------------
+# Migration shim: backfill body for pre-enrich judge-pending listings (#674)
+# ---------------------------------------------------------------------------
+
+
+def _judge_pending_seen(seen_path: Path) -> None:
+    seen_path.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "urls": [_RESUME_URL],
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "matched",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_judge_pending_no_body_triggers_enrich_and_stores_body(
+    tmp_path: Path,
+) -> None:
+    """judge_pending listing with empty body triggers enrich and stores body in CardStore."""
+    seen_path = tmp_path / ".seen.json"
+    _judge_pending_seen(seen_path)
+    card_without_body = {
+        "header": "ML Engineer · ACME · Hamburg",
+        "summary": "Good ML role.",
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({"1": card_without_body}), encoding="utf-8"
+    )
+    card_store = load_card_store(tmp_path / "extracts.json")
+
+    parser_enrich_calls: list[str] = []
+
+    class _TrackingParser(_OneStubParser):
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            parser_enrich_calls.append(stub.url)
+            return EnrichResult(
+                stub=stub, body="fetched body " + "x" * 91, mode="fallback"
+            )
+
+    judge_candidate_ids: list[int] = []
+
+    class _TrackingExtractor:
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            for c in candidates:
+                judge_candidate_ids.append(c.id)
+            return [
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
+
+    run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_TrackingExtractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert parser_enrich_calls == [_RESUME_URL], (
+        "enrich must be called for body-less judge_pending"
+    )
+    card = card_store.get(1)
+    assert card is not None
+    assert card.body != "", "body must be persisted in CardStore after migration enrich"
+    assert 1 in judge_candidate_ids, (
+        "listing must still reach the judge after body backfill"
+    )
+
+
+def test_judge_pending_with_body_skips_enrich(tmp_path: Path) -> None:
+    """judge_pending listing with existing body does not trigger an additional enrich call."""
+    seen_path = tmp_path / ".seen.json"
+    _judge_pending_seen(seen_path)
+    card_with_body = {
+        "header": "ML Engineer · ACME · Hamburg",
+        "summary": "Good ML role.",
+        "body": "already fetched body " + "x" * 91,
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({"1": card_with_body}), encoding="utf-8"
+    )
+    card_store = load_card_store(tmp_path / "extracts.json")
+
+    parser_enrich_calls: list[str] = []
+
+    class _TrackingParser(_OneStubParser):
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            parser_enrich_calls.append(stub.url)
+            return EnrichResult(stub=stub, body="new body " + "x" * 91, mode="fallback")
+
+    run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TrackingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert parser_enrich_calls == [], (
+        "enrich must NOT be called when body is already present"
+    )
+
+
+def test_judge_pending_enrich_failure_listing_still_enters_pool(
+    tmp_path: Path,
+) -> None:
+    """judge_pending body-fetch failure leaves listing in Pool — run does not break."""
+    seen_path = tmp_path / ".seen.json"
+    _judge_pending_seen(seen_path)
+    card_without_body = {
+        "header": "ML Engineer · ACME · Hamburg",
+        "summary": "Good ML role.",
+    }
+    (tmp_path / "extracts.json").write_text(
+        json.dumps({"1": card_without_body}), encoding="utf-8"
+    )
+    card_store = load_card_store(tmp_path / "extracts.json")
+
+    class _FailingParser(_OneStubParser):
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            raise EnrichFailedError(stub.url)
+
+    judge_candidate_ids: list[int] = []
+
+    class _TrackingExtractor:
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            for c in candidates:
+                judge_candidate_ids.append(c.id)
+            return [
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
+            ], _ZERO_USAGE
+
+    run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_TrackingExtractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _FailingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert 1 in judge_candidate_ids, (
+        "listing must reach the judge even when body backfill fails"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Threading: PARSER_DEAD (issue #112)
 # ---------------------------------------------------------------------------
 

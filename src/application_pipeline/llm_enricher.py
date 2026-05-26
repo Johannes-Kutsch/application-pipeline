@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 @runtime_checkable
 class LLMExtractor(Protocol):
     def classify_relevance(
-        self, item: ClassifyItem
-    ) -> tuple[RelevanceVerdict, CallUsage]: ...
+        self, items: list[ClassifyItem]
+    ) -> tuple[list[RelevanceVerdict | None], CallUsage]: ...
 
 
 def _parse_header_date(header: str) -> date | None:
@@ -82,7 +82,9 @@ class LLMEnricher:
             posted_date=stub.posted_date,
         )
         try:
-            verdict, _ = self._extractor.classify_relevance(item)
+            verdicts, _ = self._extractor.classify_relevance([item])
+            verdict = verdicts[0]
+            assert verdict is not None
         except (ExtractorMalformedError, ExtractorMalformedJSONError) as exc:
             self._stash_malformed(stub, exc)
             self._run_log.event(

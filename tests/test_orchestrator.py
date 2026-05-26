@@ -123,7 +123,10 @@ _ZERO_USAGE = CallUsage(
 
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
-    ext.classify_relevance.return_value = (RelevanceVerdict(matches=False), _ZERO_USAGE)
+    ext.classify_relevance.return_value = (
+        [RelevanceVerdict(matches=False)],
+        _ZERO_USAGE,
+    )
     ext.judge_top_n.side_effect = lambda candidates: (
         [MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])],
         _ZERO_USAGE,
@@ -5300,7 +5303,7 @@ def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
 
     extractor_mock = MagicMock()
     extractor_mock.classify_relevance.return_value = (
-        RelevanceVerdict(matches=True, header=stale_header, summary="Old role."),
+        [RelevanceVerdict(matches=True, header=stale_header, summary="Old role.")],
         _ZERO_USAGE,
     )
     extractor_mock.judge_top_n.return_value = ([], _ZERO_USAGE)

@@ -64,17 +64,6 @@ def _make_list_page(start_id: int, count: int) -> bytes:
     return cards.encode()
 
 
-def _make_stellenangebote_page(start_id: int, count: int) -> bytes:
-    """Build a jobs HTML fragment with `count` /stellenangebote/ cards (all skipped)."""
-    cards = "".join(
-        f'<div class="serp-jobcontet-cards-container-joblist jobcard" id="{start_id + i}">'
-        f'<h3><a href="/stellenangebote/{start_id + i}">External Job {start_id + i}</a></h3>'
-        f"</div>"
-        for i in range(count)
-    )
-    return cards.encode()
-
-
 def _query(**kwargs: object) -> ParserQuery:
     defaults: dict = {
         "keyword": "python",
@@ -541,13 +530,9 @@ def test_has_native_enrich_is_true() -> None:
 def test_enrich_returns_native_mode_result(
     run_log: RunLog, stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
-    responses = iter([wrapper_html, iframe_target_html])
-
-    def two_hop_get(url: str, timeout: float) -> bytes:
-        return next(responses)
-
+    get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=two_hop_get)
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         result = p.enrich(stub)
 
@@ -558,13 +543,9 @@ def test_enrich_returns_native_mode_result(
 def test_enrich_body_contains_job_description_text(
     run_log: RunLog, stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
 ) -> None:
-    responses = iter([wrapper_html, iframe_target_html])
-
-    def two_hop_get(url: str, timeout: float) -> bytes:
-        return next(responses)
-
+    get = _make_get([wrapper_html, iframe_target_html])
     with JobsBeimStaatParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=two_hop_get)
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
     ) as p:
         result = p.enrich(stub)
 
@@ -603,6 +584,45 @@ def test_enrich_raises_enrich_failed_error_on_iframe_fetch_404(
 
     with JobsBeimStaatParser(
         run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get_with_404)
+    ) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+
+def test_enrich_fetches_iframe_url_from_myiframe_src(
+    run_log: RunLog, stub: PositionStub, iframe_target_html: bytes
+) -> None:
+    wrapper = (
+        b'<html><body><iframe id="myiframe" '
+        b'src="/stellenanzeigen-details/?id=99999"></iframe></body></html>'
+    )
+    fetched: list[str] = []
+    responses = iter([wrapper, iframe_target_html])
+
+    def capturing_get(url: str, timeout: float) -> bytes:
+        fetched.append(url)
+        return next(responses)
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=capturing_get)
+    ) as p:
+        p.enrich(stub)
+
+    assert (
+        fetched[1] == "https://www.jobs-beim-staat.de/stellenanzeigen-details/?id=99999"
+    )
+
+
+def test_enrich_raises_enrich_failed_error_when_iframe_has_no_src(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    no_src_html = b'<html><body><iframe id="myiframe"></iframe></body></html>'
+
+    def get_no_src(url: str, timeout: float) -> bytes:
+        return no_src_html
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get_no_src)
     ) as p:
         with pytest.raises(EnrichFailedError):
             p.enrich(stub)

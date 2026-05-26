@@ -191,7 +191,6 @@ class JobsBeimStaatParser:
         step: int | None = None
         start = 0
         today = date.today()
-        seen_urls: set[str] = set()
 
         while True:
             if start >= _MAX_START:
@@ -232,17 +231,9 @@ class JobsBeimStaatParser:
             if step is None:
                 step = len(cards)
 
-            page_stubs = [
-                stub for card in cards if (stub := _parse_card(card, today)) is not None
-            ]
-            page_urls = {stub.url for stub in page_stubs}
-
-            if page_urls and page_urls.issubset(seen_urls):
-                break
-
-            for stub in page_stubs:
-                if stub.url not in seen_urls:
-                    seen_urls.add(stub.url)
+            for card in cards:
+                stub = _parse_card(card, today)
+                if stub is not None:
                     yield stub
 
             start += step

@@ -12,6 +12,7 @@ import pytest
 from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.dedup import load as dedup_load
+from application_pipeline.dedup.store import DeduplicationStore
 from application_pipeline.extracts.card_store import load_card_store
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.llm.body_strip import strip_to_text
@@ -71,6 +72,26 @@ def _make_enricher(
         run_log=run_log,
         failures_dir=tmp_path / "failures",
     )
+
+
+def _make_enricher_with_dedup(
+    *,
+    extractor: object,
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> tuple[LLMEnricher, DeduplicationStore]:
+    card_store = load_card_store(tmp_path / "extracts.json")
+    dedup = dedup_load(tmp_path / ".seen.json")
+    enricher = LLMEnricher(
+        extractor=extractor,  # type: ignore[arg-type]
+        quota_wall=QuotaWall(),
+        card_store=card_store,
+        run_log=run_log,
+        failures_dir=tmp_path / "failures",
+        dedup_store=dedup,
+    )
+    return enricher, dedup
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +155,7 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
         location="Hamburg",
     )
 
-    result = enricher.enrich(1, stub, body)
+    result = enricher.enrich([(1, stub, body)])[0]
 
     assert result is not None
     assert result.matches is True
@@ -176,7 +197,7 @@ def test_enricher_stashes_malformed_llm_output(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(99, stub, body)
+        enricher.enrich([(99, stub, body)])
 
     slug = "example.com-job-99"
     stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
@@ -215,7 +236,7 @@ def test_enricher_malformed_error_produces_md_file_with_all_sections(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(99, stub, body)
+        enricher.enrich([(99, stub, body)])
 
     slug = "example.com-job-99"
     stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
@@ -254,7 +275,7 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
     )
 
     with pytest.raises(ExtractorMalformedJSONError):
-        enricher.enrich(99, stub, body)
+        enricher.enrich([(99, stub, body)])
 
     slug = "example.com-job-cli"
     stash_path = tmp_path / "failures" / "malformed" / f"src_cli-{slug}.md"
@@ -296,7 +317,7 @@ def test_enricher_malformed_llm_output_emits_log_event(
     )
 
     with pytest.raises(ExtractorMalformedError):
-        enricher.enrich(99, stub, body)
+        enricher.enrich([(99, stub, body)])
 
     events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
     assert events_file.exists()
@@ -373,7 +394,7 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
         posted_date=None,  # no pre-LLM date
     )
 
-    result = enricher.enrich(1, stub, body)
+    result = enricher.enrich([(1, stub, body)])[0]
 
     assert result is None
     assert card_store.get(1) is None
@@ -409,7 +430,7 @@ def test_enricher_freshness_drop_records_post_llm_transcript(
         posted_date=None,
     )
 
-    enricher.enrich(1, stub, body)
+    enricher.enrich([(1, stub, body)])
 
     rows = _read_freshness_transcripts(tmp_path)
     assert len(rows) == 1
@@ -456,7 +477,7 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
         posted_date=None,
     )
 
-    result = enricher.enrich(1, stub, body)
+    result = enricher.enrich([(1, stub, body)])[0]
 
     assert result is not None
     assert result.matches is True
@@ -503,8 +524,219 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
         posted_date=None,
     )
 
-    result = enricher.enrich(1, stub, body)
+    result = enricher.enrich([(1, stub, body)])[0]
 
     assert result is not None
     assert result.matches is True
     assert card_store.get(1) is not None
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: batch interface
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_accepts_list_of_items_and_returns_list_of_verdicts(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    body = "Senior Python Engineer – remote ML role."
+    extractor = MagicMock()
+    extractor.classify_relevance.return_value = (
+        [
+            RelevanceVerdict(
+                matches=True,
+                header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+                summary="Great ML role.",
+            )
+        ],
+        _call_usage(),
+    )
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/1",
+        title="Senior Python Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+    )
+
+    results = enricher.enrich([(1, stub, body)])
+
+    assert isinstance(results, list)
+    assert len(results) == 1
+    assert results[0] is not None
+    assert results[0].matches is True
+    card = load_card_store(tmp_path / "extracts.json").get(1)
+    assert card is not None
+    assert card.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: batch routing — mixed verdicts
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_batch_routes_match_reject_none_independently(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    """Matches write card store + mark_matched; rejections mark_out_of_domain; None untouched."""
+    extractor = MagicMock()
+    extractor.classify_relevance.return_value = (
+        [
+            RelevanceVerdict(
+                matches=True,
+                header="ML Engineer\nAcme · Berlin · remote\n2024-06-01",
+                summary="Good role.",
+            ),
+            RelevanceVerdict(matches=False),
+            None,
+        ],
+        _call_usage(),
+    )
+
+    enricher, dedup = _make_enricher_with_dedup(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub_match = PositionStub(
+        url="https://example.com/job/match",
+        title="ML Engineer",
+        source="test",
+        company="Acme",
+        location="Berlin",
+    )
+    stub_reject = PositionStub(
+        url="https://example.com/job/reject",
+        title="Sales Manager",
+        source="test",
+    )
+    stub_none = PositionStub(
+        url="https://example.com/job/none",
+        title="Unknown",
+        source="test",
+    )
+
+    with dedup.run_scope():
+        dedup.is_seen(stub_match)
+        dedup.is_seen(stub_reject)
+        dedup.is_seen(stub_none)
+
+        results = enricher.enrich(
+            [
+                (1, stub_match, "ML body"),
+                (2, stub_reject, "Sales body"),
+                (3, stub_none, "Unknown body"),
+            ]
+        )
+
+    assert results[0] is not None and results[0].matches is True
+    assert results[1] is not None and results[1].matches is False
+    assert results[2] is None
+
+    card_store = load_card_store(tmp_path / "extracts.json")
+    assert card_store.get(1) is not None, "match should write card"
+    assert card_store.get(2) is None, "rejection should not write card"
+    assert card_store.get(3) is None, "None verdict should not write card"
+
+    assert isinstance(dedup, DeduplicationStore)
+    assert dedup._records[1]["status"] == "matched", (
+        "match listing should be marked matched"
+    )
+    assert dedup._records[2]["status"] == "out_of_domain", (
+        "reject listing should be marked out_of_domain"
+    )
+    assert 3 not in dedup._records, (
+        "None verdict listing should be evicted (never promoted from pending)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: per-item freshness gate — stale does not block fresh
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_per_item_freshness_gate_stale_does_not_block_fresh(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    stale_header = "Old Role\nCorp · Berlin · remote\n2025-12-15 · mid · —"
+    fresh_header = "Fresh Role\nCorp · Berlin · remote\n2026-01-10 · mid · —"
+
+    extractor = MagicMock()
+    extractor.classify_relevance.return_value = (
+        [
+            RelevanceVerdict(matches=True, header=stale_header, summary="Old."),
+            RelevanceVerdict(matches=True, header=fresh_header, summary="Fresh."),
+        ],
+        _call_usage(),
+    )
+
+    gate = _make_freshness_gate(tmp_path, run_log)
+    card_store = load_card_store(tmp_path / "extracts.json")
+    enricher = LLMEnricher(
+        extractor=extractor,  # type: ignore[arg-type]
+        quota_wall=QuotaWall(),
+        card_store=card_store,
+        run_log=run_log,
+        failures_dir=tmp_path / "failures",
+        freshness_gate=gate,
+    )
+    stub_stale = PositionStub(
+        url="https://example.com/job/stale",
+        title="Old Role",
+        source="test",
+        posted_date=None,
+    )
+    stub_fresh = PositionStub(
+        url="https://example.com/job/fresh",
+        title="Fresh Role",
+        source="test",
+        posted_date=None,
+    )
+
+    results = enricher.enrich(
+        [(1, stub_stale, "old body"), (2, stub_fresh, "fresh body")]
+    )
+
+    assert results[0] is None, "stale item should be dropped by freshness gate"
+    assert results[1] is not None and results[1].matches is True, (
+        "fresh item should pass"
+    )
+    assert card_store.get(1) is None, "stale match should not write card"
+    assert card_store.get(2) is not None, "fresh match should write card"
+
+
+# ---------------------------------------------------------------------------
+# LLMEnricher: malformed stashing — once per batch call
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_malformed_stash_written_once_for_batch(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    error_msg = "batch classify failed"
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorMalformedError(error_msg)
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub1 = PositionStub(url="https://example.com/job/a", title="Job A", source="src")
+    stub2 = PositionStub(url="https://example.com/job/b", title="Job B", source="src")
+
+    with pytest.raises(ExtractorMalformedError):
+        enricher.enrich([(1, stub1, "body a"), (2, stub2, "body b")])
+
+    malformed_dir = tmp_path / "failures" / "malformed"
+    assert malformed_dir.exists()
+    stash_files = list(malformed_dir.glob("*.md"))
+    assert len(stash_files) == 1, f"Expected 1 stash file, got {len(stash_files)}"

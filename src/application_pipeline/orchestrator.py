@@ -89,8 +89,8 @@ class _LLMJudge(Protocol):
 
 class _LLMEnricherLike(Protocol):
     def enrich(
-        self, listing_id: int, stub: PositionStub, body: str
-    ) -> "RelevanceVerdict | None": ...
+        self, items: "list[tuple[int, PositionStub, str]]"
+    ) -> "list[RelevanceVerdict | None]": ...
 
 
 # ---------------------------------------------------------------------------
@@ -505,8 +505,8 @@ class _ClassifyWorker(_QueueWorker):
             self._quota_wall.wait_if_blocked()
             try:
                 verdict = self._llm_enricher.enrich(
-                    item.listing_id, item.stub, item.body
-                )
+                    [(item.listing_id, item.stub, item.body)]
+                )[0]
                 break
             except ClaudeUsageLimitError as err:
                 now = datetime.now(timezone.utc)

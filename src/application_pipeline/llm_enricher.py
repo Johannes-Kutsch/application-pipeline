@@ -20,6 +20,7 @@ from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
 
 if TYPE_CHECKING:
+    from application_pipeline.dedup.store import DeduplicationStore
     from application_pipeline.freshness_gate import FreshnessGate
 
 
@@ -58,6 +59,7 @@ class LLMEnricher:
         run_log: RunLog,
         failures_dir: Path,
         freshness_gate: "FreshnessGate | None" = None,
+        dedup_store: "DeduplicationStore | None" = None,
     ) -> None:
         self._extractor = extractor
         self._quota_wall = quota_wall
@@ -65,58 +67,80 @@ class LLMEnricher:
         self._run_log = run_log
         self._failures_dir = failures_dir
         self.freshness_gate: FreshnessGate | None = freshness_gate
+        self._dedup_store = dedup_store
 
     def enrich(
-        self, listing_id: int, stub: PositionStub, body: str
-    ) -> RelevanceVerdict | None:
-        """Classify and write CardStore.
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> list[RelevanceVerdict | None]:
+        """Classify a batch and write CardStore entries for matched listings.
 
-        Returns the verdict on success, or None when dropped by the post-LLM
-        Freshness Gate arm.
-        Raises ExtractorMalformedError / ExtractorMalformedJSONError on malformed LLM
-        output after stashing the error text, so callers do not mark .seen.json.
+        Returns a list aligned with ``items``:
+        - RelevanceVerdict for classified items (matches or non-matches)
+        - None for unparseable verdicts (listing left unmarked in DeduplicationStore)
+
+        For matched items the post-LLM Freshness Gate runs per item; a stale
+        item does not affect other items in the same batch.
+        Raises ExtractorMalformedError / ExtractorMalformedJSONError when the
+        entire batch response is malformed; stashes the raw response once.
         """
-        item = ClassifyItem(
-            title=stub.title,
-            raw_description=body,
-            company=stub.company,
-            location=stub.location,
-            posted_date=stub.posted_date,
-        )
+        classify_items = [
+            ClassifyItem(
+                title=stub.title,
+                raw_description=body,
+                company=stub.company,
+                location=stub.location,
+                posted_date=stub.posted_date,
+            )
+            for _, stub, body in items
+        ]
+
         try:
-            verdicts, _ = self._extractor.classify_relevance([item])
-            verdict = verdicts[0]
-            assert verdict is not None
+            raw_verdicts, _ = self._extractor.classify_relevance(classify_items)
         except (ExtractorMalformedError, ExtractorMalformedJSONError) as exc:
-            self._stash_malformed(stub, exc)
+            first_stub = items[0][1]
+            self._stash_malformed(first_stub, exc)
             self._run_log.event(
                 "llm_enricher",
                 "classify_malformed",
-                url=stub.url,
-                source=stub.source,
+                url=first_stub.url,
+                source=first_stub.source,
                 error=str(exc),
             )
             raise
 
-        if verdict.matches:
-            assert verdict.header is not None
-            assert verdict.summary is not None
+        results: list[RelevanceVerdict | None] = []
+        for (listing_id, stub, _), verdict in zip(items, raw_verdicts):
+            if verdict is None:
+                results.append(None)
+                continue
 
-            if self.freshness_gate is not None:
-                updated_stub = dataclasses.replace(
-                    stub, posted_date=_parse_header_date(verdict.header)
+            if verdict.matches:
+                assert verdict.header is not None
+                assert verdict.summary is not None
+
+                if self.freshness_gate is not None:
+                    updated_stub = dataclasses.replace(
+                        stub, posted_date=_parse_header_date(verdict.header)
+                    )
+                    if not self.freshness_gate.admit(
+                        updated_stub, gate_arm="post_llm", deadline=stub.deadline
+                    ):
+                        results.append(None)
+                        continue
+
+                self._card_store.put(
+                    listing_id,
+                    CardExtract(header=verdict.header, summary=verdict.summary),
                 )
-                if not self.freshness_gate.admit(
-                    updated_stub, gate_arm="post_llm", deadline=stub.deadline
-                ):
-                    return None
+                if self._dedup_store is not None:
+                    self._dedup_store.mark_matched(listing_id, stub)
+            else:
+                if self._dedup_store is not None:
+                    self._dedup_store.mark_out_of_domain(listing_id, stub)
 
-            self._card_store.put(
-                listing_id,
-                CardExtract(header=verdict.header, summary=verdict.summary),
-            )
+            results.append(verdict)
 
-        return verdict
+        return results
 
     def _stash_failure(
         self, kind: str, stub: PositionStub, content: str, *, ext: str = "html"

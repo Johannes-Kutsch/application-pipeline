@@ -101,7 +101,7 @@ def test_load_prompts_classify_contains_gate_criteria_not_candidate_profile(
 
     prompts = load_prompts(config)
     rendered = prompts.classify_relevance.render(
-        LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
+        LISTINGS="## Stellenanzeige id=1\n\n- Jobtitel: x\n\ny"
     )
 
     assert "Hamburg, remote" in rendered
@@ -115,7 +115,7 @@ def test_load_prompts_classify_is_single_gate_check_no_skill_floor(
 
     prompts = load_prompts(config)
     rendered = prompts.classify_relevance.render(
-        LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
+        LISTINGS="## Stellenanzeige id=1\n\n- Jobtitel: x\n\ny"
     )
 
     assert "Skill" not in rendered
@@ -135,17 +135,17 @@ def test_load_prompts_judge_contains_candidate_profile_and_skills_not_gate_crite
     assert "Hamburg, remote" not in rendered
 
 
-def test_load_prompts_classify_contains_verdict_tag_instruction(
+def test_load_prompts_classify_contains_verdict_id_tag_instruction(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
     rendered = prompts.classify_relevance.render(
-        LISTING_BULLETS="- Jobtitel: x", RAW_DESCRIPTION="y"
+        LISTINGS="## Stellenanzeige id=1\n\n- Jobtitel: x\n\ny"
     )
 
-    assert "<verdict>" in rendered
+    assert '<verdict id="N">' in rendered
 
 
 def test_load_prompts_skills_slot_populated_attributes_stripped(
@@ -286,7 +286,7 @@ def test_load_prompts_via_load(tmp_path: pathlib.Path) -> None:
 
 def test_prompts_is_frozen() -> None:
     tpl = PromptTemplate(
-        "{LISTING_BULLETS} {RAW_DESCRIPTION}",
+        "{LISTINGS}",
         CLASSIFY_RELEVANCE_SLOTS,
     )
     prompts = Prompts(

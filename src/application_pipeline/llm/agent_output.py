@@ -73,6 +73,25 @@ def _fallback_bare_fence(text: str) -> tuple[Any, bool]:
         raise AgentOutputProtocolError("tag_missing") from None
 
 
+def extract_id_tagged_verdicts(text: str) -> dict[int, Any]:
+    """Extract all ``<verdict id="N">JSON</verdict>`` tags from *text*.
+
+    Returns a mapping of numeric id → parsed JSON value.  Tags whose body is
+    not valid JSON are silently omitted so callers can treat the missing key as
+    ``None``.
+    """
+    pattern = re.compile(r'<verdict\s+id="(\d+)">(.*?)</verdict>', re.DOTALL)
+    result: dict[int, Any] = {}
+    for m in pattern.finditer(text):
+        item_id = int(m.group(1))
+        body = _strip_fence(m.group(2).strip())
+        try:
+            result[item_id] = json.loads(body)
+        except json.JSONDecodeError:
+            pass
+    return result
+
+
 def _strip_fence(body: str) -> str:
     m = re.match(r"^```(?:json)?\n(.*)\n```$", body, re.DOTALL)
     if m:

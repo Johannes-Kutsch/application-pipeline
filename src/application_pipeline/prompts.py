@@ -14,9 +14,7 @@ class PromptError(Exception):
     pass
 
 
-CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset(
-    {"LISTING_BULLETS", "RAW_DESCRIPTION"}
-)
+CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"LISTINGS"})
 JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"CANDIDATES"})
 
 _PROFILE_SLOTS: frozenset[str] = frozenset(

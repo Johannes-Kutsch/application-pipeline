@@ -677,7 +677,7 @@ def run(
             search_terms = load_search_terms(cfg.user_info_dir)
         if extractor is None or llm_enricher is None:
             try:
-                prompts = load_prompts(cfg, search_terms)
+                prompts = load_prompts(cfg)
             except PromptError as exc:
                 _log.error("startup failed — prompts: %s", exc)
                 raise

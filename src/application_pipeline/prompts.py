@@ -1,10 +1,13 @@
 import importlib.resources
 import pathlib
+import re
 import string
 from dataclasses import dataclass
 
 from .config import Config
-from .search_terms.types import SearchTerms
+
+_BULLET_RE = re.compile(r"^-\s+(.+)$")
+_TRAILING_ATTR_RE = re.compile(r"\s*\{[^}]*\}$")
 
 
 class PromptError(Exception):
@@ -43,7 +46,7 @@ class Prompts:
     judge_top_n: PromptTemplate
 
 
-def load_prompts(config: Config, search_terms: SearchTerms) -> Prompts:
+def load_prompts(config: Config) -> Prompts:
     triage_dir = config.user_info_dir / "triage-profile"
     legacy_domain_fit = triage_dir / "domain-fit.md"
     if legacy_domain_fit.exists():
@@ -55,7 +58,7 @@ def load_prompts(config: Config, search_terms: SearchTerms) -> Prompts:
     profile_values: dict[str, str] = {
         "CANDIDATE_PROFILE": _read_user_info(triage_dir, "candidate-profile.md"),
         "GATE_CRITERIA": _read_user_info(triage_dir, "gate-criteria.md"),
-        "SKILLS": "\n".join(f"- {s}" for s in search_terms.skills),
+        "SKILLS": _load_skills(triage_dir / "skills.md"),
     }
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
@@ -75,6 +78,18 @@ def load_prompts(config: Config, search_terms: SearchTerms) -> Prompts:
         classify_relevance=classify,
         judge_top_n=judge_top_n,
     )
+
+
+def _load_skills(path: pathlib.Path) -> str:
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8-sig")
+    items = []
+    for line in text.splitlines():
+        m = _BULLET_RE.match(line)
+        if m:
+            items.append(_TRAILING_ATTR_RE.sub("", m.group(1).strip()))
+    return "\n".join(f"- {s}" for s in items)
 
 
 def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:

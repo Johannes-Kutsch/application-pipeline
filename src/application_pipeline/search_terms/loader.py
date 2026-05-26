@@ -7,10 +7,8 @@ from .types import SearchTerms, SearchTermsError
 
 _DIR = "search-terms"
 _FILE_KEYWORDS = "keywords.md"
-_FILE_SKILLS = "skills.md"
 _FILE_NEGATIVE_KEYWORDS = "negative-keywords.md"
 _BULLET_RE = re.compile(r"^-\s+(.+)$")
-_TRAILING_ATTR_RE = re.compile(r"\s*\{[^}]*\}$")
 
 
 def load_search_terms(user_info_dir: pathlib.Path) -> SearchTerms:
@@ -28,16 +26,8 @@ def load_search_terms(user_info_dir: pathlib.Path) -> SearchTerms:
 
     return SearchTerms(
         keywords=tuple(keywords),
-        skills=tuple(_parse_skills(base / _FILE_SKILLS)),
         negative_keywords=tuple(_parse_optional(base / _FILE_NEGATIVE_KEYWORDS)),
     )
-
-
-def _parse_skills(path: pathlib.Path) -> list[str]:
-    if not path.exists():
-        return []
-    items = _parse_bullets(path)
-    return [_TRAILING_ATTR_RE.sub("", item) for item in items]
 
 
 def _parse_optional(path: pathlib.Path) -> list[str]:

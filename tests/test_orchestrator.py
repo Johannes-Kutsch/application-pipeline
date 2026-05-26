@@ -2760,12 +2760,7 @@ def test_prompt_loader_returns_single_template_per_call_site(tmp_path: Path) -> 
         locations=["Hamburg"],
         user_info_dir=user_info_dir,
     )
-    from application_pipeline.search_terms.types import SearchTerms
-
-    prompts = load_prompts(
-        cfg,
-        SearchTerms(keywords=("python",), skills=(), negative_keywords=()),
-    )
+    prompts = load_prompts(cfg)
 
     assert isinstance(prompts.classify_relevance, PromptTemplate)
     assert isinstance(prompts.judge_top_n, PromptTemplate)

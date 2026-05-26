@@ -17,25 +17,21 @@ def write_search_terms(
     tmp_path: pathlib.Path,
     *,
     keywords: str = "",
-    skills: str | None = None,
     negative_keywords: str | None = None,
 ) -> pathlib.Path:
     user_info = tmp_path / "user-info"
     st_dir = user_info / "search-terms"
     st_dir.mkdir(parents=True, exist_ok=True)
     (st_dir / "keywords.md").write_text(keywords)
-    if skills is not None:
-        (st_dir / "skills.md").write_text(skills)
     if negative_keywords is not None:
         (st_dir / "negative-keywords.md").write_text(negative_keywords)
     return user_info
 
 
-def test_valid_files_load_all_three_lists(tmp_path: pathlib.Path) -> None:
+def test_valid_files_load_both_lists(tmp_path: pathlib.Path) -> None:
     user_info = write_search_terms(
         tmp_path,
         keywords="- software engineer\n- python developer\n",
-        skills="- Python\n- SQL\n",
         negative_keywords="- Manager\n- Sales\n",
     )
 
@@ -43,22 +39,7 @@ def test_valid_files_load_all_three_lists(tmp_path: pathlib.Path) -> None:
 
     assert isinstance(result, SearchTerms)
     assert result.keywords == ("software engineer", "python developer")
-    assert result.skills == ("Python", "SQL")
     assert result.negative_keywords == ("Manager", "Sales")
-
-
-def test_missing_skills_file_gives_empty_tuple(tmp_path: pathlib.Path) -> None:
-    user_info = write_search_terms(
-        tmp_path,
-        keywords="- python developer\n",
-        negative_keywords="- Manager\n",
-    )
-
-    result = load_search_terms(user_info)
-
-    assert result.skills == ()
-    assert result.keywords == ("python developer",)
-    assert result.negative_keywords == ("Manager",)
 
 
 def test_missing_negative_keywords_file_gives_empty_tuple(
@@ -67,14 +48,12 @@ def test_missing_negative_keywords_file_gives_empty_tuple(
     user_info = write_search_terms(
         tmp_path,
         keywords="- python developer\n",
-        skills="- Python\n",
     )
 
     result = load_search_terms(user_info)
 
     assert result.negative_keywords == ()
     assert result.keywords == ("python developer",)
-    assert result.skills == ("Python",)
 
 
 def test_empty_keywords_file_raises_search_terms_error(
@@ -83,7 +62,6 @@ def test_empty_keywords_file_raises_search_terms_error(
     user_info = write_search_terms(
         tmp_path,
         keywords="",
-        skills="- Python\n",
     )
 
     with pytest.raises(SearchTermsError):
@@ -135,58 +113,6 @@ def test_init_seeds_search_terms_template_that_loads_successfully(
 
     assert isinstance(result, SearchTerms)
     assert result.keywords
-
-
-def test_skills_trailing_attribute_block_is_stripped(tmp_path: pathlib.Path) -> None:
-    user_info = write_search_terms(
-        tmp_path,
-        keywords="- python developer\n",
-        skills="- Pandas {always}\n",
-    )
-
-    result = load_search_terms(user_info)
-
-    assert result.skills == ("Pandas",)
-
-
-def test_skills_without_attribute_block_are_preserved(tmp_path: pathlib.Path) -> None:
-    user_info = write_search_terms(
-        tmp_path,
-        keywords="- python developer\n",
-        skills="- TensorFlow\n",
-    )
-
-    result = load_search_terms(user_info)
-
-    assert result.skills == ("TensorFlow",)
-
-
-def test_skills_h2_headings_ignored_bullets_collected_in_order(
-    tmp_path: pathlib.Path,
-) -> None:
-    user_info = write_search_terms(
-        tmp_path,
-        keywords="- python developer\n",
-        skills="## MLE\n- Pandas {always}\n- TensorFlow\n",
-    )
-
-    result = load_search_terms(user_info)
-
-    assert result.skills == ("Pandas", "TensorFlow")
-
-
-def test_skills_partial_brace_mid_word_preserved_verbatim(
-    tmp_path: pathlib.Path,
-) -> None:
-    user_info = write_search_terms(
-        tmp_path,
-        keywords="- python developer\n",
-        skills="- foo{bar\n",
-    )
-
-    result = load_search_terms(user_info)
-
-    assert result.skills == ("foo{bar",)
 
 
 def test_keywords_attribute_syntax_not_stripped(tmp_path: pathlib.Path) -> None:

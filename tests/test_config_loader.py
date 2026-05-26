@@ -635,6 +635,59 @@ def test_claude_classify_parallelism_accepts_1(tmp_path: pathlib.Path) -> None:
     assert config.claude_classify_parallelism == 1
 
 
+# --- claude_classify_batch_size ---
+
+
+def test_claude_classify_batch_size_defaults_to_10(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY)
+
+    config = load(path)
+
+    assert config.claude_classify_batch_size == 10
+
+
+def test_claude_classify_batch_size_reads_configured_value(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 5\n")
+
+    config = load(path)
+
+    assert config.claude_classify_batch_size == 5
+
+
+def test_claude_classify_batch_size_accepts_1(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 1\n")
+
+    config = load(path)
+
+    assert config.claude_classify_batch_size == 1
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_claude_classify_batch_size_raises_when_less_than_1(
+    tmp_path: pathlib.Path, value: int
+) -> None:
+    path = write_config(
+        tmp_path, REQUIRED_BODY + f"\nCLAUDE_CLASSIFY_BATCH_SIZE = {value}\n"
+    )
+
+    with pytest.raises(ConfigError, match="CLAUDE_CLASSIFY_BATCH_SIZE"):
+        load(path)
+
+
+@pytest.mark.parametrize("value", ["'10'", "10.0", "True", "False"])
+def test_claude_classify_batch_size_raises_when_not_int(
+    tmp_path: pathlib.Path, value: str
+) -> None:
+    path = write_config(
+        tmp_path, REQUIRED_BODY + f"\nCLAUDE_CLASSIFY_BATCH_SIZE = {value}\n"
+    )
+
+    with pytest.raises(ConfigError, match="CLAUDE_CLASSIFY_BATCH_SIZE"):
+        load(path)
+
+
 # --- dedup_cooldown_days ---
 
 

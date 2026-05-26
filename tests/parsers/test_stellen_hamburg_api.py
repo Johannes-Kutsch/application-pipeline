@@ -398,14 +398,24 @@ def test_enrich_raises_enrich_failed_error_on_404(
                 p.enrich(stub)
 
 
-def test_enrich_propagates_transient_http_error_on_503(
+def test_enrich_retries_transient_503_and_raises_parser_error(
     run_log: RunLog, tmp_path: Path, stub: PositionStub
 ) -> None:
-    with respx.mock:
-        respx.get(stub.url).mock(return_value=httpx.Response(503))
-        with StellenHamburgParser(run_log=run_log, failures_dir=tmp_path) as p:
-            with pytest.raises(httpx.HTTPStatusError):
-                p.enrich(stub)
+    from application_pipeline.parsers import ParserError
+
+    attempts: list[str] = []
+
+    def always_503(url: str, timeout: float) -> bytes:
+        attempts.append(url)
+        raise OSError("simulated 503")
+
+    http = ParserHttp(
+        run_log=run_log, _http_get=always_503, retries=3, _sleep=lambda _: None
+    )
+    with StellenHamburgParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(ParserError):
+            p.enrich(stub)
+    assert len(attempts) == 3
 
 
 # ---------------------------------------------------------------------------

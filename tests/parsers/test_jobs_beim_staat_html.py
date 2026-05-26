@@ -18,6 +18,7 @@ from application_pipeline.parsers.jobs_beim_staat_html import (
 )
 from application_pipeline.parsers.types import (
     City,
+    EnrichFailedError,
     NotServedQuery,
     Remote,
 )
@@ -53,10 +54,10 @@ def _empty_envelope() -> bytes:
 
 
 def _make_list_page(start_id: int, count: int) -> bytes:
-    """Build a jobs HTML fragment with `count` cards whose URLs start at `start_id`."""
+    """Build a jobs HTML fragment with `count` /jobangebote/ cards."""
     cards = "".join(
         f'<div class="serp-jobcontet-cards-container-joblist jobcard" id="{start_id + i}">'
-        f'<h3><a href="/stellenangebote/{start_id + i}">Job {start_id + i}</a></h3>'
+        f'<h3><a href="/jobangebote/{start_id + i}">Job {start_id + i}</a></h3>'
         f"</div>"
         for i in range(count)
     )
@@ -337,7 +338,7 @@ def test_discover_stub_title_extracted(run_log: RunLog, list_html: bytes) -> Non
     assert stub.title == "Softwareentwickler/in (m/w/d)"
 
 
-def test_discover_stub_url_points_to_stellenangebote(
+def test_discover_stub_url_points_to_jobangebote(
     run_log: RunLog, list_html: bytes
 ) -> None:
     get = _make_get([_jobs_envelope(list_html), _empty_envelope()])
@@ -346,7 +347,7 @@ def test_discover_stub_url_points_to_stellenangebote(
     ) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
-    assert "stellenangebote/1001" in stub.url
+    assert "jobangebote/1001" in stub.url
 
 
 def test_discover_stub_company_extracted_from_data_attribute(
@@ -473,3 +474,155 @@ def test_discover_raises_parser_error_on_http_failure(run_log: RunLog) -> None:
     ) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
+
+
+# ---------------------------------------------------------------------------
+# discover — /stellenangebote/ filter
+# ---------------------------------------------------------------------------
+
+
+def _mixed_cards_html() -> bytes:
+    """Two cards: one /stellenangebote/ (to be skipped) and one /jobangebote/."""
+    return (
+        b'<div class="serp-jobcontet-cards-container-joblist jobcard" id="100">'
+        b'<h3><a href="/stellenangebote/100">External Job</a></h3></div>'
+        b'<div class="serp-jobcontet-cards-container-joblist jobcard" id="200">'
+        b'<h3><a href="/jobangebote/200">Internal Job</a></h3></div>'
+    )
+
+
+def test_discover_skips_stellenangebote_stubs_silently(run_log: RunLog) -> None:
+    get = _make_get([_jobs_envelope(_mixed_cards_html()), _empty_envelope()])
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        stubs = list(p.discover(_query()))
+    assert len(stubs) == 1
+    assert isinstance(stubs[0], PositionStub)
+    assert "jobangebote/200" in stubs[0].url
+
+
+def test_discover_stellenangebote_not_in_results(run_log: RunLog) -> None:
+    get = _make_get([_jobs_envelope(_mixed_cards_html()), _empty_envelope()])
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        stubs = list(p.discover(_query()))
+    assert not any(
+        "stellenangebote" in s.url for s in stubs if isinstance(s, PositionStub)
+    )
+
+
+# ---------------------------------------------------------------------------
+# has_native_enrich
+# ---------------------------------------------------------------------------
+
+
+def test_has_native_enrich_is_true() -> None:
+    assert parser_module.has_native_enrich is True
+
+
+# ---------------------------------------------------------------------------
+# enrich — native two-hop fetch
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_returns_native_mode_result(
+    run_log: RunLog, stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
+) -> None:
+    get = _make_get([wrapper_html, iframe_target_html])
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        result = p.enrich(stub)
+
+    assert result.mode == "native"
+    assert result.stub is stub
+
+
+def test_enrich_body_contains_job_description_text(
+    run_log: RunLog, stub: PositionStub, wrapper_html: bytes, iframe_target_html: bytes
+) -> None:
+    get = _make_get([wrapper_html, iframe_target_html])
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
+    ) as p:
+        result = p.enrich(stub)
+
+    assert result.body.strip()
+    assert "Softwareentwickler" in result.body
+
+
+def test_enrich_raises_enrich_failed_error_when_no_iframe(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    no_iframe_html = b"<html><body><h1>No iframe here</h1></body></html>"
+
+    def get_no_iframe(url: str, timeout: float) -> bytes:
+        return no_iframe_html
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get_no_iframe)
+    ) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+
+def test_enrich_raises_enrich_failed_error_on_iframe_fetch_404(
+    run_log: RunLog, stub: PositionStub, wrapper_html: bytes
+) -> None:
+    from application_pipeline.http.errors import HttpStubNotRetryableError
+
+    call_count = 0
+
+    def get_with_404(url: str, timeout: float) -> bytes:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return wrapper_html
+        raise HttpStubNotRetryableError("not found")
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get_with_404)
+    ) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+
+def test_enrich_fetches_iframe_url_from_myiframe_src(
+    run_log: RunLog, stub: PositionStub, iframe_target_html: bytes
+) -> None:
+    wrapper = (
+        b'<html><body><iframe id="myiframe" '
+        b'src="/stellenanzeigen-details/?id=99999"></iframe></body></html>'
+    )
+    fetched: list[str] = []
+    responses = iter([wrapper, iframe_target_html])
+
+    def capturing_get(url: str, timeout: float) -> bytes:
+        fetched.append(url)
+        return next(responses)
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=capturing_get)
+    ) as p:
+        p.enrich(stub)
+
+    assert (
+        fetched[1] == "https://www.jobs-beim-staat.de/stellenanzeigen-details/?id=99999"
+    )
+
+
+def test_enrich_raises_enrich_failed_error_when_iframe_has_no_src(
+    run_log: RunLog, stub: PositionStub
+) -> None:
+    no_src_html = b'<html><body><iframe id="myiframe"></iframe></body></html>'
+
+    def get_no_src(url: str, timeout: float) -> bytes:
+        return no_src_html
+
+    with JobsBeimStaatParser(
+        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get_no_src)
+    ) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)

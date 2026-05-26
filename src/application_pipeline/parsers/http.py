@@ -14,6 +14,7 @@ from application_pipeline.http import (
 )
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
+from application_pipeline.parsers.types import EnrichFailedError
 
 HTTP_CONNECT_TIMEOUT: float = 5.0
 HTTP_READ_TIMEOUT: float = 30.0
@@ -163,6 +164,16 @@ class ParserHttp:
         raise HttpRetryError(
             f"HTTP request failed after {self._retries} retries: {last_exc}"
         ) from last_exc
+
+    def enrich_get(self, url: str, *, error_prefix: str) -> bytes:
+        """Like get(), but converts HttpStubNotRetryableError to EnrichFailedError."""
+        self._throttle.wait()
+        try:
+            return self._get_with_retry(url)
+        except HttpRetryError as exc:
+            raise ParserError(f"{error_prefix}: {exc}") from exc.__cause__
+        except HttpStubNotRetryableError as exc:
+            raise EnrichFailedError(f"{error_prefix}: {exc}") from exc
 
     def get(self, url: str, *, error_prefix: str) -> bytes:
         self._throttle.wait()

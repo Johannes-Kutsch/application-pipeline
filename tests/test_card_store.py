@@ -184,6 +184,33 @@ def test_legacy_extracts_migration_round_trip_stable(store_path: Path) -> None:
     assert first_content == second_content
 
 
+def test_put_then_get_round_trips_body(store: CardStore) -> None:
+    card = CardExtract(
+        header="Role · Acme · Berlin",
+        summary="Great fit.",
+        body="Full raw description text.",
+    )
+    store.put(1, card)
+    assert store.get(1) == card
+
+
+def test_body_persists_to_disk(store_path: Path) -> None:
+    store = load_card_store(store_path)
+    store.put(1, CardExtract(header="H", summary="S", body="Raw body."))
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk["1"]["body"] == "Raw body."
+
+
+def test_legacy_record_without_body_loads_with_empty_default(store_path: Path) -> None:
+    store_path.write_text(
+        json.dumps({"1": {"header": "H", "summary": "S"}}),
+        encoding="utf-8",
+    )
+    card = load_card_store(store_path).get(1)
+    assert card == CardExtract(header="H", summary="S", body="")
+
+
 def test_concurrent_writers_do_not_corrupt_file(store_path: Path) -> None:
     store = load_card_store(store_path)
     barrier = threading.Barrier(8)

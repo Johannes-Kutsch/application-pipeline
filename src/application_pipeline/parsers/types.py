@@ -36,6 +36,7 @@ class PositionStub:
     company: str | None = None
     location: str | None = None
     posted_date: date | None = None
+    deadline: date | None = None
     _warnings: tuple[str, ...] = ()
 
 

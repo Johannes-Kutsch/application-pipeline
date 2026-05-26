@@ -105,7 +105,7 @@ class LLMEnricher:
                     stub, posted_date=_parse_header_date(verdict.header)
                 )
                 if not self.freshness_gate.admit(
-                    updated_stub, gate_arm="post_llm", deadline=None
+                    updated_stub, gate_arm="post_llm", deadline=stub.deadline
                 ):
                     return None
 

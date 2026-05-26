@@ -4,6 +4,7 @@ import json
 import sys
 import urllib.parse
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -146,7 +147,18 @@ class StellenHamburgParser:
             source=_DISPLAY_NAME,
             company=descriptor.get("OrganizationName") or None,
             location=location,
+            posted_date=_parse_date(descriptor.get("PublicationStartDate")),
+            deadline=_parse_date(descriptor.get("PublicationEndDate")),
         )
+
+
+def _parse_date(value: Any) -> date | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 parser_class = StellenHamburgParser

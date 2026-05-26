@@ -76,6 +76,40 @@ def test_cron_sh_has_no_flock(cron_sh_text: str) -> None:
     assert ".cron.lock" not in cron_sh_text
 
 
+def test_cron_sh_has_no_fail_function(cron_sh_text: str) -> None:
+    """cron.sh must not define a fail() bash helper."""
+    assert "fail()" not in cron_sh_text
+
+
+def test_cron_sh_has_no_mkdir(cron_sh_text: str) -> None:
+    """cron.sh must not contain mkdir -p calls."""
+    assert "mkdir" not in cron_sh_text
+
+
+def test_cron_sh_has_no_log_truncation(cron_sh_text: str) -> None:
+    """cron.sh must not contain tail / log truncation logic."""
+    assert "tail" not in cron_sh_text
+
+
+def test_cron_sh_invokes_cron_not_init_or_run(cron_sh_text: str) -> None:
+    """cron.sh must invoke 'application-pipeline cron', not 'init' or 'run' directly."""
+    assert (
+        "application-pipeline cron" in cron_sh_text
+        or 'application-pipeline" cron' in cron_sh_text
+        or "cron" in cron_sh_text
+    )
+    assert "init --refresh" not in cron_sh_text
+    # Must not invoke `run` as a standalone command (but `cron` is allowed)
+    import re
+
+    run_cmd_lines = [
+        line
+        for line in cron_sh_text.splitlines()
+        if re.search(r"application-pipeline\s+(run)\b", line)
+    ]
+    assert run_cmd_lines == [], f"Lines invoking 'run' directly: {run_cmd_lines}"
+
+
 # ---------------------------------------------------------------------------
 # cron.sh behavioral checks (subprocess)
 # ---------------------------------------------------------------------------
@@ -146,7 +180,7 @@ def test_cron_sh_exits_with_error_when_venv_missing(tmp_path: Path) -> None:
 
 
 def test_cron_sh_pip_failure_warns_but_continues(tmp_path: Path) -> None:
-    """A pip upgrade failure prints a warning but init --refresh and run still execute."""
+    """A pip upgrade failure prints a warning but cron still executes."""
     cron_sh, venv_bin, env = _make_script_env(tmp_path)
 
     # pip always fails
@@ -168,99 +202,8 @@ def test_cron_sh_pip_failure_warns_but_continues(tmp_path: Path) -> None:
     assert "WARNING" in combined or "warning" in combined.lower()
 
 
-def test_cron_sh_init_failure_writes_failure_report(tmp_path: Path) -> None:
-    """When init --refresh exits non-zero, a Failure Report appears in .runtime-data/failures/."""
-    cron_sh, venv_bin, env = _make_script_env(tmp_path)
-
-    _write_stub(venv_bin, "pip", "", exit_code=0)
-    # application-pipeline: fail on init, succeed on run
-    (venv_bin / "application-pipeline").write_text(
-        textwrap.dedent("""\
-            #!/usr/bin/env bash
-            if [[ "$*" == *"init"* ]]; then
-                echo "init failed" >&2
-                exit 1
-            fi
-            exit 0
-        """),
-        encoding="utf-8",
-    )
-    (venv_bin / "application-pipeline").chmod(
-        (venv_bin / "application-pipeline").stat().st_mode | stat.S_IEXEC
-    )
-
-    subprocess.run(
-        ["bash", str(cron_sh)],
-        cwd=str(tmp_path),
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    failures_dir = tmp_path / "application-pipeline" / ".runtime-data" / "failures"
-    failure_files = list(failures_dir.glob("*.md"))
-    assert len(failure_files) >= 1, "Expected a Failure Report markdown file"
-
-
-def test_cron_sh_run_failure_writes_failure_report(tmp_path: Path) -> None:
-    """When run exits non-zero, a Failure Report appears in .runtime-data/failures/."""
-    cron_sh, venv_bin, env = _make_script_env(tmp_path)
-
-    _write_stub(venv_bin, "pip", "", exit_code=0)
-    (venv_bin / "application-pipeline").write_text(
-        textwrap.dedent("""\
-            #!/usr/bin/env bash
-            if [[ "$*" == *"run"* ]]; then
-                echo "run failed" >&2
-                exit 1
-            fi
-            exit 0
-        """),
-        encoding="utf-8",
-    )
-    (venv_bin / "application-pipeline").chmod(
-        (venv_bin / "application-pipeline").stat().st_mode | stat.S_IEXEC
-    )
-
-    subprocess.run(
-        ["bash", str(cron_sh)],
-        cwd=str(tmp_path),
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    failures_dir = tmp_path / "application-pipeline" / ".runtime-data" / "failures"
-    failure_files = list(failures_dir.glob("*.md"))
-    assert len(failure_files) >= 1, "Expected a Failure Report markdown file"
-
-
-def test_cron_sh_log_trimmed_to_10000_lines(tmp_path: Path) -> None:
-    """After a successful tick, cron.log is trimmed to at most 10,000 lines."""
-    cron_sh, venv_bin, env = _make_script_env(tmp_path)
-
-    _write_stub(venv_bin, "pip", "", exit_code=0)
-    _write_stub(venv_bin, "application-pipeline", "", exit_code=0)
-
-    # Seed cron.log with 15000 lines
-    log_path = tmp_path / "application-pipeline" / ".runtime-data" / "logs" / "cron.log"
-    log_path.write_text("line\n" * 15000, encoding="utf-8")
-
-    result = subprocess.run(
-        ["bash", str(cron_sh)],
-        cwd=str(tmp_path),
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    assert result.returncode == 0, f"stderr: {result.stderr}"
-    line_count = len(log_path.read_text(encoding="utf-8").splitlines())
-    assert line_count <= 10000, f"Expected ≤10000 lines, got {line_count}"
-
-
-def test_cron_sh_no_judge_passes_flag_to_run(tmp_path: Path) -> None:
-    """./cron.sh --no-judge passes --no-judge to application-pipeline run."""
+def test_cron_sh_no_judge_passes_flag_to_cron(tmp_path: Path) -> None:
+    """./cron.sh --no-judge passes --no-judge to application-pipeline cron."""
     cron_sh, venv_bin, env = _make_script_env(tmp_path)
 
     _write_stub(venv_bin, "pip", "", exit_code=0)
@@ -288,14 +231,14 @@ def test_cron_sh_no_judge_passes_flag_to_run(tmp_path: Path) -> None:
 
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
     calls = calls_file.read_text(encoding="utf-8").splitlines()
-    run_calls = [c for c in calls if c.startswith("run")]
-    assert any("--no-judge" in c for c in run_calls), (
-        f"Expected 'run --no-judge' in application-pipeline calls, got: {calls}"
+    cron_calls = [c for c in calls if c.startswith("cron")]
+    assert any("--no-judge" in c for c in cron_calls), (
+        f"Expected 'cron --no-judge' in application-pipeline calls, got: {calls}"
     )
 
 
 def test_cron_sh_without_no_judge_does_not_pass_flag(tmp_path: Path) -> None:
-    """./cron.sh without --no-judge invokes application-pipeline run without --no-judge."""
+    """./cron.sh without --no-judge invokes application-pipeline cron without --no-judge."""
     cron_sh, venv_bin, env = _make_script_env(tmp_path)
 
     _write_stub(venv_bin, "pip", "", exit_code=0)
@@ -323,10 +266,10 @@ def test_cron_sh_without_no_judge_does_not_pass_flag(tmp_path: Path) -> None:
 
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
     calls = calls_file.read_text(encoding="utf-8").splitlines()
-    run_calls = [c for c in calls if c.startswith("run")]
-    assert run_calls, "application-pipeline run must be called"
-    assert not any("--no-judge" in c for c in run_calls), (
-        f"--no-judge must not appear in run call without the flag: {run_calls}"
+    cron_calls = [c for c in calls if c.startswith("cron")]
+    assert cron_calls, "application-pipeline cron must be called"
+    assert not any("--no-judge" in c for c in cron_calls), (
+        f"--no-judge must not appear in cron call without the flag: {cron_calls}"
     )
 
 

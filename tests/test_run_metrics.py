@@ -478,6 +478,105 @@ def test_judge_top_n_complete_prints_card_count_as_terminal_message(
 
 
 # ---------------------------------------------------------------------------
+# Judge row — lazily registered when candidates exist (issue #640)
+# ---------------------------------------------------------------------------
+
+
+def test_judge_row_registered_when_judge_started_with_candidates(
+    run_log: RunLog,
+) -> None:
+    """judge_started(n) registers a judge row with phase 'running' and candidate count body."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    metrics.judge_started(14)
+
+    register_calls = [
+        c
+        for c in display.calls
+        if c.method == "register" and c.name == "llm judge match"
+    ]
+    assert len(register_calls) == 1
+    assert register_calls[0].kwargs["phase"] == "running"
+    assert "14" in str(register_calls[0].kwargs["body"])
+    assert "candidates" in str(register_calls[0].kwargs["body"])
+
+
+def test_judge_row_ordered_after_classify_row(run_log: RunLog) -> None:
+    """Judge row order is greater than classify row order."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    metrics.judge_started(5)
+
+    classify_reg = next(
+        c
+        for c in display.calls
+        if c.method == "register" and c.name == "llm classify relevance"
+    )
+    judge_reg = next(
+        c
+        for c in display.calls
+        if c.method == "register" and c.name == "llm judge match"
+    )
+    assert judge_reg.kwargs["order"] > classify_reg.kwargs["order"]
+
+
+def test_judge_row_absent_when_judge_never_started(run_log: RunLog) -> None:
+    """No judge row is registered when judge_started is never called (zero candidates)."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    assert "llm judge match" not in display.registered_names()
+
+
+def test_judge_row_shows_card_count_and_done_on_completion(run_log: RunLog) -> None:
+    """judge_top_n_complete updates body to show card count and transitions phase to done."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    usage = _make_usage()
+    metrics.judge_started(5)
+    metrics.judge_top_n_complete(usage, card_count=3)
+
+    body = _last_body(display, "llm judge match")
+    assert "3" in body
+    assert "cards" in body
+
+    phase_calls = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "llm judge match"
+    ]
+    assert phase_calls, "expected phase update for judge row on completion"
+    assert phase_calls[-1].kwargs["phase"] == "done"
+
+
+def test_judge_row_transitions_out_of_running_on_extractor_error(
+    run_log: RunLog,
+) -> None:
+    """judge_top_n_failed transitions the judge row out of 'running'."""
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    metrics.judge_started(5)
+    metrics.judge_top_n_failed()
+
+    phase_calls = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "llm judge match"
+    ]
+    assert phase_calls, "expected phase update for judge row on failure"
+    assert phase_calls[-1].kwargs["phase"] != "running"
+
+
+# ---------------------------------------------------------------------------
 # format_run_divider — byte-identical to _format_run_divider
 # ---------------------------------------------------------------------------
 

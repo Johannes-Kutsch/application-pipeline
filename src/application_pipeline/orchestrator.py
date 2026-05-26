@@ -951,6 +951,7 @@ def run(
 
         daily_top_5_count = 0
         if candidates:
+            metrics.judge_started(len(candidates))
             verdicts: list[MatchVerdict] | None = None
             judge_usage = None
             assert isinstance(extractor, _LLMJudge), (
@@ -977,6 +978,7 @@ def run(
                         log_tail="",
                         failures_dir=cfg.failures_path,
                     )
+                    metrics.judge_top_n_failed()
                     break
 
             if verdicts is not None and judge_usage is not None:

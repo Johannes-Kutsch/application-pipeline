@@ -397,6 +397,18 @@ class RunMetrics:
             pipeline_body = self._pipeline_body()
         self._display.update_body("pipeline", body=pipeline_body)
 
+    _JUDGE_ROW = "llm judge match"
+    _JUDGE_ROW_ORDER = 1002
+
+    def judge_started(self, candidate_count: int) -> None:
+        """Lazily register the judge row when the judge step is about to begin."""
+        self._display.register(
+            self._JUDGE_ROW,
+            order=self._JUDGE_ROW_ORDER,
+            phase="running",
+            body=f"{candidate_count} candidates",
+        )
+
     def judge_top_n_complete(self, usage: CallUsage, card_count: int) -> None:
         with self._lock:
             self._judge_calls += 1
@@ -407,10 +419,16 @@ class RunMetrics:
             self._judge_cost_usd += usage.cost_usd
             self._judge_total_s += usage.duration_s
             self._written += card_count
+        self._display.update_body(self._JUDGE_ROW, body=f"wrote {card_count} cards")
+        self._display.update_phase(self._JUDGE_ROW, phase="done")
         self._display.print(
             caller="llm_judge_match",
             message=f"judge_top_n complete: wrote {card_count} cards",
         )
+
+    def judge_top_n_failed(self) -> None:
+        """Transition the judge row out of 'running' when judge_top_n fails."""
+        self._display.update_phase(self._JUDGE_ROW, phase="error")
 
     # -----------------------------------------------------------------------
     # Read-only accessors for run_complete event

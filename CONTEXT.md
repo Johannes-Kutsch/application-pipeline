@@ -26,9 +26,9 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Position Schema**: _Retired_ per ADR-0032. Closed-enum fields live inside the LLM-authored **Header**. `PositionStub` and `EnrichResult` survive (ADR-0038). "Parsers never guess" invariant retires — LLM Enricher infers from body. _Avoid_: do not reintroduce per-field extraction.
 
-**Raw Description**: Full body text, fetched and stripped by parser's `enrich()` (per-source CSS selector or generic library fallback). Fed to LLM but never persisted or rendered (ADR-0032). Empty body dropped by **Content Gate** (ADR-0030). Oversized stashed to `.runtime-data/failures/oversized/`, no `seen.json` mark. _Avoid_: description (when full text is meant).
+**Raw Description**: Full body text, fetched and stripped by parser's `enrich()` (per-source CSS selector or generic library fallback). Fed to LLM and persisted in **Card Store** at classify time. Rendered into **Daily Results File** after **Summary**, fenced by `---` above and below. Empty body dropped by **Content Gate** (ADR-0030). Oversized stashed to `.runtime-data/failures/oversized/`, no `seen.json` mark. _Avoid_: description (when full text is meant).
 
-**Structured Extract**: _Retired_ per ADR-0032. Replaced by **Header** + **Summary**. `extracts.json` is `{listing_id: {header, summary}}`, keyed by **Listing ID** integer. _Avoid_: do not reintroduce.
+**Structured Extract**: _Retired_ per ADR-0032. Replaced by **Header** + **Summary** + **Raw Description**. `extracts.json` is `{listing_id: {header, summary, body}}`, keyed by **Listing ID** integer. _Avoid_: do not reintroduce.
 
 **Header**: Three-line block authored by the **LLM Enricher** at classify time (ADR-0032) — title, `company · location · work_model`, `posted_date · seniority · salary`. LLM substitutes known values, infers from body, or drops segments. Persisted in `extracts.json`. _Avoid_: card top, headline.
 
@@ -111,9 +111,9 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthin
 
 ### Display
 
-**Card**: Fixed two-block markdown per winner (ADR-0033): `# **{rank}:** {Header}` + `{Summary}`. No placeholder vocabulary beyond rank. _Avoid_: card template, headline.
+**Card**: Fixed markdown block per winner (ADR-0033): `# **{rank}:** {title}` (blank line) metadata lines + URL (blank line) `{Summary}` (blank line) `---` (blank line) `{Raw Description}` (blank line) `---`. _Avoid_: card template, headline.
 
-**Renderer**: `render(rank, header, summary) -> str` returns `f"# **{rank}:** {header}\n\n{summary}\n"`. No `Position`/`Layout` arguments. _Avoid_: formatter, presenter.
+**Renderer**: `render(rank, header, summary, url, body) -> str` — splits header at first newline to insert blank line after `#` title, appends URL after metadata, summary block, then `---`-fenced body, trailing `---` closes the card. _Avoid_: formatter, presenter.
 
 **Results File Manager**: `ensure_initialized(path)` (mkdir) and `append(path, rendered_block)` (write + flush + fsync). Path: `<settings-dir>/results/{cron_anchored_date}.md` (ADR-0015). _Avoid_: writer, output manager.
 

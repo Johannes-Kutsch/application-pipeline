@@ -54,28 +54,66 @@ def main() -> None:
         compile_cv(Path(args[1]))
         return
 
+    if args and args[0] == "cron":
+        cron_flags = set(args[1:])
+        unknown = cron_flags - {"--no-judge"}
+        if unknown:
+            _print_usage()
+            sys.exit(2)
+        no_judge = "--no-judge" in cron_flags
+        config_path = _require_config_path()
+
+        from application_pipeline.init_cmd import init as _init
+        from application_pipeline.config import resolve_data_paths
+        from application_pipeline.failure_report import write_failure
+
+        failures_path = resolve_data_paths(config_path.parent).failures_path
+        try:
+            _init(Path.cwd(), refresh=True)
+        except Exception as exc:
+            try:
+                write_failure("init --refresh", exc, _tail.tail(), failures_path)
+            except Exception:
+                pass
+            sys.exit(1)
+
+        _execute_run(config_path, no_judge=no_judge)
+        return
+
     if args and args[0] == "run":
         run_flags = set(args[1:])
         unknown = run_flags - {"--no-judge"}
         if unknown:
-            print("usage: application-pipeline run [--no-judge]", file=sys.stderr)
-            print("       application-pipeline init [--refresh]", file=sys.stderr)
-            print("       application-pipeline compile-cv <dir>", file=sys.stderr)
+            _print_usage()
             sys.exit(2)
         no_judge = "--no-judge" in run_flags
-        cwd = Path.cwd()
-        config_path = cwd / "application-pipeline" / "config.py"
-        if not config_path.exists():
-            from application_pipeline.init_cmd import missing_config_message
+        config_path = _require_config_path()
+        _execute_run(config_path, no_judge=no_judge)
+        return
 
-            print(missing_config_message(cwd), file=sys.stderr)
-            sys.exit(2)
-    else:
-        print("usage: application-pipeline run [--no-judge]", file=sys.stderr)
-        print("       application-pipeline init [--refresh]", file=sys.stderr)
-        print("       application-pipeline compile-cv <dir>", file=sys.stderr)
+    _print_usage()
+    sys.exit(2)
+
+
+def _print_usage() -> None:
+    print("usage: application-pipeline cron [--no-judge]", file=sys.stderr)
+    print("       application-pipeline run [--no-judge]", file=sys.stderr)
+    print("       application-pipeline init [--refresh]", file=sys.stderr)
+    print("       application-pipeline compile-cv <dir>", file=sys.stderr)
+
+
+def _require_config_path() -> Path:
+    cwd = Path.cwd()
+    config_path = cwd / "application-pipeline" / "config.py"
+    if not config_path.exists():
+        from application_pipeline.init_cmd import missing_config_message
+
+        print(missing_config_message(cwd), file=sys.stderr)
         sys.exit(2)
+    return config_path
 
+
+def _execute_run(config_path: Path, *, no_judge: bool) -> None:
     from application_pipeline.parser_log import RunLog
     from application_pipeline.config import resolve_data_paths
     from application_pipeline.failure_report import write_failure

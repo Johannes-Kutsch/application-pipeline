@@ -15,6 +15,7 @@ from application_pipeline.llm import (
     ClaudeMalformedEnvelopeError,
     ClaudeResponse,
     ClaudeUsage,
+    ExtractorBatchMalformedError,
     ExtractorMalformedJSONError,
 )
 from application_pipeline.llm.types import (
@@ -77,7 +78,7 @@ def _classify_response(verdict: object) -> ClaudeResponse:
     )
 
 
-def _judge_response(verdicts: list[dict[str, object]]) -> ClaudeResponse:
+def _judge_response(verdicts: list[dict[str, int]]) -> ClaudeResponse:
     return ClaudeResponse(
         raw_response=f"<verdicts>{json.dumps(verdicts)}</verdicts>",
         usage=_usage(),
@@ -281,7 +282,7 @@ def test_classify_relevance_legacy_in_domain_field_returns_none(
 
 def _make_candidates(n: int) -> list[JudgeCandidate]:
     return [
-        JudgeCandidate(id=f"cand-{i}", header=f"Title {i}\nCo", summary=f"Summary {i}")
+        JudgeCandidate(id=i, header=f"Title {i}\nCo", summary=f"Summary {i}")
         for i in range(n)
     ]
 
@@ -336,8 +337,28 @@ def test_judge_top_n_candidates_appear_in_prompt(
     )
     extractor.judge_top_n(candidates)
     prompt_sent = invoker.call.call_args.args[0]
-    assert "cand-0" in prompt_sent
-    assert "cand-1" in prompt_sent
+    assert "[Candidate id=0]" in prompt_sent
+    assert "[Candidate id=1]" in prompt_sent
+
+
+def test_judge_top_n_rejects_non_integer_verdict_id(run_log: RunLog) -> None:
+    candidates = _make_candidates(3)
+    # id encoded as a JSON string — must be rejected even though "0" matches a
+    # candidate ID when coerced.
+    invoker = _fake_invoker(
+        ClaudeResponse(
+            raw_response='<verdicts>[{"id": "0", "rank": 1}]</verdicts>',
+            usage=_usage(),
+            cost_usd=0.003,
+            duration_s=2.0,
+            session_id="s-judge",
+        )
+    )
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    with pytest.raises(ExtractorBatchMalformedError):
+        extractor.judge_top_n(candidates)
 
 
 def _read_transcripts(run_log: RunLog, component_id: str) -> list[dict]:  # type: ignore[type-arg]

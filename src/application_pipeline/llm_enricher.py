@@ -66,7 +66,9 @@ class LLMEnricher:
         self._failures_dir = failures_dir
         self.freshness_gate: FreshnessGate | None = freshness_gate
 
-    def enrich(self, stub: PositionStub, body: str) -> RelevanceVerdict | None:
+    def enrich(
+        self, listing_id: int, stub: PositionStub, body: str
+    ) -> RelevanceVerdict | None:
         """Classify and write CardStore.
 
         Returns the verdict on success, or None when dropped by the post-LLM
@@ -110,7 +112,7 @@ class LLMEnricher:
                     return None
 
             self._card_store.put(
-                stub.url,
+                listing_id,
                 CardExtract(header=verdict.header, summary=verdict.summary),
             )
 

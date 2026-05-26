@@ -25,21 +25,21 @@ def store(store_path: Path) -> CardStore:
 def test_card_store_creates_parent_dir_on_first_write(tmp_path: Path) -> None:
     path = tmp_path / ".runtime-data" / "extracts.json"
     store = load_card_store(path)
-    store.put("k1", CardExtract(header="H", summary="S"))
+    store.put(1, CardExtract(header="H", summary="S"))
     assert path.exists()
     assert path.parent.is_dir()
 
 
 def test_get_on_unknown_key_returns_none(store: CardStore) -> None:
-    assert store.get("missing") is None
+    assert store.get(0) is None
 
 
 def test_put_then_get_round_trips_header_and_summary(store: CardStore) -> None:
     card = CardExtract(
         header="Role · Acme · Berlin", summary="Strong fit for the role."
     )
-    store.put("abc123", card)
-    result = store.get("abc123")
+    store.put(42, card)
+    result = store.get(42)
     assert result == card
     assert result.header == "Role · Acme · Berlin"
     assert result.summary == "Strong fit for the role."
@@ -47,30 +47,30 @@ def test_put_then_get_round_trips_header_and_summary(store: CardStore) -> None:
 
 def test_put_persists_to_disk(store_path: Path) -> None:
     store = load_card_store(store_path)
-    store.put("k1", CardExtract(header="Eng · Co · City", summary="Gut."))
+    store.put(1, CardExtract(header="Eng · Co · City", summary="Gut."))
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert on_disk["k1"]["header"] == "Eng · Co · City"
-    assert on_disk["k1"]["summary"] == "Gut."
+    assert on_disk["1"]["header"] == "Eng · Co · City"
+    assert on_disk["1"]["summary"] == "Gut."
 
 
 def test_card_extract_survives_reload(store_path: Path) -> None:
     card = CardExtract(header="Lead · Startup · Remote", summary="Ideal role.")
-    load_card_store(store_path).put("k1", card)
+    load_card_store(store_path).put(1, card)
 
     reloaded = load_card_store(store_path)
-    assert reloaded.get("k1") == card
+    assert reloaded.get(1) == card
 
 
 def test_delete_removes_extract(store: CardStore) -> None:
-    store.put("k1", CardExtract(header="H", summary="S"))
-    store.delete("k1")
-    assert store.get("k1") is None
+    store.put(1, CardExtract(header="H", summary="S"))
+    store.delete(1)
+    assert store.get(1) is None
 
 
 def test_delete_unknown_key_is_silent_no_op(store_path: Path) -> None:
     store = load_card_store(store_path)
-    store.delete("never-put")
+    store.delete(999)
     assert not store_path.exists()
 
 
@@ -86,13 +86,22 @@ def test_load_rejects_non_object_json(store_path: Path) -> None:
         load_card_store(store_path)
 
 
+def test_load_rejects_non_integer_keys(store_path: Path) -> None:
+    store_path.write_text(
+        json.dumps({"https://example.com/job": {"header": "H", "summary": "S"}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ExtractStoreError):
+        load_card_store(store_path)
+
+
 def test_concurrent_writers_do_not_corrupt_file(store_path: Path) -> None:
     store = load_card_store(store_path)
     barrier = threading.Barrier(8)
 
     def worker(i: int) -> None:
         barrier.wait()
-        store.put(f"k{i}", CardExtract(header=f"H{i}", summary=f"S{i}"))
+        store.put(i, CardExtract(header=f"H{i}", summary=f"S{i}"))
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
     for t in threads:
@@ -101,6 +110,6 @@ def test_concurrent_writers_do_not_corrupt_file(store_path: Path) -> None:
         t.join()
 
     on_disk = json.loads(store_path.read_text(encoding="utf-8"))
-    assert set(on_disk) == {f"k{i}" for i in range(8)}
+    assert set(on_disk) == {str(i) for i in range(8)}
     for i in range(8):
-        assert store.get(f"k{i}") == CardExtract(header=f"H{i}", summary=f"S{i}")
+        assert store.get(i) == CardExtract(header=f"H{i}", summary=f"S{i}")

@@ -361,6 +361,9 @@ class RunMetrics:
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
+    def classify_done(self) -> None:
+        self._display.update_phase("llm classify relevance", phase="done")
+
     # -----------------------------------------------------------------------
     # Judge-stage events
     # -----------------------------------------------------------------------

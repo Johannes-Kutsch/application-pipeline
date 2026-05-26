@@ -931,6 +931,8 @@ def run(
             if first_exc is None and cw.exc is not None:
                 first_exc = cw.exc
 
+        metrics.classify_done()
+
         if first_exc is not None:
             raise first_exc
 

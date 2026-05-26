@@ -341,13 +341,31 @@ def test_judge_top_n_candidates_appear_in_prompt(
     assert "[Candidate id=1]" in prompt_sent
 
 
-def test_judge_top_n_rejects_non_integer_verdict_id(run_log: RunLog) -> None:
+def test_judge_top_n_coerces_string_id_to_int(run_log: RunLog) -> None:
     candidates = _make_candidates(3)
-    # id encoded as a JSON string — must be rejected even though "0" matches a
-    # candidate ID when coerced.
     invoker = _fake_invoker(
         ClaudeResponse(
             raw_response='<verdicts>[{"id": "0", "rank": 1}]</verdicts>',
+            usage=_usage(),
+            cost_usd=0.003,
+            duration_s=2.0,
+            session_id="s-judge",
+        )
+    )
+    extractor = ClaudeExtractor(
+        _config(), _prompts(), run_log=run_log, _invoker=invoker
+    )
+    verdicts, _ = extractor.judge_top_n(candidates)
+    assert len(verdicts) == 1
+    assert verdicts[0].id == 0
+    assert verdicts[0].rank == 1
+
+
+def test_judge_top_n_rejects_non_numeric_string_verdict_id(run_log: RunLog) -> None:
+    candidates = _make_candidates(3)
+    invoker = _fake_invoker(
+        ClaudeResponse(
+            raw_response='<verdicts>[{"id": "abc", "rank": 1}]</verdicts>',
             usage=_usage(),
             cost_usd=0.003,
             duration_s=2.0,

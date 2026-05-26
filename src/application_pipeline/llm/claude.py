@@ -446,6 +446,11 @@ class ClaudeExtractor:
                     f"judge_top_n: verdict entry is not a dict: {entry!r}"
                 )
             entry_id = entry.get("id")
+            if isinstance(entry_id, str):
+                try:
+                    entry_id = int(entry_id)
+                except (ValueError, TypeError):
+                    pass
             if not isinstance(entry_id, int) or entry_id not in valid_ids:
                 raise ExtractorBatchMalformedError(
                     f"judge_top_n: unknown or missing id in verdict: {entry_id!r}"

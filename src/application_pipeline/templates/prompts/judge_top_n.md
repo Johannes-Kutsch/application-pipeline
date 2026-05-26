@@ -20,8 +20,8 @@ Ordne sie von rank 1 (besten) bis rank 5. Jeder rank darf nur einmal vergeben we
 Antworte ausschließlich mit einem JSON-Array in folgendem Format innerhalb von <verdicts>-Tags:
 
 <verdicts>[
-  {{"id": "1234", "rank": 1}},
-  {{"id": "5678", "rank": 2}},
+  {{"id": 1234, "rank": 1}},
+  {{"id": 5678, "rank": 2}},
   ...
 ]</verdicts>
 

@@ -474,12 +474,11 @@ def test_init_skips_existing_setup_scripts(
     assert "skipped" in lines[0]
 
 
-def test_cron_sh_invokes_init_refresh_without_path_arg(tmp_path: Path) -> None:
+def test_cron_sh_invokes_cron_subcommand(tmp_path: Path) -> None:
     init(tmp_path)
     cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
-    match = re.search(r"application-pipeline init --refresh(\S*)", cron_sh)
-    assert match is not None
-    assert match.group(1) == ""
+    assert re.search(r"application-pipeline cron", cron_sh)
+    assert "init --refresh" not in cron_sh
 
 
 def test_cron_sh_self_locates_via_dirname(tmp_path: Path) -> None:
@@ -530,13 +529,12 @@ def test_cron_sh_pip_warning_includes_captured_stderr(tmp_path: Path) -> None:
     assert re.search(r"WARNING.*\$_pip_stderr", cron_sh)
 
 
-def test_cron_sh_pipeline_stages_still_call_fail_on_error(tmp_path: Path) -> None:
+def test_cron_sh_has_no_fail_helper_or_init_run_stages(tmp_path: Path) -> None:
     init(tmp_path)
     cron_sh = (_ap(tmp_path) / "setup" / "cron.sh").read_text()
-    assert re.search(
-        r"application-pipeline init --refresh.*\|\|.*\bfail\b", cron_sh, re.DOTALL
-    )
-    assert re.search(r"application-pipeline run.*\|\|.*\bfail\b", cron_sh, re.DOTALL)
+    assert "fail()" not in cron_sh
+    assert "init --refresh" not in cron_sh
+    assert not re.search(r"application-pipeline\s+run\b", cron_sh)
 
 
 def test_adr_0020_documents_pip_warn_and_continue_policy() -> None:

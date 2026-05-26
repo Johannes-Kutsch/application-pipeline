@@ -119,9 +119,10 @@ def test_classify_relevance_matched_returns_header_and_summary(
         run_log=run_log,
         _invoker=invoker,
     )
-    result, usage = extractor.classify_relevance(
-        _item(company="Acme", location="Hamburg")
+    results, usage = extractor.classify_relevance(
+        [_item(company="Acme", location="Hamburg")]
     )
+    result = results[0]
     assert isinstance(result, RelevanceVerdict)
     assert result.matches is True
     assert (
@@ -147,7 +148,8 @@ def test_classify_relevance_out_of_domain_returns_none_header_and_summary(
         run_log=run_log,
         _invoker=invoker,
     )
-    result, _ = extractor.classify_relevance(_item())
+    results, _ = extractor.classify_relevance([_item()])
+    result = results[0]
     assert isinstance(result, RelevanceVerdict)
     assert result.matches is False
     assert result.header is None
@@ -170,7 +172,7 @@ def test_classify_relevance_matched_missing_header_raises_malformed(
         _invoker=invoker,
     )
     with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance(_item())
+        extractor.classify_relevance([_item()])
 
 
 def test_classify_relevance_matched_missing_summary_raises_malformed(
@@ -186,7 +188,7 @@ def test_classify_relevance_matched_missing_summary_raises_malformed(
         _invoker=invoker,
     )
     with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance(_item())
+        extractor.classify_relevance([_item()])
 
 
 def test_classify_relevance_matched_empty_header_raises_malformed(
@@ -202,7 +204,7 @@ def test_classify_relevance_matched_empty_header_raises_malformed(
         _invoker=invoker,
     )
     with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance(_item())
+        extractor.classify_relevance([_item()])
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +221,7 @@ def test_classify_relevance_schema_mismatch_attaches_prompt_and_raw_response(
         _config(), _prompts(), run_log=run_log, _invoker=invoker
     )
     with pytest.raises(ExtractorMalformedError) as excinfo:
-        extractor.classify_relevance(_item())
+        extractor.classify_relevance([_item()])
     sent_prompt = invoker.call.call_args.args[0]
     assert excinfo.value.prompt == sent_prompt
     assert excinfo.value.raw_response == response.raw_response
@@ -240,7 +242,7 @@ def test_classify_relevance_protocol_error_attaches_prompt_and_raw_response(
         _config(), _prompts(), run_log=run_log, _invoker=invoker
     )
     with pytest.raises(ExtractorMalformedError) as excinfo:
-        extractor.classify_relevance(_item())
+        extractor.classify_relevance([_item()])
     sent_prompt = invoker.call.call_args.args[0]
     assert excinfo.value.prompt == sent_prompt
     assert excinfo.value.raw_response == response.raw_response
@@ -262,7 +264,7 @@ def test_classify_relevance_envelope_malformed_attaches_prompt_and_none_raw_resp
         _config(), _prompts(), run_log=run_log, _invoker=invoker
     )
     with pytest.raises(ExtractorMalformedJSONError) as excinfo:
-        extractor.classify_relevance(_item())
+        extractor.classify_relevance([_item()])
     sent_prompt = invoker.call.call_args.args[0]
     assert excinfo.value.prompt == sent_prompt
     assert excinfo.value.raw_response is None
@@ -287,7 +289,7 @@ def test_classify_relevance_prompt_includes_company_and_location(
         run_log=run_log,
         _invoker=invoker,
     )
-    extractor.classify_relevance(_item(company="TestCorp", location="Berlin"))
+    extractor.classify_relevance([_item(company="TestCorp", location="Berlin")])
     prompt_sent = invoker.call.call_args.args[0]
     assert "TestCorp" in prompt_sent
     assert "Berlin" in prompt_sent
@@ -306,7 +308,7 @@ def test_classify_relevance_legacy_in_domain_field_raises_malformed(
         _invoker=invoker,
     )
     with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance(_item())
+        extractor.classify_relevance([_item()])
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +423,9 @@ def test_classify_relevance_bare_fence_fallback_returns_verdict(
     extractor = ClaudeExtractor(
         _config(), _prompts(), run_log=run_log, _invoker=invoker
     )
-    result, _ = extractor.classify_relevance(_item())
+    results, _ = extractor.classify_relevance([_item()])
+    result = results[0]
+    assert result is not None
     assert result.matches is True
     assert result.header == "h"
     assert result.summary == "s"
@@ -434,7 +438,7 @@ def test_classify_relevance_bare_fence_fallback_logs_protocol_fallback_transcrip
     extractor = ClaudeExtractor(
         _config(), _prompts(), run_log=run_log, _invoker=invoker
     )
-    extractor.classify_relevance(_item())
+    extractor.classify_relevance([_item()])
     transcripts = _read_transcripts(run_log, "llm_classify_relevance")
     assert len(transcripts) == 1
     assert transcripts[0]["status"] == "protocol_fallback"
@@ -447,7 +451,7 @@ def test_classify_relevance_bare_fence_fallback_logs_protocol_fallback_event(
     extractor = ClaudeExtractor(
         _config(), _prompts(), run_log=run_log, _invoker=invoker
     )
-    extractor.classify_relevance(_item())
+    extractor.classify_relevance([_item()])
     events = _read_events(run_log, "llm_classify_relevance")
     assert any(e.get("status") == "protocol_fallback" for e in events)
 
@@ -460,4 +464,4 @@ def test_classify_relevance_bare_fence_fallback_schema_invalid_raises_malformed(
         _config(), _prompts(), run_log=run_log, _invoker=invoker
     )
     with pytest.raises(ExtractorMalformedError):
-        extractor.classify_relevance(_item())
+        extractor.classify_relevance([_item()])

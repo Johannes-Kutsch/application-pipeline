@@ -113,11 +113,13 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
 
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
-        RelevanceVerdict(
-            matches=True,
-            header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
-            summary="Great ML role.",
-        ),
+        [
+            RelevanceVerdict(
+                matches=True,
+                header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+                summary="Great ML role.",
+            )
+        ],
         _call_usage(),
     )
 
@@ -342,11 +344,13 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
     )
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
-        RelevanceVerdict(
-            matches=True,
-            header=stale_header,
-            summary="Old ML role.",
-        ),
+        [
+            RelevanceVerdict(
+                matches=True,
+                header=stale_header,
+                summary="Old ML role.",
+            )
+        ],
         _call_usage(),
     )
 
@@ -384,7 +388,7 @@ def test_enricher_freshness_drop_records_post_llm_transcript(
     stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2025-12-15 · mid · —"
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
-        RelevanceVerdict(matches=True, header=stale_header, summary="Stale role."),
+        [RelevanceVerdict(matches=True, header=stale_header, summary="Stale role.")],
         _call_usage(),
     )
 
@@ -425,11 +429,13 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
     fresh_header = "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · €90k"
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
-        RelevanceVerdict(
-            matches=True,
-            header=fresh_header,
-            summary="Good ML role.",
-        ),
+        [
+            RelevanceVerdict(
+                matches=True,
+                header=fresh_header,
+                summary="Good ML role.",
+            )
+        ],
         _call_usage(),
     )
 
@@ -470,11 +476,13 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
     no_date_header = "Backend Engineer\nCorp · Munich · on-site\nseniority: mid · —"
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
-        RelevanceVerdict(
-            matches=True,
-            header=no_date_header,
-            summary="Undated backend role.",
-        ),
+        [
+            RelevanceVerdict(
+                matches=True,
+                header=no_date_header,
+                summary="Undated backend role.",
+            )
+        ],
         _call_usage(),
     )
 

@@ -124,17 +124,43 @@ class ClaudeExtractor:
         self._invoker = _invoker or ClaudeCliInvoker(cli_path=config.claude_cli_path)
 
     def classify_relevance(
-        self, item: ClassifyItem
-    ) -> tuple[RelevanceVerdict, CallUsage]:
-        prompt = self._prompts.classify_relevance.render(
-            LISTING_BULLETS=_build_listing_bullets(item),
-            RAW_DESCRIPTION=item.raw_description,
-        )
-        parsed, response = self._invoke(_CLASSIFY_SITE, prompt, {})
-        usage = self._usage_from(response)
-        return self._parse_relevance(
-            parsed, prompt=prompt, raw_response=response.raw_response
-        ), usage
+        self, items: list[ClassifyItem]
+    ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
+        results: list[RelevanceVerdict | None] = []
+        combined: CallUsage | None = None
+        for item in items:
+            prompt = self._prompts.classify_relevance.render(
+                LISTING_BULLETS=_build_listing_bullets(item),
+                RAW_DESCRIPTION=item.raw_description,
+            )
+            parsed, response = self._invoke(_CLASSIFY_SITE, prompt, {})
+            usage = self._usage_from(response)
+            results.append(
+                self._parse_relevance(
+                    parsed, prompt=prompt, raw_response=response.raw_response
+                )
+            )
+            combined = (
+                usage
+                if combined is None
+                else CallUsage(
+                    input_tokens=combined.input_tokens + usage.input_tokens,
+                    output_tokens=combined.output_tokens + usage.output_tokens,
+                    cache_read_tokens=combined.cache_read_tokens
+                    + usage.cache_read_tokens,
+                    cost_usd=combined.cost_usd + usage.cost_usd,
+                    duration_s=combined.duration_s + usage.duration_s,
+                )
+            )
+        if combined is None:
+            combined = CallUsage(
+                input_tokens=0,
+                output_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=0.0,
+                duration_s=0.0,
+            )
+        return results, combined
 
     def judge_top_n(
         self, candidates: list[JudgeCandidate]

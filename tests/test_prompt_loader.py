@@ -150,6 +150,33 @@ def test_load_prompts_skills_slot_populated_attributes_stripped(
     assert "{always}" not in rendered
 
 
+def test_load_prompts_skills_h2_headings_ignored_bullets_kept_in_order(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    (config.user_info_dir / "triage-profile" / "skills.md").write_text(
+        "## MLE\n- Pandas {always}\n- TensorFlow\n## Backend\n- Go\n"
+    )
+
+    prompts = load_prompts(config)
+    rendered = prompts.judge_top_n.render(CANDIDATES="x")
+
+    assert "- Pandas\n- TensorFlow\n- Go" in rendered
+    assert "## MLE" not in rendered
+
+
+def test_load_prompts_skills_missing_file_renders_empty_slot(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    (config.user_info_dir / "triage-profile" / "skills.md").unlink()
+
+    prompts = load_prompts(config)
+    rendered = prompts.judge_top_n.render(CANDIDATES="x")
+
+    assert "- Python" not in rendered
+
+
 # --- load_prompts: legacy / missing / empty user-info files ---
 
 

@@ -96,7 +96,7 @@ def test_cv_template_resume_name_uses_my_macros(cv_template: str) -> None:
 
 def test_cv_template_reduces_cover_stretch_in_order(cv_template: str) -> None:
     body = re.search(
-        r"\\newcommand\*\{\\AutoCoverLetterStretch\}\[5\]\{(?P<body>.*?)\\unvbox",
+        r"\\newcommand\{\\AutoCoverLetterStretch\}\[5\]\{(?P<body>.*?)\\unvbox",
         cv_template,
         re.DOTALL,
     )
@@ -106,6 +106,13 @@ def test_cv_template_reduces_cover_stretch_in_order(cv_template: str) -> None:
     )
     assert candidates == ["1", "2", "3", "4"]
     assert body.group("body").count(r"\ifdim") == 3
+
+
+def test_cv_template_cover_stretch_accepts_paragraph_slots(cv_template: str) -> None:
+    assert r"\newcommand{\AutoCoverLetterStretch}" in cv_template
+    assert r"\newcommand*{\AutoCoverLetterStretch}" not in cv_template
+    assert r"\newcommand{\SetCoverLetterBox}" in cv_template
+    assert r"\newcommand*{\SetCoverLetterBox}" not in cv_template
 
 
 def test_cv_template_hardcodes_cover_stretch_minimum_without_new_slot(

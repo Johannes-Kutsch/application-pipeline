@@ -104,7 +104,7 @@
 
 \newsavebox{\CoverLetterBox}
 \newdimen\CoverLetterRemaining
-\newcommand*{\SetCoverLetterBox}[2]{%
+\newcommand{\SetCoverLetterBox}[2]{%
   \setbox\CoverLetterBox=\vbox{%
     \hsize=\textwidth
     \setstretch{#1}%
@@ -115,7 +115,7 @@
     \makeletterclosing
   }%
 }
-\newcommand*{\AutoCoverLetterStretch}[5]{%
+\newcommand{\AutoCoverLetterStretch}[5]{%
   \CoverLetterRemaining=\pagegoal
   \advance\CoverLetterRemaining by -\pagetotal
   \SetCoverLetterBox{#1}{#5}%

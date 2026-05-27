@@ -53,7 +53,7 @@ Dann mit `{company, title, raw_description, url}` (url=None für Paste-Modi) in 
 Pro Turn in der Grilling-Schleife, in dieser Reihenfolge:
 
 1. **Lies die User-Antwort.**
-2. **Extrahiere verallgemeinerbare Signale** aus der Antwort — Aussagen, die über das aktuelle Listing hinausgehen (Domain-Fit, Match-Kriterien, Identität, Werte).
+2. **Vergleiche die Antwort mit den bestehenden Triage-Profil-Bullets** und extrahiere verallgemeinerbare Signale für `candidate-profile.md` — auch wenn sie bestehende Bullets vertiefen, differenzieren oder korrigieren, nicht nur wenn sie net-new sind.
 3. **Schreibe Profil-Updates** laut [../_shared/TRIAGE-ROUTING.md](../_shared/TRIAGE-ROUTING.md) (Routing, Conservative-Promotion, Supersede-Replace, Bullet-Stil).
 4. **Formuliere die nächste Frage** (oder gehe zur Session-Ende-Prüfung über).
 

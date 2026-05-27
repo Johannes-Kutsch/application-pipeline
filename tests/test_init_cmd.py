@@ -44,6 +44,16 @@ def _claude_template_bytes(rel: str) -> bytes:
     return node.read_bytes()
 
 
+def _claude_template_text(rel: str) -> str:
+    return _claude_template_bytes(rel).decode()
+
+
+def _analyse_listing_step_2(text: str) -> str:
+    match = re.search(r"^2\. \*\*(?P<step>.+)$", text, flags=re.MULTILINE)
+    assert match is not None
+    return match.group("step")
+
+
 _TRIAGE_PROFILE_FILES = (
     "candidate-profile.md",
     "gate-criteria.md",
@@ -795,6 +805,32 @@ def test_fresh_init_seeds_known_skill_files_with_template_content(
         dest = claude_skills / rel
         assert dest.exists(), f"expected {rel} to be seeded"
         assert dest.read_bytes() == _claude_template_bytes(f"skills/{rel}")
+
+
+def test_analyse_listing_step_2_compares_answers_against_triage_profile() -> None:
+    text = _claude_template_text("skills/analyse-listing/SKILL.md")
+
+    step = _analyse_listing_step_2(text)
+
+    assert "bestehenden Triage-Profil-Bullets" in step
+    assert "candidate-profile.md" in step
+    assert "vertiefen, differenzieren oder korrigieren" in step
+    assert "net-new" in step
+    assert "gate-criteria.md" not in step
+    assert "Domain-Fit" not in step
+    assert "Match-Kriterien" not in step
+
+
+def test_seeded_analyse_listing_step_2_keeps_enriched_profile_instruction(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    text = (_claude(tmp_path) / "skills" / "analyse-listing" / "SKILL.md").read_text()
+
+    step = _analyse_listing_step_2(text)
+
+    assert "candidate-profile.md" in step
+    assert "vertiefen, differenzieren oder korrigieren" in step
 
 
 def test_seeded_startup_triage_drops_domain_fit(tmp_path: Path) -> None:

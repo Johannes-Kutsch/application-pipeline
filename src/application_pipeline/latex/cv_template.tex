@@ -102,6 +102,35 @@
 }
 \makeatother
 
+\newsavebox{\CoverLetterBox}
+\newdimen\CoverLetterRemaining
+\newcommand{\SetCoverLetterBox}[2]{%
+  \setbox\CoverLetterBox=\vbox{%
+    \hsize=\textwidth
+    \setstretch{#1}%
+    \vspace{-1em}%
+    \justify
+    #2%
+    \par
+    \makeletterclosing
+  }%
+}
+\newcommand{\AutoCoverLetterStretch}[5]{%
+  \CoverLetterRemaining=\pagegoal
+  \advance\CoverLetterRemaining by -\pagetotal
+  \SetCoverLetterBox{#1}{#5}%
+  \ifdim\dimexpr\ht\CoverLetterBox+\dp\CoverLetterBox\relax>\CoverLetterRemaining
+    \SetCoverLetterBox{#2}{#5}%
+  \fi
+  \ifdim\dimexpr\ht\CoverLetterBox+\dp\CoverLetterBox\relax>\CoverLetterRemaining
+    \SetCoverLetterBox{#3}{#5}%
+  \fi
+  \ifdim\dimexpr\ht\CoverLetterBox+\dp\CoverLetterBox\relax>\CoverLetterRemaining
+    \SetCoverLetterBox{#4}{#5}%
+  \fi
+  \unvbox\CoverLetterBox
+}
+
 \setstretch{1}
 \begin{document}
 
@@ -124,9 +153,7 @@
 \closing{Mit freundlichen Grüßen,}
 
 \makelettertitle
-\setstretch{1.8}
-\vspace{-1em}
-\justify
+\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%
 
 <<COVER_INTRO>>
 
@@ -135,8 +162,7 @@
 <<COVER_FIT>>
 
 <<COVER_CLOSING>>
-
-\makeletterclosing
+}
 
 \ifdefstring{\BUILD}{combined}{\newpage}{}%
 }

@@ -98,15 +98,19 @@ Wenn du denkst, die großen Branches sind durch (du hast (a) ein konkretes *Waru
 Wird nur bei User-OK geschrieben. Pfad: `application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/analysis.md`.
 
 <analysis-template>
-# {Company} · {Title}
+# Job-Listing
 
-{raw_description verbatim}
+## {Company} · {Title}
+
+{neutral summary of relevant listing points — concise, non-evaluative; no reasoning about why they are relevant}
+
+---
 
 ## Why apply
 
 - <2–4 Bullets: persönliche Verbindung zu Company/Rolle — Material für den Anschreiben-Opener>
 
-## Tailoring hooks
+# Tailoring hooks
 
 ### Resonance — warum das Listing zu mir passt
 

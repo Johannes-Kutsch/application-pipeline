@@ -21,7 +21,7 @@ Siehe [../_shared/APPLICATION-FOLDER-ARG.md](../_shared/APPLICATION-FOLDER-ARG.m
 
 Lies alle Inputs in den Speicher:
 
-- `analysis.md` — Raw Description + „Why apply"-Bullets + Listing-fordert / Hook / Anekdote-Tailoring-Hooks.
+- `analysis.md` — neutraler Listing-Summary + „Why apply"-Bullets + Listing-fordert / Hook / Anekdote-Tailoring-Hooks.
 - `application-pipeline/user-info/triage-profile/*.md` — Identität + Match-Kriterien. Geladen: `candidate-profile.md`.
 - `application-pipeline/user-info/cv/writing-style.md` — Phrasing-Regeln und Cover-Strategie.
 - `application-pipeline/user-info/cv/positive-exemplars.md` — Stil-Vorbilder (vier Vorbild-Briefe).
@@ -64,7 +64,7 @@ Items werden als reine `\<itemName>`-Macro-Aufrufe in den Body geschrieben, eine
 Der `skills_block`-Slot wird mechanisch aus dem Skills-Pool zusammengesetzt — die LLM-Rolle ist ausschließlich *Auswahl*, niemals *Erfindung* von Skill-Namen. Algorithmus laut ADR-0033:
 
 1. **Pool parsen.** Lies `application-pipeline/user-info/triage-profile/skills.md` und parse die Gruppen + Items + Attribute strikt nach der ADR-0033-Grammatik (H2 = Gruppe, Bullet = Item, `{...}`-Attributblock optional am Zeilenende). Gruppen-Attribute: `always` (bare) und `<jobtype>=<high|medium|low>` Relevanzen. Item-Attribut: `always`. Unbekannte Tokens stillschweigend ignorieren. Bullets vor der ersten H2 verwerfen.
-2. **Jobtype aus dem Listing ableiten.** Bestimme den Jobtype des aktuellen Listings (z.B. `mle`, `games`, `agents`) per LLM-Judgment aus `analysis.md` (raw_description + Tailoring-Hooks). Der Jobtype-Schlüssel entspricht den Relevanz-Keys im Pool — wähle deine Bezeichnung passend zu den vorhandenen Keys.
+2. **Jobtype aus dem Listing ableiten.** Bestimme den Jobtype des aktuellen Listings (z.B. `mle`, `games`, `agents`) per LLM-Judgment aus `analysis.md` (neutraler Listing-Summary + Tailoring-Hooks). Der Jobtype-Schlüssel entspricht den Relevanz-Keys im Pool — wähle deine Bezeichnung passend zu den vorhandenen Keys.
 3. **Gruppen-Auswahl:**
    - Gruppen mit `{always}` werden **immer** in die Auswahl aufgenommen — unabhängig vom Jobtype.
    - Non-always-Gruppen: wähle null oder mehr per LLM-Judgment, basierend auf ihren Relevanz-Einträgen gegen den Listing-Jobtype (`high` ≫ `medium` ≫ `low`; Gruppen ohne passenden Relevanz-Eintrag dürfen weggelassen werden).

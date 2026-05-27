@@ -336,6 +336,24 @@ def test_compile_cv_build_cv_tex_has_substituted_content(
     assert "Firma GmbH" in content
 
 
+def test_compile_cv_cover_letter_measures_default_stretch_first(
+    app_dir: Path,
+    project_root: Path,
+    patch_subprocess: Callable[[RunFn], None],
+) -> None:
+    patch_subprocess(_fake_pdflatex_failure)
+
+    with pytest.raises(SystemExit):
+        compile_cv(app_dir)
+
+    content = (app_dir / ".build" / "cv.tex").read_text(encoding="utf-8")
+    assert (
+        r"\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%"
+        "\n\n"
+        "Ich bewerbe mich hiermit."
+    ) in content
+
+
 def test_compile_cv_cv_data_dir_uses_forward_slashes(
     app_dir: Path,
     project_root: Path,

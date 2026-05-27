@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import importlib.resources
+import re
+from pathlib import Path
 
 import pytest
+
+from application_pipeline.latex import slot_map
 
 _EXPECTED_LATEX_PACKAGE_FILES = frozenset(
     {
@@ -88,3 +92,29 @@ def test_cv_template_resume_name_uses_my_macros(cv_template: str) -> None:
         r"resume body uses \@familyname; tokenisation at outer-scope catcodes "
         r"breaks it. Use \myFamilyname instead."
     )
+
+
+def test_cv_template_reduces_cover_stretch_in_order(cv_template: str) -> None:
+    body = re.search(
+        r"\\newcommand\*\{\\AutoCoverLetterStretch\}\[5\]\{(?P<body>.*?)\\unvbox",
+        cv_template,
+        re.DOTALL,
+    )
+    assert body is not None
+    candidates = re.findall(
+        r"\\SetCoverLetterBox\{#([1-4])\}\{#5\}", body.group("body")
+    )
+    assert candidates == ["1", "2", "3", "4"]
+    assert body.group("body").count(r"\ifdim") == 3
+
+
+def test_cv_template_hardcodes_cover_stretch_minimum_without_new_slot(
+    cv_template: str,
+    tmp_path: Path,
+) -> None:
+    assert r"\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}" in cv_template
+    cv_tex = tmp_path / "cv.tex"
+    cv_tex.write_text("%% SLOT: cover_stretch\n1.5\n", encoding="utf-8")
+
+    with pytest.raises(slot_map.UnknownSlotError):
+        slot_map.parse(cv_tex)

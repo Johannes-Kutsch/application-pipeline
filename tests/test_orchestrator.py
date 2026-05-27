@@ -46,7 +46,7 @@ from application_pipeline.parsers.types import (
     Remote,
 )
 from application_pipeline.prompts import PromptError
-from application_pipeline.results import ResultsFileError
+from application_pipeline.daily_results_file import DailyResultsFile, ResultsFileError
 
 
 class _StubParserBase:
@@ -276,10 +276,13 @@ def test_results_file_error_propagates(
 ) -> None:
     config_path = _write_config(tmp_path)
 
-    def _raise(_path: Path) -> None:
-        raise ResultsFileError("cannot write")
+    class _FailInitFile(DailyResultsFile):
+        def ensure_initialized(self) -> None:
+            raise ResultsFileError("cannot write")
 
-    monkeypatch.setattr("application_pipeline.orchestrator.ensure_initialized", _raise)
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.DailyResultsFile", _FailInitFile
+    )
 
     with pytest.raises(ResultsFileError):
         run(
@@ -2168,14 +2171,19 @@ def test_parser_thread_dead_surviving_parsers_continue(tmp_path: Path) -> None:
 def test_append_failure_exits_nonzero_position_not_marked_seen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ResultsFileError from append: run raises (non-zero exit), position NOT marked seen."""
+    """ResultsFileError from commit: run raises (non-zero exit), position NOT marked seen."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
-    def _raise(_path: Path, _text: str) -> None:
-        raise ResultsFileError("disk full")
+    class _FailCommitFile(DailyResultsFile):
+        def commit(
+            self, *, rank: int, header: str, summary: str, url: str, body: str
+        ) -> None:
+            raise ResultsFileError("disk full")
 
-    monkeypatch.setattr("application_pipeline.orchestrator.append", _raise)
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.DailyResultsFile", _FailCommitFile
+    )
 
     with pytest.raises(ResultsFileError):
         run(
@@ -2379,7 +2387,7 @@ def test_fatal_error_writes_failure_report_and_exits_one(
 def test_results_write_error_propagates_from_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ResultsFileError from append in judge worker propagates from run()."""
+    """ResultsFileError from commit in judge worker propagates from run()."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -2390,10 +2398,15 @@ def test_results_write_error_propagates_from_run(
     )
     card_store = _make_card_store(tmp_path)
 
-    def _raise(_path: Path, _text: str) -> None:
-        raise ResultsFileError("disk full")
+    class _FailCommitFile(DailyResultsFile):
+        def commit(
+            self, *, rank: int, header: str, summary: str, url: str, body: str
+        ) -> None:
+            raise ResultsFileError("disk full")
 
-    monkeypatch.setattr("application_pipeline.orchestrator.append", _raise)
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.DailyResultsFile", _FailCommitFile
+    )
 
     with pytest.raises(ResultsFileError):
         run(

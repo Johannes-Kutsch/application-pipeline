@@ -1,2 +1,0 @@
-class ResultsFileError(Exception):
-    pass

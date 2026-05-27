@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from application_pipeline.daily_results_file import DailyResultsFile
-from application_pipeline.results.errors import ResultsFileError
+from application_pipeline.daily_results_file import ResultsFileError
 
 
 class _CardKwargs(TypedDict):

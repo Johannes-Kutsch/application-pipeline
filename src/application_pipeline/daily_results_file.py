@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from application_pipeline.results.errors import ResultsFileError
+
+class ResultsFileError(Exception):
+    pass
 
 
 def _render_card(rank: int, header: str, summary: str, url: str, body: str) -> str:

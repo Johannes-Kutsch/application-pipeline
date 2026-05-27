@@ -17,7 +17,7 @@ from .prompts import (
     Prompts,
     load_prompts,
 )
-from .results import ResultsFileError
+from .daily_results_file import ResultsFileError
 from .user_settings import UserSettingsError, load_user_module
 
 __all__ = [

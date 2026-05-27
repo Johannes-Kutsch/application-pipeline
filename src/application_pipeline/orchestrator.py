@@ -57,8 +57,7 @@ from application_pipeline.content_gate import ContentGate
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
-from application_pipeline.renderer import render as render
-from application_pipeline.results import ResultsFileError, append, ensure_initialized
+from application_pipeline.daily_results_file import DailyResultsFile, ResultsFileError
 from application_pipeline.search_terms import SearchTerms, load_search_terms
 
 _log = logging.getLogger(__name__)
@@ -846,8 +845,9 @@ def run(
             )
 
         daily_file_path = cfg.results_dir / f"{cron_anchored_date}.md"
+        daily_file = DailyResultsFile(daily_file_path)
         try:
-            ensure_initialized(daily_file_path)
+            daily_file.ensure_initialized()
         except ResultsFileError as exc:
             _log.error("startup failed — results file: %s", exc)
             raise
@@ -1113,11 +1113,14 @@ def run(
                         continue
                     stub = pool_collector.get_stub(verdict.id)
                     url = stub.url if stub is not None else ""
-                    rendered = render(
-                        verdict.rank, card.header, card.summary, url, card.body
-                    )
                     try:
-                        append(daily_file_path, rendered)
+                        daily_file.commit(
+                            rank=verdict.rank,
+                            header=card.header,
+                            summary=card.summary,
+                            url=url,
+                            body=card.body,
+                        )
                     except ResultsFileError as exc:
                         _log.error("daily file append failed: %s", exc)
                         raise

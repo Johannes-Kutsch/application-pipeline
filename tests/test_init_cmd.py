@@ -722,6 +722,22 @@ def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
         assert "_shared/" in text
 
 
+def test_fresh_init_seeds_iterate_cv_with_cover_strategy_routing_contract(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    text = (_ap(tmp_path) / "agent-skills" / "iterate-cv.md").read_text()
+
+    assert "Strategie-Form, Inhalt/Bogen/Beleg pro Slot" in text
+    assert "Bullet in `cv/writing-style.md` Sektion `## Cover-Strategie`" in text
+    assert "nur wenn es ein positives Vorbild" in text
+    assert "realen handgeschriebenen Brief" in text
+    assert "keine Negativ-Exemplare in `cv/writing-style.md`" in text
+    assert "abstrahiere zur Regel" in text
+    assert "verwirf den Beispiel-Satz" in text
+
+
 def test_seeded_shared_agent_skill_support_files_reference_cv_template_path(
     tmp_path: Path,
 ) -> None:
@@ -746,6 +762,21 @@ def test_refresh_overwrites_shared_agent_skill_bodies(tmp_path: Path) -> None:
     init(tmp_path, refresh=True)
 
     assert skill_body.read_bytes() == _agent_skill_template_bytes("analyse-listing.md")
+
+
+def test_refresh_overwrites_shared_iterate_cv_with_cover_strategy_routing_contract(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    skill_body = _ap(tmp_path) / "agent-skills" / "iterate-cv.md"
+    skill_body.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    text = skill_body.read_text()
+    assert "nur wenn es ein positives Vorbild" in text
+    assert "realen handgeschriebenen Brief" in text
+    assert "schlechter KI-Draft" in text
 
 
 def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:

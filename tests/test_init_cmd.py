@@ -37,6 +37,10 @@ def _skeleton_template_bytes() -> bytes:
     return _ap_template_bytes("cv-template/cv_skeleton.tex")
 
 
+def _agent_skill_template_bytes(name: str) -> bytes:
+    return _ap_template_bytes(f"agent-skills/{name}")
+
+
 def _claude_template_bytes(rel: str) -> bytes:
     node = importlib.resources.files("application_pipeline.templates") / "claude"
     for part in rel.split("/"):
@@ -678,6 +682,82 @@ def test_fresh_init_creates_cv_skeleton(tmp_path: Path) -> None:
     dest = _ap(tmp_path) / "cv-template" / "cv_skeleton.tex"
     assert dest.exists()
     assert dest.read_bytes() == _skeleton_template_bytes()
+
+
+def test_fresh_init_seeds_shared_agent_skill_bodies(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    shared_root = _ap(tmp_path) / "agent-skills"
+    expected_files = [
+        "analyse-listing.md",
+        "iterate-cv.md",
+        "write-cv.md",
+        "_shared/APPLICATION-FOLDER-ARG.md",
+        "_shared/BUILD-CONTRACT.md",
+        "_shared/CONVENTIONS.md",
+        "_shared/SLOT-MAP.md",
+        "_shared/STARTUP-APPLICATION.md",
+        "_shared/STARTUP-TRIAGE.md",
+        "_shared/STRIP-DOWN.md",
+        "_shared/TRIAGE-ROUTING.md",
+    ]
+
+    assert shared_root.is_dir()
+    assert (shared_root / "_shared").is_dir()
+    for rel in expected_files:
+        dest = shared_root / rel
+        assert dest.exists(), f"expected {rel} to be seeded"
+        assert dest.read_bytes() == _agent_skill_template_bytes(rel)
+
+
+def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    shared_root = _ap(tmp_path) / "agent-skills"
+    for rel in ("analyse-listing.md", "iterate-cv.md", "write-cv.md"):
+        text = (shared_root / rel).read_text()
+        assert "../_shared/" not in text
+        assert "_shared/" in text
+
+
+def test_seeded_shared_agent_skill_support_files_reference_cv_template_path(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    shared_root = _ap(tmp_path) / "agent-skills" / "_shared"
+
+    slot_map = (shared_root / "SLOT-MAP.md").read_text()
+    assert "application-pipeline/cv-template/cv_skeleton.tex" in slot_map
+    assert "application-pipeline/skills/cv_skeleton.tex" not in slot_map
+
+    startup = (shared_root / "STARTUP-APPLICATION.md").read_text()
+    assert "application-pipeline/cv-template/cv_skeleton.tex" in startup
+    assert "application-pipeline/skills/cv_skeleton.tex" not in startup
+
+
+def test_refresh_overwrites_shared_agent_skill_bodies(tmp_path: Path) -> None:
+    init(tmp_path)
+    skill_body = _ap(tmp_path) / "agent-skills" / "analyse-listing.md"
+    skill_body.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert skill_body.read_bytes() == _agent_skill_template_bytes("analyse-listing.md")
+
+
+def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:
+    init(tmp_path)
+    support_file = _ap(tmp_path) / "agent-skills" / "_shared" / "CONVENTIONS.md"
+    support_file.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert support_file.read_bytes() == _agent_skill_template_bytes(
+        "_shared/CONVENTIONS.md"
+    )
 
 
 def test_init_skips_existing_cv_skeleton(tmp_path: Path) -> None:

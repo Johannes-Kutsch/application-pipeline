@@ -82,7 +82,7 @@ Wenn das Grilling bisher nur Competence-Branches abgedeckt hat, frage aktiv nach
 
 ## Session-Ende
 
-Wenn du denkst, die großen Branches sind durch (du hast (a) ein konkretes *Warum gerade diese Position*, (b) **mindestens je einen Resonance- und einen Competence-Hook**, insgesamt 2–4 Tailoring-Hooks, (c) keine ungelösten Zweifel): gib den Ball zurück mit einem Draft des `analysis.md`-Inhalts inline zur Prüfung und der Frage, ob das passt oder ob noch etwas unter Druck zu setzen ist.
+Wenn du denkst, die großen Branches sind durch (du hast (a) ein konkretes *Warum gerade diese Position*, (b) **mindestens je einen Resonance- und einen Competence-Hook**, insgesamt 2–4 Tailoring-Hooks, (c) **genau einen primären Cover-Arc**, der den stärksten Mittelteil des Anschreibens tragen soll, und (d) keine ungelösten Zweifel): gib den Ball zurück mit einem Draft des `analysis.md`-Inhalts inline zur Prüfung und der Frage, ob das passt oder ob noch etwas unter Druck zu setzen ist.
 
 - **User-OK** → schreibe `application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/analysis.md` nach dem Schema unten. Überschreibe ohne Rückfrage, falls bereits vorhanden. Dann eine kurze Prosa-Zusammenfassung mit dem geschriebenen Pfad, Notiz zu Profil-Änderungen, und vorgeschlagenem `/write-cv`-Aufruf mit **vollqualifiziertem** Pfad (`application-pipeline/applications/<today>-<slug>/`), damit der User unabhängig von der CWD copy-pasten kann.
 - **Weiteres Feedback** → zurück ins Grilling, später erneut präsentieren.
@@ -104,6 +104,13 @@ Wird nur bei User-OK geschrieben. Pfad: `application-pipeline/applications/<toda
 ## Why apply
 
 - <2–4 Bullets: persönliche Verbindung zu Company/Rolle — Material für den Anschreiben-Opener>
+
+### Primary cover arc
+
+- **Primary:** <genau ein Hook — Resonance oder Competence — der den dominanten Cover-Arc für `/write-cv` trägt>
+  **Warum dieser Arc:** <warum dieser Hook der stärkste rote Faden ist und die anderen Hooks nur stützen>
+  **Supporting hooks:** <kommagetrennte Liste der Hooks, die denselben Arc stützen und in Cover/Resume/Skills mitlaufen können; `none`, falls keine>
+  **Unused hooks:** <kommagetrennte Liste übriger Hooks, die bewusst erhalten bleiben für Resume, Skills oder spätere Iteration; `none`, falls keine>
 
 # Tailoring hooks
 

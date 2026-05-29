@@ -16,7 +16,7 @@ Siehe [_shared/APPLICATION-FOLDER-ARG.md](_shared/APPLICATION-FOLDER-ARG.md).
 
 Lies alle Inputs in den Speicher:
 
-- `analysis.md` — neutraler Listing-Summary + „Why apply"-Bullets + Listing-fordert / Hook / Anekdote-Tailoring-Hooks.
+- `analysis.md` — neutraler Listing-Summary + „Why apply"-Bullets + `Primary cover arc` (ein primärer Arc mit Supporting/Unused-Hooks) + Listing-fordert / Hook / Anekdote-Tailoring-Hooks.
 - `application-pipeline/user-info/triage-profile/*.md` — Identität + Match-Kriterien. Geladen: `candidate-profile.md`.
 - `application-pipeline/user-info/cv/writing-style.md` — Phrasing-Regeln und Cover-Strategie.
 - `application-pipeline/user-info/cv/positive-exemplars.md` — Stil-Vorbilder (vier Vorbild-Briefe).
@@ -34,7 +34,7 @@ Format-Spec, Header-Form, Body-Semantik und Slot-Listen-Source-of-Truth: siehe [
 - Der Beispiel-Body im Skelett ist Format-by-Example: Stil, TeX-Konstrukte (`\href`, `\textit`, `\cventry`, …) und Mehrzeiligkeit zeigen, wie der echte Body aussehen soll. Nicht den Beispiel-Body wörtlich kopieren.
 - Die Prompt-Guidance-Kommentare aus dem Skelett werden **nicht** in `cv.tex` übernommen — die emittierte Datei enthält nur Slot-Header und Body.
 
-**Cover-Paragraph-Slots (`cover_intro`, `cover_pivot`, `cover_fit`, `cover_closing`) und `opening`:** Stimme und Strategie laut `cv/writing-style.md` (inkl. Sektion `## Cover-Strategie`) und `cv/positive-exemplars.md`. Geerdet in den „Why apply"-Bullets aus `analysis.md` und den Tailoring-Hooks. Erfinde **keine** Fakten; jede Behauptung lässt sich auf `analysis.md` oder eine Triage-Profil-Datei zurückführen.
+**Cover-Paragraph-Slots (`cover_intro`, `cover_pivot`, `cover_fit`, `cover_closing`) und `opening`:** Stimme und Strategie laut `cv/writing-style.md` (inkl. Sektion `## Cover-Strategie`) und `cv/positive-exemplars.md`. Nutze den `Primary cover arc` aus `analysis.md` als dominanten roten Faden; `Supporting hooks` dürfen ihn stützen, `Unused hooks` bleiben für Resume, Skills oder spätere Iteration liegen. Geerdet in den „Why apply"-Bullets aus `analysis.md` und den Tailoring-Hooks. Erfinde **keine** Fakten; jede Behauptung lässt sich auf `analysis.md` oder eine Triage-Profil-Datei zurückführen.
 
 **Recipient-Slots:** Empfänger-Infos aus `analysis.md` ziehen. Slot-Semantik komplett laut Skeleton-Guidance.
 

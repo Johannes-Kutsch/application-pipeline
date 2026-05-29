@@ -1,8 +1,5 @@
 # Positive Exemplars
 
-Stil-Vorbilder als Bullet-Snippets aus handgeschriebenen Briefen. Neue Einträge hier ablegen, wenn der Ton eines Briefes als besonders gelungen gilt.
+Store positive-only style snippets from handwritten cover letters here. Negative examples do not belong here.
 
-Keine Negativ-Exemplare — schlechte Beispiele gehören nicht hierher.
-
-## Exemplare
-
+## Exemplars

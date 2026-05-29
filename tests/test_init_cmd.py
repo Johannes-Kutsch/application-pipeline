@@ -372,6 +372,32 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
         assert dest.read_bytes() == _cv_template_bytes(fname)
 
 
+def test_init_seeds_cv_style_files_with_cover_strategy_layout(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    writing_style = (
+        _ap(tmp_path) / "user-info" / "cv" / "writing-style.md"
+    ).read_text()
+    positive_exemplars = (
+        _ap(tmp_path) / "user-info" / "cv" / "positive-exemplars.md"
+    ).read_text()
+
+    for heading in (
+        "# Writing Style",
+        "## Voice",
+        "## Do",
+        "## Don't",
+        "## Register",
+        "## Cover Strategy",
+    ):
+        assert heading in writing_style
+
+    assert "Concrete exemplars do not belong here." in writing_style
+    assert "Negative examples do not belong here." in positive_exemplars
+    assert "negative examples do not belong" not in writing_style.lower()
+    assert "## Negative Exemplars" not in positive_exemplars
+
+
 def test_init_seeds_subdirs_under_user_info(tmp_path: Path) -> None:
     init(tmp_path)
 
@@ -807,6 +833,21 @@ def test_refresh_preserves_user_info_when_skills_exist(tmp_path: Path) -> None:
     assert (
         _ap(tmp_path) / "user-info" / "triage-profile" / "candidate-profile.md"
     ).read_text() == custom_user_info
+
+
+def test_refresh_preserves_operator_owned_cv_style_files(tmp_path: Path) -> None:
+    init(tmp_path)
+    writing_style = _ap(tmp_path) / "user-info" / "cv" / "writing-style.md"
+    positive_exemplars = _ap(tmp_path) / "user-info" / "cv" / "positive-exemplars.md"
+    custom_writing_style = "# my writing rules\n"
+    custom_positive_exemplars = "# my exemplars\n"
+    writing_style.write_text(custom_writing_style)
+    positive_exemplars.write_text(custom_positive_exemplars)
+
+    init(tmp_path, refresh=True)
+
+    assert writing_style.read_text() == custom_writing_style
+    assert positive_exemplars.read_text() == custom_positive_exemplars
 
 
 # --- legacy <cwd>/application-pipeline/skills/ cleanup on refresh ---

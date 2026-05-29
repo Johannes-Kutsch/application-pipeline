@@ -116,6 +116,9 @@ def _assert_write_cv_primary_cover_arc_usage(text: str) -> None:
 
 def _assert_write_cv_cover_strategy_contract(text: str) -> None:
     _assert_write_cv_primary_cover_arc_usage(text)
+    assert "application-pipeline/user-info/cv/cover-patterns.md" in text
+    assert "application-pipeline/user-info/cv/writing-style.md" not in text
+    assert "application-pipeline/user-info/cv/positive-exemplars.md" not in text
     assert "persönlicher, listingspezifischer Resonanz-Hook" in text
     assert "keine Mehrfach-Nennung von Projektnamen im Opener" in text
     assert "ein dominanter Capability-Arc" in text
@@ -135,10 +138,7 @@ _TRIAGE_PROFILE_FILES = (
     "skills.md",
 )
 
-_CV_MD_FILES = (
-    "writing-style.md",
-    "positive-exemplars.md",
-)
+_CV_MD_FILES = ("cover-patterns.md",)
 
 _USER_INFO_ROOT_FILES = (
     "search-terms/keywords.md",
@@ -445,30 +445,18 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
         assert dest.read_bytes() == _cv_template_bytes(fname)
 
 
-def test_init_seeds_cv_style_files_with_cover_strategy_layout(tmp_path: Path) -> None:
+def test_init_seeds_cover_patterns_template(tmp_path: Path) -> None:
     init(tmp_path)
 
-    writing_style = (
-        _ap(tmp_path) / "user-info" / "cv" / "writing-style.md"
-    ).read_text()
-    positive_exemplars = (
-        _ap(tmp_path) / "user-info" / "cv" / "positive-exemplars.md"
+    cover_patterns = (
+        _ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md"
     ).read_text()
 
-    for heading in (
-        "# Writing Style",
-        "## Voice",
-        "## Do",
-        "## Don't",
-        "## Register",
-        "## Cover Strategy",
-    ):
-        assert heading in writing_style
-
-    assert "Concrete exemplars do not belong here." in writing_style
-    assert "Negative examples do not belong here." in positive_exemplars
-    assert "negative examples do not belong" not in writing_style.lower()
-    assert "## Negative Exemplars" not in positive_exemplars
+    assert "# Cover Paragraph Patterns" in cover_patterns
+    assert "## Product Resonance Intro" in cover_patterns
+    assert "- slot: cover_intro" in cover_patterns
+    assert "- argument_type: resonance" in cover_patterns
+    assert "- placeholders: Musterfirma, Musterprodukt, Musterprojekt" in cover_patterns
 
 
 def test_init_seeds_subdirs_under_user_info(tmp_path: Path) -> None:
@@ -966,35 +954,27 @@ def test_refresh_preserves_user_info_when_skills_exist(tmp_path: Path) -> None:
     ).read_text() == custom_user_info
 
 
-def test_refresh_preserves_operator_owned_cv_style_files(tmp_path: Path) -> None:
+def test_refresh_preserves_operator_owned_cover_patterns(tmp_path: Path) -> None:
     init(tmp_path)
-    writing_style = _ap(tmp_path) / "user-info" / "cv" / "writing-style.md"
-    positive_exemplars = _ap(tmp_path) / "user-info" / "cv" / "positive-exemplars.md"
-    custom_writing_style = "# my writing rules\n"
-    custom_positive_exemplars = "# my exemplars\n"
-    writing_style.write_text(custom_writing_style)
-    positive_exemplars.write_text(custom_positive_exemplars)
+    cover_patterns = _ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md"
+    custom_cover_patterns = "# my cover patterns\n"
+    cover_patterns.write_text(custom_cover_patterns)
 
     init(tmp_path, refresh=True)
 
-    assert writing_style.read_text() == custom_writing_style
-    assert positive_exemplars.read_text() == custom_positive_exemplars
+    assert cover_patterns.read_text() == custom_cover_patterns
 
 
-def test_refresh_seeds_missing_cv_style_file_without_overwriting_existing_peer(
+def test_refresh_seeds_missing_cover_patterns_file(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
-    writing_style = _ap(tmp_path) / "user-info" / "cv" / "writing-style.md"
-    positive_exemplars = _ap(tmp_path) / "user-info" / "cv" / "positive-exemplars.md"
-    custom_positive_exemplars = "# my exemplars\n"
-    positive_exemplars.write_text(custom_positive_exemplars)
-    writing_style.unlink()
+    cover_patterns = _ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md"
+    cover_patterns.unlink()
 
     init(tmp_path, refresh=True)
 
-    assert writing_style.read_bytes() == _cv_template_bytes("writing-style.md")
-    assert positive_exemplars.read_text() == custom_positive_exemplars
+    assert cover_patterns.read_bytes() == _cv_template_bytes("cover-patterns.md")
 
 
 # --- legacy <cwd>/application-pipeline/skills/ cleanup on refresh ---

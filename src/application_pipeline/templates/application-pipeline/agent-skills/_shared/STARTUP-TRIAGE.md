@@ -8,8 +8,7 @@ Verifiziere, dass `application-pipeline/user-info/triage-profile/` relativ zur C
 
 Verifiziere außerdem, dass `application-pipeline/user-info/cv/` folgende Files enthält:
 
-- `writing-style.md`
-- `positive-exemplars.md`
+- `cover-patterns.md`
 
 Bei einem Miss: dem User in eigenen Worten sagen, welche Datei fehlt und dass `application-pipeline init --refresh` sie initialisiert. Dann stopp.
 </startup-checks>

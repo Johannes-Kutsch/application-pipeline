@@ -52,7 +52,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Skill Group**: H2 heading in `skills.md` (ADR-0025) — also `\cvitem{<group>}{...}` label. Unit of LLM selection for `/write-cv`: always-groups render; others picked by relevance. File order = render order. Empty groups collapse silently. _Avoid_: skill category, section (overloaded).
 
-**Agent Skills**: Claude-Code agent workflows under `<cwd>/.claude/skills/` (ADR-0035). Four dirs: `_shared/`, `analyse-listing/`, `iterate-cv/`, `write-cv/`. Source of truth in `src/application_pipeline/templates/claude/skills/`. Refresh overwrites package-owned dirs; user-added dirs survive. _Avoid_: subagents, prompts (overloaded).
+**Agent Skills**: Tool-consumed agent workflows seeded by `init` (ADR-0035, ADR-0048). Package-owned workflow bodies live as shared markdown files in `<cwd>/application-pipeline/agent-skills/`: `analyse-listing.md`, `iterate-cv.md`, `write-cv.md`, plus support files in `agent-skills/_shared/`. Claude receives frontmatter wrappers under `<cwd>/.claude/skills/<workflow>/SKILL.md`; Codex receives frontmatter wrappers under `<cwd>/.codex/skills/<workflow>/SKILL.md`. Wrappers read the corresponding shared body via `../../../application-pipeline/agent-skills/<workflow>.md`. Refresh overwrites shared bodies and package-owned wrappers; user-added dirs survive. `application-pipeline/skills/` remains retired legacy path. _Avoid_: subagents, prompts (overloaded).
 
 **Keyword**: Search term from `SearchTerms.KEYWORDS` (ADR-0021). Distinct from **Skill** and **Negative Keyword**. _Avoid_: skill (when querying).
 
@@ -161,7 +161,7 @@ Distributed via PyPI (ADR-0020). Install: `.venv/bin/pip install application-pip
 - `application-pipeline init [--refresh]` seeds into `<cwd>/application-pipeline/`.
 - `application-pipeline compile-cv <app_dir>` compiles per-listing draft from slot-map. Windows paths normalized to POSIX for `\def\CvDataDir{...}` (ADR-0024, ADR-0023).
 
-Fail loud-and-fast (exit 2) if `config.py` missing. Cron weekdays 00:30 (ADR-0017). Each tick: `pip install --upgrade` (×2), `init --refresh`, `run`. **`init --refresh`** overwrites `setup/*.sh`, `cv-template/`, package-owned `.claude/skills/` dirs (ADR-0035), deletes `layout.py` (ADR-0033) and obsolete `skills/` dir (ADR-0035). Seeds-if-missing for `config.py`, `user-info/*`, `.gitignore` (ADR-0037). Never touches `.runtime-data/`. Templates organised into routing buckets (ADR-0035). No flock — single-writer on the Pi, overlapping ticks cannot occur. `pycastle/` in this repo is an unrelated RALPH Loop plugin used to *build* this project.
+Fail loud-and-fast (exit 2) if `config.py` missing. Cron weekdays 00:30 (ADR-0017). Each tick: `pip install --upgrade` (×2), `init --refresh`, `run`. **`init --refresh`** overwrites `setup/*.sh`, `cv-template/`, package-owned shared **Agent Skills** bodies, and package-owned Claude/Codex wrappers (ADR-0035, ADR-0048), deletes `layout.py` (ADR-0033) and obsolete `skills/` dir (ADR-0035). Seeds-if-missing for `config.py`, `user-info/*`, `.gitignore` (ADR-0037). Never touches `.runtime-data/`. Templates organised into routing buckets (ADR-0035). No flock — single-writer on the Pi, overlapping ticks cannot occur. `pycastle/` in this repo is an unrelated RALPH Loop plugin used to *build* this project.
 
 ## Relationships
 

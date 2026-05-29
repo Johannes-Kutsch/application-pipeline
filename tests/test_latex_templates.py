@@ -115,6 +115,29 @@ def test_cv_template_cover_stretch_accepts_paragraph_slots(cv_template: str) -> 
     assert r"\newcommand*{\SetCoverLetterBox}" not in cv_template
 
 
+def test_cv_template_opening_intro_gap_stays_outside_flex_stretch(
+    cv_template: str,
+) -> None:
+    fixed_gap = (
+        r"\makelettertitle"
+        "\n"
+        r"\setstretch{1.8}"
+        "\n"
+        r"\vspace{-1em}"
+        "\n"
+        r"\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%"
+    )
+    assert fixed_gap in cv_template
+
+    set_box = re.search(
+        r"\\newcommand\{\\SetCoverLetterBox\}\[2\]\{(?P<body>.*?)\\makeletterclosing",
+        cv_template,
+        re.DOTALL,
+    )
+    assert set_box is not None
+    assert r"\vspace{-1em}" not in set_box.group("body")
+
+
 def test_cv_template_hardcodes_cover_stretch_minimum_without_new_slot(
     cv_template: str,
     tmp_path: Path,

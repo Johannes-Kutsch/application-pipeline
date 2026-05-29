@@ -114,6 +114,21 @@ def _assert_write_cv_primary_cover_arc_usage(text: str) -> None:
     )
 
 
+def _assert_write_cv_cover_strategy_contract(text: str) -> None:
+    _assert_write_cv_primary_cover_arc_usage(text)
+    assert "persönlicher, listingspezifischer Resonanz-Hook" in text
+    assert "keine Mehrfach-Nennung von Projektnamen im Opener" in text
+    assert "ein dominanter Capability-Arc" in text
+    assert "höchstens zwei Evidence-Anchors" in text
+    assert "Octofox, pycastle und application-pipeline" in text
+    assert "selektierbare Evidence-Anchors" in text
+    assert "nicht feste Absatz-Slots" in text
+    assert (
+        "Weitere Projekte bleiben für Resume-Slots, Skills-Block oder spätere Iteration"
+        in text
+    )
+
+
 _TRIAGE_PROFILE_FILES = (
     "candidate-profile.md",
     "gate-criteria.md",
@@ -882,6 +897,12 @@ def test_write_cv_template_reads_primary_cover_strategy_arc_from_analysis() -> N
     text = _agent_skill_template_bytes("write-cv.md").decode()
 
     _assert_write_cv_primary_cover_arc_usage(text)
+
+
+def test_write_cv_template_follows_cover_strategy_contract() -> None:
+    text = _agent_skill_template_bytes("write-cv.md").decode()
+
+    _assert_write_cv_cover_strategy_contract(text)
 
 
 def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:

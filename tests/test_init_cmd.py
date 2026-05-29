@@ -893,6 +893,43 @@ def test_write_cv_template_follows_cover_strategy_contract() -> None:
     _assert_write_cv_cover_strategy_contract(text)
 
 
+def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None:
+    text = _agent_skill_template_bytes("write-cv.md").decode()
+
+    # Opening is automatic; cover prose slots are interactive
+    assert "Kein User-Loop fuer `opening`" in text
+    assert "`cv.tex` erst schreiben, wenn alle vier Slots bestaetigt sind" in text
+
+    # Per-slot loop: one pattern match offer, then three typed alternatives
+    assert "Cover Paragraph Pattern" in text
+    assert "genau **einen** Vorschlag als **Cover Paragraph Pattern**-Match" in text
+    assert "genau **drei** Alternativen" in text
+    assert "anderen** `argument_type`" in text
+    assert "voll ausformulierter Absatz gezeigt, nicht als Outline" in text
+
+    # Pattern save rules: significant new only, during main loop or on explicit request
+    assert "signifikant neu" in text
+    assert "auf expliziten User-Wunsch" in text
+
+    # cover-patterns.md exclusions during shortening loop
+    assert (
+        "Post-Build-Shortening-Loop schreibt **nie** nach `cover-patterns.md`" in text
+    )
+    assert (
+        "Resume-Overflow bleibt automatisch; nur Cover-Prosa wird interaktiv verkuerzt"
+        in text
+    )
+
+    # Interactive Cover Shortening shows full variants
+    assert "Interactive Cover Shortening" in text
+    assert "verkuerzten Varianten **vollstaendig** in Prosa" in text
+
+    # Success report must not recommend /iterate-cv as normal next step
+    assert (
+        "Empfiehl `/iterate-cv` dabei **nicht** als normalen naechsten Schritt" in text
+    )
+
+
 def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:
     init(tmp_path)
     support_file = _ap(tmp_path) / "agent-skills" / "_shared" / "CONVENTIONS.md"

@@ -738,6 +738,28 @@ def test_seeded_shared_agent_skill_support_files_reference_cv_template_path(
     assert "application-pipeline/skills/cv_skeleton.tex" not in startup
 
 
+def test_refresh_overwrites_shared_agent_skill_bodies(tmp_path: Path) -> None:
+    init(tmp_path)
+    skill_body = _ap(tmp_path) / "agent-skills" / "analyse-listing.md"
+    skill_body.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert skill_body.read_bytes() == _agent_skill_template_bytes("analyse-listing.md")
+
+
+def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:
+    init(tmp_path)
+    support_file = _ap(tmp_path) / "agent-skills" / "_shared" / "CONVENTIONS.md"
+    support_file.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert support_file.read_bytes() == _agent_skill_template_bytes(
+        "_shared/CONVENTIONS.md"
+    )
+
+
 def test_init_skips_existing_cv_skeleton(tmp_path: Path) -> None:
     ap = _ap(tmp_path)
     (ap / "cv-template").mkdir(parents=True)

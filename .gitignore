@@ -1,5 +1,6 @@
 *.idea
 *.claude
+*.codex
 pycastle/
 application-pipeline/
 !src/application_pipeline/templates/application-pipeline/

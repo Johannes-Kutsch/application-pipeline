@@ -748,6 +748,21 @@ def test_refresh_overwrites_shared_agent_skill_bodies(tmp_path: Path) -> None:
     assert skill_body.read_bytes() == _agent_skill_template_bytes("analyse-listing.md")
 
 
+def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:
+    text = _agent_skill_template_bytes("analyse-listing.md").decode()
+
+    assert "### Primary cover arc" in text
+    assert "**Primary:**" in text
+    assert "/write-cv" in text
+
+
+def test_write_cv_template_reads_primary_cover_strategy_arc_from_analysis() -> None:
+    text = _agent_skill_template_bytes("write-cv.md").decode()
+
+    assert "Primary cover arc" in text
+    assert "analysis.md" in text
+
+
 def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:
     init(tmp_path)
     support_file = _ap(tmp_path) / "agent-skills" / "_shared" / "CONVENTIONS.md"

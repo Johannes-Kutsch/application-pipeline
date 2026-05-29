@@ -6,7 +6,7 @@ from pathlib import Path
 
 _PATTERN_HEADER_RE = re.compile(r"^## (.+)$", re.MULTILINE)
 _METADATA_RE = re.compile(r"^- ([a-z_]+):\s*(.+)$")
-_PLACEHOLDER_RE = re.compile(r"\b(Muster[A-Za-z]+)\b")
+_PLACEHOLDER_RE = re.compile(r"\b(Muster[^\W\d_]+)\b")
 _SENTENCE_RE = re.compile(r"[.!?](?:\s|$)")
 
 _REQUIRED_METADATA = frozenset(
@@ -29,7 +29,8 @@ _VALID_PLACEHOLDERS = frozenset(
         "Musterteam",
         "Musteraufgabe",
         "Musterbranche",
-        "Musterdomain",
+        "Musterdomäne",
+        "Mustertechnologie",
         "Musterziel",
         "Musterort",
         "Musterkontakt",

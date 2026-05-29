@@ -145,6 +145,45 @@ def test_parse_rejects_invalid_cover_patterns(text: str, message: str) -> None:
         parse(textwrap.dedent(text))
 
 
+@pytest.mark.parametrize(
+    "placeholder",
+    ["Musterdomäne", "Mustertechnologie"],
+)
+def test_parse_accepts_canonical_placeholder_vocabulary(placeholder: str) -> None:
+    text = textwrap.dedent(
+        f"""\
+        ## Vocab Pattern
+        - slot: cover_intro
+        - argument_type: resonance
+        - use_when: When the domain maps clearly.
+        - placeholders: Musterfirma, {placeholder}
+        - why_it_works: It ties employer context to candidate evidence.
+
+        Bei Musterfirma reizt mich besonders die Arbeit im Bereich {placeholder}. Diese Verbindung habe ich bereits konkret erlebt und möchte sie weiterentwickeln.
+        """
+    )
+    result = parse(text)
+    assert len(result) == 1
+    assert placeholder in result[0].placeholders
+
+
+def test_parse_detects_umlaut_placeholder_as_undeclared_in_text() -> None:
+    text = textwrap.dedent(
+        """\
+        ## Umlaut Undeclared
+        - slot: cover_intro
+        - argument_type: resonance
+        - use_when: When domain matches.
+        - placeholders: Musterfirma
+        - why_it_works: It is specific.
+
+        Bei Musterfirma reizt mich die Arbeit in der Musterdomäne besonders. Diese Verbindung habe ich bereits konkret erlebt und möchte sie aktiv weiterentwickeln.
+        """
+    )
+    with pytest.raises(CoverPatternError, match="undeclared placeholders in text"):
+        parse(text)
+
+
 @pytest.mark.parametrize("seed", [None, "", "   \n"])
 def test_load_tolerates_missing_or_empty_cover_patterns(
     seed: str | None, tmp_path: Path

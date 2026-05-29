@@ -850,6 +850,22 @@ def test_refresh_preserves_operator_owned_cv_style_files(tmp_path: Path) -> None
     assert positive_exemplars.read_text() == custom_positive_exemplars
 
 
+def test_refresh_seeds_missing_cv_style_file_without_overwriting_existing_peer(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    writing_style = _ap(tmp_path) / "user-info" / "cv" / "writing-style.md"
+    positive_exemplars = _ap(tmp_path) / "user-info" / "cv" / "positive-exemplars.md"
+    custom_positive_exemplars = "# my exemplars\n"
+    positive_exemplars.write_text(custom_positive_exemplars)
+    writing_style.unlink()
+
+    init(tmp_path, refresh=True)
+
+    assert writing_style.read_bytes() == _cv_template_bytes("writing-style.md")
+    assert positive_exemplars.read_text() == custom_positive_exemplars
+
+
 # --- legacy <cwd>/application-pipeline/skills/ cleanup on refresh ---
 
 

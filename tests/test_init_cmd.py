@@ -48,16 +48,6 @@ def _claude_template_bytes(rel: str) -> bytes:
     return node.read_bytes()
 
 
-def _claude_template_text(rel: str) -> str:
-    return _claude_template_bytes(rel).decode()
-
-
-def _analyse_listing_step_2(text: str) -> str:
-    match = re.search(r"^2\. \*\*(?P<step>.+)$", text, flags=re.MULTILINE)
-    assert match is not None
-    return match.group("step")
-
-
 def _skill_frontmatter(text: str) -> tuple[str, str]:
     match = re.match(
         r"^---\nname: (?P<name>[^\n]+)\ndescription: (?P<description>[^\n]+)\n---\n",
@@ -91,8 +81,6 @@ _LATEX_USER_INFO_FILES = (
     "profile.png",
     "signature.png",
 )
-
-_PKG_SKILL_DIRS = ("analyse-listing", "iterate-cv", "write-cv")
 
 
 def _ap(tmp: Path) -> Path:
@@ -965,6 +953,24 @@ def test_refresh_preserves_unknown_files_inside_package_owned_skill_dirs(
 
     init(tmp_path, refresh=True)
 
+    assert notes.read_text() == "# wip\n"
+
+
+def test_refresh_restores_missing_wrapper_and_preserves_neighboring_user_files(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    skill_dir = _claude(tmp_path) / "skills" / "iterate-cv"
+    skill_file = skill_dir / "SKILL.md"
+    notes = skill_dir / "notes.md"
+    notes.write_text("# wip\n")
+    skill_file.unlink()
+
+    init(tmp_path, refresh=True)
+
+    assert skill_file.read_bytes() == _claude_template_bytes(
+        "skills/iterate-cv/SKILL.md"
+    )
     assert notes.read_text() == "# wip\n"
 
 

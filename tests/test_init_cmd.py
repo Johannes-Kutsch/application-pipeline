@@ -58,6 +58,36 @@ def _analyse_listing_step_2(text: str) -> str:
     return match.group("step")
 
 
+def _assert_primary_cover_arc_contract(text: str) -> None:
+    match = re.search(
+        r"^### Primary cover arc\n(?P<body>.*?)(?=^# Tailoring hooks$)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None
+
+    body = match.group("body")
+    assert "**Primary:**" in body
+    assert "**Warum dieser Arc:**" in body
+    assert "**Supporting hooks:**" in body
+    assert "**Unused hooks:**" in body
+    assert "Resume, Skills oder spätere Iteration" in body
+    assert body.count("`none`") == 2
+
+
+def _assert_write_cv_primary_cover_arc_usage(text: str) -> None:
+    assert (
+        'analysis.md` — neutraler Listing-Summary + „Why apply"-Bullets + '
+        "`Primary cover arc` (ein primärer Arc mit Supporting/Unused-Hooks)"
+    ) in text
+    assert "Nutze den `Primary cover arc` aus `analysis.md`" in text
+    assert "`Supporting hooks` dürfen ihn stützen" in text
+    assert (
+        "`Unused hooks` bleiben für Resume, Skills oder spätere Iteration liegen"
+        in text
+    )
+
+
 _TRIAGE_PROFILE_FILES = (
     "candidate-profile.md",
     "gate-criteria.md",
@@ -751,16 +781,22 @@ def test_refresh_overwrites_shared_agent_skill_bodies(tmp_path: Path) -> None:
 def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:
     text = _agent_skill_template_bytes("analyse-listing.md").decode()
 
-    assert "### Primary cover arc" in text
-    assert "**Primary:**" in text
-    assert "/write-cv" in text
+    _assert_primary_cover_arc_contract(text)
+
+
+def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    text = (_ap(tmp_path) / "agent-skills" / "analyse-listing.md").read_text()
+    _assert_primary_cover_arc_contract(text)
 
 
 def test_write_cv_template_reads_primary_cover_strategy_arc_from_analysis() -> None:
     text = _agent_skill_template_bytes("write-cv.md").decode()
 
-    assert "Primary cover arc" in text
-    assert "analysis.md" in text
+    _assert_write_cv_primary_cover_arc_usage(text)
 
 
 def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:

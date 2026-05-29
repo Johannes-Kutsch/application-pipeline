@@ -63,6 +63,12 @@ def _codex_template_text(rel: str) -> str:
     return _codex_template_bytes(rel).decode()
 
 
+def _front_matter_field(text: str, field: str) -> str:
+    match = re.search(rf"^{field}: .+$", text, flags=re.MULTILINE)
+    assert match is not None
+    return match.group(0)
+
+
 def _analyse_listing_step_2(text: str) -> str:
     match = re.search(r"^2\. \*\*(?P<step>.+)$", text, flags=re.MULTILINE)
     assert match is not None
@@ -889,10 +895,12 @@ def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
 
         codex_text = wrapper.read_text()
         claude_text = _claude_template_text(f"skills/{d}/SKILL.md")
-        desc_match = re.search(r"^description: .+$", claude_text, flags=re.MULTILINE)
-        assert desc_match is not None
-        assert f"name: {d}" in codex_text
-        assert desc_match.group(0) in codex_text
+        assert _front_matter_field(codex_text, "name") == _front_matter_field(
+            claude_text, "name"
+        )
+        assert _front_matter_field(codex_text, "description") == _front_matter_field(
+            claude_text, "description"
+        )
         assert f"../../../application-pipeline/agent-skills/{d}.md" in codex_text
 
     assert not (_ap(tmp_path) / ".codex").exists()

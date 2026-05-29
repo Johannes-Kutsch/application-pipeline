@@ -52,6 +52,17 @@ def _claude_template_text(rel: str) -> str:
     return _claude_template_bytes(rel).decode()
 
 
+def _codex_template_bytes(rel: str) -> bytes:
+    node = importlib.resources.files("application_pipeline.templates") / "codex"
+    for part in rel.split("/"):
+        node = node / part
+    return node.read_bytes()
+
+
+def _codex_template_text(rel: str) -> str:
+    return _codex_template_bytes(rel).decode()
+
+
 def _analyse_listing_step_2(text: str) -> str:
     match = re.search(r"^2\. \*\*(?P<step>.+)$", text, flags=re.MULTILINE)
     assert match is not None
@@ -92,6 +103,10 @@ def _ap(tmp: Path) -> Path:
 
 def _claude(tmp: Path) -> Path:
     return tmp / ".claude"
+
+
+def _codex(tmp: Path) -> Path:
+    return tmp / ".codex"
 
 
 def test_first_bootstrap_writes_config(tmp_path: Path) -> None:
@@ -855,6 +870,67 @@ def test_refresh_with_no_legacy_skills_dir_is_silent(
 
     out = capsys.readouterr().out
     assert "removed skills/" not in out
+
+
+# --- .codex/skills/ seeding (issue #689) ---
+
+
+def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    codex_skills = _codex(tmp_path) / "skills"
+    assert codex_skills.is_dir()
+    for d in ("analyse-listing", "iterate-cv", "write-cv"):
+        wrapper = codex_skills / d / "SKILL.md"
+        assert wrapper.exists(), f"{d}/SKILL.md missing"
+        assert wrapper.read_bytes() == _codex_template_bytes(f"skills/{d}/SKILL.md")
+
+        codex_text = wrapper.read_text()
+        claude_text = _claude_template_text(f"skills/{d}/SKILL.md")
+        desc_match = re.search(r"^description: .+$", claude_text, flags=re.MULTILINE)
+        assert desc_match is not None
+        assert f"name: {d}" in codex_text
+        assert desc_match.group(0) in codex_text
+        assert f"../../../application-pipeline/agent-skills/{d}.md" in codex_text
+
+    assert not (_ap(tmp_path) / ".codex").exists()
+
+
+def test_refresh_overwrites_package_owned_codex_skill_files(tmp_path: Path) -> None:
+    init(tmp_path)
+    skill_file = _codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md"
+    skill_file.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert skill_file.read_bytes() == _codex_template_bytes(
+        "skills/analyse-listing/SKILL.md"
+    )
+
+
+def test_refresh_preserves_user_added_codex_skill_dirs(tmp_path: Path) -> None:
+    init(tmp_path)
+    custom = _codex(tmp_path) / "skills" / "my-skill"
+    custom.mkdir(parents=True, exist_ok=True)
+    (custom / "SKILL.md").write_text("# my private skill\n")
+
+    init(tmp_path, refresh=True)
+
+    assert (custom / "SKILL.md").read_text() == "# my private skill\n"
+
+
+def test_refresh_preserves_unknown_files_inside_package_owned_codex_skill_dirs(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    notes = _codex(tmp_path) / "skills" / "iterate-cv" / "notes.md"
+    notes.write_text("# wip\n")
+
+    init(tmp_path, refresh=True)
+
+    assert notes.read_text() == "# wip\n"
 
 
 # --- .claude/skills/ seeding (ADR-0044) ---

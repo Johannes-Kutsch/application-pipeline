@@ -134,6 +134,7 @@ class ParserIntakeHarness:
         body: str = DEFAULT_BODY,
         parser: Parser | None = None,
         domain_pre_filter: PreFilterGate | None = None,
+        negative_keywords: list[str] | None = None,
     ) -> "ParserIntakeHarness":
         seen_path = tmp_path / ".seen.json"
         extracts_path = tmp_path / "extracts.json"
@@ -153,7 +154,7 @@ class ParserIntakeHarness:
         )
         content_gate = ContentGate(display=status_display, run_log=run_log)
         configured_pre_filter = domain_pre_filter or PreFilterGate(
-            blacklist=[],
+            blacklist=[] if negative_keywords is None else negative_keywords,
             dedup=dedup_store,
             display=status_display,
             run_log=run_log,
@@ -322,6 +323,9 @@ class ParserIntakeHarness:
     def dedup_status(self, listing_id: int) -> str | None:
         record = self.dedup_observation(listing_id)
         return None if record is None else record.status
+
+    def listing_id_for_url(self, url: str) -> int | None:
+        return self.dedup_store.listing_id_for(url)
 
     def dedup_observation(self, listing_id: int) -> DeduplicationObservation | None:
         record = self.dedup_store._records.get(listing_id)

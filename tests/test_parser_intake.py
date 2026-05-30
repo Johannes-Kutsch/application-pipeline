@@ -21,7 +21,6 @@ from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
 from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError, EnrichResult
-from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.run_metrics import RunMetrics
 from tests.parser_intake_harness import ParserIntakeHarness
 
@@ -425,9 +424,6 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_sto
 def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_keeps_listing_id(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     stub = PositionStub(
         url="https://example.com/blacklisted",
         title="Senior Python Developer",
@@ -436,54 +432,30 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
         location="Hamburg",
         posted_date=date(2026, 5, 29),
     )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    display = FakeStatusDisplay()
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
+        discovered_stub=stub,
+        enriched_stub=stub,
         parser=_UnexpectedEnrichParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=display,
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=PreFilterGate(
-            blacklist=["python"],
-            dedup=dedup_store,
-            display=display,
-            run_log=run_log,
-        ),
-        content_gate=ContentGate(display=display, run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
+        negative_keywords=["python"],
     )
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(stub)
-    _assert_dedup_recorded(dedup_counters, "miss")
-    assert _last_body(metrics_display, "parser test gates") == "1 pre-filter"
-    assert card_store.get(1) is None
+    harness.process_one_position_stub(stub)
 
-    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data["1"]["status"] == "out_of_domain"
-    assert seen_data["1"]["urls"] == [stub.url]
+    listing_id = harness.listing_id_for_url(stub.url)
+    assert listing_id == 1
+    _assert_dedup_recorded(harness.dedup_counters, "miss")
+    assert harness.status_display_row_body("parser test gates") == "1 pre-filter"
+    assert harness.card_content(listing_id) is None
+    assert harness.classify_handoffs() == []
 
-    transcript_rows = [
-        json.loads(line)
-        for line in (logs_dir / "pipeline" / "prefilter.transcripts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip()
-    ]
+    dedup_record = harness.dedup_observation(listing_id)
+    assert dedup_record is not None
+    assert dedup_record.status == "out_of_domain"
+    assert dedup_record.urls == (stub.url,)
+
+    transcript_rows = harness.log_artifact_transcript_rows("pipeline_prefilter")
     assert transcript_rows == [
         {
             "url": stub.url,

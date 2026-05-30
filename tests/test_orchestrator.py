@@ -25,6 +25,7 @@ from application_pipeline.extracts.card_store import (
     CardStore,
     load_card_store,
 )
+from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
     JudgeCandidate,
@@ -4338,6 +4339,136 @@ def test_non_quota_worker_exception_writes_failure_report(
 
     body = reports[0].read_text(encoding="utf-8")
     assert "RuntimeError" in body
+
+
+def test_default_llm_enricher_receives_run_scoped_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default LLM Enricher construction receives the active run-scoped Deduplication Store and Freshness Gate."""
+    import application_pipeline.parser_log as parser_log
+
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    logs_dir = tmp_path / "logs"
+    run_log = parser_log.RunLog(logs_dir)
+    dedup_store = dedup_module.load(tmp_path / ".seen.json")
+    captured: dict[str, object] = {}
+
+    class _RunScopedDedupProxy:
+        def __init__(self, base: object) -> None:
+            self._base = base
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._base, name)
+
+    run_scope_dedup = _RunScopedDedupProxy(dedup_store)
+
+    @contextmanager
+    def _run_scope():
+        yield run_scope_dedup
+
+    dedup_store.run_scope = _run_scope  # type: ignore[method-assign]
+
+    class _CapturingLLMEnricher:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            return AppliedClassifyOutcome.from_verdicts(
+                items, [RelevanceVerdict(matches=False) for _ in items]
+            )
+
+    class _OneStubParser(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://wire.example/1",
+                    title="Python Engineer",
+                    source="stub",
+                )
+            ]
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.LLMEnricher",
+        _CapturingLLMEnricher,
+    )
+
+    run(
+        config_path,
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_store,
+        run_log=run_log,
+    )
+
+    assert captured["run_log"] is run_log
+    assert captured["failures_dir"] == tmp_path / ".runtime-data" / "failures"
+    assert isinstance(captured["card_store"], CardStore)
+    assert captured["dedup_store"] is run_scope_dedup
+    assert isinstance(captured["freshness_gate"], FreshnessGate)
+
+
+def test_injected_llm_enricher_bypasses_default_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Injected LLM Enricher instances bypass default construction cleanly."""
+    config_path = _write_config(
+        tmp_path,
+        sources='[SourceEntry(parser_type="bundesagentur_api")]',
+        keywords='["python"]',
+        locations='["Hamburg"]',
+        include_remote=False,
+    )
+    card_store = _make_card_store(tmp_path)
+
+    class _OneStubParser(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://wire.example/2",
+                    title="Python Engineer",
+                    source="stub",
+                )
+            ]
+
+    class _ShouldNotConstruct:
+        def __init__(self, **_kwargs: object) -> None:
+            raise AssertionError("default LLM Enricher must not be constructed")
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.LLMEnricher",
+        _ShouldNotConstruct,
+    )
+
+    summary = run(
+        config_path,
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert summary.classify_items == 1
 
 
 # ---------------------------------------------------------------------------

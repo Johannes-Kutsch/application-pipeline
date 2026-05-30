@@ -17,6 +17,7 @@ from application_pipeline.parser_intake import Dropped, ParserIntake, PoolAdmitt
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
 from application_pipeline.parsers.types import EnrichResult
+from application_pipeline.prefilter_gate import PreFilterGate
 
 
 _DedupSeeder = Callable[[Any, PositionStub], int]
@@ -152,6 +153,80 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_lis
     assert outcome.parser_row_metric == "dedup_dropped"
     assert prefilter.calls == 0
     assert card_store.get(expected_listing_id) is None
+
+
+def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_keeps_listing_id(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    stub = PositionStub(
+        url="https://example.com/blacklisted",
+        title="Senior Python Developer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    display = FakeStatusDisplay()
+    run_log = RunLog(logs_dir)
+    intake = ParserIntake(
+        parser=_UnexpectedEnrichParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=display,
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=PreFilterGate(
+            blacklist=["python"],
+            dedup=dedup_store,
+            display=display,
+            run_log=run_log,
+        ),
+        content_gate=ContentGate(display=display, run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(stub)
+
+    assert isinstance(outcome, Dropped)
+    assert outcome.reason == "prefilter"
+    assert outcome.listing_id == 1
+    assert outcome.dedup_kind is None
+    assert outcome.dedup_events == ("miss",)
+    assert outcome.parser_row_metric == "prefilter_dropped"
+    assert card_store.get(1) is None
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data["1"]["status"] == "out_of_domain"
+    assert seen_data["1"]["urls"] == [stub.url]
+
+    transcript_rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "prefilter.transcripts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert transcript_rows == [
+        {
+            "url": stub.url,
+            "title": stub.title,
+            "source": stub.source,
+            "passes": False,
+            "reason": "blacklist_drop",
+            "blacklist_matches": [{"term": "python"}],
+            "title_len": len(stub.title or ""),
+        }
+    ]
 
 
 def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_steps(

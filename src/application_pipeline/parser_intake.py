@@ -240,6 +240,7 @@ class ParserIntake:
             return Dropped(
                 reason="prefilter",
                 stub=position_stub,
+                listing_id=discover_dedup.listing_id,
                 dedup_events=("miss",),
             )
 

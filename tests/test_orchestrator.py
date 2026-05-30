@@ -5206,6 +5206,127 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
         assert "1" not in extracts_after
 
 
+def test_discover_deadline_expiry_with_injected_stores_cleans_up_matched_extract(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".runtime-data" / "seen.json"
+    extracts_path = tmp_path / ".runtime-data" / "extracts.json"
+    seen_path.parent.mkdir(parents=True, exist_ok=True)
+
+    canonical_url = "https://deadline.example/original"
+    alias_url = "https://deadline.example/alias"
+    seen_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "urls": [canonical_url],
+                    "company_lc": "acme",
+                    "title_lc": "platform engineer",
+                    "location_lc": "hamburg",
+                    "status": "matched",
+                    "status_last_changed": "2026-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    extracts_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "header": "Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior",
+                    "summary": "Persisted summary",
+                    "body": "Persisted body",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _DeadlineExpiredParser(_StubParserBase):
+        def __enter__(self) -> "_DeadlineExpiredParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=alias_url,
+                    title="Platform Engineer",
+                    source="stub",
+                    company="Acme",
+                    location="Hamburg",
+                    deadline=_date.today(),
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            raise AssertionError(
+                "discover-arm freshness drop must stop before enrich()"
+            )
+
+    display = FakeStatusDisplay()
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_module.load(seen_path)
+
+    run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _DeadlineExpiredParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_store,
+        card_store=card_store,
+        status_display=display,
+    )
+
+    seen_after = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_after["7"]["status"] == "expired"
+    assert seen_after["7"]["urls"] == [alias_url, canonical_url]
+    assert card_store.get(7) is None
+
+    transcript_rows = [
+        json.loads(line)
+        for line in (
+            tmp_path
+            / ".runtime-data"
+            / "logs"
+            / "pipeline"
+            / "freshness.transcripts.jsonl"
+        )
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert any(
+        row["url"] == alias_url
+        and row["gate_arm"] == "discover"
+        and row["passes"] is False
+        and row["reason"] == "deadline_passed"
+        for row in transcript_rows
+    )
+
+    gates_bodies = display.body_updates_for("parser bundesagentur api gates")
+    assert any("1 freshness" in body for body in gates_bodies)
+
+    classify_events = (
+        tmp_path / ".runtime-data" / "logs" / "llm" / "classify_relevance.events.jsonl"
+    )
+    if classify_events.exists():
+        rows = [
+            json.loads(line)
+            for line in classify_events.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert not any(row.get("url") == alias_url for row in rows)
+
+
 def test_freshness_pool_reentry_fresh_position_stays_matched_and_reaches_judge(
     tmp_path: Path,
 ) -> None:

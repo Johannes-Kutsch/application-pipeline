@@ -30,7 +30,11 @@ class _Stub(Protocol):
 
 
 class _DedupStore(Protocol):
-    def mark_expired(self, key: _Stub) -> None: ...
+    def mark_expired(self, key: _Stub) -> int | None: ...
+
+
+class _CardStore(Protocol):
+    def delete(self, key: int) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -89,12 +93,14 @@ class FreshnessGate:
         dedup: _DedupStore,
         display: StatusDisplay,
         run_log: RunLog,
+        card_store: _CardStore | None = None,
     ) -> None:
         self._anchored_today = anchored_today
         self._max_listing_age_days = max_listing_age_days
         self._dedup = dedup
         self._display = display
         self._run_log = run_log
+        self._card_store = card_store
         self._lock = threading.Lock()
         self._counts: dict[str, int] = {
             "passed": 0,
@@ -135,7 +141,9 @@ class FreshnessGate:
         with self._lock:
             self._counts[verdict.reason] += 1
         if not verdict.passes:
-            self._dedup.mark_expired(stub)
+            expired_listing_id = self._dedup.mark_expired(stub)
+            if expired_listing_id is not None and self._card_store is not None:
+                self._card_store.delete(expired_listing_id)
         return verdict.passes
 
     def snapshot(self) -> FreshnessSnapshot:

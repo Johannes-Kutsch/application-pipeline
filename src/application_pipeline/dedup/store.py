@@ -520,18 +520,32 @@ class DeduplicationStore:
         self,
         key_or_listing_id: "_SeenKey | int",
         stub: "_SeenKey | None" = None,
-    ) -> None:
+    ) -> int | None:
         with self._lock:
-            listing_id, stub = self._resolve_listing_id(key_or_listing_id, stub)
+            if isinstance(key_or_listing_id, int):
+                assert stub is not None
+                listing_id, stub = key_or_listing_id, stub
+            else:
+                stub = key_or_listing_id
+                resolved_listing_id = self._url_index.get(stub.url)
+                if resolved_listing_id is None:
+                    resolved_listing_id = self._tuple_lookup(stub)
+                if resolved_listing_id is None:
+                    resolved_listing_id = self._fuzzy_lookup(stub)
+                if resolved_listing_id is None:
+                    resolved_listing_id = self._write_pending(stub)
+                listing_id = resolved_listing_id
             prior = self._records.get(listing_id)
             prior_status = prior.get("status") if prior else None
             if prior_status == "matched":
                 self._mark(listing_id, stub, "expired", overwrite_if="matched")
                 self._delete_from_stores(listing_id)
-            elif prior_status == "expired":
+                return listing_id
+            if prior_status == "expired":
                 self._mark(listing_id, stub, "expired", overwrite_if="expired")
-            else:
-                self._mark(listing_id, stub, "expired")
+                return None
+            self._mark(listing_id, stub, "expired")
+            return None
 
     def mark_matched(
         self,

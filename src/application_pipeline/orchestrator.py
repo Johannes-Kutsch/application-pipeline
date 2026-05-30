@@ -865,6 +865,7 @@ def run(
                 dedup=dedup_run,
                 display=status_display,
                 run_log=run_log,
+                card_store=card_store,
             )
             if llm_enricher is None:
                 assert isinstance(extractor, LLMExtractor), (

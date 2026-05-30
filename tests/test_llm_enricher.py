@@ -18,6 +18,7 @@ from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
+    AppliedClassifyOutcome,
     CallUsage,
     ExtractorMalformedError,
     ExtractorMalformedJSONError,
@@ -125,7 +126,7 @@ def test_strip_to_text_without_selector_falls_back_to_trafilatura() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_enricher_matched_returns_verdict_and_writes_card_store(
+def test_enricher_matched_returns_applied_outcome_and_writes_card_store(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
@@ -155,14 +156,11 @@ def test_enricher_matched_returns_verdict_and_writes_card_store(
         location="Hamburg",
     )
 
-    result = enricher.enrich([(1, stub, body)])[0]
+    result = enricher.enrich([(1, stub, body)])
 
-    assert result is not None
-    assert result.matches is True
-    assert (
-        result.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
-    )
-    assert result.summary == "Great ML role."
+    assert isinstance(result, AppliedClassifyOutcome)
+    assert [item.state for item in result.items] == ["matched"]
+    assert result.matched_listings == [(1, stub)]
 
     card = load_card_store(tmp_path / "extracts.json").get(1)
     assert card is not None
@@ -395,9 +393,9 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
         posted_date=None,  # no pre-LLM date
     )
 
-    result = enricher.enrich([(1, stub, body)])[0]
+    result = enricher.enrich([(1, stub, body)])
 
-    assert result is None
+    assert [item.state for item in result.items] == ["expired"]
     assert card_store.get(1) is None
 
 
@@ -478,10 +476,9 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
         posted_date=None,
     )
 
-    result = enricher.enrich([(1, stub, body)])[0]
+    result = enricher.enrich([(1, stub, body)])
 
-    assert result is not None
-    assert result.matches is True
+    assert [item.state for item in result.items] == ["matched"]
     card = card_store.get(1)
     assert card is not None
     assert card.header == fresh_header
@@ -525,10 +522,9 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
         posted_date=None,
     )
 
-    result = enricher.enrich([(1, stub, body)])[0]
+    result = enricher.enrich([(1, stub, body)])
 
-    assert result is not None
-    assert result.matches is True
+    assert [item.state for item in result.items] == ["matched"]
     assert card_store.get(1) is not None
 
 
@@ -537,7 +533,7 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
 # ---------------------------------------------------------------------------
 
 
-def test_enrich_accepts_list_of_items_and_returns_list_of_verdicts(
+def test_enrich_accepts_list_of_items_and_returns_structured_outcome(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
@@ -568,10 +564,9 @@ def test_enrich_accepts_list_of_items_and_returns_list_of_verdicts(
 
     results = enricher.enrich([(1, stub, body)])
 
-    assert isinstance(results, list)
-    assert len(results) == 1
-    assert results[0] is not None
-    assert results[0].matches is True
+    assert isinstance(results, AppliedClassifyOutcome)
+    assert len(results.items) == 1
+    assert results.items[0].state == "matched"
     card = load_card_store(tmp_path / "extracts.json").get(1)
     assert card is not None
     assert card.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
@@ -636,9 +631,12 @@ def test_enrich_batch_routes_match_reject_none_independently(
             ]
         )
 
-    assert results[0] is not None and results[0].matches is True
-    assert results[1] is not None and results[1].matches is False
-    assert results[2] is None
+    assert [item.state for item in results.items] == [
+        "matched",
+        "out_of_domain",
+        "retryable",
+    ]
+    assert results.matched_listings == [(1, stub_match)]
 
     card_store = load_card_store(tmp_path / "extracts.json")
     assert card_store.get(1) is not None, "match should write card"
@@ -706,10 +704,7 @@ def test_enrich_per_item_freshness_gate_stale_does_not_block_fresh(
         [(1, stub_stale, "old body"), (2, stub_fresh, "fresh body")]
     )
 
-    assert results[0] is None, "stale item should be dropped by freshness gate"
-    assert results[1] is not None and results[1].matches is True, (
-        "fresh item should pass"
-    )
+    assert [item.state for item in results.items] == ["expired", "matched"]
     assert card_store.get(1) is None, "stale match should not write card"
     assert card_store.get(2) is not None, "fresh match should write card"
 

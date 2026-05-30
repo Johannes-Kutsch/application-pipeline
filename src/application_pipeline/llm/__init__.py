@@ -8,6 +8,9 @@ from .claude_cli import (
     ClaudeUsageLimitError,
 )
 from .types import (
+    AppliedClassifyItemOutcome,
+    AppliedClassifyOutcome,
+    AppliedClassifyState,
     CallUsage,
     ClassifyItem,
     ExtractorBatchMalformedError,
@@ -22,6 +25,9 @@ from .types import (
 )
 
 __all__ = [
+    "AppliedClassifyItemOutcome",
+    "AppliedClassifyOutcome",
+    "AppliedClassifyState",
     "CallUsage",
     "ClassifyItem",
     "ClaudeExtractor",

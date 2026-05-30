@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from application_pipeline.extracts.card_store import CardExtract, CardStore
 from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
+    AppliedClassifyItemOutcome,
+    AppliedClassifyOutcome,
     CallUsage,
     ClassifyItem,
     ExtractorMalformedError,
@@ -71,18 +73,8 @@ class LLMEnricher:
 
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
-    ) -> list[RelevanceVerdict | None]:
-        """Classify a batch and write CardStore entries for matched listings.
-
-        Returns a list aligned with ``items``:
-        - RelevanceVerdict for classified items (matches or non-matches)
-        - None for unparseable verdicts (listing left unmarked in DeduplicationStore)
-
-        For matched items the post-LLM Freshness Gate runs per item; a stale
-        item does not affect other items in the same batch.
-        Raises ExtractorMalformedError / ExtractorMalformedJSONError when the
-        entire batch response is malformed; stashes the raw response once.
-        """
+    ) -> AppliedClassifyOutcome:
+        """Classify a batch, apply local side effects, and return item outcomes."""
         classify_items = [
             ClassifyItem(
                 title=stub.title,
@@ -108,10 +100,16 @@ class LLMEnricher:
             )
             raise
 
-        results: list[RelevanceVerdict | None] = []
+        outcome_items: list[AppliedClassifyItemOutcome] = []
+        matched_listings: list[tuple[int, PositionStub]] = []
         for (listing_id, stub, body), verdict in zip(items, raw_verdicts):
             if verdict is None:
-                results.append(None)
+                outcome_items.append(
+                    AppliedClassifyItemOutcome(
+                        state="retryable",
+                        event_matches=None,
+                    )
+                )
                 continue
 
             if verdict.matches:
@@ -125,7 +123,12 @@ class LLMEnricher:
                     if not self.freshness_gate.admit(
                         updated_stub, gate_arm="post_llm", deadline=stub.deadline
                     ):
-                        results.append(None)
+                        outcome_items.append(
+                            AppliedClassifyItemOutcome(
+                                state="expired",
+                                event_matches=None,
+                            )
+                        )
                         continue
 
                 self._card_store.put(
@@ -136,13 +139,27 @@ class LLMEnricher:
                 )
                 if self._dedup_store is not None:
                     self._dedup_store.mark_matched(listing_id, stub)
+                matched_listings.append((listing_id, stub))
+                outcome_items.append(
+                    AppliedClassifyItemOutcome(
+                        state="matched",
+                        event_matches=True,
+                    )
+                )
             else:
                 if self._dedup_store is not None:
                     self._dedup_store.mark_out_of_domain(listing_id, stub)
+                outcome_items.append(
+                    AppliedClassifyItemOutcome(
+                        state="out_of_domain",
+                        event_matches=False,
+                    )
+                )
 
-            results.append(verdict)
-
-        return results
+        return AppliedClassifyOutcome(
+            items=outcome_items,
+            matched_listings=matched_listings,
+        )
 
     def _stash_failure(
         self, kind: str, stub: PositionStub, content: str, *, ext: str = "html"

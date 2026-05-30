@@ -42,7 +42,7 @@ from application_pipeline.llm import (
     MatchVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
-from application_pipeline.llm.types import CallUsage, RelevanceVerdict
+from application_pipeline.llm.types import AppliedClassifyOutcome, CallUsage
 from application_pipeline.llm_enricher import LLMEnricher, LLMExtractor
 from application_pipeline.parsers import (
     NotServedQuery,
@@ -93,7 +93,7 @@ class _LLMJudge(Protocol):
 class _LLMEnricherLike(Protocol):
     def enrich(
         self, items: "list[tuple[int, PositionStub, str]]"
-    ) -> "list[RelevanceVerdict | None]": ...
+    ) -> AppliedClassifyOutcome: ...
 
 
 # ---------------------------------------------------------------------------
@@ -588,7 +588,7 @@ class _ClassifyWorker(_QueueWorker):
         while True:
             self._quota_wall.wait_if_blocked()
             try:
-                verdicts = self._llm_enricher.enrich(items)
+                outcome = self._llm_enricher.enrich(items)
                 break
             except ClaudeUsageLimitError as err:
                 now = datetime.now(timezone.utc)
@@ -619,20 +619,25 @@ class _ClassifyWorker(_QueueWorker):
                 return
 
         dropped = 0
-        for req, verdict in zip(batch, verdicts):
+        matched_listing_ids = {listing_id for listing_id, _ in outcome.matched_listings}
+        for req, item_outcome in zip(batch, outcome.items):
             self._run_log.event(
                 "llm_classify_relevance",
                 "classify_relevance",
-                matches=verdict.matches if verdict is not None else None,
+                matches=item_outcome.event_matches,
             )
-            if verdict is None:
+            if item_outcome.state in {"retryable", "expired"}:
                 self._metrics.enrich_failed(req.stub.source)
-            elif not verdict.matches:
+            elif item_outcome.state == "out_of_domain":
                 self._dedup_store.mark_out_of_domain(req.listing_id, req.stub)
                 dropped += 1
-            else:
+            elif item_outcome.state == "matched":
                 self._dedup_store.mark_matched(req.listing_id, req.stub)
-                self._pool_collector.add_matched(req.stub, req.listing_id)
+                if req.listing_id not in matched_listing_ids:
+                    raise AssertionError("matched outcome missing matched listing data")
+
+        for listing_id, stub in outcome.matched_listings:
+            self._pool_collector.add_matched(stub, listing_id)
 
         self._metrics.classify_batch_complete(_ZERO_USAGE, len(batch), dropped)
 

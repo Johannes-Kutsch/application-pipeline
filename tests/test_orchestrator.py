@@ -7213,30 +7213,83 @@ def test_parser_dead_failure_reports_distinguish_exception_types(
 
 
 # ---------------------------------------------------------------------------
-# Post-enrich dedup check (issue #613)
+# Post-enrich dedup check (issue #613, issue #718)
 # ---------------------------------------------------------------------------
 
 
-def test_post_enrich_dedup_drops_listing_with_backfilled_company(
+@pytest.mark.parametrize(
+    ("dedup_kind", "seen_record", "enriched_url", "enriched_title", "counter_key"),
+    [
+        (
+            "url_hit",
+            {
+                "urls": ["https://dedup-test.example/original-url-hit"],
+                "company_lc": "acme",
+                "title_lc": "engineer",
+                "location_lc": "hamburg",
+                "status": "out_of_domain",
+                "status_last_changed": "2024-01-01",
+            },
+            "https://dedup-test.example/original-url-hit",
+            "Engineer",
+            "dedup_url_hits",
+        ),
+        (
+            "tuple_hit",
+            {
+                "urls": ["https://dedup-test.example/original-tuple-hit"],
+                "company_lc": "acme",
+                "title_lc": "engineer",
+                "location_lc": "hamburg",
+                "status": "out_of_domain",
+                "status_last_changed": "2024-01-01",
+            },
+            "https://dedup-test.example/new-post-enrich-hit",
+            "Engineer",
+            "dedup_tuple_hits",
+        ),
+        (
+            "fuzzy_hit",
+            {
+                "urls": ["https://dedup-test.example/original-fuzzy-hit"],
+                "company_lc": "acme",
+                "title_lc": "senior lead platform backend engineer",
+                "location_lc": "hamburg",
+                "status": "out_of_domain",
+                "status_last_changed": "2024-01-01",
+            },
+            "https://dedup-test.example/new-post-enrich-hit",
+            "Lead Platform Backend Engineer",
+            "dedup_fuzzy_hits",
+        ),
+    ],
+)
+def test_post_enrich_non_pending_dedup_hit_stays_local_and_preserves_existing_card(
     tmp_path: Path,
+    dedup_kind: str,
+    seen_record: dict[str, object],
+    enriched_url: str,
+    enriched_title: str,
+    counter_key: str,
 ) -> None:
-    """A listing with company=None at discover that gets company backfilled is skipped."""
     import dataclasses as _dc
 
-    existing_url = "https://dedup-test.example/existing"
-    new_url = "https://dedup-test.example/new"
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    display = FakeStatusDisplay()
+    extractor = _stub_extractor()
+    new_url = "https://dedup-test.example/new-discovered"
     seen_path = tmp_path / ".runtime-data" / "seen.json"
+    extracts_path = tmp_path / ".runtime-data" / "extracts.json"
     seen_path.parent.mkdir(parents=True)
-    seen_path.write_text(
+    seen_path.write_text(json.dumps({"1": seen_record}), encoding="utf-8")
+    extracts_path.write_text(
         json.dumps(
             {
                 "1": {
-                    "urls": [existing_url],
-                    "company_lc": "acme",
-                    "title_lc": "engineer",
-                    "location_lc": "hamburg",
-                    "status": "out_of_domain",
-                    "status_last_changed": "2024-01-01",
+                    "header": "Persisted header",
+                    "summary": "Persisted summary",
+                    "body": "Persisted body",
                 }
             }
         ),
@@ -7262,81 +7315,12 @@ def test_post_enrich_dedup_drops_listing_with_backfilled_company(
             ]
 
         def enrich(self, stub: PositionStub) -> EnrichResult:
-            enriched = _dc.replace(stub, company="Acme", location="Hamburg")
-            return EnrichResult(stub=enriched, body="body " + "x" * 91, mode="fallback")
-
-    summary = run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-        ),
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _BackfillParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
-    )
-
-    assert summary.discovered == 1
-    assert summary.dedup_tuple_hits == 1
-    assert summary.skipped == 1
-    assert summary.written == 0
-
-
-def test_post_enrich_fuzzy_hit_stays_local_and_records_only_terminal_hit_kind(
-    tmp_path: Path,
-) -> None:
-    import dataclasses as _dc
-
-    logs_dir = tmp_path / "logs"
-    run_log = RunLog(logs_dir)
-    display = FakeStatusDisplay()
-    extractor = _stub_extractor()
-    existing_url = "https://dedup-test.example/original-fuzzy"
-    new_url = "https://dedup-test.example/new-fuzzy"
-    seen_path = tmp_path / ".runtime-data" / "seen.json"
-    seen_path.parent.mkdir(parents=True)
-    seen_path.write_text(
-        json.dumps(
-            {
-                "1": {
-                    "urls": [existing_url],
-                    "company_lc": "acme",
-                    "title_lc": "senior lead platform backend engineer",
-                    "location_lc": "hamburg",
-                    "status": "out_of_domain",
-                    "status_last_changed": "2024-01-01",
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    class _BackfillFuzzyParser(_StubParserBase):
-        def __enter__(self) -> "_BackfillFuzzyParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return [
-                PositionStub(
-                    url=new_url,
-                    title="Engineer",
-                    source="stub",
-                    company=None,
-                    location=None,
-                )
-            ]
-
-        def enrich(self, stub: PositionStub) -> EnrichResult:
             enriched = _dc.replace(
                 stub,
+                url=enriched_url,
                 company="Acme",
                 location="Hamburg",
-                title="Lead Platform Backend Engineer",
+                title=enriched_title,
             )
             return EnrichResult(stub=enriched, body="body " + "x" * 91, mode="fallback")
 
@@ -7349,7 +7333,7 @@ def test_post_enrich_fuzzy_hit_stays_local_and_records_only_terminal_hit_kind(
             include_remote=False,
         ),
         extractor=extractor,
-        parser_registry=lambda _: _BackfillFuzzyParser,  # type: ignore[return-value, arg-type]
+        parser_registry=lambda _: _BackfillParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(seen_path),
         status_display=display,
         run_log=run_log,
@@ -7360,9 +7344,21 @@ def test_post_enrich_fuzzy_hit_stays_local_and_records_only_terminal_hit_kind(
     assert summary.written == 0
     assert summary.skipped == 1
     assert extractor.classify_relevance.call_count == 0
+    if hasattr(summary, counter_key):
+        assert getattr(summary, counter_key) == 1
+    assert summary.dedup_misses == 0
 
     gates_bodies = display.body_updates_for("parser bundesagentur api gates")
     assert any("1 dedup" in body for body in gates_bodies)
+
+    card_store = load_card_store(extracts_path)
+    card = card_store.get(1)
+    assert card is not None
+    assert card == CardExtract(
+        header="Persisted header",
+        summary="Persisted summary",
+        body="Persisted body",
+    )
 
     rows = [
         json.loads(line)
@@ -7374,7 +7370,7 @@ def test_post_enrich_fuzzy_hit_stays_local_and_records_only_terminal_hit_kind(
     run_complete_rows = [row for row in rows if row.get("event") == "run_complete"]
     assert len(run_complete_rows) == 1
     row = run_complete_rows[0]
-    assert row["dedup_fuzzy_hits"] == 1
+    assert row[counter_key] == 1
     assert row["dedup_misses"] == 0
 
 

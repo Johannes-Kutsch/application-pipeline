@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import Any, Callable
+
+import pytest
 
 from fake_status_display import FakeStatusDisplay
 
@@ -14,6 +17,9 @@ from application_pipeline.parser_intake import Dropped, ParserIntake
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
 from application_pipeline.parsers.types import EnrichResult
+
+
+_DedupSeeder = Callable[[Any, PositionStub], int]
 
 
 class _UnexpectedEnrichParser:
@@ -33,6 +39,119 @@ class _UnexpectedEnrichParser:
 class _PassThroughPreFilter:
     def admit(self, stub: PositionStub) -> bool:
         return True
+
+
+class _CountingPreFilter:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def admit(self, stub: PositionStub) -> bool:
+        self.calls += 1
+        return True
+
+
+def _seed_url_hit(dedup_store: Any, stub: PositionStub) -> int:
+    dedup_store.mark_out_of_domain(stub)
+    return dedup_store.listing_id_for(stub.url)
+
+
+def _seed_tuple_hit(dedup_store: Any, stub: PositionStub) -> int:
+    original = PositionStub(
+        url="https://example.com/original",
+        title=stub.title,
+        source=stub.source,
+        company=stub.company,
+        location=stub.location,
+    )
+    dedup_store.mark_out_of_domain(original)
+    return dedup_store.listing_id_for(original.url)
+
+
+def _seed_fuzzy_hit(dedup_store: Any, stub: PositionStub) -> int:
+    original = PositionStub(
+        url="https://example.com/original",
+        title="Senior Lead Platform Backend Engineer",
+        source=stub.source,
+        company=stub.company,
+        location=stub.location,
+    )
+    dedup_store.mark_out_of_domain(original)
+    return dedup_store.listing_id_for(original.url)
+
+
+def _seed_run_hit(dedup_store: Any, stub: PositionStub) -> int:
+    return dedup_store.is_seen(stub).listing_id
+
+
+@pytest.mark.parametrize(
+    ("dedup_kind", "prepare"),
+    [
+        (
+            "url_hit",
+            _seed_url_hit,
+        ),
+        (
+            "tuple_hit",
+            _seed_tuple_hit,
+        ),
+        (
+            "fuzzy_hit",
+            _seed_fuzzy_hit,
+        ),
+        (
+            "run_hit",
+            _seed_run_hit,
+        ),
+    ],
+)
+def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_listing_id(
+    tmp_path: Path,
+    dedup_kind: str,
+    prepare: _DedupSeeder,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    stub = PositionStub(
+        url="https://example.com/alias",
+        title="Lead Platform Backend Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    prefilter = _CountingPreFilter()
+    run_log = RunLog(logs_dir)
+    intake = ParserIntake(
+        parser=_UnexpectedEnrichParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=prefilter,
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        expected_listing_id = prepare(dedup_store, stub)
+        outcome = intake.process_position_stub(stub)
+
+    assert isinstance(outcome, Dropped)
+    assert outcome.reason == f"dedup_{dedup_kind}"
+    assert outcome.dedup_kind == dedup_kind
+    assert outcome.dedup_events == (dedup_kind,)
+    assert outcome.listing_id == expected_listing_id
+    assert outcome.parser_row_metric == "dedup_dropped"
+    assert prefilter.calls == 0
+    assert card_store.get(expected_listing_id) is None
 
 
 def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_steps(

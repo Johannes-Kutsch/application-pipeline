@@ -95,6 +95,7 @@ class PoolAdmitted:
 class Dropped:
     reason: DropReason
     stub: PositionStub
+    listing_id: ListingId | None = None
     dedup_kind: RunScopedSeenKind | None = None
     dedup_events: tuple[RunScopedSeenKind, ...] = ()
 
@@ -230,6 +231,7 @@ class ParserIntake:
             return Dropped(
                 reason=_drop_reason_for_dedup(discover_dedup.kind),
                 stub=position_stub,
+                listing_id=discover_dedup.listing_id,
                 dedup_kind=discover_dedup.kind,
                 dedup_events=(discover_dedup.kind,),
             )
@@ -279,6 +281,7 @@ class ParserIntake:
             return Dropped(
                 reason=_drop_reason_for_dedup(post_enrich_dedup.kind),
                 stub=stub,
+                listing_id=post_enrich_dedup.listing_id,
                 dedup_kind=post_enrich_dedup.kind,
                 dedup_events=("miss", "tuple_hit"),
             )

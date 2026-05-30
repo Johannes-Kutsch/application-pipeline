@@ -630,7 +630,7 @@ class _ClassifyWorker(_QueueWorker):
                 retryable += 1
                 self._metrics.enrich_failed(req.stub.source)
             elif item_outcome.state == "expired":
-                self._metrics.enrich_failed(req.stub.source)
+                dropped += 1
             elif item_outcome.state == "rejected":
                 dropped += 1
             elif item_outcome.state == "matched":

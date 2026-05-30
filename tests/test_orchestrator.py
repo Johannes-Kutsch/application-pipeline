@@ -6139,6 +6139,124 @@ def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
     assert post_llm_rows[0]["passes"] is False
 
 
+def test_post_llm_stale_outcome_is_dropped_and_fresh_batch_peer_reaches_judge(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+    stale_url = "https://ba.example/post-llm-stale"
+    fresh_url = "https://ba.example/post-llm-fresh"
+    stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2020-01-01 · mid · —"
+    fresh_header = "Data Engineer\nCorp · Hamburg · remote\n2026-01-10 · senior · —"
+    judge_candidate_ids: list[list[int]] = []
+
+    class _TwoStubParser(_StubParserBase):
+        def __enter__(self) -> "_TwoStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=stale_url, title="ML Engineer", source="stub"),
+                PositionStub(url=fresh_url, title="Data Engineer", source="stub"),
+            ]
+
+    class _TrackingExtractor:
+        def classify_relevance(
+            self, items: list[ClassifyItem]
+        ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
+            assert len(items) == 2
+            return (
+                [
+                    RelevanceVerdict(
+                        matches=True,
+                        header=stale_header,
+                        summary="Old role.",
+                    ),
+                    RelevanceVerdict(
+                        matches=True,
+                        header=fresh_header,
+                        summary="Fresh role.",
+                    ),
+                ],
+                _ZERO_USAGE,
+            )
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            judge_candidate_ids.append([c.id for c in candidates])
+            return (
+                [
+                    MatchVerdict(id=c.id, rank=i + 1)
+                    for i, c in enumerate(candidates[:5])
+                ],
+                _ZERO_USAGE,
+            )
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_batch_size=2,
+        ),
+        extractor=_TrackingExtractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.classifier_dropped == 1
+    assert summary.written == 1
+    assert card_store.get(1) is None
+    assert card_store.get(2) is not None
+    assert judge_candidate_ids == [[2]]
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert (
+        next(r["status"] for r in seen_data.values() if stale_url in r.get("urls", []))
+        == "expired"
+    )
+    assert (
+        next(r["status"] for r in seen_data.values() if fresh_url in r.get("urls", []))
+        == "selected_by_judge"
+    )
+
+    transcript_rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "freshness.transcripts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert [
+        row
+        for row in transcript_rows
+        if row["url"] == stale_url and row["gate_arm"] == "post_llm"
+    ] == [
+        {
+            "url": stale_url,
+            "title": "ML Engineer",
+            "source": "stub",
+            "posted_date": "2020-01-01",
+            "deadline": None,
+            "anchored_today": transcript_rows[0]["anchored_today"],
+            "age_days": transcript_rows[0]["age_days"],
+            "passes": False,
+            "reason": "too_old",
+            "gate_arm": "post_llm",
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # EnrichFailedError / OversizedBodyError semantics (issue #557)
 # ---------------------------------------------------------------------------

@@ -817,20 +817,10 @@ def run(
             card_store = load_card_store(extracts_path)
             dedup_store.attach_card_store(card_store)
 
-        # Step 8: Build LLMEnricher if not injected
+        # Step 8: Build shared quota wall; default LLMEnricher is constructed later
+        # once the active run-scoped stores and gates exist.
         if quota_wall is None:
             quota_wall = _quota.QuotaWall()
-        if llm_enricher is None:
-            assert isinstance(extractor, LLMExtractor), (
-                "extractor must implement LLMExtractor (classify_relevance)"
-            )
-            llm_enricher = LLMEnricher(
-                extractor=extractor,
-                quota_wall=quota_wall,
-                card_store=card_store,
-                run_log=run_log,
-                failures_dir=cfg.failures_path,
-            )
 
         daily_file_path = cfg.results_dir / f"{cron_anchored_date}.md"
         daily_file = DailyResultsFile(daily_file_path)
@@ -888,8 +878,19 @@ def run(
                 display=status_display,
                 run_log=run_log,
             )
-            if isinstance(llm_enricher, LLMEnricher):
-                llm_enricher.freshness_gate = freshness
+            if llm_enricher is None:
+                assert isinstance(extractor, LLMExtractor), (
+                    "extractor must implement LLMExtractor (classify_relevance)"
+                )
+                llm_enricher = LLMEnricher(
+                    extractor=extractor,
+                    quota_wall=quota_wall,
+                    card_store=card_store,
+                    run_log=run_log,
+                    failures_dir=cfg.failures_path,
+                    freshness_gate=freshness,
+                    dedup_store=dedup_run,
+                )
             prefilter = PreFilterGate(
                 blacklist=list(search_terms.negative_keywords),
                 dedup=dedup_run,

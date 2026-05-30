@@ -7362,8 +7362,6 @@ def test_post_discover_judge_pending_routes_to_pool_without_enrich_or_body_refre
     tmp_path: Path,
 ) -> None:
     """A matched rediscovery is Pool-admitted from discover and keeps the existing card."""
-    import dataclasses as _dc
-
     canonical_url = "https://dedup-test.example/matched"
     rediscovered_url = "https://dedup-test.example/alias"
     seen_path = tmp_path / ".runtime-data" / "seen.json"
@@ -7398,7 +7396,6 @@ def test_post_discover_judge_pending_routes_to_pool_without_enrich_or_body_refre
         encoding="utf-8",
     )
     card_store = load_card_store(extracts_path)
-    enrich_calls: list[str] = []
 
     class _RediscoveredMatchedParser(_StubParserBase):
         def __enter__(self) -> "_RediscoveredMatchedParser":
@@ -7419,13 +7416,7 @@ def test_post_discover_judge_pending_routes_to_pool_without_enrich_or_body_refre
             ]
 
         def enrich(self, stub: PositionStub) -> EnrichResult:
-            enrich_calls.append(stub.url)
-            enriched = _dc.replace(stub, company="Acme", location="Hamburg")
-            return EnrichResult(
-                stub=enriched,
-                body="fresh body that must not overwrite persisted body",
-                mode="fallback",
-            )
+            raise AssertionError("discover-arm judge_pending must stop before enrich()")
 
     extractor = _stub_extractor()
     results_dir = tmp_path / "results"
@@ -7449,7 +7440,6 @@ def test_post_discover_judge_pending_routes_to_pool_without_enrich_or_body_refre
     assert summary.classify_items == 0
     assert summary.judge_resumed == 1
     assert summary.written == 1
-    assert enrich_calls == []
     assert extractor.classify_relevance.call_count == 0
 
     persisted_card = card_store.get(1)

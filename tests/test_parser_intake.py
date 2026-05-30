@@ -650,6 +650,8 @@ def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_ca
     card = harness.card_content(expected_listing_id)
     assert card is not None
     assert card.body == "Persisted body"
+    assert harness.classify_handoffs() == []
+    assert harness.pool_admissions() == []
 
 
 def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refreshes_body(

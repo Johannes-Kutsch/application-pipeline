@@ -117,6 +117,7 @@ class Dropped:
 @dataclass(frozen=True)
 class RetryableEnrichFailure:
     stub: PositionStub
+    error: EnrichFailedError
     dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
 
     @property
@@ -246,8 +247,12 @@ class ParserIntake:
 
         try:
             enrich_result = self._parser.enrich(position_stub)
-        except EnrichFailedError:
-            return RetryableEnrichFailure(stub=position_stub, dedup_events=("miss",))
+        except EnrichFailedError as exc:
+            return RetryableEnrichFailure(
+                stub=position_stub,
+                error=exc,
+                dedup_events=("miss",),
+            )
         except OversizedBodyError as exc:
             return OversizedBodySkip(
                 stub=position_stub,

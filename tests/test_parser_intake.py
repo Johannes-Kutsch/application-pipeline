@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
+import httpx
 import pytest
 
 from fake_status_display import FakeStatusDisplay
@@ -13,10 +14,18 @@ from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import load as dedup_load
 from application_pipeline.extracts import load_card_store
 from application_pipeline.freshness_gate import FreshnessGate
-from application_pipeline.parser_intake import Dropped, ParserIntake, PoolAdmitted
+from application_pipeline.parser_intake import (
+    Dropped,
+    OversizedBodySkip,
+    ParserIntake,
+    PoolAdmitted,
+    RetryableEnrichFailure,
+    TransientHttpSkip,
+)
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
-from application_pipeline.parsers.types import EnrichResult
+from application_pipeline.parsers.body_fetch import OversizedBodyError
+from application_pipeline.parsers.types import EnrichFailedError, EnrichResult
 from application_pipeline.prefilter_gate import PreFilterGate
 
 
@@ -49,6 +58,52 @@ class _CountingPreFilter:
     def admit(self, stub: PositionStub) -> bool:
         self.calls += 1
         return True
+
+
+class _EnrichFailedParser:
+    def __enter__(self) -> "_EnrichFailedParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        raise EnrichFailedError("native enrich failed")
+
+
+class _OversizedBodyParser:
+    def __enter__(self) -> "_OversizedBodyParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        raise OversizedBodyError(url=stub.url, source=stub.source, body_len=4321)
+
+
+class _TransientHttpErrorParser:
+    def __enter__(self) -> "_TransientHttpErrorParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        raise httpx.HTTPStatusError(
+            "503 Service Unavailable",
+            request=httpx.Request("GET", stub.url),
+            response=httpx.Response(503),
+        )
 
 
 def _seed_url_hit(dedup_store: Any, stub: PositionStub) -> int:
@@ -408,3 +463,165 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     assert card.header == "Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior"
     assert card.summary == "Persisted summary"
     assert card.body == "Persisted body"
+
+
+def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_write(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    stub = PositionStub(
+        url="https://example.com/enrich-failed",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    run_log = RunLog(logs_dir)
+    intake = ParserIntake(
+        parser=_EnrichFailedParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(stub)
+
+    assert isinstance(outcome, RetryableEnrichFailure)
+    assert outcome.stub == stub
+    assert str(outcome.error) == "native enrich failed"
+    assert outcome.dedup_events == ("miss",)
+    assert outcome.parser_row_metric == "enrich_failed"
+    assert outcome.parser_log_artifact is not None
+    assert outcome.parser_log_artifact.component == "pipeline_orchestrator"
+    assert outcome.parser_log_artifact.event == "enrich_failed"
+    assert outcome.parser_log_artifact.fields == {
+        "url": stub.url,
+        "source": stub.source,
+    }
+    assert card_store.get(1) is None
+    assert not seen_path.exists()
+
+
+def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    stub = PositionStub(
+        url="https://example.com/oversized",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    run_log = RunLog(logs_dir)
+    intake = ParserIntake(
+        parser=_OversizedBodyParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(stub)
+
+    assert isinstance(outcome, OversizedBodySkip)
+    assert outcome.stub == stub
+    assert outcome.error.url == stub.url
+    assert outcome.error.source == stub.source
+    assert outcome.error.body_len == 4321
+    assert outcome.dedup_events == ("miss",)
+    assert outcome.parser_row_metric is None
+    assert outcome.parser_log_artifact is not None
+    assert outcome.parser_log_artifact.component == "llm_enricher"
+    assert outcome.parser_log_artifact.event == "body_oversized"
+    assert outcome.parser_log_artifact.fields == {
+        "url": stub.url,
+        "source": stub.source,
+        "body_len": 4321,
+    }
+    assert not isinstance(outcome, PoolAdmitted)
+    assert card_store.get(1) is None
+    assert not seen_path.exists()
+
+
+def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_write(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    stub = PositionStub(
+        url="https://example.com/transient",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    run_log = RunLog(logs_dir)
+    intake = ParserIntake(
+        parser=_TransientHttpErrorParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(stub)
+
+    assert isinstance(outcome, TransientHttpSkip)
+    assert outcome.stub == stub
+    assert "503 Service Unavailable" in str(outcome.error)
+    assert outcome.dedup_events == ("miss",)
+    assert outcome.parser_row_metric is None
+    assert outcome.parser_log_artifact is not None
+    assert outcome.parser_log_artifact.component == "llm_enricher"
+    assert outcome.parser_log_artifact.event == "fetch_transient_error"
+    assert outcome.parser_log_artifact.fields == {
+        "url": stub.url,
+        "source": stub.source,
+        "error": "503 Service Unavailable",
+    }
+    assert not isinstance(outcome, PoolAdmitted)
+    assert card_store.get(1) is None
+    assert not seen_path.exists()

@@ -14,6 +14,21 @@ from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError
 
 ListingId = int
+ParserRowMetric = Literal[
+    "content_dropped",
+    "dedup_dropped",
+    "enrich_failed",
+    "forwarded",
+    "freshness_dropped",
+    "prefilter_dropped",
+]
+
+
+@dataclass(frozen=True)
+class ParserLogArtifact:
+    component: str
+    event: str
+    fields: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -52,12 +67,28 @@ class ClassifyForwarded:
     enrich_mode: Literal["native", "fallback"]
     dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
 
+    @property
+    def parser_row_metric(self) -> ParserRowMetric:
+        return "forwarded"
+
+    @property
+    def parser_log_artifact(self) -> ParserLogArtifact | None:
+        return None
+
 
 @dataclass(frozen=True)
 class PoolAdmitted:
     pool_admission: PoolAdmission
     dedup_kind: Literal["judge_pending"]
     dedup_events: tuple[RunScopedSeenKind, ...] = ("judge_pending",)
+
+    @property
+    def parser_row_metric(self) -> ParserRowMetric | None:
+        return None
+
+    @property
+    def parser_log_artifact(self) -> ParserLogArtifact | None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -67,11 +98,40 @@ class Dropped:
     dedup_kind: RunScopedSeenKind | None = None
     dedup_events: tuple[RunScopedSeenKind, ...] = ()
 
+    @property
+    def parser_row_metric(self) -> ParserRowMetric:
+        if self.reason.startswith("freshness_"):
+            return "freshness_dropped"
+        if self.reason.startswith("dedup_"):
+            return "dedup_dropped"
+        if self.reason == "prefilter":
+            return "prefilter_dropped"
+        return "content_dropped"
+
+    @property
+    def parser_log_artifact(self) -> ParserLogArtifact | None:
+        return None
+
 
 @dataclass(frozen=True)
 class RetryableEnrichFailure:
     stub: PositionStub
     dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
+
+    @property
+    def parser_row_metric(self) -> ParserRowMetric:
+        return "enrich_failed"
+
+    @property
+    def parser_log_artifact(self) -> ParserLogArtifact:
+        return ParserLogArtifact(
+            component="pipeline_orchestrator",
+            event="enrich_failed",
+            fields={
+                "url": self.stub.url,
+                "source": self.stub.source,
+            },
+        )
 
 
 @dataclass(frozen=True)
@@ -80,12 +140,44 @@ class OversizedBodySkip:
     error: OversizedBodyError
     dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
 
+    @property
+    def parser_row_metric(self) -> ParserRowMetric | None:
+        return None
+
+    @property
+    def parser_log_artifact(self) -> ParserLogArtifact:
+        return ParserLogArtifact(
+            component="llm_enricher",
+            event="body_oversized",
+            fields={
+                "url": self.error.url,
+                "source": self.error.source,
+                "body_len": self.error.body_len,
+            },
+        )
+
 
 @dataclass(frozen=True)
 class TransientHttpSkip:
     stub: PositionStub
     error: httpx.HTTPError
     dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
+
+    @property
+    def parser_row_metric(self) -> ParserRowMetric | None:
+        return None
+
+    @property
+    def parser_log_artifact(self) -> ParserLogArtifact:
+        return ParserLogArtifact(
+            component="llm_enricher",
+            event="fetch_transient_error",
+            fields={
+                "url": self.stub.url,
+                "source": self.stub.source,
+                "error": str(self.error),
+            },
+        )
 
 
 ParserIntakeOutcome = (

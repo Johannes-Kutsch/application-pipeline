@@ -50,6 +50,8 @@ from application_pipeline.parser_intake import (
     ClassifyForwarded,
     Dropped,
     OversizedBodySkip,
+    ParserLogArtifact,
+    ParserRowMetric,
     ParserIntake,
     PoolAdmitted,
     RetryableEnrichFailure,
@@ -367,34 +369,14 @@ class _ParserThread(threading.Thread):
         outcome = self._parser_intake.process_position_stub(stub)
         for dedup_event in outcome.dedup_events:
             self._dedup_counters.record(dedup_event)
+        self._emit_parser_log_artifact(outcome.parser_log_artifact)
+        self._apply_parser_row_metric(outcome.parser_row_metric)
 
         if isinstance(outcome, RetryableEnrichFailure):
-            self._run_log.event(
-                "pipeline_orchestrator",
-                "enrich_failed",
-                url=outcome.stub.url,
-                source=outcome.stub.source,
-            )
-            self._metrics.enrich_failed(self._parser_id)
-            self._metrics.increment_enrich_failed_count(self._parser_id)
             return
         if isinstance(outcome, OversizedBodySkip):
-            self._run_log.event(
-                "llm_enricher",
-                "body_oversized",
-                url=outcome.error.url,
-                source=outcome.error.source,
-                body_len=outcome.error.body_len,
-            )
             return
         if isinstance(outcome, TransientHttpSkip):
-            self._run_log.event(
-                "llm_enricher",
-                "fetch_transient_error",
-                url=outcome.stub.url,
-                source=outcome.stub.source,
-                error=str(outcome.error),
-            )
             return
         if isinstance(outcome, PoolAdmitted):
             self._pool_collector.add_judge_pending(
@@ -403,28 +385,55 @@ class _ParserThread(threading.Thread):
             )
             return
         if isinstance(outcome, Dropped):
-            if outcome.reason.startswith("freshness_"):
-                self._metrics.increment_freshness_dropped(self._parser_id)
-            elif outcome.reason.startswith("dedup_"):
-                self._metrics.increment_dedup_dropped(self._parser_id)
-            elif outcome.reason == "prefilter":
-                self._metrics.increment_prefilter_dropped(self._parser_id)
-            else:
-                self._metrics.increment_content_dropped(self._parser_id)
             return
 
         assert isinstance(outcome, ClassifyForwarded)
         self._metrics.enriched(self._parser_id, outcome.enrich_mode)
-        self._classify_queue.put(
-            _ClassifyRequest(
-                stub=outcome.stub,
-                body=outcome.body,
-                parser_id=self._parser_id,
-                listing_id=outcome.listing_id,
-            )
-        )
+        self._classify_queue.put(self._classify_request_from_outcome(outcome))
         self._metrics.classify_buffered(1)
-        self._metrics.increment_forwarded(self._parser_id)
+
+    def _emit_parser_log_artifact(self, log_artifact: ParserLogArtifact | None) -> None:
+        if log_artifact is None:
+            return
+        self._run_log.event(
+            log_artifact.component,
+            log_artifact.event,
+            **log_artifact.fields,
+        )
+
+    def _apply_parser_row_metric(self, metric: ParserRowMetric | None) -> None:
+        if metric is None:
+            return
+        if metric == "enrich_failed":
+            self._metrics.enrich_failed(self._parser_id)
+            self._metrics.increment_enrich_failed_count(self._parser_id)
+            return
+        if metric == "freshness_dropped":
+            self._metrics.increment_freshness_dropped(self._parser_id)
+            return
+        if metric == "dedup_dropped":
+            self._metrics.increment_dedup_dropped(self._parser_id)
+            return
+        if metric == "prefilter_dropped":
+            self._metrics.increment_prefilter_dropped(self._parser_id)
+            return
+        if metric == "content_dropped":
+            self._metrics.increment_content_dropped(self._parser_id)
+            return
+        if metric == "forwarded":
+            self._metrics.increment_forwarded(self._parser_id)
+            return
+        raise ValueError(f"unsupported parser-row metric: {metric}")
+
+    def _classify_request_from_outcome(
+        self, outcome: ClassifyForwarded
+    ) -> _ClassifyRequest:
+        return _ClassifyRequest(
+            stub=outcome.stub,
+            body=outcome.body,
+            parser_id=self._parser_id,
+            listing_id=outcome.listing_id,
+        )
 
 
 # ---------------------------------------------------------------------------

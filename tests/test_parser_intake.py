@@ -223,6 +223,48 @@ class _BackfillingMatchedParser:
         return EnrichResult(stub=enriched, body=self._body, mode="native")
 
 
+class _BackfillingMatchedFreshnessDropParser:
+    def __init__(
+        self,
+        *,
+        url: str,
+        company: str,
+        location: str,
+        title: str,
+        posted_date: date | None = None,
+        deadline: date | None = None,
+        body: str,
+    ) -> None:
+        self._url = url
+        self._company = company
+        self._location = location
+        self._title = title
+        self._posted_date = posted_date
+        self._deadline = deadline
+        self._body = body
+
+    def __enter__(self) -> "_BackfillingMatchedFreshnessDropParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        enriched = PositionStub(
+            url=self._url,
+            title=self._title,
+            source=stub.source,
+            company=self._company,
+            location=self._location,
+            posted_date=self._posted_date,
+            deadline=self._deadline,
+        )
+        return EnrichResult(stub=enriched, body=self._body, mode="native")
+
+
 def _seed_url_hit(dedup_store: Any, stub: PositionStub) -> int:
     dedup_store.mark_out_of_domain(stub)
     return dedup_store.listing_id_for(stub.url)
@@ -762,6 +804,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
 ) -> None:
     seen_path = tmp_path / ".seen.json"
     extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
     discovered_stub = PositionStub(
         url="https://example.com/post-enrich-alias",
         title="Discovered title",
@@ -790,6 +833,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
             body="Persisted body",
         ),
     )
+    run_log = RunLog(logs_dir)
     intake = ParserIntake(
         parser=_BackfillingMatchedParser(
             url="https://example.com/post-enrich-alias",
@@ -798,7 +842,13 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
             title="Platform Engineer",
             body=fresh_body,
         ),
-        freshness_gate=cast(Any, _FailOnPostEnrichFreshnessGate()),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
         deduplication=dedup_store,
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=cast(Any, _UnexpectedContentGate()),
@@ -834,6 +884,7 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
 ) -> None:
     seen_path = tmp_path / ".seen.json"
     extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
     discovered_stub = PositionStub(
         url="https://example.com/post-enrich-alias",
         title="Discovered title",
@@ -853,6 +904,7 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
     dedup_store.mark_matched(original)
     listing_id = dedup_store.listing_id_for(original.url)
     assert listing_id is not None
+    run_log = RunLog(logs_dir)
     intake = ParserIntake(
         parser=_BackfillingMatchedParser(
             url="https://example.com/post-enrich-alias",
@@ -861,7 +913,13 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
             title="Platform Engineer",
             body="Fresh raw description " + "x" * 120,
         ),
-        freshness_gate=cast(Any, _FailOnPostEnrichFreshnessGate()),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
         deduplication=dedup_store,
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=cast(Any, _UnexpectedContentGate()),
@@ -875,6 +933,127 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
     assert outcome.pool_admission.listing_id == listing_id
     assert outcome.dedup_events == ("judge_pending",)
     assert card_store.get(listing_id) is None
+
+
+@pytest.mark.parametrize(
+    ("posted_date", "deadline", "reason", "age_days", "deadline_text"),
+    [
+        (date(2026, 4, 1), None, "too_old", 59, None),
+        (None, date(2026, 5, 29), "deadline_passed", None, "2026-05-29"),
+    ],
+)
+def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_and_content_and_expires_matched_record(
+    tmp_path: Path,
+    posted_date: date | None,
+    deadline: date | None,
+    reason: str,
+    age_days: int | None,
+    deadline_text: str | None,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    discovered_stub = PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Discovered title",
+        source="test",
+    )
+
+    original = PositionStub(
+        url="https://example.com/original-tuple",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+    )
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    dedup_store.mark_matched(original)
+    listing_id = dedup_store.listing_id_for(original.url)
+    assert listing_id is not None
+    card_store.put(
+        listing_id,
+        CardExtract(
+            header="Persisted header",
+            summary="Persisted summary",
+            body="Persisted body",
+        ),
+    )
+    run_log = RunLog(logs_dir)
+    display = FakeStatusDisplay()
+    intake = ParserIntake(
+        parser=_BackfillingMatchedFreshnessDropParser(
+            url="https://example.com/post-enrich-alias",
+            company="Acme",
+            location="Hamburg",
+            title="Platform Engineer",
+            posted_date=posted_date,
+            deadline=deadline,
+            body="Fresh raw description " + "x" * 120,
+        ),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=display,
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=cast(Any, _UnexpectedContentGate()),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(discovered_stub)
+
+    assert isinstance(outcome, Dropped)
+    assert not isinstance(outcome, PoolAdmitted)
+    assert not isinstance(outcome, ClassifyForwarded)
+    assert outcome.reason == "freshness_post_enrich"
+    assert outcome.stub == PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=posted_date,
+        deadline=deadline,
+    )
+    assert outcome.listing_id == listing_id
+    assert outcome.dedup_kind == "judge_pending"
+    assert outcome.dedup_events == ("judge_pending",)
+    assert outcome.parser_row_metric == "freshness_dropped"
+    assert card_store.get(listing_id) is None
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert seen_data[str(listing_id)]["status"] == "expired"
+    assert seen_data[str(listing_id)]["urls"] == [
+        "https://example.com/post-enrich-alias",
+        "https://example.com/original-tuple",
+    ]
+
+    transcript_rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "freshness.transcripts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert transcript_rows == [
+        {
+            "url": "https://example.com/post-enrich-alias",
+            "title": "Platform Engineer",
+            "source": "test",
+            "posted_date": posted_date.isoformat() if posted_date is not None else None,
+            "deadline": deadline_text,
+            "anchored_today": "2026-05-30",
+            "age_days": age_days,
+            "passes": False,
+            "reason": reason,
+            "gate_arm": "post_enrich",
+        }
+    ]
 
 
 def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_write(

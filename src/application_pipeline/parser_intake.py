@@ -275,20 +275,7 @@ class ParserIntake:
 
         post_enrich_dedup = self._deduplication.is_seen(stub)
         post_enrich_events = _post_enrich_dedup_events(post_enrich_dedup.kind)
-        if post_enrich_dedup.kind == "judge_pending":
-            self._refresh_card_store_body(
-                listing_id=post_enrich_dedup.listing_id,
-                body=body,
-            )
-            return PoolAdmitted(
-                pool_admission=PoolAdmission(
-                    listing_id=post_enrich_dedup.listing_id,
-                    stub=stub,
-                ),
-                dedup_kind="judge_pending",
-                dedup_events=post_enrich_events,
-            )
-        if post_enrich_dedup.kind not in ("miss", "run_hit"):
+        if post_enrich_dedup.kind not in ("miss", "run_hit", "judge_pending"):
             return Dropped(
                 reason=_drop_reason_for_dedup(post_enrich_dedup.kind),
                 stub=stub,
@@ -305,11 +292,33 @@ class ParserIntake:
             return Dropped(
                 reason="freshness_post_enrich",
                 stub=stub,
+                listing_id=post_enrich_dedup.listing_id,
+                dedup_kind=post_enrich_dedup.kind,
+                dedup_events=post_enrich_events,
+            )
+
+        if post_enrich_dedup.kind == "judge_pending":
+            self._refresh_card_store_body(
+                listing_id=post_enrich_dedup.listing_id,
+                body=body,
+            )
+            return PoolAdmitted(
+                pool_admission=PoolAdmission(
+                    listing_id=post_enrich_dedup.listing_id,
+                    stub=stub,
+                ),
+                dedup_kind="judge_pending",
                 dedup_events=post_enrich_events,
             )
 
         if not self._content_gate.admit(body, stub):
-            return Dropped(reason="content", stub=stub, dedup_events=post_enrich_events)
+            return Dropped(
+                reason="content",
+                stub=stub,
+                listing_id=post_enrich_dedup.listing_id,
+                dedup_kind=post_enrich_dedup.kind,
+                dedup_events=post_enrich_events,
+            )
 
         return ClassifyForwarded(
             parser_id=self._parser_id,

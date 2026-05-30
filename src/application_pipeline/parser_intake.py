@@ -9,6 +9,7 @@ from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import RunScopedSeenKind, RunScopedSeenResult
 from application_pipeline.extracts.card_store import CardStore
 from application_pipeline.freshness_gate import FreshnessGate
+from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, PositionStub
 from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError
@@ -22,13 +23,6 @@ ParserRowMetric = Literal[
     "freshness_dropped",
     "prefilter_dropped",
 ]
-
-
-@dataclass(frozen=True)
-class ParserLogArtifact:
-    component: str
-    event: str
-    fields: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -78,10 +72,6 @@ class ClassifyForwarded:
     def parser_row_metric(self) -> ParserRowMetric:
         return "forwarded"
 
-    @property
-    def parser_log_artifact(self) -> ParserLogArtifact | None:
-        return None
-
 
 @dataclass(frozen=True)
 class PoolAdmitted:
@@ -90,10 +80,6 @@ class PoolAdmitted:
 
     @property
     def parser_row_metric(self) -> ParserRowMetric | None:
-        return None
-
-    @property
-    def parser_log_artifact(self) -> ParserLogArtifact | None:
         return None
 
 
@@ -114,10 +100,6 @@ class Dropped:
             return "prefilter_dropped"
         return "content_dropped"
 
-    @property
-    def parser_log_artifact(self) -> ParserLogArtifact | None:
-        return None
-
 
 @dataclass(frozen=True)
 class RetryableEnrichFailure:
@@ -127,17 +109,6 @@ class RetryableEnrichFailure:
     @property
     def parser_row_metric(self) -> ParserRowMetric:
         return "enrich_failed"
-
-    @property
-    def parser_log_artifact(self) -> ParserLogArtifact:
-        return ParserLogArtifact(
-            component="pipeline_orchestrator",
-            event="enrich_failed",
-            fields={
-                "url": self.stub.url,
-                "source": self.stub.source,
-            },
-        )
 
 
 @dataclass(frozen=True)
@@ -149,18 +120,6 @@ class OversizedBodySkip:
     def parser_row_metric(self) -> ParserRowMetric | None:
         return None
 
-    @property
-    def parser_log_artifact(self) -> ParserLogArtifact:
-        return ParserLogArtifact(
-            component="llm_enricher",
-            event="body_oversized",
-            fields={
-                "url": self.error.url,
-                "source": self.error.source,
-                "body_len": self.error.body_len,
-            },
-        )
-
 
 @dataclass(frozen=True)
 class TransientHttpSkip:
@@ -170,18 +129,6 @@ class TransientHttpSkip:
     @property
     def parser_row_metric(self) -> ParserRowMetric | None:
         return None
-
-    @property
-    def parser_log_artifact(self) -> ParserLogArtifact:
-        return ParserLogArtifact(
-            component="llm_enricher",
-            event="fetch_transient_error",
-            fields={
-                "url": self.stub.url,
-                "source": self.stub.source,
-                "error": str(self.error),
-            },
-        )
 
 
 ParserIntakeOutcome = (
@@ -206,6 +153,7 @@ class ParserIntake:
         domain_pre_filter: DomainPreFilter,
         content_gate: ContentGate,
         card_store: CardStore,
+        run_log: RunLog,
     ) -> None:
         self._parser_id = parser_id
         self._parser = parser
@@ -215,6 +163,7 @@ class ParserIntake:
         self._domain_pre_filter = domain_pre_filter
         self._content_gate = content_gate
         self._card_store = card_store
+        self._run_log = run_log
 
     def process_position_stub(self, position_stub: PositionStub) -> ParserIntakeOutcome:
         if not self._freshness_gate.admit(
@@ -255,18 +204,38 @@ class ParserIntake:
             enrich_result = self._parser.enrich(position_stub)
         except EnrichFailedError as exc:
             self._record_dedup("miss")
+            self._run_log.event(
+                "pipeline_orchestrator",
+                "enrich_failed",
+                url=position_stub.url,
+                source=position_stub.source,
+            )
             return RetryableEnrichFailure(
                 stub=position_stub,
                 error=exc,
             )
         except OversizedBodyError as exc:
             self._record_dedup("miss")
+            self._run_log.event(
+                "llm_enricher",
+                "body_oversized",
+                url=exc.url,
+                source=exc.source,
+                body_len=exc.body_len,
+            )
             return OversizedBodySkip(
                 stub=position_stub,
                 error=exc,
             )
         except httpx.HTTPError as exc:
             self._record_dedup("miss")
+            self._run_log.event(
+                "llm_enricher",
+                "fetch_transient_error",
+                url=position_stub.url,
+                source=position_stub.source,
+                error=str(exc),
+            )
             return TransientHttpSkip(
                 stub=position_stub,
                 error=exc,

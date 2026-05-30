@@ -50,7 +50,6 @@ from application_pipeline.parser_intake import (
     ClassifyForwarded,
     Dropped,
     OversizedBodySkip,
-    ParserLogArtifact,
     ParserRowMetric,
     ParserIntake,
     PoolAdmitted,
@@ -319,6 +318,7 @@ class _ParserThread(threading.Thread):
             domain_pre_filter=prefilter,
             content_gate=content_gate,
             card_store=card_store,
+            run_log=run_log,
         )
 
     def run(self) -> None:
@@ -368,7 +368,6 @@ class _ParserThread(threading.Thread):
         self._metrics.discovered(self._parser_id)
 
         outcome = self._parser_intake.process_position_stub(stub)
-        self._emit_parser_log_artifact(outcome.parser_log_artifact)
         self._apply_parser_row_metric(outcome.parser_row_metric)
 
         if isinstance(outcome, RetryableEnrichFailure):
@@ -390,15 +389,6 @@ class _ParserThread(threading.Thread):
         self._metrics.enriched(self._parser_id, outcome.enrich_mode)
         self._classify_queue.put(self._classify_request_from_outcome(outcome))
         self._metrics.classify_buffered(1)
-
-    def _emit_parser_log_artifact(self, log_artifact: ParserLogArtifact | None) -> None:
-        if log_artifact is None:
-            return
-        self._run_log.event(
-            log_artifact.component,
-            log_artifact.event,
-            **log_artifact.fields,
-        )
 
     def _apply_parser_row_metric(self, metric: ParserRowMetric | None) -> None:
         if metric is None:

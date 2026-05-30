@@ -52,6 +52,18 @@ def _assert_dedup_recorded(
     assert snapshot.judge_resumed == (1 if expected == "judge_pending" else 0)
 
 
+def _read_event_rows(
+    logs_dir: Path, layer: str, component: str
+) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in (logs_dir / layer / f"{component}.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+
+
 class _UnexpectedEnrichParser:
     def __enter__(self) -> "_UnexpectedEnrichParser":
         return self
@@ -453,6 +465,7 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_lis
         domain_pre_filter=prefilter,
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -508,6 +521,7 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
         ),
         content_gate=ContentGate(display=display, run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -602,6 +616,7 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=display, run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     outcome = intake.process_position_stub(
@@ -712,6 +727,7 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=display, run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -763,6 +779,7 @@ def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -852,6 +869,7 @@ def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_hi
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=cast(Any, _UnexpectedContentGate()),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -932,6 +950,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1005,6 +1024,7 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1080,6 +1100,7 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refre
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1169,6 +1190,7 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_a
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=cast(Any, _UnexpectedContentGate()),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1256,6 +1278,7 @@ def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_wri
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1266,13 +1289,16 @@ def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_wri
     assert str(outcome.error) == "native enrich failed"
     _assert_dedup_recorded(dedup_counters, "miss")
     assert outcome.parser_row_metric == "enrich_failed"
-    assert outcome.parser_log_artifact is not None
-    assert outcome.parser_log_artifact.component == "pipeline_orchestrator"
-    assert outcome.parser_log_artifact.event == "enrich_failed"
-    assert outcome.parser_log_artifact.fields == {
-        "url": stub.url,
-        "source": stub.source,
-    }
+    assert [
+        {k: v for k, v in row.items() if k != "ts"}
+        for row in _read_event_rows(logs_dir, "pipeline", "orchestrator")
+    ] == [
+        {
+            "event": "enrich_failed",
+            "url": stub.url,
+            "source": stub.source,
+        }
+    ]
     assert card_store.get(1) is None
     assert not seen_path.exists()
 
@@ -1308,6 +1334,7 @@ def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_ca
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1382,6 +1409,7 @@ def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_o
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1458,6 +1486,7 @@ def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1470,14 +1499,17 @@ def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
     assert outcome.error.body_len == 4321
     _assert_dedup_recorded(dedup_counters, "miss")
     assert outcome.parser_row_metric is None
-    assert outcome.parser_log_artifact is not None
-    assert outcome.parser_log_artifact.component == "llm_enricher"
-    assert outcome.parser_log_artifact.event == "body_oversized"
-    assert outcome.parser_log_artifact.fields == {
-        "url": stub.url,
-        "source": stub.source,
-        "body_len": 4321,
-    }
+    assert [
+        {k: v for k, v in row.items() if k != "ts"}
+        for row in _read_event_rows(logs_dir, "llm", "enricher")
+    ] == [
+        {
+            "event": "body_oversized",
+            "url": stub.url,
+            "source": stub.source,
+            "body_len": 4321,
+        }
+    ]
     assert not isinstance(outcome, PoolAdmitted)
     assert card_store.get(1) is None
     assert not seen_path.exists()
@@ -1516,6 +1548,7 @@ def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_w
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        run_log=run_log,
     )
 
     with dedup_store.run_scope():
@@ -1526,14 +1559,17 @@ def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_w
     assert "503 Service Unavailable" in str(outcome.error)
     _assert_dedup_recorded(dedup_counters, "miss")
     assert outcome.parser_row_metric is None
-    assert outcome.parser_log_artifact is not None
-    assert outcome.parser_log_artifact.component == "llm_enricher"
-    assert outcome.parser_log_artifact.event == "fetch_transient_error"
-    assert outcome.parser_log_artifact.fields == {
-        "url": stub.url,
-        "source": stub.source,
-        "error": "503 Service Unavailable",
-    }
+    assert [
+        {k: v for k, v in row.items() if k != "ts"}
+        for row in _read_event_rows(logs_dir, "llm", "enricher")
+    ] == [
+        {
+            "event": "fetch_transient_error",
+            "url": stub.url,
+            "source": stub.source,
+            "error": "503 Service Unavailable",
+        }
+    ]
     assert not isinstance(outcome, PoolAdmitted)
     assert card_store.get(1) is None
     assert not seen_path.exists()

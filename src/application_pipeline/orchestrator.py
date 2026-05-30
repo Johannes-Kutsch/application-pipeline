@@ -50,7 +50,6 @@ from application_pipeline.parser_intake import (
     ClassifyForwarded,
     Dropped,
     OversizedBodySkip,
-    ParserRowMetric,
     ParserIntake,
     PoolAdmitted,
     RetryableEnrichFailure,
@@ -319,6 +318,7 @@ class _ParserThread(threading.Thread):
             content_gate=content_gate,
             card_store=card_store,
             run_log=run_log,
+            metrics=metrics,
         )
 
     def run(self) -> None:
@@ -368,7 +368,6 @@ class _ParserThread(threading.Thread):
         self._metrics.discovered(self._parser_id)
 
         outcome = self._parser_intake.process_position_stub(stub)
-        self._apply_parser_row_metric(outcome.parser_row_metric)
 
         if isinstance(outcome, RetryableEnrichFailure):
             return
@@ -386,33 +385,8 @@ class _ParserThread(threading.Thread):
             return
 
         assert isinstance(outcome, ClassifyForwarded)
-        self._metrics.enriched(self._parser_id, outcome.enrich_mode)
         self._classify_queue.put(self._classify_request_from_outcome(outcome))
         self._metrics.classify_buffered(1)
-
-    def _apply_parser_row_metric(self, metric: ParserRowMetric | None) -> None:
-        if metric is None:
-            return
-        if metric == "enrich_failed":
-            self._metrics.enrich_failed(self._parser_id)
-            self._metrics.increment_enrich_failed_count(self._parser_id)
-            return
-        if metric == "freshness_dropped":
-            self._metrics.increment_freshness_dropped(self._parser_id)
-            return
-        if metric == "dedup_dropped":
-            self._metrics.increment_dedup_dropped(self._parser_id)
-            return
-        if metric == "prefilter_dropped":
-            self._metrics.increment_prefilter_dropped(self._parser_id)
-            return
-        if metric == "content_dropped":
-            self._metrics.increment_content_dropped(self._parser_id)
-            return
-        if metric == "forwarded":
-            self._metrics.increment_forwarded(self._parser_id)
-            return
-        raise ValueError(f"unsupported parser-row metric: {metric}")
 
     def _classify_request_from_outcome(
         self, outcome: ClassifyForwarded

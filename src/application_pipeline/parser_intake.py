@@ -15,14 +15,6 @@ from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError
 
 ListingId = int
-ParserRowMetric = Literal[
-    "content_dropped",
-    "dedup_dropped",
-    "enrich_failed",
-    "forwarded",
-    "freshness_dropped",
-    "prefilter_dropped",
-]
 
 
 @dataclass(frozen=True)
@@ -44,6 +36,25 @@ class DomainPreFilter(Protocol):
 @runtime_checkable
 class DedupEventRecorder(Protocol):
     def record(self, result: RunScopedSeenKind) -> None: ...
+
+
+@runtime_checkable
+class ParserMetrics(Protocol):
+    def enrich_failed(self, parser_id: str = "") -> None: ...
+
+    def enriched(self, parser_id: str, mode: str) -> None: ...
+
+    def increment_content_dropped(self, parser_id: str) -> None: ...
+
+    def increment_dedup_dropped(self, parser_id: str) -> None: ...
+
+    def increment_enrich_failed_count(self, parser_id: str) -> None: ...
+
+    def increment_forwarded(self, parser_id: str) -> None: ...
+
+    def increment_freshness_dropped(self, parser_id: str) -> None: ...
+
+    def increment_prefilter_dropped(self, parser_id: str) -> None: ...
 
 
 DropReason = Literal[
@@ -68,19 +79,11 @@ class ClassifyForwarded:
     enrich_mode: Literal["native", "fallback"]
     post_enrich_dedup_kind: RunScopedSeenKind
 
-    @property
-    def parser_row_metric(self) -> ParserRowMetric:
-        return "forwarded"
-
 
 @dataclass(frozen=True)
 class PoolAdmitted:
     pool_admission: PoolAdmission
     dedup_kind: Literal["judge_pending"]
-
-    @property
-    def parser_row_metric(self) -> ParserRowMetric | None:
-        return None
 
 
 @dataclass(frozen=True)
@@ -90,25 +93,11 @@ class Dropped:
     listing_id: ListingId | None = None
     dedup_kind: RunScopedSeenKind | None = None
 
-    @property
-    def parser_row_metric(self) -> ParserRowMetric:
-        if self.reason.startswith("freshness_"):
-            return "freshness_dropped"
-        if self.reason.startswith("dedup_"):
-            return "dedup_dropped"
-        if self.reason == "prefilter":
-            return "prefilter_dropped"
-        return "content_dropped"
-
 
 @dataclass(frozen=True)
 class RetryableEnrichFailure:
     stub: PositionStub
     error: EnrichFailedError
-
-    @property
-    def parser_row_metric(self) -> ParserRowMetric:
-        return "enrich_failed"
 
 
 @dataclass(frozen=True)
@@ -116,19 +105,11 @@ class OversizedBodySkip:
     stub: PositionStub
     error: OversizedBodyError
 
-    @property
-    def parser_row_metric(self) -> ParserRowMetric | None:
-        return None
-
 
 @dataclass(frozen=True)
 class TransientHttpSkip:
     stub: PositionStub
     error: httpx.HTTPError
-
-    @property
-    def parser_row_metric(self) -> ParserRowMetric | None:
-        return None
 
 
 ParserIntakeOutcome = (
@@ -154,6 +135,7 @@ class ParserIntake:
         content_gate: ContentGate,
         card_store: CardStore,
         run_log: RunLog,
+        metrics: ParserMetrics | None = None,
     ) -> None:
         self._parser_id = parser_id
         self._parser = parser
@@ -164,6 +146,7 @@ class ParserIntake:
         self._content_gate = content_gate
         self._card_store = card_store
         self._run_log = run_log
+        self._metrics = metrics
 
     def process_position_stub(self, position_stub: PositionStub) -> ParserIntakeOutcome:
         if not self._freshness_gate.admit(
@@ -171,6 +154,7 @@ class ParserIntake:
             gate_arm="discover",
             deadline=position_stub.deadline,
         ):
+            self._increment_drop_metric("freshness_discover")
             return Dropped(reason="freshness_discover", stub=position_stub)
 
         discover_dedup = self._deduplication.is_seen(position_stub)
@@ -185,6 +169,7 @@ class ParserIntake:
             )
         if discover_dedup.kind != "miss":
             self._record_dedup(discover_dedup.kind)
+            self._increment_drop_metric(_drop_reason_for_dedup(discover_dedup.kind))
             return Dropped(
                 reason=_drop_reason_for_dedup(discover_dedup.kind),
                 stub=position_stub,
@@ -194,6 +179,7 @@ class ParserIntake:
 
         if not self._domain_pre_filter.admit(position_stub):
             self._record_dedup("miss")
+            self._increment_drop_metric("prefilter")
             return Dropped(
                 reason="prefilter",
                 stub=position_stub,
@@ -210,6 +196,7 @@ class ParserIntake:
                 url=position_stub.url,
                 source=position_stub.source,
             )
+            self._increment_enrich_failed_metric()
             return RetryableEnrichFailure(
                 stub=position_stub,
                 error=exc,
@@ -247,6 +234,7 @@ class ParserIntake:
         post_enrich_dedup = self._deduplication.is_seen(stub)
         if post_enrich_dedup.kind not in ("miss", "run_hit", "judge_pending"):
             self._record_dedup(post_enrich_dedup.kind)
+            self._increment_drop_metric(_drop_reason_for_dedup(post_enrich_dedup.kind))
             return Dropped(
                 reason=_drop_reason_for_dedup(post_enrich_dedup.kind),
                 stub=stub,
@@ -260,6 +248,7 @@ class ParserIntake:
             deadline=stub.deadline,
         ):
             self._record_dedup(post_enrich_dedup.kind)
+            self._increment_drop_metric("freshness_post_enrich")
             return Dropped(
                 reason="freshness_post_enrich",
                 stub=stub,
@@ -270,6 +259,9 @@ class ParserIntake:
         content_decision = self._content_gate.inspect(body, stub)
         if not content_decision.passes:
             self._record_dedup(post_enrich_dedup.kind)
+            self._increment_drop_metric(
+                _drop_reason_for_content(content_decision.reason)
+            )
             return Dropped(
                 reason=_drop_reason_for_content(content_decision.reason),
                 stub=stub,
@@ -292,6 +284,7 @@ class ParserIntake:
             )
 
         self._record_dedup(post_enrich_dedup.kind)
+        self._increment_forwarded_metrics(enrich_result.mode)
         return ClassifyForwarded(
             parser_id=self._parser_id,
             stub=stub,
@@ -306,6 +299,32 @@ class ParserIntake:
 
     def _record_dedup(self, kind: RunScopedSeenKind) -> None:
         self._dedup_counters.record(kind)
+
+    def _increment_drop_metric(self, reason: DropReason) -> None:
+        if self._metrics is None or not self._parser_id:
+            return
+        if reason.startswith("freshness_"):
+            self._metrics.increment_freshness_dropped(self._parser_id)
+            return
+        if reason.startswith("dedup_"):
+            self._metrics.increment_dedup_dropped(self._parser_id)
+            return
+        if reason == "prefilter":
+            self._metrics.increment_prefilter_dropped(self._parser_id)
+            return
+        self._metrics.increment_content_dropped(self._parser_id)
+
+    def _increment_enrich_failed_metric(self) -> None:
+        if self._metrics is None or not self._parser_id:
+            return
+        self._metrics.enrich_failed(self._parser_id)
+        self._metrics.increment_enrich_failed_count(self._parser_id)
+
+    def _increment_forwarded_metrics(self, mode: Literal["native", "fallback"]) -> None:
+        if self._metrics is None or not self._parser_id:
+            return
+        self._metrics.enriched(self._parser_id, mode)
+        self._metrics.increment_forwarded(self._parser_id)
 
 
 def _drop_reason_for_dedup(kind: RunScopedSeenKind) -> DropReason:

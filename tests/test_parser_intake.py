@@ -30,6 +30,7 @@ from application_pipeline.parsers import PositionStub
 from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError, EnrichResult
 from application_pipeline.prefilter_gate import PreFilterGate
+from application_pipeline.run_metrics import RunMetrics
 
 
 _DedupSeeder = Callable[[Any, PositionStub], int]
@@ -37,6 +38,21 @@ _DedupSeeder = Callable[[Any, PositionStub], int]
 
 def _make_dedup_counters(run_log: RunLog) -> DedupCounters:
     return DedupCounters(display=FakeStatusDisplay(), run_log=run_log)
+
+
+def _make_run_metrics(
+    run_log: RunLog, *, parser_id: str = "test"
+) -> tuple[RunMetrics, FakeStatusDisplay]:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser(parser_id, order=0, total_queries=1, has_native_enrich=True)
+    return metrics, display
+
+
+def _last_body(display: FakeStatusDisplay, row: str) -> str:
+    updates = display.body_updates_for(row)
+    assert updates, f"no body updates for row {row!r}"
+    return updates[-1]
 
 
 def _assert_dedup_recorded(
@@ -451,7 +467,9 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_lis
     prefilter = _CountingPreFilter()
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_UnexpectedEnrichParser(),
         freshness_gate=FreshnessGate(
             anchored_today=date(2026, 5, 30),
@@ -466,6 +484,7 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_lis
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -477,7 +496,7 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_lis
     assert outcome.dedup_kind == dedup_kind
     _assert_dedup_recorded(dedup_counters, dedup_kind)
     assert outcome.listing_id == expected_listing_id
-    assert outcome.parser_row_metric == "dedup_dropped"
+    assert _last_body(metrics_display, "parser test gates") == "1 dedup"
     assert prefilter.calls == 0
     assert card_store.get(expected_listing_id) is None
 
@@ -502,7 +521,9 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
     display = FakeStatusDisplay()
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_UnexpectedEnrichParser(),
         freshness_gate=FreshnessGate(
             anchored_today=date(2026, 5, 30),
@@ -522,6 +543,7 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
         content_gate=ContentGate(display=display, run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -532,7 +554,7 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
     assert outcome.listing_id == 1
     assert outcome.dedup_kind is None
     _assert_dedup_recorded(dedup_counters, "miss")
-    assert outcome.parser_row_metric == "prefilter_dropped"
+    assert _last_body(metrics_display, "parser test gates") == "1 pre-filter"
     assert card_store.get(1) is None
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -608,7 +630,9 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
         run_log=run_log,
     )
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_UnexpectedEnrichParser(),
         freshness_gate=freshness_gate,
         deduplication=dedup_store,
@@ -617,6 +641,7 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
         content_gate=ContentGate(display=display, run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     outcome = intake.process_position_stub(
@@ -632,7 +657,7 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
 
     assert isinstance(outcome, Dropped)
     assert outcome.reason == "freshness_discover"
-    assert outcome.parser_row_metric == "freshness_dropped"
+    assert _last_body(metrics_display, "parser test gates") == "1 freshness"
     _assert_dedup_recorded(dedup_counters, None)
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -713,7 +738,9 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     run_log = RunLog(logs_dir)
     display = FakeStatusDisplay()
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_UnexpectedEnrichParser(),
         freshness_gate=FreshnessGate(
             anchored_today=date(2026, 5, 30),
@@ -728,6 +755,7 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
         content_gate=ContentGate(display=display, run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -738,7 +766,7 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     assert outcome.pool_admission.stub == rediscovered_stub
     assert outcome.dedup_kind == "judge_pending"
     _assert_dedup_recorded(dedup_counters, "judge_pending")
-    assert outcome.parser_row_metric is None
+    assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
 
     card = card_store.get(7)
     assert card is not None
@@ -764,6 +792,7 @@ def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data
     dedup_store = dedup_load(seen_path, card_store=card_store)
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log, parser_id="parser_test")
     intake = ParserIntake(
         parser_id="parser_test",
         parser=_BackfillingParser(),
@@ -780,6 +809,7 @@ def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -800,7 +830,10 @@ def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data
     assert outcome.enrich_mode == "native"
     assert outcome.post_enrich_dedup_kind == "run_hit"
     _assert_dedup_recorded(dedup_counters, "run_hit")
-    assert outcome.parser_row_metric == "forwarded"
+    assert (
+        _last_body(metrics_display, "parser parser test")
+        == "0 discovered · 1 forwarded"
+    )
 
 
 @pytest.mark.parametrize(
@@ -930,7 +963,9 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
     )
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_BackfillingMatchedParser(
             url="https://example.com/post-enrich-alias",
             company="Acme",
@@ -951,6 +986,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -1080,7 +1116,9 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refre
     )
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_BackfillingMatchedParser(
             url="https://example.com/post-enrich-alias",
             company="Acme",
@@ -1101,6 +1139,7 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refre
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -1113,7 +1152,7 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refre
     assert outcome.listing_id == listing_id
     assert outcome.dedup_kind == "judge_pending"
     _assert_dedup_recorded(dedup_counters, "judge_pending")
-    assert outcome.parser_row_metric == "content_dropped"
+    assert _last_body(metrics_display, "parser test gates") == "1 content"
     assert card_store.get(listing_id) == CardExtract(
         header="Persisted header",
         summary="Persisted summary",
@@ -1168,7 +1207,9 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_a
     run_log = RunLog(logs_dir)
     display = FakeStatusDisplay()
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_BackfillingMatchedFreshnessDropParser(
             url="https://example.com/post-enrich-alias",
             company="Acme",
@@ -1191,6 +1232,7 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_a
         content_gate=cast(Any, _UnexpectedContentGate()),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -1212,7 +1254,7 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_a
     assert outcome.listing_id == listing_id
     assert outcome.dedup_kind == "judge_pending"
     _assert_dedup_recorded(dedup_counters, "judge_pending")
-    assert outcome.parser_row_metric == "freshness_dropped"
+    assert _last_body(metrics_display, "parser test gates") == "1 freshness"
     assert card_store.get(listing_id) is None
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -1264,7 +1306,9 @@ def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_wri
     dedup_store = dedup_load(seen_path, card_store=card_store)
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_EnrichFailedParser(),
         freshness_gate=FreshnessGate(
             anchored_today=date(2026, 5, 30),
@@ -1279,6 +1323,7 @@ def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_wri
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -1288,7 +1333,9 @@ def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_wri
     assert outcome.stub == stub
     assert str(outcome.error) == "native enrich failed"
     _assert_dedup_recorded(dedup_counters, "miss")
-    assert outcome.parser_row_metric == "enrich_failed"
+    assert _last_body(metrics_display, "parser test") == (
+        "0 discovered · 1 enrich_failed · 0 forwarded"
+    )
     assert [
         {k: v for k, v in row.items() if k != "ts"}
         for row in _read_event_rows(logs_dir, "pipeline", "orchestrator")
@@ -1320,7 +1367,9 @@ def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_ca
     dedup_store = dedup_load(seen_path, card_store=card_store)
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_EmptyBodyParser(),
         freshness_gate=FreshnessGate(
             anchored_today=date(2026, 5, 30),
@@ -1335,6 +1384,7 @@ def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_ca
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -1355,7 +1405,7 @@ def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_ca
     assert outcome.listing_id == 1
     assert outcome.dedup_kind == "run_hit"
     _assert_dedup_recorded(dedup_counters, "run_hit")
-    assert outcome.parser_row_metric == "content_dropped"
+    assert _last_body(metrics_display, "parser test gates") == "1 content"
     assert card_store.get(1) is None
     assert not seen_path.exists()
 
@@ -1395,7 +1445,9 @@ def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_o
     dedup_store = dedup_load(seen_path, card_store=card_store)
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_TooShortBodyParser(),
         freshness_gate=FreshnessGate(
             anchored_today=date(2026, 5, 30),
@@ -1410,6 +1462,7 @@ def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_o
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -1430,7 +1483,7 @@ def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_o
     assert outcome.listing_id == 1
     assert outcome.dedup_kind == "run_hit"
     _assert_dedup_recorded(dedup_counters, "run_hit")
-    assert outcome.parser_row_metric == "content_dropped"
+    assert _last_body(metrics_display, "parser test gates") == "1 content"
     assert card_store.get(1) is None
     assert not seen_path.exists()
 
@@ -1472,7 +1525,9 @@ def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
     dedup_store = dedup_load(seen_path, card_store=card_store)
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_OversizedBodyParser(),
         freshness_gate=FreshnessGate(
             anchored_today=date(2026, 5, 30),
@@ -1487,6 +1542,7 @@ def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -1498,7 +1554,7 @@ def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
     assert outcome.error.source == stub.source
     assert outcome.error.body_len == 4321
     _assert_dedup_recorded(dedup_counters, "miss")
-    assert outcome.parser_row_metric is None
+    assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
     assert [
         {k: v for k, v in row.items() if k != "ts"}
         for row in _read_event_rows(logs_dir, "llm", "enricher")
@@ -1534,7 +1590,9 @@ def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_w
     dedup_store = dedup_load(seen_path, card_store=card_store)
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    metrics, metrics_display = _make_run_metrics(run_log)
     intake = ParserIntake(
+        parser_id="test",
         parser=_TransientHttpErrorParser(),
         freshness_gate=FreshnessGate(
             anchored_today=date(2026, 5, 30),
@@ -1549,6 +1607,7 @@ def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_w
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
         run_log=run_log,
+        metrics=metrics,
     )
 
     with dedup_store.run_scope():
@@ -1558,7 +1617,7 @@ def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_w
     assert outcome.stub == stub
     assert "503 Service Unavailable" in str(outcome.error)
     _assert_dedup_recorded(dedup_counters, "miss")
-    assert outcome.parser_row_metric is None
+    assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
     assert [
         {k: v for k, v in row.items() if k != "ts"}
         for row in _read_event_rows(logs_dir, "llm", "enricher")

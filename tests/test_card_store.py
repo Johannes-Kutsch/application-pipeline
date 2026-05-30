@@ -132,7 +132,7 @@ def test_legacy_record_without_body_loads_with_empty_default(store_path: Path) -
     assert card == CardExtract(header="H", summary="S", body="")
 
 
-def test_replace_body_if_present_keeps_header_and_summary_and_noops_for_missing_key(
+def test_replace_body_if_present_keeps_header_and_summary_and_noops_for_empty_or_missing_input(
     store: CardStore,
 ) -> None:
     store.put(
@@ -141,6 +141,12 @@ def test_replace_body_if_present_keeps_header_and_summary_and_noops_for_missing_
     )
 
     assert store.replace_body_if_present(1, "Fresh raw description") is True
+    assert store.get(1) == CardExtract(
+        header="Persisted header",
+        summary="Persisted summary",
+        body="Fresh raw description",
+    )
+    assert store.replace_body_if_present(1, "") is False
     assert store.get(1) == CardExtract(
         header="Persisted header",
         summary="Persisted summary",

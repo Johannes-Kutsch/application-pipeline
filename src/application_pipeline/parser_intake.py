@@ -7,7 +7,7 @@ import httpx
 
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import RunScopedSeenKind, RunScopedSeenResult
-from application_pipeline.extracts.card_store import CardExtract, CardStore
+from application_pipeline.extracts.card_store import CardStore
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parsers import Parser, PositionStub
 from application_pipeline.parsers.body_fetch import OversizedBodyError
@@ -322,17 +322,7 @@ class ParserIntake:
         )
 
     def _refresh_card_store_body(self, *, listing_id: ListingId, body: str) -> None:
-        existing = self._card_store.get(listing_id)
-        if existing is None or not body:
-            return
-        self._card_store.put(
-            listing_id,
-            CardExtract(
-                header=existing.header,
-                summary=existing.summary,
-                body=body,
-            ),
-        )
+        self._card_store.replace_body_if_present(listing_id, body)
 
 
 def _drop_reason_for_dedup(kind: RunScopedSeenKind) -> DropReason:

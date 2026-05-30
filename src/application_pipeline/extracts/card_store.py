@@ -47,6 +47,21 @@ class CardStore:
             self._persist(new_records)
             self._records = new_records
 
+    def replace_body_if_present(self, key: int, body: str) -> bool:
+        with self._lock:
+            record = self._records.get(key)
+            if record is None or not body:
+                return False
+            new_records = dict(self._records)
+            new_records[key] = {
+                "header": record["header"],
+                "summary": record["summary"],
+                "body": body,
+            }
+            self._persist(new_records)
+            self._records = new_records
+            return True
+
     def delete(self, key: int) -> None:
         with self._lock:
             if key not in self._records:

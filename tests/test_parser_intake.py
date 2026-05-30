@@ -782,6 +782,70 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     assert card.body == "Persisted body"
 
 
+def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    discovered_stub = PositionStub(
+        url="https://example.com/fresh-forward",
+        title="Backend Engineer",
+        source="test",
+        posted_date=date(2026, 5, 29),
+    )
+
+    class _TrackingClassifySink:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None:
+            self.calls.append({"listing_id": listing_id, "stub": stub, "body": body})
+
+    sink = _TrackingClassifySink()
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    run_log = RunLog(logs_dir)
+    dedup_counters = _make_dedup_counters(run_log)
+    metrics, _ = _make_run_metrics(run_log, parser_id="parser_test")
+    intake = ParserIntake(
+        parser_id="parser_test",
+        parser=_BackfillingParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        dedup_counters=dedup_counters,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
+        card_store=card_store,
+        classify_sink=sink,
+        run_log=run_log,
+        metrics=metrics,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(discovered_stub)
+
+    assert isinstance(outcome, ClassifyForwarded)
+    assert len(sink.calls) == 1
+    call = sink.calls[0]
+    assert call["listing_id"] == 1
+    assert call["stub"] == PositionStub(
+        url="https://example.com/fresh-forward",
+        title="Backend Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+    assert call["body"] == "Fresh backend role " + "x" * 120
+
+
 def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data(
     tmp_path: Path,
 ) -> None:

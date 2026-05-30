@@ -133,6 +133,7 @@ class ParserIntakeHarness:
         enriched_stub: PositionStub = DEFAULT_ENRICHED_STUB,
         body: str = DEFAULT_BODY,
         parser: Parser | None = None,
+        domain_pre_filter: PreFilterGate | None = None,
     ) -> "ParserIntakeHarness":
         seen_path = tmp_path / ".seen.json"
         extracts_path = tmp_path / "extracts.json"
@@ -151,7 +152,7 @@ class ParserIntakeHarness:
             card_store=card_store,
         )
         content_gate = ContentGate(display=status_display, run_log=run_log)
-        domain_pre_filter = PreFilterGate(
+        configured_pre_filter = domain_pre_filter or PreFilterGate(
             blacklist=[],
             dedup=dedup_store,
             display=status_display,
@@ -175,7 +176,7 @@ class ParserIntakeHarness:
             freshness_gate=freshness_gate,
             deduplication=dedup_store,
             dedup_counters=dedup_counters,
-            domain_pre_filter=domain_pre_filter,
+            domain_pre_filter=configured_pre_filter,
             content_gate=content_gate,
             card_store=card_store,
             pool_collector=pool_collector,
@@ -191,7 +192,7 @@ class ParserIntakeHarness:
             card_store=card_store,
             freshness_gate=freshness_gate,
             content_gate=content_gate,
-            domain_pre_filter=domain_pre_filter,
+            domain_pre_filter=configured_pre_filter,
             run_log=run_log,
             metrics=metrics,
             status_display=status_display,
@@ -230,6 +231,56 @@ class ParserIntakeHarness:
         listing_id = self.dedup_store.listing_id_for(listing.url)
         assert listing_id is not None
         return listing_id
+
+    def seed_post_discover_url_hit_listing(
+        self, stub: PositionStub | None = None
+    ) -> int:
+        listing = self.default_position_stub if stub is None else stub
+        self.dedup_store.mark_out_of_domain(listing)
+        listing_id = self.dedup_store.listing_id_for(listing.url)
+        assert listing_id is not None
+        return listing_id
+
+    def seed_post_discover_tuple_hit_listing(
+        self, stub: PositionStub | None = None
+    ) -> int:
+        listing = self.default_position_stub if stub is None else stub
+        original = PositionStub(
+            url="https://example.com/original",
+            title=listing.title,
+            source=listing.source,
+            company=listing.company,
+            location=listing.location,
+        )
+        self.dedup_store.mark_out_of_domain(original)
+        listing_id = self.dedup_store.listing_id_for(original.url)
+        assert listing_id is not None
+        return listing_id
+
+    def seed_post_discover_fuzzy_hit_listing(
+        self, stub: PositionStub | None = None
+    ) -> int:
+        listing = self.default_position_stub if stub is None else stub
+        original = PositionStub(
+            url="https://example.com/original",
+            title="Senior Lead Platform Backend Engineer",
+            source=listing.source,
+            company=listing.company,
+            location=listing.location,
+        )
+        self.dedup_store.mark_out_of_domain(original)
+        listing_id = self.dedup_store.listing_id_for(original.url)
+        assert listing_id is not None
+        return listing_id
+
+    def seed_post_discover_run_hit_listing(
+        self, stub: PositionStub | None = None
+    ) -> int:
+        listing = self.default_position_stub if stub is None else stub
+        assert self._run_scope_depth > 0, (
+            "run_scope() must stay open for in-run post-discover seeding"
+        )
+        return self.dedup_store.is_seen(listing).listing_id
 
     def seed_matched_pool_reentry_listing(
         self, stub: PositionStub | None = None

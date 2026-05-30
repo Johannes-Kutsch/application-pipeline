@@ -27,6 +27,7 @@ from tests.parser_intake_harness import ParserIntakeHarness
 
 
 _DedupSeeder = Callable[[Any, PositionStub], int]
+_HarnessSeedHelper = Callable[[ParserIntakeHarness], int]
 
 
 def _make_dedup_counters(run_log: RunLog) -> DedupCounters:
@@ -330,39 +331,6 @@ class _TooShortBodyParser:
         return EnrichResult(stub=enriched, body="x" * 99, mode="native")
 
 
-def _seed_url_hit(dedup_store: Any, stub: PositionStub) -> int:
-    dedup_store.mark_out_of_domain(stub)
-    return dedup_store.listing_id_for(stub.url)
-
-
-def _seed_tuple_hit(dedup_store: Any, stub: PositionStub) -> int:
-    original = PositionStub(
-        url="https://example.com/original",
-        title=stub.title,
-        source=stub.source,
-        company=stub.company,
-        location=stub.location,
-    )
-    dedup_store.mark_out_of_domain(original)
-    return dedup_store.listing_id_for(original.url)
-
-
-def _seed_fuzzy_hit(dedup_store: Any, stub: PositionStub) -> int:
-    original = PositionStub(
-        url="https://example.com/original",
-        title="Senior Lead Platform Backend Engineer",
-        source=stub.source,
-        company=stub.company,
-        location=stub.location,
-    )
-    dedup_store.mark_out_of_domain(original)
-    return dedup_store.listing_id_for(original.url)
-
-
-def _seed_run_hit(dedup_store: Any, stub: PositionStub) -> int:
-    return dedup_store.is_seen(stub).listing_id
-
-
 def _seed_post_enrich_url_hit(dedup_store: Any, stub: PositionStub) -> int:
     original = PositionStub(
         url="https://example.com/canonical-url-hit",
@@ -400,34 +368,31 @@ def _seed_post_enrich_fuzzy_hit(dedup_store: Any, stub: PositionStub) -> int:
 
 
 @pytest.mark.parametrize(
-    ("dedup_kind", "prepare"),
+    ("dedup_kind", "seed_listing"),
     [
         (
             "url_hit",
-            _seed_url_hit,
+            ParserIntakeHarness.seed_post_discover_url_hit_listing,
         ),
         (
             "tuple_hit",
-            _seed_tuple_hit,
+            ParserIntakeHarness.seed_post_discover_tuple_hit_listing,
         ),
         (
             "fuzzy_hit",
-            _seed_fuzzy_hit,
+            ParserIntakeHarness.seed_post_discover_fuzzy_hit_listing,
         ),
         (
             "run_hit",
-            _seed_run_hit,
+            ParserIntakeHarness.seed_post_discover_run_hit_listing,
         ),
     ],
 )
 def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_store_state(
     tmp_path: Path,
     dedup_kind: str,
-    prepare: _DedupSeeder,
+    seed_listing: _HarnessSeedHelper,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     stub = PositionStub(
         url="https://example.com/alias",
         title="Lead Platform Backend Engineer",
@@ -437,38 +402,24 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_sto
         posted_date=date(2026, 5, 29),
     )
 
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
     prefilter = _CountingPreFilter()
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
+        discovered_stub=stub,
+        enriched_stub=stub,
         parser=_UnexpectedEnrichParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=prefilter,
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
+        domain_pre_filter=cast(Any, prefilter),
     )
 
-    with dedup_store.run_scope():
-        expected_listing_id = prepare(dedup_store, stub)
-        intake.process_position_stub(stub)
-    _assert_dedup_recorded(dedup_counters, dedup_kind)
-    assert _last_body(metrics_display, "parser test gates") == "1 dedup"
+    with harness.run_scope():
+        expected_listing_id = seed_listing(harness)
+        harness.process_one_position_stub(stub)
+
+    _assert_dedup_recorded(harness.dedup_counters, dedup_kind)
+    assert harness.status_display_row_body("parser test gates") == "1 dedup"
     assert prefilter.calls == 0
-    assert card_store.get(expected_listing_id) is None
+    assert harness.card_content(expected_listing_id) is None
 
 
 def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_keeps_listing_id(

@@ -17,12 +17,6 @@ from application_pipeline.parsers.types import EnrichFailedError
 ListingId = int
 
 
-@dataclass(frozen=True)
-class PoolAdmission:
-    listing_id: ListingId
-    stub: PositionStub
-
-
 @runtime_checkable
 class Deduplication(Protocol):
     def is_seen(self, key: PositionStub) -> RunScopedSeenResult: ...
@@ -36,6 +30,16 @@ class DomainPreFilter(Protocol):
 @runtime_checkable
 class DedupEventRecorder(Protocol):
     def record(self, result: RunScopedSeenKind) -> None: ...
+
+
+@runtime_checkable
+class PoolCollector(Protocol):
+    def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None: ...
+
+
+class _NullPoolCollector:
+    def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None:
+        pass
 
 
 @runtime_checkable
@@ -81,12 +85,6 @@ class ClassifyForwarded:
 
 
 @dataclass(frozen=True)
-class PoolAdmitted:
-    pool_admission: PoolAdmission
-    dedup_kind: Literal["judge_pending"]
-
-
-@dataclass(frozen=True)
 class Dropped:
     reason: DropReason
     stub: PositionStub
@@ -114,7 +112,6 @@ class TransientHttpSkip:
 
 ParserIntakeOutcome = (
     ClassifyForwarded
-    | PoolAdmitted
     | Dropped
     | RetryableEnrichFailure
     | OversizedBodySkip
@@ -134,6 +131,7 @@ class ParserIntake:
         domain_pre_filter: DomainPreFilter,
         content_gate: ContentGate,
         card_store: CardStore,
+        pool_collector: PoolCollector | None = None,
         run_log: RunLog,
         metrics: ParserMetrics | None = None,
     ) -> None:
@@ -145,10 +143,13 @@ class ParserIntake:
         self._domain_pre_filter = domain_pre_filter
         self._content_gate = content_gate
         self._card_store = card_store
+        self._pool_collector = pool_collector or _NullPoolCollector()
         self._run_log = run_log
         self._metrics = metrics
 
-    def process_position_stub(self, position_stub: PositionStub) -> ParserIntakeOutcome:
+    def process_position_stub(
+        self, position_stub: PositionStub
+    ) -> ParserIntakeOutcome | None:
         if not self._freshness_gate.admit(
             position_stub,
             gate_arm="discover",
@@ -159,14 +160,12 @@ class ParserIntake:
 
         discover_dedup = self._deduplication.is_seen(position_stub)
         if discover_dedup.kind == "judge_pending":
-            self._record_dedup("judge_pending")
-            return PoolAdmitted(
-                pool_admission=PoolAdmission(
-                    listing_id=discover_dedup.listing_id,
-                    stub=position_stub,
-                ),
-                dedup_kind="judge_pending",
+            self._admit_judge_pending(
+                listing_id=discover_dedup.listing_id,
+                stub=position_stub,
             )
+            self._record_dedup("judge_pending")
+            return None
         if discover_dedup.kind != "miss":
             self._record_dedup(discover_dedup.kind)
             self._increment_drop_metric(_drop_reason_for_dedup(discover_dedup.kind))
@@ -274,14 +273,12 @@ class ParserIntake:
                 listing_id=post_enrich_dedup.listing_id,
                 body=body,
             )
-            self._record_dedup("judge_pending")
-            return PoolAdmitted(
-                pool_admission=PoolAdmission(
-                    listing_id=post_enrich_dedup.listing_id,
-                    stub=stub,
-                ),
-                dedup_kind="judge_pending",
+            self._admit_judge_pending(
+                listing_id=post_enrich_dedup.listing_id,
+                stub=stub,
             )
+            self._record_dedup("judge_pending")
+            return None
 
         self._record_dedup(post_enrich_dedup.kind)
         self._increment_forwarded_metrics(enrich_result.mode)
@@ -296,6 +293,11 @@ class ParserIntake:
 
     def _refresh_card_store_body(self, *, listing_id: ListingId, body: str) -> None:
         self._card_store.replace_body_if_present(listing_id, body)
+
+    def _admit_judge_pending(
+        self, *, listing_id: ListingId, stub: PositionStub
+    ) -> None:
+        self._pool_collector.add_judge_pending(stub, listing_id)
 
     def _record_dedup(self, kind: RunScopedSeenKind) -> None:
         self._dedup_counters.record(kind)

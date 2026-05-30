@@ -21,7 +21,6 @@ from application_pipeline.parser_intake import (
     Dropped,
     OversizedBodySkip,
     ParserIntake,
-    PoolAdmitted,
     RetryableEnrichFailure,
     TransientHttpSkip,
 )
@@ -78,6 +77,14 @@ def _read_event_rows(
         .splitlines()
         if line.strip()
     ]
+
+
+class _RecordingPoolCollector:
+    def __init__(self) -> None:
+        self.admissions: list[tuple[int, PositionStub]] = []
+
+    def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None:
+        self.admissions.append((listing_id, stub))
 
 
 class _UnexpectedEnrichParser:
@@ -739,6 +746,7 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     display = FakeStatusDisplay()
     dedup_counters = _make_dedup_counters(run_log)
     metrics, metrics_display = _make_run_metrics(run_log)
+    pool_collector = _RecordingPoolCollector()
     intake = ParserIntake(
         parser_id="test",
         parser=_UnexpectedEnrichParser(),
@@ -754,6 +762,7 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=display, run_log=run_log),
         card_store=card_store,
+        pool_collector=pool_collector,
         run_log=run_log,
         metrics=metrics,
     )
@@ -761,10 +770,8 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     with dedup_store.run_scope():
         outcome = intake.process_position_stub(rediscovered_stub)
 
-    assert isinstance(outcome, PoolAdmitted)
-    assert outcome.pool_admission.listing_id == 7
-    assert outcome.pool_admission.stub == rediscovered_stub
-    assert outcome.dedup_kind == "judge_pending"
+    assert outcome is None
+    assert pool_collector.admissions == [(7, rediscovered_stub)]
     _assert_dedup_recorded(dedup_counters, "judge_pending")
     assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
 
@@ -964,6 +971,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
     metrics, metrics_display = _make_run_metrics(run_log)
+    pool_collector = _RecordingPoolCollector()
     intake = ParserIntake(
         parser_id="test",
         parser=_BackfillingMatchedParser(
@@ -985,6 +993,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        pool_collector=pool_collector,
         run_log=run_log,
         metrics=metrics,
     )
@@ -992,18 +1001,20 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
     with dedup_store.run_scope():
         outcome = intake.process_position_stub(discovered_stub)
 
-    assert isinstance(outcome, PoolAdmitted)
-    assert not isinstance(outcome, ClassifyForwarded)
-    assert outcome.pool_admission.listing_id == listing_id
-    assert outcome.pool_admission.stub == PositionStub(
-        url="https://example.com/post-enrich-alias",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=date(2026, 5, 29),
-    )
-    assert outcome.dedup_kind == "judge_pending"
+    assert outcome is None
+    assert pool_collector.admissions == [
+        (
+            listing_id,
+            PositionStub(
+                url="https://example.com/post-enrich-alias",
+                title="Platform Engineer",
+                source="test",
+                company="Acme",
+                location="Hamburg",
+                posted_date=date(2026, 5, 29),
+            ),
+        )
+    ]
     _assert_dedup_recorded(dedup_counters, "judge_pending")
 
     assert card_store.get(listing_id) == CardExtract(
@@ -1040,6 +1051,7 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
     assert listing_id is not None
     run_log = RunLog(logs_dir)
     dedup_counters = _make_dedup_counters(run_log)
+    pool_collector = _RecordingPoolCollector()
     intake = ParserIntake(
         parser=_BackfillingMatchedParser(
             url="https://example.com/post-enrich-alias",
@@ -1060,14 +1072,27 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
         domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
+        pool_collector=pool_collector,
         run_log=run_log,
     )
 
     with dedup_store.run_scope():
         outcome = intake.process_position_stub(discovered_stub)
 
-    assert isinstance(outcome, PoolAdmitted)
-    assert outcome.pool_admission.listing_id == listing_id
+    assert outcome is None
+    assert pool_collector.admissions == [
+        (
+            listing_id,
+            PositionStub(
+                url="https://example.com/post-enrich-alias",
+                title="Platform Engineer",
+                source="test",
+                company="Acme",
+                location="Hamburg",
+                posted_date=date(2026, 5, 29),
+            ),
+        )
+    ]
     _assert_dedup_recorded(dedup_counters, "judge_pending")
     assert card_store.get(listing_id) is None
 
@@ -1146,7 +1171,7 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refre
         outcome = intake.process_position_stub(discovered_stub)
 
     assert isinstance(outcome, Dropped)
-    assert not isinstance(outcome, PoolAdmitted)
+    assert outcome is not None
     assert not isinstance(outcome, ClassifyForwarded)
     assert outcome.reason == drop_reason
     assert outcome.listing_id == listing_id
@@ -1239,7 +1264,7 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_a
         outcome = intake.process_position_stub(discovered_stub)
 
     assert isinstance(outcome, Dropped)
-    assert not isinstance(outcome, PoolAdmitted)
+    assert outcome is not None
     assert not isinstance(outcome, ClassifyForwarded)
     assert outcome.reason == "freshness_post_enrich"
     assert outcome.stub == PositionStub(
@@ -1391,7 +1416,7 @@ def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_ca
         outcome = intake.process_position_stub(stub)
 
     assert isinstance(outcome, Dropped)
-    assert not isinstance(outcome, PoolAdmitted)
+    assert outcome is not None
     assert not isinstance(outcome, ClassifyForwarded)
     assert outcome.reason == "content_empty_body"
     assert outcome.stub == PositionStub(
@@ -1469,7 +1494,7 @@ def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_o
         outcome = intake.process_position_stub(stub)
 
     assert isinstance(outcome, Dropped)
-    assert not isinstance(outcome, PoolAdmitted)
+    assert outcome is not None
     assert not isinstance(outcome, ClassifyForwarded)
     assert outcome.reason == "content_too_short"
     assert outcome.stub == PositionStub(
@@ -1566,7 +1591,7 @@ def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
             "body_len": 4321,
         }
     ]
-    assert not isinstance(outcome, PoolAdmitted)
+    assert outcome is not None
     assert card_store.get(1) is None
     assert not seen_path.exists()
 
@@ -1629,6 +1654,6 @@ def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_w
             "error": "503 Service Unavailable",
         }
     ]
-    assert not isinstance(outcome, PoolAdmitted)
+    assert outcome is not None
     assert card_store.get(1) is None
     assert not seen_path.exists()

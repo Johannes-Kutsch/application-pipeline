@@ -51,7 +51,6 @@ from application_pipeline.parser_intake import (
     Dropped,
     OversizedBodySkip,
     ParserIntake,
-    PoolAdmitted,
     RetryableEnrichFailure,
     TransientHttpSkip,
 )
@@ -317,6 +316,7 @@ class _ParserThread(threading.Thread):
             domain_pre_filter=prefilter,
             content_gate=content_gate,
             card_store=card_store,
+            pool_collector=pool_collector,
             run_log=run_log,
             metrics=metrics,
         )
@@ -375,13 +375,9 @@ class _ParserThread(threading.Thread):
             return
         if isinstance(outcome, TransientHttpSkip):
             return
-        if isinstance(outcome, PoolAdmitted):
-            self._pool_collector.add_judge_pending(
-                outcome.pool_admission.stub,
-                outcome.pool_admission.listing_id,
-            )
-            return
         if isinstance(outcome, Dropped):
+            return
+        if outcome is None:
             return
 
         assert isinstance(outcome, ClassifyForwarded)

@@ -20,6 +20,7 @@ from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
     CallUsage,
+    ExtractorBatchMalformedError,
     ExtractorMalformedError,
     ExtractorMalformedJSONError,
     RelevanceVerdict,
@@ -336,6 +337,39 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
     assert stderr_text in content
     assert "**Returncode:** 1" in content
     assert "## Raw response" not in content
+
+
+def test_enricher_batch_malformed_error_produces_md_file_without_prompt_or_response(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    error_msg = "batch response could not be parsed"
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorBatchMalformedError(error_msg)
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/batch",
+        title="Batch Job",
+        source="batch_src",
+    )
+
+    with pytest.raises(ExtractorBatchMalformedError):
+        enricher.enrich([(1, stub, "body")])
+
+    slug = "example.com-job-batch"
+    stash_path = tmp_path / "failures" / "malformed" / f"batch_src-{slug}.md"
+    assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
+    content = stash_path.read_text(encoding="utf-8")
+    assert "**Source:** batch_src" in content
+    assert "**URL:** https://example.com/job/batch" in content
+    assert f"**Error:** {error_msg}" in content
+    assert "## Prompt" not in content
+    assert "## Raw response" not in content
+    assert "## CLI stderr" not in content
 
 
 # ---------------------------------------------------------------------------

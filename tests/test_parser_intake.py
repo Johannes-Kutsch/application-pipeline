@@ -549,93 +549,53 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
 def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_steps(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     canonical_url = "https://example.com/original"
     alias_url = "https://example.com/alias"
-
-    seen_path.write_text(
-        json.dumps(
-            {
-                "7": {
-                    "urls": [canonical_url],
-                    "company_lc": "acme",
-                    "title_lc": "platform engineer",
-                    "location_lc": "hamburg",
-                    "status": "matched",
-                    "status_last_changed": "2026-01-01",
-                }
-            }
-        ),
-        encoding="utf-8",
+    alias_stub = PositionStub(
+        url=alias_url,
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 4, 1),
     )
-    extracts_path.write_text(
-        json.dumps(
-            {
-                "7": {
-                    "header": "Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior",
-                    "summary": "Persisted summary",
-                    "body": "Persisted body",
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    display = FakeStatusDisplay()
-    freshness_gate = FreshnessGate(
-        anchored_today=date(2026, 5, 30),
-        max_listing_age_days=30,
-        dedup=dedup_store,
-        display=display,
-        run_log=run_log,
-    )
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
-        parser=_UnexpectedEnrichParser(),
-        freshness_gate=freshness_gate,
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=display, run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
-    )
-
-    intake.process_position_stub(
-        PositionStub(
-            url=alias_url,
+        discovered_stub=alias_stub,
+        enriched_stub=PositionStub(
+            url=canonical_url,
             title="Platform Engineer",
             source="test",
             company="Acme",
             location="Hamburg",
-            posted_date=date(2026, 4, 1),
-        )
+            posted_date=date(2026, 5, 29),
+        ),
+        parser=_UnexpectedEnrichParser(),
+    )
+    listing_id = harness.seed_matched_pool_reentry_listing()
+    harness.seed_persisted_card(
+        listing_id,
+        header="Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior",
+        summary="Persisted summary",
+        body="Persisted body",
     )
 
-    assert _last_body(metrics_display, "parser test gates") == "1 freshness"
-    _assert_dedup_recorded(dedup_counters, None)
+    harness.process_one_position_stub(alias_stub)
 
-    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data["7"]["status"] == "expired"
-    assert seen_data["7"]["urls"] == [alias_url, canonical_url]
+    assert harness.status_display_row_body("parser test gates") == "1 freshness"
+    _assert_dedup_recorded(harness.dedup_counters, None)
 
-    assert card_store.get(7) is None
+    dedup_record = harness.dedup_observation(listing_id)
+    assert dedup_record is not None
+    assert dedup_record.status == "expired"
+    assert dedup_record.urls == (alias_url, canonical_url)
 
-    transcript_rows = [
-        json.loads(line)
-        for line in (logs_dir / "pipeline" / "freshness.transcripts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip()
-    ]
+    assert harness.card_content(listing_id) is None
+    assert harness.classify_handoffs() == []
+    assert harness.pool_admissions() == []
+
+    transcript_rows = harness.log_artifact_transcript_rows("pipeline_freshness")
     assert transcript_rows == [
         {
             "url": alias_url,

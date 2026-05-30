@@ -17,7 +17,7 @@ from application_pipeline.extracts.card_store import CardExtract
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parser_intake import ParserIntake
 from application_pipeline.parser_log import RunLog
-from application_pipeline.parsers import PositionStub
+from application_pipeline.parsers import Parser, PositionStub
 from application_pipeline.parsers.types import EnrichResult
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.run_metrics import RunMetrics
@@ -101,7 +101,7 @@ class CollectingPoolCollector:
 @dataclass
 class ParserIntakeHarness:
     parser_intake: ParserIntake
-    parser: InMemoryParser
+    parser: Parser
     dedup_store: DeduplicationStore
     dedup_counters: DedupCounters
     card_store: CardStore
@@ -132,7 +132,8 @@ class ParserIntakeHarness:
         discovered_stub: PositionStub = DEFAULT_DISCOVERED_STUB,
         enriched_stub: PositionStub = DEFAULT_ENRICHED_STUB,
         body: str = DEFAULT_BODY,
-    ) -> ParserIntakeHarness:
+        parser: Parser | None = None,
+    ) -> "ParserIntakeHarness":
         seen_path = tmp_path / ".seen.json"
         extracts_path = tmp_path / "extracts.json"
         logs_dir = tmp_path / "logs"
@@ -163,14 +164,14 @@ class ParserIntakeHarness:
             total_queries=1,
             has_native_enrich=True,
         )
-        parser = InMemoryParser(
+        parser_instance = parser or InMemoryParser(
             EnrichResult(stub=enriched_stub, body=body, mode="native")
         )
         classify_sink = CollectingClassifySink()
         pool_collector = CollectingPoolCollector()
         parser_intake = ParserIntake(
             parser_id=parser_id,
-            parser=parser,
+            parser=parser_instance,
             freshness_gate=freshness_gate,
             deduplication=dedup_store,
             dedup_counters=dedup_counters,
@@ -184,7 +185,7 @@ class ParserIntakeHarness:
         )
         return cls(
             parser_intake=parser_intake,
-            parser=parser,
+            parser=parser_instance,
             dedup_store=dedup_store,
             dedup_counters=dedup_counters,
             card_store=card_store,

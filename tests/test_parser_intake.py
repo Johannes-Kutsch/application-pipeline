@@ -449,6 +449,7 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
     assert harness.status_display_row_body("parser test gates") == "1 pre-filter"
     assert harness.card_content(listing_id) is None
     assert harness.classify_handoffs() == []
+    assert harness.pool_admissions() == []
 
     dedup_record = harness.dedup_observation(listing_id)
     assert dedup_record is not None

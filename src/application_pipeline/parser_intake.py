@@ -55,7 +55,8 @@ DropReason = Literal[
     "dedup_run_hit",
     "prefilter",
     "freshness_post_enrich",
-    "content",
+    "content_empty_body",
+    "content_too_short",
 ]
 
 
@@ -311,9 +312,10 @@ class ParserIntake:
                 dedup_events=post_enrich_events,
             )
 
-        if not self._content_gate.admit(body, stub):
+        content_decision = self._content_gate.inspect(body, stub)
+        if not content_decision.passes:
             return Dropped(
-                reason="content",
+                reason=_drop_reason_for_content(content_decision.reason),
                 stub=stub,
                 listing_id=post_enrich_dedup.listing_id,
                 dedup_kind=post_enrich_dedup.kind,
@@ -352,3 +354,13 @@ def _post_enrich_dedup_events(
     if kind == "miss":
         return ("miss",)
     return (kind,)
+
+
+def _drop_reason_for_content(
+    reason: Literal["passed", "empty_body", "too_short"],
+) -> DropReason:
+    if reason == "empty_body":
+        return "content_empty_body"
+    if reason == "too_short":
+        return "content_too_short"
+    raise ValueError(f"unsupported content drop reason: {reason}")

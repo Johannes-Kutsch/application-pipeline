@@ -32,6 +32,12 @@ class ContentSnapshot:
     content_dropped_too_short: int = 0
 
 
+@dataclass(frozen=True)
+class ContentDecision:
+    passes: bool
+    reason: _Reason
+
+
 def _evaluate(stripped_body: str) -> tuple[bool, _Reason]:
     body = stripped_body.strip()
     if not body:
@@ -51,7 +57,7 @@ class ContentGate:
         self._content_dropped_empty_body = 0
         self._content_dropped_too_short = 0
 
-    def admit(self, stripped_body: str, stub: _Stub) -> bool:
+    def inspect(self, stripped_body: str, stub: _Stub) -> ContentDecision:
         passes, reason = _evaluate(stripped_body)
         self._run_log.transcript(
             "pipeline_content",
@@ -72,7 +78,10 @@ class ContentGate:
                 self._content_dropped_too_short += 1
             else:
                 self._content_dropped_empty_body += 1
-        return passes
+        return ContentDecision(passes=passes, reason=reason)
+
+    def admit(self, stripped_body: str, stub: _Stub) -> bool:
+        return self.inspect(stripped_body, stub).passes
 
     def snapshot(self) -> ContentSnapshot:
         with self._lock:

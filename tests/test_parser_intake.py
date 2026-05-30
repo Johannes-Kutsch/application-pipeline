@@ -265,6 +265,50 @@ class _BackfillingMatchedFreshnessDropParser:
         return EnrichResult(stub=enriched, body=self._body, mode="native")
 
 
+class _EmptyBodyParser:
+    def __enter__(self) -> "_EmptyBodyParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        enriched = PositionStub(
+            url=stub.url,
+            title=stub.title,
+            source=stub.source,
+            company="Acme",
+            location="Hamburg",
+            posted_date=stub.posted_date,
+        )
+        return EnrichResult(stub=enriched, body="   \n\t  ", mode="native")
+
+
+class _TooShortBodyParser:
+    def __enter__(self) -> "_TooShortBodyParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        enriched = PositionStub(
+            url=stub.url,
+            title=stub.title,
+            source=stub.source,
+            company="Acme",
+            location="Hamburg",
+            posted_date=stub.posted_date,
+        )
+        return EnrichResult(stub=enriched, body="x" * 99, mode="native")
+
+
 def _seed_url_hit(dedup_store: Any, stub: PositionStub) -> int:
     dedup_store.mark_out_of_domain(stub)
     return dedup_store.listing_id_for(stub.url)
@@ -1106,6 +1150,150 @@ def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_wri
     }
     assert card_store.get(1) is None
     assert not seen_path.exists()
+
+
+def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_card_write(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    stub = PositionStub(
+        url="https://example.com/empty-body",
+        title="Platform Engineer",
+        source="test",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    run_log = RunLog(logs_dir)
+    intake = ParserIntake(
+        parser=_EmptyBodyParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(stub)
+
+    assert isinstance(outcome, Dropped)
+    assert not isinstance(outcome, PoolAdmitted)
+    assert not isinstance(outcome, ClassifyForwarded)
+    assert outcome.reason == "content_empty_body"
+    assert outcome.stub == PositionStub(
+        url="https://example.com/empty-body",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+    assert outcome.listing_id == 1
+    assert outcome.dedup_kind == "run_hit"
+    assert outcome.dedup_events == ("run_hit",)
+    assert outcome.parser_row_metric == "content_dropped"
+    assert card_store.get(1) is None
+    assert not seen_path.exists()
+
+    transcript_rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "content.transcripts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert transcript_rows == [
+        {
+            "url": "https://example.com/empty-body",
+            "title": "Platform Engineer",
+            "source": "test",
+            "passes": False,
+            "reason": "empty_body",
+            "body_len": 7,
+        }
+    ]
+
+
+def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_or_card_write(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    stub = PositionStub(
+        url="https://example.com/too-short-body",
+        title="Platform Engineer",
+        source="test",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    run_log = RunLog(logs_dir)
+    intake = ParserIntake(
+        parser=_TooShortBodyParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(stub)
+
+    assert isinstance(outcome, Dropped)
+    assert not isinstance(outcome, PoolAdmitted)
+    assert not isinstance(outcome, ClassifyForwarded)
+    assert outcome.reason == "content_too_short"
+    assert outcome.stub == PositionStub(
+        url="https://example.com/too-short-body",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+    assert outcome.listing_id == 1
+    assert outcome.dedup_kind == "run_hit"
+    assert outcome.dedup_events == ("run_hit",)
+    assert outcome.parser_row_metric == "content_dropped"
+    assert card_store.get(1) is None
+    assert not seen_path.exists()
+
+    transcript_rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "content.transcripts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert transcript_rows == [
+        {
+            "url": "https://example.com/too-short-body",
+            "title": "Platform Engineer",
+            "source": "test",
+            "passes": False,
+            "reason": "too_short",
+            "body_len": 99,
+        }
+    ]
 
 
 def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(

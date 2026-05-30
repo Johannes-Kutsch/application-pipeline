@@ -4,6 +4,7 @@ import ast
 import json
 import re
 import textwrap
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -769,6 +770,190 @@ def test_in_run_dedup_run_hits_in_log_line(
         r.getMessage() for r in caplog.records if "run complete:" in r.getMessage()
     )
     assert "dedup_run_hits=1" in run_complete
+
+
+@pytest.mark.parametrize(
+    ("dedup_kind", "seed_original", "counter_key"),
+    [
+        (
+            "url_hit",
+            lambda dedup_store, stub: dedup_store.mark_out_of_domain(stub),
+            "dedup_url_hits",
+        ),
+        (
+            "tuple_hit",
+            lambda dedup_store, stub: dedup_store.mark_out_of_domain(
+                PositionStub(
+                    url="https://post-discover.example/original",
+                    title=stub.title,
+                    source=stub.source,
+                    company=stub.company,
+                    location=stub.location,
+                )
+            ),
+            "dedup_tuple_hits",
+        ),
+        (
+            "fuzzy_hit",
+            lambda dedup_store, stub: dedup_store.mark_out_of_domain(
+                PositionStub(
+                    url="https://post-discover.example/original",
+                    title="Senior Lead Platform Backend Engineer",
+                    source=stub.source,
+                    company=stub.company,
+                    location=stub.location,
+                )
+            ),
+            "dedup_fuzzy_hits",
+        ),
+    ],
+)
+def test_post_discover_dedup_skip_stays_local_and_records_actual_hit_kind(
+    tmp_path: Path,
+    dedup_kind: str,
+    seed_original: Callable[[DeduplicationStore, PositionStub], None],
+    counter_key: str,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    display = FakeStatusDisplay()
+    extractor = _stub_extractor()
+    stub = PositionStub(
+        url="https://post-discover.example/alias",
+        title="Lead Platform Backend Engineer",
+        source="stub",
+        company="Acme",
+        location="Hamburg",
+    )
+
+    class _DedupSkipParser(_StubParserBase):
+        def __enter__(self) -> "_DedupSkipParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [stub]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            raise AssertionError(
+                f"post-discover {dedup_kind} must stop before Parser.enrich()"
+            )
+
+    card_store = _make_card_store(tmp_path)
+    dedup_store = dedup_module.load(tmp_path / ".seen.json", card_store=card_store)
+    seed_original(dedup_store, stub)
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=extractor,
+        card_store=card_store,
+        parser_registry=lambda _: _DedupSkipParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_store,
+        status_display=display,
+        run_log=run_log,
+    )
+
+    assert summary.discovered == 1
+    assert summary.classify_items == 0
+    assert summary.written == 0
+    assert extractor.classify_relevance.call_count == 0
+
+    gates_bodies = display.body_updates_for("parser bundesagentur api gates")
+    assert any("1 dedup" in body for body in gates_bodies)
+
+    rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "dedup.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    run_complete_rows = [row for row in rows if row.get("event") == "run_complete"]
+    assert len(run_complete_rows) == 1
+    row = run_complete_rows[0]
+    assert row[counter_key] == 1
+    assert row["dedup_url_hits"] == (1 if counter_key == "dedup_url_hits" else 0)
+    assert row["dedup_tuple_hits"] == (1 if counter_key == "dedup_tuple_hits" else 0)
+    assert row["dedup_fuzzy_hits"] == (1 if counter_key == "dedup_fuzzy_hits" else 0)
+    assert row["dedup_run_hits"] == 0
+    assert row["dedup_misses"] == 0
+    assert row["judge_resumed"] == 0
+
+
+def test_post_discover_run_hit_stays_local_and_updates_parser_gates_row(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    display = FakeStatusDisplay()
+    extractor = _stub_extractor()
+    enrich_calls: list[str] = []
+    duplicate_url = "https://post-discover.example/run-hit"
+
+    class _RunHitParser(_StubParserBase):
+        def __enter__(self) -> "_RunHitParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=duplicate_url, title="Backend Engineer", source="stub")
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enrich_calls.append(stub.url)
+            return super().enrich(stub)
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python", "django"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=extractor,
+        card_store=_make_card_store(tmp_path),
+        parser_registry=lambda _: _RunHitParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        status_display=display,
+        run_log=run_log,
+    )
+
+    assert summary.discovered == 2
+    assert summary.classify_items == 1
+    assert extractor.classify_relevance.call_count == 1
+    assert enrich_calls == [duplicate_url]
+
+    gates_bodies = display.body_updates_for("parser bundesagentur api gates")
+    assert any("1 dedup" in body for body in gates_bodies)
+
+    rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "dedup.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    run_complete_rows = [row for row in rows if row.get("event") == "run_complete"]
+    assert len(run_complete_rows) == 1
+    row = run_complete_rows[0]
+    assert row["dedup_run_hits"] == 1
+    assert row["dedup_misses"] == 1
+    assert row["dedup_url_hits"] == 0
+    assert row["dedup_tuple_hits"] == 0
+    assert row["dedup_fuzzy_hits"] == 0
+    assert row["judge_resumed"] == 0
 
 
 def test_in_run_set_is_fresh_per_run_invocation(tmp_path: Path) -> None:

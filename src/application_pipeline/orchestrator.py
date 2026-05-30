@@ -308,7 +308,6 @@ class _ParserThread(threading.Thread):
         self._prefilter = prefilter
         self._content_gate = content_gate
         self._dedup = dedup
-        self._dedup_counters = dedup_counters
         self._pool_collector = pool_collector
         self._metrics = metrics
         self._parser_intake = ParserIntake(
@@ -316,6 +315,7 @@ class _ParserThread(threading.Thread):
             parser=parser,
             freshness_gate=freshness,
             deduplication=dedup,
+            dedup_counters=dedup_counters,
             domain_pre_filter=prefilter,
             content_gate=content_gate,
             card_store=card_store,
@@ -368,8 +368,6 @@ class _ParserThread(threading.Thread):
         self._metrics.discovered(self._parser_id)
 
         outcome = self._parser_intake.process_position_stub(stub)
-        for dedup_event in outcome.dedup_events:
-            self._dedup_counters.record(dedup_event)
         self._emit_parser_log_artifact(outcome.parser_log_artifact)
         self._apply_parser_row_metric(outcome.parser_row_metric)
 

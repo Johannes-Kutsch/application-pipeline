@@ -47,6 +47,11 @@ class DomainPreFilter(Protocol):
     def admit(self, stub: PositionStub) -> bool: ...
 
 
+@runtime_checkable
+class DedupEventRecorder(Protocol):
+    def record(self, result: RunScopedSeenKind) -> None: ...
+
+
 DropReason = Literal[
     "freshness_discover",
     "dedup_url_hit",
@@ -68,7 +73,6 @@ class ClassifyForwarded:
     body: str
     enrich_mode: Literal["native", "fallback"]
     post_enrich_dedup_kind: RunScopedSeenKind
-    dedup_events: tuple[RunScopedSeenKind, ...]
 
     @property
     def parser_row_metric(self) -> ParserRowMetric:
@@ -83,7 +87,6 @@ class ClassifyForwarded:
 class PoolAdmitted:
     pool_admission: PoolAdmission
     dedup_kind: Literal["judge_pending"]
-    dedup_events: tuple[RunScopedSeenKind, ...] = ("judge_pending",)
 
     @property
     def parser_row_metric(self) -> ParserRowMetric | None:
@@ -100,7 +103,6 @@ class Dropped:
     stub: PositionStub
     listing_id: ListingId | None = None
     dedup_kind: RunScopedSeenKind | None = None
-    dedup_events: tuple[RunScopedSeenKind, ...] = ()
 
     @property
     def parser_row_metric(self) -> ParserRowMetric:
@@ -121,7 +123,6 @@ class Dropped:
 class RetryableEnrichFailure:
     stub: PositionStub
     error: EnrichFailedError
-    dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
 
     @property
     def parser_row_metric(self) -> ParserRowMetric:
@@ -143,7 +144,6 @@ class RetryableEnrichFailure:
 class OversizedBodySkip:
     stub: PositionStub
     error: OversizedBodyError
-    dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
 
     @property
     def parser_row_metric(self) -> ParserRowMetric | None:
@@ -166,7 +166,6 @@ class OversizedBodySkip:
 class TransientHttpSkip:
     stub: PositionStub
     error: httpx.HTTPError
-    dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
 
     @property
     def parser_row_metric(self) -> ParserRowMetric | None:
@@ -203,6 +202,7 @@ class ParserIntake:
         parser: Parser,
         freshness_gate: FreshnessGate,
         deduplication: Deduplication,
+        dedup_counters: DedupEventRecorder,
         domain_pre_filter: DomainPreFilter,
         content_gate: ContentGate,
         card_store: CardStore,
@@ -211,6 +211,7 @@ class ParserIntake:
         self._parser = parser
         self._freshness_gate = freshness_gate
         self._deduplication = deduplication
+        self._dedup_counters = dedup_counters
         self._domain_pre_filter = domain_pre_filter
         self._content_gate = content_gate
         self._card_store = card_store
@@ -225,64 +226,63 @@ class ParserIntake:
 
         discover_dedup = self._deduplication.is_seen(position_stub)
         if discover_dedup.kind == "judge_pending":
+            self._record_dedup("judge_pending")
             return PoolAdmitted(
                 pool_admission=PoolAdmission(
                     listing_id=discover_dedup.listing_id,
                     stub=position_stub,
                 ),
                 dedup_kind="judge_pending",
-                dedup_events=("judge_pending",),
             )
         if discover_dedup.kind != "miss":
+            self._record_dedup(discover_dedup.kind)
             return Dropped(
                 reason=_drop_reason_for_dedup(discover_dedup.kind),
                 stub=position_stub,
                 listing_id=discover_dedup.listing_id,
                 dedup_kind=discover_dedup.kind,
-                dedup_events=(discover_dedup.kind,),
             )
 
         if not self._domain_pre_filter.admit(position_stub):
+            self._record_dedup("miss")
             return Dropped(
                 reason="prefilter",
                 stub=position_stub,
                 listing_id=discover_dedup.listing_id,
-                dedup_events=("miss",),
             )
 
         try:
             enrich_result = self._parser.enrich(position_stub)
         except EnrichFailedError as exc:
+            self._record_dedup("miss")
             return RetryableEnrichFailure(
                 stub=position_stub,
                 error=exc,
-                dedup_events=("miss",),
             )
         except OversizedBodyError as exc:
+            self._record_dedup("miss")
             return OversizedBodySkip(
                 stub=position_stub,
                 error=exc,
-                dedup_events=("miss",),
             )
         except httpx.HTTPError as exc:
+            self._record_dedup("miss")
             return TransientHttpSkip(
                 stub=position_stub,
                 error=exc,
-                dedup_events=("miss",),
             )
 
         stub = enrich_result.stub
         body = enrich_result.body
 
         post_enrich_dedup = self._deduplication.is_seen(stub)
-        post_enrich_events = _post_enrich_dedup_events(post_enrich_dedup.kind)
         if post_enrich_dedup.kind not in ("miss", "run_hit", "judge_pending"):
+            self._record_dedup(post_enrich_dedup.kind)
             return Dropped(
                 reason=_drop_reason_for_dedup(post_enrich_dedup.kind),
                 stub=stub,
                 listing_id=post_enrich_dedup.listing_id,
                 dedup_kind=post_enrich_dedup.kind,
-                dedup_events=post_enrich_events,
             )
 
         if not self._freshness_gate.admit(
@@ -290,22 +290,22 @@ class ParserIntake:
             gate_arm="post_enrich",
             deadline=stub.deadline,
         ):
+            self._record_dedup(post_enrich_dedup.kind)
             return Dropped(
                 reason="freshness_post_enrich",
                 stub=stub,
                 listing_id=post_enrich_dedup.listing_id,
                 dedup_kind=post_enrich_dedup.kind,
-                dedup_events=post_enrich_events,
             )
 
         content_decision = self._content_gate.inspect(body, stub)
         if not content_decision.passes:
+            self._record_dedup(post_enrich_dedup.kind)
             return Dropped(
                 reason=_drop_reason_for_content(content_decision.reason),
                 stub=stub,
                 listing_id=post_enrich_dedup.listing_id,
                 dedup_kind=post_enrich_dedup.kind,
-                dedup_events=post_enrich_events,
             )
 
         if post_enrich_dedup.kind == "judge_pending":
@@ -313,15 +313,16 @@ class ParserIntake:
                 listing_id=post_enrich_dedup.listing_id,
                 body=body,
             )
+            self._record_dedup("judge_pending")
             return PoolAdmitted(
                 pool_admission=PoolAdmission(
                     listing_id=post_enrich_dedup.listing_id,
                     stub=stub,
                 ),
                 dedup_kind="judge_pending",
-                dedup_events=post_enrich_events,
             )
 
+        self._record_dedup(post_enrich_dedup.kind)
         return ClassifyForwarded(
             parser_id=self._parser_id,
             stub=stub,
@@ -329,11 +330,13 @@ class ParserIntake:
             body=body,
             enrich_mode=enrich_result.mode,
             post_enrich_dedup_kind=post_enrich_dedup.kind,
-            dedup_events=post_enrich_events,
         )
 
     def _refresh_card_store_body(self, *, listing_id: ListingId, body: str) -> None:
         self._card_store.replace_body_if_present(listing_id, body)
+
+    def _record_dedup(self, kind: RunScopedSeenKind) -> None:
+        self._dedup_counters.record(kind)
 
 
 def _drop_reason_for_dedup(kind: RunScopedSeenKind) -> DropReason:
@@ -346,14 +349,6 @@ def _drop_reason_for_dedup(kind: RunScopedSeenKind) -> DropReason:
     if kind == "run_hit":
         return "dedup_run_hit"
     raise ValueError(f"unsupported dedup drop kind: {kind}")
-
-
-def _post_enrich_dedup_events(
-    kind: RunScopedSeenKind,
-) -> tuple[RunScopedSeenKind, ...]:
-    if kind == "miss":
-        return ("miss",)
-    return (kind,)
 
 
 def _drop_reason_for_content(

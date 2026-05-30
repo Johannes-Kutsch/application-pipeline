@@ -7358,6 +7358,110 @@ def test_post_enrich_dedup_judge_pending_routes_to_pool(tmp_path: Path) -> None:
     assert summary.judge_resumed == 1
 
 
+def test_post_discover_judge_pending_routes_to_pool_without_enrich_or_body_refresh(
+    tmp_path: Path,
+) -> None:
+    """A matched rediscovery is Pool-admitted from discover and keeps the existing card."""
+    import dataclasses as _dc
+
+    canonical_url = "https://dedup-test.example/matched"
+    rediscovered_url = "https://dedup-test.example/alias"
+    seen_path = tmp_path / ".runtime-data" / "seen.json"
+    seen_path.parent.mkdir(parents=True)
+    extracts_path = tmp_path / ".runtime-data" / "extracts.json"
+    persisted_body = "Persisted body that must survive post-discover pool admission."
+    extracts_path.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "header": "Matched Job · ACME · Hamburg",
+                    "summary": "A matched job description.",
+                    "body": persisted_body,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    seen_path.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "urls": [canonical_url],
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "matched",
+                    "status_last_changed": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    card_store = load_card_store(extracts_path)
+    enrich_calls: list[str] = []
+
+    class _RediscoveredMatchedParser(_StubParserBase):
+        def __enter__(self) -> "_RediscoveredMatchedParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=rediscovered_url,
+                    title="Engineer",
+                    source="stub",
+                    company="Acme",
+                    location="Hamburg",
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enrich_calls.append(stub.url)
+            enriched = _dc.replace(stub, company="Acme", location="Hamburg")
+            return EnrichResult(
+                stub=enriched,
+                body="fresh body that must not overwrite persisted body",
+                mode="fallback",
+            )
+
+    extractor = _stub_extractor()
+    results_dir = tmp_path / "results"
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=extractor,
+        card_store=card_store,
+        parser_registry=lambda _: _RediscoveredMatchedParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.discovered == 1
+    assert summary.classify_items == 0
+    assert summary.judge_resumed == 1
+    assert summary.written == 1
+    assert enrich_calls == []
+    assert extractor.classify_relevance.call_count == 0
+
+    persisted_card = card_store.get(1)
+    assert persisted_card is not None
+    assert persisted_card.body == persisted_body
+
+    content = _read_all_results(results_dir)
+    assert rediscovered_url in content
+    assert canonical_url not in content
+    assert persisted_body in content
+
+
 # ---------------------------------------------------------------------------
 # Renderer integration: URL and body appear in Daily Results File (#673)
 # ---------------------------------------------------------------------------

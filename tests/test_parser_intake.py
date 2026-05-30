@@ -13,7 +13,7 @@ from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import load as dedup_load
 from application_pipeline.extracts import load_card_store
 from application_pipeline.freshness_gate import FreshnessGate
-from application_pipeline.parser_intake import Dropped, ParserIntake
+from application_pipeline.parser_intake import Dropped, ParserIntake, PoolAdmitted
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
 from application_pipeline.parsers.types import EnrichResult
@@ -253,3 +253,83 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
             "gate_arm": "discover",
         }
     ]
+
+
+def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps_card(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    canonical_url = "https://example.com/original"
+    rediscovered_stub = PositionStub(
+        url="https://example.com/alias",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "urls": [canonical_url],
+                    "company_lc": "acme",
+                    "title_lc": "platform engineer",
+                    "location_lc": "hamburg",
+                    "status": "matched",
+                    "status_last_changed": "2026-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    extracts_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "header": "Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior",
+                    "summary": "Persisted summary",
+                    "body": "Persisted body",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    run_log = RunLog(logs_dir)
+    display = FakeStatusDisplay()
+    intake = ParserIntake(
+        parser=_UnexpectedEnrichParser(),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=display,
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=ContentGate(display=display, run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(rediscovered_stub)
+
+    assert isinstance(outcome, PoolAdmitted)
+    assert outcome.pool_admission.listing_id == 7
+    assert outcome.pool_admission.stub == rediscovered_stub
+    assert outcome.dedup_kind == "judge_pending"
+    assert outcome.dedup_events == ("judge_pending",)
+    assert outcome.parser_row_metric is None
+
+    card = card_store.get(7)
+    assert card is not None
+    assert card.header == "Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior"
+    assert card.summary == "Persisted summary"
+    assert card.body == "Persisted body"

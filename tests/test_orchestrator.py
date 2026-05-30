@@ -150,6 +150,19 @@ def _make_card_store(tmp_path: Path, name: str = "card_store.json") -> CardStore
     return load_card_store(tmp_path / name)
 
 
+def _dedup_run_complete_row(logs_dir: Path) -> dict[str, object]:
+    rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "dedup.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    run_complete_rows = [row for row in rows if row.get("event") == "run_complete"]
+    assert len(run_complete_rows) == 1
+    return run_complete_rows[0]
+
+
 def _make_fake_llm_enricher(
     card_store: CardStore,
     *,
@@ -957,6 +970,111 @@ def test_post_discover_run_hit_stays_local_and_updates_parser_gates_row(
     assert row["dedup_url_hits"] == 0
     assert row["dedup_tuple_hits"] == 0
     assert row["dedup_fuzzy_hits"] == 0
+    assert row["judge_resumed"] == 0
+
+
+def test_parser_intake_miss_paths_keep_single_miss_in_run_summary_and_dedup_run_complete(
+    tmp_path: Path,
+) -> None:
+    import httpx
+
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    urls = {
+        "prefilter": "https://parser-intake-miss.example/prefilter",
+        "enrich_failed": "https://parser-intake-miss.example/enrich-failed",
+        "oversized": "https://parser-intake-miss.example/oversized",
+        "transient": "https://parser-intake-miss.example/transient",
+        "forwarded": "https://parser-intake-miss.example/forwarded",
+    }
+    forwarded_urls: list[str] = []
+
+    class _MissPathsParser(_StubParserBase):
+        def __enter__(self) -> "_MissPathsParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=urls["prefilter"],
+                    title="Excluded Backend Role",
+                    source="stub",
+                ),
+                PositionStub(
+                    url=urls["enrich_failed"],
+                    title="Backend Engineer",
+                    source="stub",
+                ),
+                PositionStub(
+                    url=urls["oversized"],
+                    title="Backend Engineer",
+                    source="stub",
+                ),
+                PositionStub(
+                    url=urls["transient"],
+                    title="Backend Engineer",
+                    source="stub",
+                ),
+                PositionStub(
+                    url=urls["forwarded"],
+                    title="Backend Engineer",
+                    source="stub",
+                ),
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            if stub.url == urls["enrich_failed"]:
+                raise EnrichFailedError("native fetch failed")
+            if stub.url == urls["oversized"]:
+                raise OversizedBodyError(
+                    url=stub.url,
+                    source=stub.source,
+                    body_len=4321,
+                )
+            if stub.url == urls["transient"]:
+                raise httpx.HTTPStatusError(
+                    "503 Service Unavailable",
+                    request=httpx.Request("GET", stub.url),
+                    response=httpx.Response(503),
+                )
+            forwarded_urls.append(stub.url)
+            return EnrichResult(stub=stub, body="body text " + "x" * 91, mode="native")
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            negative_keywords='["excluded"]',
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _MissPathsParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        run_log=run_log,
+    )
+
+    assert forwarded_urls == [urls["forwarded"]]
+    assert summary.discovered == 5
+    assert summary.prefilter_dropped == 1
+    assert summary.enrich_failed == 1
+    assert summary.classify_items == 1
+    assert summary.dedup_misses == 4
+    assert summary.dedup_url_hits == 0
+    assert summary.dedup_tuple_hits == 0
+    assert summary.dedup_run_hits == 1
+    assert summary.judge_resumed == 0
+
+    row = _dedup_run_complete_row(logs_dir)
+    assert row["dedup_misses"] == 4
+    assert row["dedup_url_hits"] == 0
+    assert row["dedup_tuple_hits"] == 0
+    assert row["dedup_fuzzy_hits"] == 0
+    assert row["dedup_run_hits"] == 1
     assert row["judge_resumed"] == 0
 
 
@@ -2113,6 +2231,67 @@ def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
     )
 
     assert summary.written == 1, "judge_pending stub must be written"
+
+
+def test_judge_pending_keeps_judge_resumed_in_run_summary_and_dedup_run_complete(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+
+    seen_path.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "urls": [_RESUME_URL],
+                    "company_lc": None,
+                    "title_lc": None,
+                    "location_lc": None,
+                    "status": "matched",
+                    "first_seen": "2026-05-17",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "extracts.json").write_text(
+        json.dumps(
+            {
+                "1": {
+                    "header": "ML Engineer · ACME · Hamburg",
+                    "summary": "Good ML role.",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    card_store = load_card_store(tmp_path / "extracts.json")
+
+    summary = run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.written == 1
+    assert summary.judge_resumed == 1
+    assert summary.dedup_url_hits == 0
+    assert summary.dedup_tuple_hits == 0
+    assert summary.dedup_run_hits == 0
+    assert summary.dedup_misses == 0
+
+    row = _dedup_run_complete_row(logs_dir)
+    assert row["judge_resumed"] == 1
+    assert row["dedup_url_hits"] == 0
+    assert row["dedup_tuple_hits"] == 0
+    assert row["dedup_fuzzy_hits"] == 0
+    assert row["dedup_run_hits"] == 0
+    assert row["dedup_misses"] == 0
 
 
 def test_judge_pending_judge_failure_stays_matched_on_rerun(

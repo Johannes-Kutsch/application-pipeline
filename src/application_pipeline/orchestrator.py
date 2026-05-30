@@ -47,7 +47,6 @@ from application_pipeline.parsers import (
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
 from application_pipeline.parser_intake import (
-    ClassifyForwarded,
     Dropped,
     OversizedBodySkip,
     ParserIntake,
@@ -169,6 +168,30 @@ class _ClassifyRequest:
     body: str
     parser_id: str
     listing_id: int = 0
+
+
+class _ParserIntakeClassifySink:
+    def __init__(
+        self,
+        *,
+        classify_queue: queue.Queue[object],
+        metrics: "RunMetrics",
+        parser_id: str,
+    ) -> None:
+        self._classify_queue = classify_queue
+        self._metrics = metrics
+        self._parser_id = parser_id
+
+    def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None:
+        self._classify_queue.put(
+            _ClassifyRequest(
+                stub=stub,
+                body=body,
+                parser_id=self._parser_id,
+                listing_id=listing_id,
+            )
+        )
+        self._metrics.classify_buffered(1)
 
 
 class _NoMoreBatches:
@@ -317,6 +340,11 @@ class _ParserThread(threading.Thread):
             content_gate=content_gate,
             card_store=card_store,
             pool_collector=pool_collector,
+            classify_sink=_ParserIntakeClassifySink(
+                classify_queue=classify_queue,
+                metrics=metrics,
+                parser_id=parser_id,
+            ),
             run_log=run_log,
             metrics=metrics,
         )
@@ -377,22 +405,7 @@ class _ParserThread(threading.Thread):
             return
         if isinstance(outcome, Dropped):
             return
-        if outcome is None:
-            return
-
-        assert isinstance(outcome, ClassifyForwarded)
-        self._classify_queue.put(self._classify_request_from_outcome(outcome))
-        self._metrics.classify_buffered(1)
-
-    def _classify_request_from_outcome(
-        self, outcome: ClassifyForwarded
-    ) -> _ClassifyRequest:
-        return _ClassifyRequest(
-            stub=outcome.stub,
-            body=outcome.body,
-            parser_id=outcome.parser_id,
-            listing_id=outcome.listing_id,
-        )
+        return
 
 
 # ---------------------------------------------------------------------------

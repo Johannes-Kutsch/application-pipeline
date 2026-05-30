@@ -37,8 +37,18 @@ class PoolCollector(Protocol):
     def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None: ...
 
 
+@runtime_checkable
+class _ClassifySink(Protocol):
+    def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None: ...
+
+
 class _NullPoolCollector:
     def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None:
+        pass
+
+
+class _NullClassifySink:
+    def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None:
         pass
 
 
@@ -132,6 +142,7 @@ class ParserIntake:
         content_gate: ContentGate,
         card_store: CardStore,
         pool_collector: PoolCollector | None = None,
+        classify_sink: _ClassifySink | None = None,
         run_log: RunLog,
         metrics: ParserMetrics | None = None,
     ) -> None:
@@ -144,6 +155,7 @@ class ParserIntake:
         self._content_gate = content_gate
         self._card_store = card_store
         self._pool_collector = pool_collector or _NullPoolCollector()
+        self._classify_sink = classify_sink or _NullClassifySink()
         self._run_log = run_log
         self._metrics = metrics
 
@@ -282,6 +294,11 @@ class ParserIntake:
 
         self._record_dedup(post_enrich_dedup.kind)
         self._increment_forwarded_metrics(enrich_result.mode)
+        self._classify_sink.enqueue(
+            listing_id=post_enrich_dedup.listing_id,
+            stub=stub,
+            body=body,
+        )
         return ClassifyForwarded(
             parser_id=self._parser_id,
             stub=stub,

@@ -25,7 +25,6 @@ from application_pipeline.run_metrics import RunMetrics
 from tests.parser_intake_harness import ParserIntakeHarness
 
 
-_DedupSeeder = Callable[[Any, PositionStub], int]
 _HarnessSeedHelper = Callable[[ParserIntakeHarness], int]
 
 
@@ -175,38 +174,6 @@ class _TransientHttpErrorParser:
         )
 
 
-class _BackfillingAliasParser:
-    def __init__(self, *, url: str, company: str, location: str, title: str) -> None:
-        self._url = url
-        self._company = company
-        self._location = location
-        self._title = title
-
-    def __enter__(self) -> "_BackfillingAliasParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        enriched = PositionStub(
-            url=self._url,
-            title=self._title,
-            source=stub.source,
-            company=self._company,
-            location=self._location,
-            posted_date=stub.posted_date,
-        )
-        return EnrichResult(
-            stub=enriched,
-            body="Backfilled body " + "x" * 120,
-            mode="native",
-        )
-
-
 class _BackfillingMatchedParser:
     def __init__(
         self,
@@ -328,42 +295,6 @@ class _TooShortBodyParser:
             posted_date=stub.posted_date,
         )
         return EnrichResult(stub=enriched, body="x" * 99, mode="native")
-
-
-def _seed_post_enrich_url_hit(dedup_store: Any, stub: PositionStub) -> int:
-    original = PositionStub(
-        url="https://example.com/canonical-url-hit",
-        title="Original title",
-        source=stub.source,
-        company="Acme",
-        location="Hamburg",
-    )
-    dedup_store.mark_out_of_domain(original)
-    return dedup_store.listing_id_for(original.url)
-
-
-def _seed_post_enrich_tuple_hit(dedup_store: Any, stub: PositionStub) -> int:
-    original = PositionStub(
-        url="https://example.com/original-tuple",
-        title="Platform Engineer",
-        source=stub.source,
-        company="Acme",
-        location="Hamburg",
-    )
-    dedup_store.mark_out_of_domain(original)
-    return dedup_store.listing_id_for(original.url)
-
-
-def _seed_post_enrich_fuzzy_hit(dedup_store: Any, stub: PositionStub) -> int:
-    original = PositionStub(
-        url="https://example.com/original-fuzzy",
-        title="Senior Lead Platform Backend Engineer",
-        source=stub.source,
-        company="Acme",
-        location="Hamburg",
-    )
-    dedup_store.mark_out_of_domain(original)
-    return dedup_store.listing_id_for(original.url)
 
 
 @pytest.mark.parametrize(
@@ -647,79 +578,76 @@ def test_fresh_stub_reaching_classify_updates_queue_and_metrics(tmp_path: Path) 
 
 
 @pytest.mark.parametrize(
-    ("dedup_kind", "prepare", "enriched_url", "enriched_title"),
+    ("dedup_kind", "seed_listing", "enriched_stub"),
     [
         (
             "url_hit",
-            _seed_post_enrich_url_hit,
-            "https://example.com/canonical-url-hit",
-            "Original title",
+            ParserIntakeHarness.seed_post_enrich_url_hit_listing,
+            PositionStub(
+                url="https://example.com/canonical-url-hit",
+                title="Original title",
+                source="test",
+                company="Acme",
+                location="Hamburg",
+                posted_date=date(2026, 5, 29),
+            ),
         ),
         (
             "tuple_hit",
-            _seed_post_enrich_tuple_hit,
-            "https://example.com/post-enrich-alias",
-            "Platform Engineer",
+            ParserIntakeHarness.seed_post_enrich_tuple_hit_listing,
+            PositionStub(
+                url="https://example.com/post-enrich-alias",
+                title="Platform Engineer",
+                source="test",
+                company="Acme",
+                location="Hamburg",
+                posted_date=date(2026, 5, 29),
+            ),
         ),
         (
             "fuzzy_hit",
-            _seed_post_enrich_fuzzy_hit,
-            "https://example.com/post-enrich-alias",
-            "Lead Platform Backend Engineer",
+            ParserIntakeHarness.seed_post_enrich_fuzzy_hit_listing,
+            PositionStub(
+                url="https://example.com/post-enrich-alias",
+                title="Lead Platform Backend Engineer",
+                source="test",
+                company="Acme",
+                location="Hamburg",
+                posted_date=date(2026, 5, 29),
+            ),
         ),
     ],
 )
 def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_card(
     tmp_path: Path,
     dedup_kind: str,
-    prepare: _DedupSeeder,
-    enriched_url: str,
-    enriched_title: str,
+    seed_listing: _HarnessSeedHelper,
+    enriched_stub: PositionStub,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
-    stub = PositionStub(
+    discovered_stub = PositionStub(
         url="https://example.com/post-enrich-alias",
         title="Discovered title",
         source="test",
         posted_date=date(2026, 5, 29),
     )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    expected_listing_id = prepare(dedup_store, stub)
-    card_store.put(
-        expected_listing_id,
-        CardExtract(
-            header="Persisted header",
-            summary="Persisted summary",
-            body="Persisted body",
-        ),
-    )
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    intake = ParserIntake(
-        parser=_BackfillingAliasParser(
-            url=enriched_url,
-            company="Acme",
-            location="Hamburg",
-            title=enriched_title,
-        ),
+    harness = ParserIntakeHarness.create(
+        tmp_path,
+        parser_id="test",
+        discovered_stub=discovered_stub,
+        enriched_stub=enriched_stub,
+        body="Backfilled body " + "x" * 120,
         freshness_gate=cast(Any, _FailOnPostEnrichFreshnessGate()),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
         content_gate=cast(Any, _UnexpectedContentGate()),
-        card_store=card_store,
-        run_log=run_log,
+        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
     )
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(stub)
-    _assert_dedup_recorded(dedup_counters, dedup_kind)
+    expected_listing_id = seed_listing(harness)
+    harness.seed_persisted_card(expected_listing_id, body="Persisted body")
 
-    card = card_store.get(expected_listing_id)
+    harness.process_one_position_stub(discovered_stub)
+    _assert_dedup_recorded(harness.dedup_counters, dedup_kind)
+
+    card = harness.card_content(expected_listing_id)
     assert card is not None
     assert card.body == "Persisted body"
 

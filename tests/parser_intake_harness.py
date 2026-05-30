@@ -133,6 +133,8 @@ class ParserIntakeHarness:
         enriched_stub: PositionStub = DEFAULT_ENRICHED_STUB,
         body: str = DEFAULT_BODY,
         parser: Parser | None = None,
+        freshness_gate: FreshnessGate | None = None,
+        content_gate: ContentGate | None = None,
         domain_pre_filter: PreFilterGate | None = None,
         negative_keywords: list[str] | None = None,
     ) -> "ParserIntakeHarness":
@@ -144,7 +146,7 @@ class ParserIntakeHarness:
         card_store = load_card_store(extracts_path)
         dedup_store = load_dedup(seen_path, card_store=card_store, run_log=run_log)
         dedup_counters = DedupCounters(display=status_display, run_log=run_log)
-        freshness_gate = FreshnessGate(
+        configured_freshness_gate = freshness_gate or FreshnessGate(
             anchored_today=anchored_today,
             max_listing_age_days=max_listing_age_days,
             dedup=dedup_store,
@@ -152,7 +154,10 @@ class ParserIntakeHarness:
             run_log=run_log,
             card_store=card_store,
         )
-        content_gate = ContentGate(display=status_display, run_log=run_log)
+        configured_content_gate = content_gate or ContentGate(
+            display=status_display,
+            run_log=run_log,
+        )
         configured_pre_filter = domain_pre_filter or PreFilterGate(
             blacklist=[] if negative_keywords is None else negative_keywords,
             dedup=dedup_store,
@@ -174,11 +179,11 @@ class ParserIntakeHarness:
         parser_intake = ParserIntake(
             parser_id=parser_id,
             parser=parser_instance,
-            freshness_gate=freshness_gate,
+            freshness_gate=configured_freshness_gate,
             deduplication=dedup_store,
             dedup_counters=dedup_counters,
             domain_pre_filter=configured_pre_filter,
-            content_gate=content_gate,
+            content_gate=configured_content_gate,
             card_store=card_store,
             pool_collector=pool_collector,
             classify_sink=classify_sink,
@@ -191,8 +196,8 @@ class ParserIntakeHarness:
             dedup_store=dedup_store,
             dedup_counters=dedup_counters,
             card_store=card_store,
-            freshness_gate=freshness_gate,
-            content_gate=content_gate,
+            freshness_gate=configured_freshness_gate,
+            content_gate=configured_content_gate,
             domain_pre_filter=configured_pre_filter,
             run_log=run_log,
             metrics=metrics,
@@ -282,6 +287,45 @@ class ParserIntakeHarness:
             "run_scope() must stay open for in-run post-discover seeding"
         )
         return self.dedup_store.is_seen(listing).listing_id
+
+    def seed_post_enrich_url_hit_listing(self, stub: PositionStub | None = None) -> int:
+        listing = self.default_enriched_stub if stub is None else stub
+        self.dedup_store.mark_out_of_domain(listing)
+        listing_id = self.dedup_store.listing_id_for(listing.url)
+        assert listing_id is not None
+        return listing_id
+
+    def seed_post_enrich_tuple_hit_listing(
+        self, stub: PositionStub | None = None
+    ) -> int:
+        listing = self.default_enriched_stub if stub is None else stub
+        original = PositionStub(
+            url="https://example.com/original-tuple",
+            title=listing.title,
+            source=listing.source,
+            company=listing.company,
+            location=listing.location,
+        )
+        self.dedup_store.mark_out_of_domain(original)
+        listing_id = self.dedup_store.listing_id_for(original.url)
+        assert listing_id is not None
+        return listing_id
+
+    def seed_post_enrich_fuzzy_hit_listing(
+        self, stub: PositionStub | None = None
+    ) -> int:
+        listing = self.default_enriched_stub if stub is None else stub
+        original = PositionStub(
+            url="https://example.com/original-fuzzy",
+            title="Senior Lead Platform Backend Engineer",
+            source=listing.source,
+            company=listing.company,
+            location=listing.location,
+        )
+        self.dedup_store.mark_out_of_domain(original)
+        listing_id = self.dedup_store.listing_id_for(original.url)
+        assert listing_id is not None
+        return listing_id
 
     def seed_matched_pool_reentry_listing(
         self, stub: PositionStub | None = None

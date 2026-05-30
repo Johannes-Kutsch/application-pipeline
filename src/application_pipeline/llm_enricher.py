@@ -14,6 +14,7 @@ from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
     CallUsage,
     ClassifyItem,
+    ExtractorBatchMalformedError,
     ExtractorMalformedError,
     ExtractorMalformedJSONError,
     MatchedListing,
@@ -89,7 +90,11 @@ class LLMEnricher:
 
         try:
             raw_verdicts, _ = self._extractor.classify_relevance(classify_items)
-        except (ExtractorMalformedError, ExtractorMalformedJSONError) as exc:
+        except (
+            ExtractorBatchMalformedError,
+            ExtractorMalformedError,
+            ExtractorMalformedJSONError,
+        ) as exc:
             first_stub = items[0][1]
             self._stash_malformed(first_stub, exc)
             self._run_log.event(
@@ -172,20 +177,27 @@ class LLMEnricher:
     def _stash_malformed(
         self,
         stub: PositionStub,
-        exc: ExtractorMalformedError | ExtractorMalformedJSONError,
+        exc: (
+            ExtractorBatchMalformedError
+            | ExtractorMalformedError
+            | ExtractorMalformedJSONError
+        ),
     ) -> None:
         lines: list[str] = [
             f"**Source:** {stub.source}",
             f"**URL:** {stub.url}",
             f"**Error:** {exc}",
         ]
-        if exc.prompt is not None:
-            lines += ["", "## Prompt", "", exc.prompt]
+        prompt = getattr(exc, "prompt", None)
+        if prompt is not None:
+            lines += ["", "## Prompt", "", prompt]
         if isinstance(exc, ExtractorMalformedJSONError):
             if exc.stderr:
                 lines += ["", "## CLI stderr", "", exc.stderr]
             if exc.returncode is not None:
                 lines += ["", f"**Returncode:** {exc.returncode}"]
-        elif exc.raw_response is not None:
-            lines += ["", "## Raw response", "", exc.raw_response]
+        else:
+            raw_response = getattr(exc, "raw_response", None)
+            if raw_response is not None:
+                lines += ["", "## Raw response", "", raw_response]
         self._stash_failure("malformed", stub, "\n".join(lines), ext="md")

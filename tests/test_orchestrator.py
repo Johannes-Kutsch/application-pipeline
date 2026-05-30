@@ -16,6 +16,7 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.llm import (
+    ExtractorBatchMalformedError,
     CallUsage,
     ExtractorError,
     ExtractorUnreachableError,
@@ -3183,6 +3184,100 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
     )
     # First item must NOT be in seen store
     assert not any(_ERR_URLS[0] in r.get("urls", []) for r in seen_data.values())
+
+
+def test_batch_level_malformed_classify_failure_stashes_once_and_continues(
+    tmp_path: Path,
+) -> None:
+    """Malformed first classify batch is stashed once, leaves batch retryable, and later batches still complete."""
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+
+    urls = [
+        "https://batch-malformed.example/0",
+        "https://batch-malformed.example/1",
+        "https://batch-malformed.example/2",
+    ]
+
+    class _ThreeStubParser(_StubParserBase):
+        def __enter__(self) -> "_ThreeStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=url, title=f"Job {i}", source="stub")
+                for i, url in enumerate(urls)
+            ]
+
+    class _MalformedThenMatchExtractor:
+        def __init__(self) -> None:
+            self._calls = 0
+
+        def classify_relevance(
+            self, items: list[ClassifyItem]
+        ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
+            self._calls += 1
+            if self._calls == 1:
+                raise ExtractorBatchMalformedError("bad batch verdict")
+            return (
+                [
+                    RelevanceVerdict(
+                        matches=True,
+                        header="Job 2\nACME · Hamburg · remote\n2026-01-15",
+                        summary="Third listing matched.",
+                    )
+                ],
+                _ZERO_USAGE,
+            )
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            return (
+                [MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates)],
+                _ZERO_USAGE,
+            )
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_batch_size=2,
+            claude_classify_parallelism=1,
+        ),
+        extractor=_MalformedThenMatchExtractor(),
+        card_store=load_card_store(extracts_path),
+        parser_registry=lambda _: _ThreeStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    malformed_dir = tmp_path / ".runtime-data" / "failures" / "malformed"
+    stash_files = list(malformed_dir.glob("*.md"))
+    assert len(stash_files) == 1
+    assert summary.errored == 2
+    assert summary.written == 1
+
+    card_store = load_card_store(extracts_path)
+    assert card_store.get(1) is None
+    assert card_store.get(2) is None
+    assert card_store.get(3) is not None
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert not any(urls[0] in row.get("urls", []) for row in seen_data.values())
+    assert not any(urls[1] in row.get("urls", []) for row in seen_data.values())
+    assert any(urls[2] in row.get("urls", []) for row in seen_data.values())
+
+    content = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "batches_failed=1" in content
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:

@@ -108,7 +108,6 @@
   \setbox\CoverLetterBox=\vbox{%
     \hsize=\textwidth
     \setstretch{#1}%
-    \vspace{-1em}%
     \justify
     #2%
     \par
@@ -153,6 +152,8 @@
 \closing{Mit freundlichen Grüßen,}
 
 \makelettertitle
+\setstretch{1.8}
+\vspace{-1em}
 \AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%
 
 <<COVER_INTRO>>

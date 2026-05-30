@@ -7,7 +7,7 @@ Eine **CV Slot-Map** ist eine `.tex`-Datei, die ausschließlich aus Slot-Headern
 
 **Body:** läuft vom Slot-Header bis zum nächsten `%% SLOT:`-Header oder EOF. Bodies sind **rohe TeX-Fragmente** — keine Escape-Regeln, keine Umlaut-Substitution. `\href{...}{...}`, `\textit{...}`, Umlaute (ä, ö, ü, ß, Ä, Ö, Ü), Em-Dashes (`---`) werden verbatim verwendet.
 
-**Source-of-Truth für die Slot-Liste:** `application-pipeline/skills/cv_skeleton.tex`. Jede Slot-Map (`cv.tex`, Skeleton selbst) muss exakt dieselben Slot-Namen in derselben Reihenfolge enthalten — keine zusätzlichen, keine fehlenden, keine umbenannten. Beim Start: Skeleton parsen, dann gegen `cv.tex` vergleichen.
+**Source-of-Truth für die Slot-Liste:** `application-pipeline/cv-template/cv_skeleton.tex`. Jede Slot-Map (`cv.tex`, Skeleton selbst) muss exakt dieselben Slot-Namen in derselben Reihenfolge enthalten — keine zusätzlichen, keine fehlenden, keine umbenannten. Beim Start: Skeleton parsen, dann gegen `cv.tex` vergleichen.
 
 **Shape ist read-only:** Slot-Liste, Reihenfolge und Header-Form sind nicht editierbar. Edits passieren ausschließlich an Slot-Bodies.
 

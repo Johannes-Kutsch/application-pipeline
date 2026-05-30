@@ -10,7 +10,7 @@ Verifiziere, dass `application-pipeline/user-info/cv/` zusätzlich zu den Triage
 - `signature.png`
 - `profile.png`
 
-Verifiziere, dass `application-pipeline/skills/cv_skeleton.tex` relativ zur CWD existiert.
+Verifiziere, dass `application-pipeline/cv-template/cv_skeleton.tex` relativ zur CWD existiert.
 
 Verifiziere, dass `analysis.md` im aufgelösten Application-Ordner existiert. Fehlt sie: dem User sagen, dass `/analyse-listing` zuerst laufen muss, dann stopp.
 

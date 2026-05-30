@@ -1,5 +1,7 @@
 # Template tree splits into routing buckets; `.claude/skills/` seeded by `init`
 
+Amended by ADR-0048: Agent Skill workflow bodies now live in `application-pipeline/agent-skills/`, with Claude and Codex wrappers seeded under `.claude/skills/` and `.codex/skills/`.
+
 `src/application_pipeline/templates/` reorganises into per-destination buckets:
 
 - `templates/application-pipeline/...` → seeds to `<cwd>/application-pipeline/`.

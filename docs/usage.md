@@ -2,7 +2,7 @@
 
 ## Installation
 
-Requires Python ≥ 3.11, a working `cron` daemon, and the Claude CLI on `$PATH`.
+Requires Python >= 3.11, a working `cron` daemon, and the Claude CLI on `$PATH`.
 
 ```bash
 python3 -m venv .venv
@@ -15,112 +15,145 @@ All subsequent commands use the binary installed inside the venv:
 .venv/bin/application-pipeline <subcommand>
 ```
 
-## CLI reference
+## CLI Reference
 
 ### `init`
 
-Seed a settings folder with the default config, layout, user-info files, LaTeX template, and cron
-helper scripts. Safe to re-run — existing files are never overwritten.
+Seed `<cwd>/application-pipeline/` with the default config, user-info files, CV skeleton, agent
+skills, and cron helper scripts. Safe to re-run: existing user-owned files are not overwritten.
 
 ```bash
-application-pipeline init <settings-dir>
+application-pipeline init
 ```
 
-Pass `--refresh` to also seed any files introduced in a newer release without touching files you
-have already edited. The seeded `setup/cron.sh` calls `init --refresh` on every cron tick so new
-template files self-heal after a `pip install --upgrade`.
+Pass `--refresh` to update package-owned files such as setup scripts, CV skeleton, and agent skill
+bodies after an upgrade. User-owned files under `user-info/` are still preserved.
 
 ```bash
-application-pipeline init --refresh <settings-dir>
+application-pipeline init --refresh
 ```
 
 ### `run`
 
-Execute one full pipeline tick against the given config file and write today's Daily Results File.
-This is what `setup/cron.sh` calls.
+Execute one full pipeline tick and write today's Daily Results File.
 
 ```bash
-application-pipeline run <settings-dir>/config.py
+application-pipeline run
 ```
 
-## Settings folder layout
+### `compile-cv`
 
-After `init`, the settings folder contains:
+Compile a per-listing `cv.tex` CV Slot-Map into `cover.pdf`, `resume.pdf`, and `combined.pdf`.
 
-```
-<settings-dir>/
-├── config.py          # search knobs — keywords, sources, locations, skills
-├── layout.py          # card template for the Daily Results File
-├── user-info/
-│   ├── triage-profile/
-│   │   ├── self-description.md   # your background, fed into both classifier and judge
-│   │   ├── domain-fit.md         # what counts as in-domain for the classifier
-│   │   ├── match-criteria.md     # what makes a good match for the judge
-│   │   └── writing-style.md      # authoring style (future use — not injected in v1)
-│   ├── contact.tex           # LaTeX contact block
-│   ├── content_pool.tex      # LaTeX CV content
-│   └── identity.tex          # LaTeX identity block
-├── latex/
-│   └── cv_template.tex       # LaTeX CV template
-├── setup/
-│   ├── cron.sh               # the script cron calls each tick
-│   ├── cron-install.sh       # writes the crontab line
-│   └── cron-uninstall.sh     # removes the crontab line
-└── results/                  # Daily Results Files written here (created on first run)
+```bash
+application-pipeline compile-cv application-pipeline/applications/<folder>/
 ```
 
-## Per-file editing guide
+## Settings Folder Layout
+
+After `init`, `<cwd>/application-pipeline/` contains:
+
+```text
+application-pipeline/
+|-- config.py
+|-- cv-template/
+|   `-- cv_skeleton.tex
+|-- setup/
+|   |-- cron.sh
+|   |-- cron-install.sh
+|   `-- cron-uninstall.sh
+|-- user-info/
+|   |-- search-terms/
+|   |   |-- keywords.md
+|   |   `-- negative-keywords.md
+|   |-- triage-profile/
+|   |   |-- gate-criteria.md
+|   |   |-- candidate-profile.md
+|   |   `-- skills.md
+|   `-- cv/
+|       |-- facts.tex
+|       |-- content_pool.tex
+|       |-- writing-style.md
+|       |-- positive-exemplars.md
+|       |-- profile.png
+|       `-- signature.png
+|-- results/
+`-- applications/
+```
+
+`.runtime-data/` is created at runtime for logs, state, extracts, and failure reports.
+
+## Per-File Editing Guide
 
 ### `config.py`
 
-Plain Python literals — edit in any text editor. Key knobs:
+Plain Python literals for pipeline mechanics. Search terms and skills do not live here.
 
 | Setting | Purpose |
 |---|---|
-| `KEYWORDS` | Search terms sent to every Source (Cartesian product). |
-| `SKILLS` | Hard skills surfaced in the Match Judge prompt. Not used by the pre-filter. |
-| `NEGATIVE_KEYWORDS` | Title substrings (≥ 3 chars) that cause the Domain Pre-Filter to drop a listing before any LLM call. |
 | `SOURCES` | List of `SourceEntry(parser_type=...)` selecting which job boards to query. |
 | `LOCATIONS` | City names to search. Must be supported by the configured parsers. |
-| `INCLUDE_REMOTE` | Set `True` to also query each source's remote/homeoffice slot. |
-| `MAX_LISTING_AGE_DAYS` | Freshness Gate threshold in days (≥ 1, default 180). Listings older than this are dropped. |
+| `INCLUDE_REMOTE` | Set `True` to also query remote/homeoffice slots where parsers support them. |
+| `MAX_LISTING_AGE_DAYS` | Freshness Gate threshold in days. Listings older than this are dropped. |
+| `CLAUDE_CLASSIFY_PARALLELISM` | Relevance Classifier worker pool size. |
+| `CLAUDE_CLASSIFY_BATCH_SIZE` | Listings per classifier LLM call, if present in your config. |
+| `DEDUP_COOLDOWN_DAYS` | Days before selected/expired seen entries stop suppressing duplicates. |
 
-### `layout.py`
+### `user-info/search-terms/keywords.md`
 
-Controls the visual structure of each Card in the Daily Results File.
+Flat `-` bullets for search queries sent to the configured sources. This file must exist and contain
+at least one entry.
 
-- **`PLACEHOLDER_GROUPS`** — maps a group name to a separator and a list of field names. The group
-  collapses its fields with the separator, omitting `None` values, and the result replaces the group
-  name as a placeholder in `CARD_TEMPLATE`.
-- **`CARD_TEMPLATE`** — a `str.format_map`-style template. Available placeholders: `{company}`,
-  `{title}`, `{location_segment}`, `{posted_date}`, `{contract_type}`, `{employment_type}`,
-  `{salary}`, `{summary}`, `{matched_bullets}`, `{missing_bullets}`, `{raw_description}`, `{rank}`,
-  `{url}`.
+### `user-info/search-terms/negative-keywords.md`
 
-### `user-info/triage-profile/self-description.md`
+Optional flat `-` bullets for title-only exclusions. If any entry matches a discovered title
+case-insensitively, the Domain Pre-Filter drops the listing before LLM classification.
 
-Free-text description of your background, experience, and target roles. Injected into both the
-Relevance Classifier prompt and the Match Judge prompt via the `{USER_INFO}` slot. Keep it
-concise — bullets and fragments are preferred over full sentences.
+### `user-info/triage-profile/gate-criteria.md`
 
-### `user-info/triage-profile/domain-fit.md`
+Classifier-only criteria: broad domain-in/domain-out signals and hard exclusions. Keep this file
+concise and gate-shaped. Preference and ranking nuance belongs in `candidate-profile.md`.
 
-Defines the in-domain boundary for the Relevance Classifier. List the role families that should be
-classified `in_domain: true` and those that should be `in_domain: false`. The classifier does not
-see your match criteria or skills — only this file and `self-description.md`.
+### `user-info/triage-profile/candidate-profile.md`
 
-### `user-info/triage-profile/match-criteria.md`
+Judge-facing applicant profile: who the candidate is, what roles are attractive, and which soft
+signals should rank one matched listing above another.
 
-Defines what makes a position a strong, partial, or poor match for the Match Judge. Include
-location preferences, seniority level, contract preferences, and any hard disqualifiers. The judge
-uses this alongside `self-description.md` and the `SKILLS` list from `config.py`.
+### `user-info/triage-profile/skills.md`
 
-### `user-info/triage-profile/writing-style.md`
+Hard-skill pool. The Match Judge receives the flat skill list; `/write-cv` reads the grouped
+structure to assemble the `skills_block` slot.
 
-Authoring style notes for future CV/cover-letter generation (v2). Not injected into any v1 prompt —
-edit freely without affecting pipeline output.
+### `user-info/cv/writing-style.md`
 
-### `user-info/*.tex` and `latex/cv_template.tex`
+Cover-letter voice, phrasing rules, and cover strategy. Use short declarative bullets:
 
-LaTeX content fragments and the CV template. Used by the future authoring pipeline (v2). Edit to
-match your actual CV content and preferred formatting.
+- `## Voice` for high-level tone.
+- `## Do` for preferred phrasing and behavior.
+- `## Don't` for anti-rules, not concrete bad examples.
+- `## Register` for `Sie`/`Du`, greeting, and audience conventions.
+- `## Cover-Strategie` for content arc and slot strategy, such as hook placement, pivot choice, and
+  project-evidence discipline.
+
+Do not store exemplars here. If a bad draft sentence reveals a reusable rule, abstract it into a
+Do/Don't or `Cover-Strategie` bullet and discard the concrete sentence.
+
+### `user-info/cv/positive-exemplars.md`
+
+Positive style models only, usually snippets from handwritten letters. Do not add negative examples
+or "do not write like this" samples here or in `writing-style.md`.
+
+### `user-info/cv/facts.tex`
+
+Listing-invariant LaTeX facts and presentation macros such as name, city, personal info, languages,
+and hobbies. Used by the CV template during `compile-cv`.
+
+### `user-info/cv/content_pool.tex`
+
+Reusable CV item macros for resume sections. `/write-cv` selects these into the resume slots by
+section and listing relevance.
+
+### `cv-template/cv_skeleton.tex`
+
+Package-owned format-by-example for CV Slot-Maps. `init --refresh` may overwrite it, so put personal
+content in `user-info/cv/` instead.

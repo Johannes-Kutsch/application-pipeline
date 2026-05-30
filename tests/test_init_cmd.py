@@ -37,6 +37,10 @@ def _skeleton_template_bytes() -> bytes:
     return _ap_template_bytes("cv-template/cv_skeleton.tex")
 
 
+def _agent_skill_template_bytes(name: str) -> bytes:
+    return _ap_template_bytes(f"agent-skills/{name}")
+
+
 def _claude_template_bytes(rel: str) -> bytes:
     node = importlib.resources.files("application_pipeline.templates") / "claude"
     for part in rel.split("/"):
@@ -48,10 +52,84 @@ def _claude_template_text(rel: str) -> str:
     return _claude_template_bytes(rel).decode()
 
 
+def _skill_frontmatter(text: str) -> tuple[str, str]:
+    match = re.match(
+        r"^---\nname: (?P<name>[^\n]+)\ndescription: (?P<description>[^\n]+)\n---\n",
+        text,
+    )
+    assert match is not None
+    return match.group("name"), match.group("description")
+
+
+def _codex_template_bytes(rel: str) -> bytes:
+    node = importlib.resources.files("application_pipeline.templates") / "codex"
+    for part in rel.split("/"):
+        node = node / part
+    return node.read_bytes()
+
+
+def _codex_template_text(rel: str) -> str:
+    return _codex_template_bytes(rel).decode()
+
+
+def _front_matter_field(text: str, field: str) -> str:
+    match = re.search(rf"^{field}: .+$", text, flags=re.MULTILINE)
+    assert match is not None
+    return match.group(0)
+
+
 def _analyse_listing_step_2(text: str) -> str:
     match = re.search(r"^2\. \*\*(?P<step>.+)$", text, flags=re.MULTILINE)
     assert match is not None
     return match.group("step")
+
+
+def _assert_primary_cover_arc_contract(text: str) -> None:
+    match = re.search(
+        r"^### Primary cover arc\n(?P<body>.*?)(?=^# Tailoring hooks$)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None
+
+    body = match.group("body")
+    assert "**Primary:**" in body
+    assert "**Warum dieser Arc:**" in body
+    assert "**Supporting hooks:**" in body
+    assert "**Unused hooks:**" in body
+    assert "Resume, Skills oder spätere Iteration" in body
+    assert body.count("`none`") == 2
+
+
+def _assert_write_cv_primary_cover_arc_usage(text: str) -> None:
+    assert (
+        'analysis.md` — neutraler Listing-Summary + „Why apply"-Bullets + '
+        "`Primary cover arc` (ein primärer Arc mit Supporting/Unused-Hooks)"
+    ) in text
+    assert "Nutze den `Primary cover arc` aus `analysis.md`" in text
+    assert "`Supporting hooks` dürfen ihn stützen" in text
+    assert (
+        "`Unused hooks` bleiben für Resume, Skills oder spätere Iteration liegen"
+        in text
+    )
+
+
+def _assert_write_cv_cover_strategy_contract(text: str) -> None:
+    _assert_write_cv_primary_cover_arc_usage(text)
+    assert "application-pipeline/user-info/cv/cover-patterns.md" in text
+    assert "application-pipeline/user-info/cv/writing-style.md" not in text
+    assert "application-pipeline/user-info/cv/positive-exemplars.md" not in text
+    assert "persönlicher, listingspezifischer Resonanz-Hook" in text
+    assert "keine Mehrfach-Nennung von Projektnamen im Opener" in text
+    assert "ein dominanter Capability-Arc" in text
+    assert "höchstens zwei Evidence-Anchors" in text
+    assert "Octofox, pycastle und application-pipeline" in text
+    assert "selektierbare Evidence-Anchors" in text
+    assert "nicht feste Absatz-Slots" in text
+    assert (
+        "Weitere Projekte bleiben für Resume-Slots, Skills-Block oder spätere Iteration"
+        in text
+    )
 
 
 _TRIAGE_PROFILE_FILES = (
@@ -60,10 +138,7 @@ _TRIAGE_PROFILE_FILES = (
     "skills.md",
 )
 
-_CV_MD_FILES = (
-    "writing-style.md",
-    "positive-exemplars.md",
-)
+_CV_MD_FILES = ("cover-patterns.md",)
 
 _USER_INFO_ROOT_FILES = (
     "search-terms/keywords.md",
@@ -79,8 +154,6 @@ _LATEX_USER_INFO_FILES = (
     "signature.png",
 )
 
-_PKG_SKILL_DIRS = ("_shared", "analyse-listing", "iterate-cv", "write-cv")
-
 
 def _ap(tmp: Path) -> Path:
     return tmp / "application-pipeline"
@@ -88,6 +161,10 @@ def _ap(tmp: Path) -> Path:
 
 def _claude(tmp: Path) -> Path:
     return tmp / ".claude"
+
+
+def _codex(tmp: Path) -> Path:
+    return tmp / ".codex"
 
 
 def test_first_bootstrap_writes_config(tmp_path: Path) -> None:
@@ -366,6 +443,20 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
         dest = _ap(tmp_path) / "user-info" / "cv" / fname
         assert dest.exists(), f"expected {dest} to be seeded by init"
         assert dest.read_bytes() == _cv_template_bytes(fname)
+
+
+def test_init_seeds_cover_patterns_template(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    cover_patterns = (
+        _ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md"
+    ).read_text()
+
+    assert "# Cover Paragraph Patterns" in cover_patterns
+    assert "## Product Resonance Intro" in cover_patterns
+    assert "- slot: cover_intro" in cover_patterns
+    assert "- argument_type: resonance" in cover_patterns
+    assert "- placeholders: Musterfirma, Musterprodukt, Musterprojekt" in cover_patterns
 
 
 def test_init_seeds_subdirs_under_user_info(tmp_path: Path) -> None:
@@ -680,6 +771,177 @@ def test_fresh_init_creates_cv_skeleton(tmp_path: Path) -> None:
     assert dest.read_bytes() == _skeleton_template_bytes()
 
 
+def test_fresh_init_seeds_shared_agent_skill_bodies(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    shared_root = _ap(tmp_path) / "agent-skills"
+    expected_files = [
+        "analyse-listing.md",
+        "iterate-cv.md",
+        "write-cv.md",
+        "_shared/APPLICATION-FOLDER-ARG.md",
+        "_shared/BUILD-CONTRACT.md",
+        "_shared/CONVENTIONS.md",
+        "_shared/SLOT-MAP.md",
+        "_shared/STARTUP-APPLICATION.md",
+        "_shared/STARTUP-TRIAGE.md",
+        "_shared/STRIP-DOWN.md",
+        "_shared/TRIAGE-ROUTING.md",
+    ]
+
+    assert shared_root.is_dir()
+    assert (shared_root / "_shared").is_dir()
+    for rel in expected_files:
+        dest = shared_root / rel
+        assert dest.exists(), f"expected {rel} to be seeded"
+        assert dest.read_bytes() == _agent_skill_template_bytes(rel)
+
+
+def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    shared_root = _ap(tmp_path) / "agent-skills"
+    for rel in ("analyse-listing.md", "iterate-cv.md", "write-cv.md"):
+        text = (shared_root / rel).read_text()
+        assert "../_shared/" not in text
+        assert "_shared/" in text
+
+
+def test_fresh_init_seeds_iterate_cv_with_cover_strategy_routing_contract(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    text = (_ap(tmp_path) / "agent-skills" / "iterate-cv.md").read_text()
+
+    assert "Strategie-Form, Inhalt/Bogen/Beleg pro Slot" in text
+    assert "Bullet in `cv/writing-style.md` Sektion `## Cover-Strategie`" in text
+    assert "nur wenn es ein positives Vorbild" in text
+    assert "realen handgeschriebenen Brief" in text
+    assert "keine Negativ-Exemplare in `cv/writing-style.md`" in text
+    assert "abstrahiere zur Regel" in text
+    assert "verwirf den Beispiel-Satz" in text
+
+
+def test_seeded_shared_agent_skill_support_files_reference_cv_template_path(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    shared_root = _ap(tmp_path) / "agent-skills" / "_shared"
+
+    slot_map = (shared_root / "SLOT-MAP.md").read_text()
+    assert "application-pipeline/cv-template/cv_skeleton.tex" in slot_map
+    assert "application-pipeline/skills/cv_skeleton.tex" not in slot_map
+
+    startup = (shared_root / "STARTUP-APPLICATION.md").read_text()
+    assert "application-pipeline/cv-template/cv_skeleton.tex" in startup
+    assert "application-pipeline/skills/cv_skeleton.tex" not in startup
+
+
+def test_refresh_overwrites_shared_agent_skill_bodies(tmp_path: Path) -> None:
+    init(tmp_path)
+    skill_body = _ap(tmp_path) / "agent-skills" / "analyse-listing.md"
+    skill_body.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert skill_body.read_bytes() == _agent_skill_template_bytes("analyse-listing.md")
+
+
+def test_refresh_overwrites_shared_iterate_cv_with_cover_strategy_routing_contract(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    skill_body = _ap(tmp_path) / "agent-skills" / "iterate-cv.md"
+    skill_body.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    text = skill_body.read_text()
+    assert "nur wenn es ein positives Vorbild" in text
+    assert "realen handgeschriebenen Brief" in text
+    assert "schlechter KI-Draft" in text
+
+
+def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:
+    text = _agent_skill_template_bytes("analyse-listing.md").decode()
+
+    _assert_primary_cover_arc_contract(text)
+
+
+def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    text = (_ap(tmp_path) / "agent-skills" / "analyse-listing.md").read_text()
+    _assert_primary_cover_arc_contract(text)
+
+
+def test_write_cv_template_reads_primary_cover_strategy_arc_from_analysis() -> None:
+    text = _agent_skill_template_bytes("write-cv.md").decode()
+
+    _assert_write_cv_primary_cover_arc_usage(text)
+
+
+def test_write_cv_template_follows_cover_strategy_contract() -> None:
+    text = _agent_skill_template_bytes("write-cv.md").decode()
+
+    _assert_write_cv_cover_strategy_contract(text)
+
+
+def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None:
+    text = _agent_skill_template_bytes("write-cv.md").decode()
+
+    # Opening is automatic; cover prose slots are interactive
+    assert "Kein User-Loop fuer `opening`" in text
+    assert "`cv.tex` erst schreiben, wenn alle vier Slots bestaetigt sind" in text
+
+    # Per-slot loop: one pattern match offer, then three typed alternatives
+    assert "Cover Paragraph Pattern" in text
+    assert "genau **einen** Vorschlag als **Cover Paragraph Pattern**-Match" in text
+    assert "genau **drei** Alternativen" in text
+    assert "anderen** `argument_type`" in text
+    assert "voll ausformulierter Absatz gezeigt, nicht als Outline" in text
+
+    # Pattern save rules: significant new only, during main loop or on explicit request
+    assert "signifikant neu" in text
+    assert "auf expliziten User-Wunsch" in text
+
+    # cover-patterns.md exclusions during shortening loop
+    assert (
+        "Post-Build-Shortening-Loop schreibt **nie** nach `cover-patterns.md`" in text
+    )
+    assert (
+        "Resume-Overflow bleibt automatisch; nur Cover-Prosa wird interaktiv verkuerzt"
+        in text
+    )
+
+    # Interactive Cover Shortening shows full variants
+    assert "Interactive Cover Shortening" in text
+    assert "verkuerzten Varianten **vollstaendig** in Prosa" in text
+
+    # Success report must not recommend /iterate-cv as normal next step
+    assert (
+        "Empfiehl `/iterate-cv` dabei **nicht** als normalen naechsten Schritt" in text
+    )
+
+
+def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:
+    init(tmp_path)
+    support_file = _ap(tmp_path) / "agent-skills" / "_shared" / "CONVENTIONS.md"
+    support_file.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert support_file.read_bytes() == _agent_skill_template_bytes(
+        "_shared/CONVENTIONS.md"
+    )
+
+
 def test_init_skips_existing_cv_skeleton(tmp_path: Path) -> None:
     ap = _ap(tmp_path)
     (ap / "cv-template").mkdir(parents=True)
@@ -727,6 +989,29 @@ def test_refresh_preserves_user_info_when_skills_exist(tmp_path: Path) -> None:
     assert (
         _ap(tmp_path) / "user-info" / "triage-profile" / "candidate-profile.md"
     ).read_text() == custom_user_info
+
+
+def test_refresh_preserves_operator_owned_cover_patterns(tmp_path: Path) -> None:
+    init(tmp_path)
+    cover_patterns = _ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md"
+    custom_cover_patterns = "# my cover patterns\n"
+    cover_patterns.write_text(custom_cover_patterns)
+
+    init(tmp_path, refresh=True)
+
+    assert cover_patterns.read_text() == custom_cover_patterns
+
+
+def test_refresh_seeds_missing_cover_patterns_file(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    cover_patterns = _ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md"
+    cover_patterns.unlink()
+
+    init(tmp_path, refresh=True)
+
+    assert cover_patterns.read_bytes() == _cv_template_bytes("cover-patterns.md")
 
 
 # --- legacy <cwd>/application-pipeline/skills/ cleanup on refresh ---
@@ -777,6 +1062,69 @@ def test_refresh_with_no_legacy_skills_dir_is_silent(
     assert "removed skills/" not in out
 
 
+# --- .codex/skills/ seeding (issue #689) ---
+
+
+def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    codex_skills = _codex(tmp_path) / "skills"
+    assert codex_skills.is_dir()
+    for d in ("analyse-listing", "iterate-cv", "write-cv"):
+        wrapper = codex_skills / d / "SKILL.md"
+        assert wrapper.exists(), f"{d}/SKILL.md missing"
+        assert wrapper.read_bytes() == _codex_template_bytes(f"skills/{d}/SKILL.md")
+
+        codex_text = wrapper.read_text()
+        claude_text = _claude_template_text(f"skills/{d}/SKILL.md")
+        assert _front_matter_field(codex_text, "name") == _front_matter_field(
+            claude_text, "name"
+        )
+        assert _front_matter_field(codex_text, "description") == _front_matter_field(
+            claude_text, "description"
+        )
+        assert f"../../../application-pipeline/agent-skills/{d}.md" in codex_text
+
+    assert not (_ap(tmp_path) / ".codex").exists()
+
+
+def test_refresh_overwrites_package_owned_codex_skill_files(tmp_path: Path) -> None:
+    init(tmp_path)
+    skill_file = _codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md"
+    skill_file.write_text("# tampered\n")
+
+    init(tmp_path, refresh=True)
+
+    assert skill_file.read_bytes() == _codex_template_bytes(
+        "skills/analyse-listing/SKILL.md"
+    )
+
+
+def test_refresh_preserves_user_added_codex_skill_dirs(tmp_path: Path) -> None:
+    init(tmp_path)
+    custom = _codex(tmp_path) / "skills" / "my-skill"
+    custom.mkdir(parents=True, exist_ok=True)
+    (custom / "SKILL.md").write_text("# my private skill\n")
+
+    init(tmp_path, refresh=True)
+
+    assert (custom / "SKILL.md").read_text() == "# my private skill\n"
+
+
+def test_refresh_preserves_unknown_files_inside_package_owned_codex_skill_dirs(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    notes = _codex(tmp_path) / "skills" / "iterate-cv" / "notes.md"
+    notes.write_text("# wip\n")
+
+    init(tmp_path, refresh=True)
+
+    assert notes.read_text() == "# wip\n"
+
+
 # --- .claude/skills/ seeding (ADR-0044) ---
 
 
@@ -785,8 +1133,35 @@ def test_fresh_init_seeds_claude_skills(tmp_path: Path) -> None:
 
     claude_skills = _claude(tmp_path) / "skills"
     assert claude_skills.is_dir()
-    for d in _PKG_SKILL_DIRS:
+    assert not (claude_skills / "_shared").exists()
+    for d in ("analyse-listing", "iterate-cv", "write-cv"):
         assert (claude_skills / d).is_dir(), f"{d} missing"
+
+
+def test_fresh_init_seeds_claude_wrappers_that_delegate_to_shared_bodies(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    expected = {
+        "analyse-listing": (
+            "Grills the user about why they want to apply to a specific listing and writes the conclusion into a per-listing application folder. Always one listing per session. Runs when the user types /analyse-listing.",
+            "../../../application-pipeline/agent-skills/analyse-listing.md",
+        ),
+        "iterate-cv": (
+            "Applies conversational feedback to an existing cv.tex CV Slot-Map and/or to analysis.md, edits per-slot bodies in place, recompiles via the LaTeX build script when cv.tex was touched, and promotes generalisable signals into the triage profile. Resident loop — ends when the user signals done. Runs when the user types /iterate-cv.",
+            "../../../application-pipeline/agent-skills/iterate-cv.md",
+        ),
+        "write-cv": (
+            "Generates a tailored cv.tex (CV Slot-Map) plus cover/resume/combined PDFs for a listing previously analysed by /analyse-listing. Calls `application-pipeline compile-cv` and iteratively strips content until cover ≤ 1 page and resume ≤ 2 pages. Runs when the user types /write-cv.",
+            "../../../application-pipeline/agent-skills/write-cv.md",
+        ),
+    }
+
+    for skill, (description, body_path) in expected.items():
+        text = (_claude(tmp_path) / "skills" / skill / "SKILL.md").read_text()
+        assert _skill_frontmatter(text) == (skill, description)
+        assert body_path in text
 
 
 def test_fresh_init_seeds_known_skill_files_with_template_content(
@@ -795,8 +1170,6 @@ def test_fresh_init_seeds_known_skill_files_with_template_content(
     init(tmp_path)
     claude_skills = _claude(tmp_path) / "skills"
     expected_files = [
-        "_shared/STARTUP-TRIAGE.md",
-        "_shared/TRIAGE-ROUTING.md",
         "analyse-listing/SKILL.md",
         "iterate-cv/SKILL.md",
         "write-cv/SKILL.md",
@@ -807,74 +1180,28 @@ def test_fresh_init_seeds_known_skill_files_with_template_content(
         assert dest.read_bytes() == _claude_template_bytes(f"skills/{rel}")
 
 
-def test_analyse_listing_step_2_compares_answers_against_triage_profile() -> None:
-    text = _claude_template_text("skills/analyse-listing/SKILL.md")
-
-    step = _analyse_listing_step_2(text)
-
-    assert "bestehenden Triage-Profil-Bullets" in step
-    assert "candidate-profile.md" in step
-    assert "vertiefen, differenzieren oder korrigieren" in step
-    assert "net-new" in step
-    assert "gate-criteria.md" not in step
-    assert "Domain-Fit" not in step
-    assert "Match-Kriterien" not in step
-
-
-def test_seeded_analyse_listing_step_2_keeps_enriched_profile_instruction(
-    tmp_path: Path,
-) -> None:
-    init(tmp_path)
-    text = (_claude(tmp_path) / "skills" / "analyse-listing" / "SKILL.md").read_text()
-
-    step = _analyse_listing_step_2(text)
-
-    assert "candidate-profile.md" in step
-    assert "vertiefen, differenzieren oder korrigieren" in step
-
-
-def test_seeded_startup_triage_drops_domain_fit(tmp_path: Path) -> None:
-    init(tmp_path)
-    text = (_claude(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md").read_text()
-    assert "domain-fit.md" not in text
-    assert "match-criteria.md" not in text
-    assert "gate-criteria.md" in text
-
-
-def test_seeded_triage_routing_drops_domain_fit(tmp_path: Path) -> None:
-    init(tmp_path)
-    text = (_claude(tmp_path) / "skills" / "_shared" / "TRIAGE-ROUTING.md").read_text()
-    assert "domain-fit.md" not in text
-    assert "match-criteria.md" not in text
-    assert "gate-criteria.md" in text
-
-
-def test_seeded_write_cv_skill_references_new_cv_template_path(tmp_path: Path) -> None:
-    init(tmp_path)
-    text = (_claude(tmp_path) / "skills" / "write-cv" / "SKILL.md").read_text()
-    assert "application-pipeline/cv-template/cv_skeleton.tex" in text
-    assert "application-pipeline/skills/cv_skeleton.tex" not in text
-
-
-def test_seeded_iterate_cv_skill_references_new_cv_template_path(
-    tmp_path: Path,
-) -> None:
-    init(tmp_path)
-    text = (_claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md").read_text()
-    assert "application-pipeline/cv-template/cv_skeleton.tex" in text
-    assert "application-pipeline/skills/cv_skeleton.tex" not in text
-
-
 def test_refresh_overwrites_package_owned_skill_files(tmp_path: Path) -> None:
     init(tmp_path)
-    skill_file = _claude(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md"
+    skill_file = _claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md"
     skill_file.write_text("# tampered\n")
 
     init(tmp_path, refresh=True)
 
     assert skill_file.read_bytes() == _claude_template_bytes(
-        "skills/_shared/STARTUP-TRIAGE.md"
+        "skills/iterate-cv/SKILL.md"
     )
+
+
+def test_refresh_preserves_preexisting_adapter_local_shared_dir(tmp_path: Path) -> None:
+    init(tmp_path)
+    shared_dir = _claude(tmp_path) / "skills" / "_shared"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    support_file = shared_dir / "STARTUP-TRIAGE.md"
+    support_file.write_text("# operator-local support\n")
+
+    init(tmp_path, refresh=True)
+
+    assert support_file.read_text() == "# operator-local support\n"
 
 
 def test_refresh_preserves_user_added_skill_dirs(tmp_path: Path) -> None:
@@ -897,6 +1224,24 @@ def test_refresh_preserves_unknown_files_inside_package_owned_skill_dirs(
 
     init(tmp_path, refresh=True)
 
+    assert notes.read_text() == "# wip\n"
+
+
+def test_refresh_restores_missing_wrapper_and_preserves_neighboring_user_files(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    skill_dir = _claude(tmp_path) / "skills" / "iterate-cv"
+    skill_file = skill_dir / "SKILL.md"
+    notes = skill_dir / "notes.md"
+    notes.write_text("# wip\n")
+    skill_file.unlink()
+
+    init(tmp_path, refresh=True)
+
+    assert skill_file.read_bytes() == _claude_template_bytes(
+        "skills/iterate-cv/SKILL.md"
+    )
     assert notes.read_text() == "# wip\n"
 
 

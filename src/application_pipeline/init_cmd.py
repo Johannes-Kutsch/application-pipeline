@@ -41,6 +41,7 @@ def _bucket_roots(cwd: Path) -> dict[str, Path]:
     return {
         "application-pipeline": cwd / "application-pipeline",
         "claude": cwd / ".claude",
+        "codex": cwd / ".codex",
     }
 
 
@@ -157,7 +158,7 @@ def _is_global(rel: Path, *, bucket: str) -> bool:
         if parts[0] in _PRESERVE_DIRS:
             return False
         return True
-    # `claude` bucket: every package-shipped file is package-owned and
-    # overwritten on refresh. Files in user-added skill dirs are not touched
-    # because they don't appear in the templates tree at all.
+    # `claude` and `codex` buckets: every package-shipped file is package-owned
+    # and overwritten on refresh. Files in user-added skill dirs are not
+    # touched because they don't appear in the templates tree at all.
     return True

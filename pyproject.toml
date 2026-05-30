@@ -42,10 +42,12 @@ where = ["src"]
     "application-pipeline/user-info/triage-profile/*",
     "application-pipeline/user-info/search-terms/*",
     "application-pipeline/user-info/cv/*",
-    "claude/skills/_shared/*",
     "claude/skills/analyse-listing/*",
     "claude/skills/iterate-cv/*",
     "claude/skills/write-cv/*",
+    "codex/skills/analyse-listing/*",
+    "codex/skills/iterate-cv/*",
+    "codex/skills/write-cv/*",
 ]
 "application_pipeline.templates.prompts" = ["*.md"]
 "application_pipeline.latex" = ["*.tex", "*.cls", "*.sty", "*.md"]

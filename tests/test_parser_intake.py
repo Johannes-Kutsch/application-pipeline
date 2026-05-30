@@ -124,7 +124,7 @@ class _FailOnPostEnrichFreshnessGate:
 
 
 class _UnexpectedContentGate:
-    def admit(self, body: str, stub: PositionStub) -> bool:
+    def inspect(self, body: str, stub: PositionStub) -> object:
         raise AssertionError("post-enrich dedup drop must stop before Content Gate")
 
 
@@ -1107,16 +1107,15 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
 
 
 @pytest.mark.parametrize(
-    ("body", "_drop_reason"),
+    "body",
     [
-        ("   \n\t  ", "content_empty_body"),
-        ("x" * 99, "content_too_short"),
+        "   \n\t  ",
+        "x" * 99,
     ],
 )
 def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_card(
     tmp_path: Path,
     body: str,
-    _drop_reason: str,
 ) -> None:
     seen_path = tmp_path / ".seen.json"
     extracts_path = tmp_path / "extracts.json"

@@ -23,6 +23,7 @@ from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError, EnrichResult
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.run_metrics import RunMetrics
+from tests.parser_intake_harness import ParserIntakeHarness
 
 
 _DedupSeeder = Callable[[Any, PositionStub], int]
@@ -171,32 +172,6 @@ class _TransientHttpErrorParser:
             "503 Service Unavailable",
             request=httpx.Request("GET", stub.url),
             response=httpx.Response(503),
-        )
-
-
-class _BackfillingParser:
-    def __enter__(self) -> "_BackfillingParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        enriched = PositionStub(
-            url=stub.url,
-            title=stub.title,
-            source=stub.source,
-            company="Acme",
-            location="Hamburg",
-            posted_date=stub.posted_date,
-        )
-        return EnrichResult(
-            stub=enriched,
-            body="Fresh backend role " + "x" * 120,
-            mode="native",
         )
 
 
@@ -764,107 +739,25 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
 def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
-    discovered_stub = PositionStub(
-        url="https://example.com/fresh-forward",
-        title="Backend Engineer",
-        source="test",
-        posted_date=date(2026, 5, 29),
-    )
+    harness = ParserIntakeHarness.create(tmp_path)
 
-    class _TrackingClassifySink:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
+    harness.process_one_position_stub()
 
-        def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None:
-            self.calls.append({"listing_id": listing_id, "stub": stub, "body": body})
-
-    sink = _TrackingClassifySink()
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, _ = _make_run_metrics(run_log, parser_id="parser_test")
-    intake = ParserIntake(
-        parser_id="parser_test",
-        parser=_BackfillingParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        classify_sink=sink,
-        run_log=run_log,
-        metrics=metrics,
-    )
-
-    with dedup_store.run_scope():
-        intake.process_position_stub(discovered_stub)
-    assert len(sink.calls) == 1
-    call = sink.calls[0]
-    assert call["listing_id"] == 1
-    assert call["stub"] == PositionStub(
-        url="https://example.com/fresh-forward",
-        title="Backend Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=date(2026, 5, 29),
-    )
-    assert call["body"] == "Fresh backend role " + "x" * 120
+    handoffs = harness.classify_handoffs()
+    assert len(handoffs) == 1
+    assert handoffs[0].listing_id == 1
+    assert handoffs[0].stub == harness.default_enriched_stub
+    assert handoffs[0].body == harness.default_body
 
 
-def test_fresh_stub_reaching_classify_updates_queue_and_metrics(
-    tmp_path: Path,
-) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
-    discovered_stub = PositionStub(
-        url="https://example.com/fresh-forward",
-        title="Backend Engineer",
-        source="test",
-        posted_date=date(2026, 5, 29),
-    )
+def test_fresh_stub_reaching_classify_updates_queue_and_metrics(tmp_path: Path) -> None:
+    harness = ParserIntakeHarness.create(tmp_path)
 
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log, parser_id="parser_test")
-    intake = ParserIntake(
-        parser_id="parser_test",
-        parser=_BackfillingParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
-    )
+    harness.process_one_position_stub()
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(discovered_stub)
-    _assert_dedup_recorded(dedup_counters, "run_hit")
+    _assert_dedup_recorded(harness.dedup_counters, "run_hit")
     assert (
-        _last_body(metrics_display, "parser parser test")
+        harness.status_display_row_body("parser parser test")
         == "0 discovered · 1 forwarded"
     )
 

@@ -14,8 +14,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-import httpx
-
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline.llm import quota as _quota
@@ -29,11 +27,7 @@ from application_pipeline.dedup import (
     DedupStoreError,
     DeduplicationStore,
 )
-from application_pipeline.extracts.card_store import (
-    CardExtract,
-    CardStore,
-    load_card_store,
-)
+from application_pipeline.extracts.card_store import CardStore, load_card_store
 from application_pipeline.failure_report import write_failure as _write_failure
 from application_pipeline.llm import (
     ClaudeExtractor,
@@ -50,9 +44,17 @@ from application_pipeline.parsers import (
     ParserQuery,
     PositionStub,
 )
-from application_pipeline.parsers.body_fetch import OversizedBodyError
-from application_pipeline.parsers.types import City, EnrichFailedError, Location, Remote
+from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
+from application_pipeline.parser_intake import (
+    ClassifyForwarded,
+    Dropped,
+    OversizedBodySkip,
+    ParserIntake,
+    PoolAdmitted,
+    RetryableEnrichFailure,
+    TransientHttpSkip,
+)
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
@@ -307,7 +309,14 @@ class _ParserThread(threading.Thread):
         self._dedup_counters = dedup_counters
         self._pool_collector = pool_collector
         self._metrics = metrics
-        self._card_store = card_store
+        self._parser_intake = ParserIntake(
+            parser=parser,
+            freshness_gate=freshness,
+            deduplication=dedup,
+            domain_pre_filter=prefilter,
+            content_gate=content_gate,
+            card_store=card_store,
+        )
 
     def run(self) -> None:
         try:
@@ -355,100 +364,63 @@ class _ParserThread(threading.Thread):
     def _process_stub(self, stub: PositionStub) -> None:
         self._metrics.discovered(self._parser_id)
 
-        # Freshness gate (discover arm)
-        if not self._freshness.admit(stub, gate_arm="discover", deadline=stub.deadline):
-            self._metrics.increment_freshness_dropped(self._parser_id)
-            return
+        outcome = self._parser_intake.process_position_stub(stub)
+        for dedup_event in outcome.dedup_events:
+            self._dedup_counters.record(dedup_event)
 
-        # Dedup
-        result = self._dedup.is_seen(stub)
-        self._dedup_counters.record(result.kind)
-        if result.kind == "judge_pending":
-            self._pool_collector.add_judge_pending(stub, result.listing_id)
-            return
-        if result.kind != "miss":
-            self._metrics.increment_dedup_dropped(self._parser_id)
-            return
-
-        # Pre-Filter
-        if not self._prefilter.admit(stub):
-            self._metrics.increment_prefilter_dropped(self._parser_id)
-            return
-
-        # Enrich (body fetch) — runs inline on the parser thread
-        try:
-            enrich_result = self._parser.enrich(stub)
-        except EnrichFailedError:
+        if isinstance(outcome, RetryableEnrichFailure):
             self._run_log.event(
                 "pipeline_orchestrator",
                 "enrich_failed",
-                url=stub.url,
-                source=stub.source,
+                url=outcome.stub.url,
+                source=outcome.stub.source,
             )
             self._metrics.enrich_failed(self._parser_id)
             self._metrics.increment_enrich_failed_count(self._parser_id)
             return
-        except OversizedBodyError as exc:
+        if isinstance(outcome, OversizedBodySkip):
             self._run_log.event(
                 "llm_enricher",
                 "body_oversized",
-                url=exc.url,
-                source=exc.source,
-                body_len=exc.body_len,
+                url=outcome.error.url,
+                source=outcome.error.source,
+                body_len=outcome.error.body_len,
             )
             return
-        except httpx.HTTPError as exc:
+        if isinstance(outcome, TransientHttpSkip):
             self._run_log.event(
                 "llm_enricher",
                 "fetch_transient_error",
-                url=stub.url,
-                source=stub.source,
-                error=str(exc),
+                url=outcome.stub.url,
+                source=outcome.stub.source,
+                error=str(outcome.error),
             )
             return
-
-        self._metrics.enriched(self._parser_id, enrich_result.mode)
-        stub = enrich_result.stub
-        body = enrich_result.body
-
-        # Post-enrich dedup check (catches backfilled company/location fields)
-        post_enrich_result = self._dedup.is_seen(stub)
-        if post_enrich_result.kind == "judge_pending":
-            self._dedup_counters.record(post_enrich_result.kind)
-            self._pool_collector.add_judge_pending(stub, post_enrich_result.listing_id)
-            existing = self._card_store.get(post_enrich_result.listing_id)
-            if existing is not None and body:
-                self._card_store.put(
-                    post_enrich_result.listing_id,
-                    CardExtract(
-                        header=existing.header, summary=existing.summary, body=body
-                    ),
-                )
+        if isinstance(outcome, PoolAdmitted):
+            self._pool_collector.add_judge_pending(
+                outcome.pool_admission.stub,
+                outcome.pool_admission.listing_id,
+            )
             return
-        if post_enrich_result.kind == "tuple_hit":
-            self._dedup_counters.record(post_enrich_result.kind)
-            self._metrics.increment_dedup_dropped(self._parser_id)
+        if isinstance(outcome, Dropped):
+            if outcome.reason.startswith("freshness_"):
+                self._metrics.increment_freshness_dropped(self._parser_id)
+            elif outcome.reason.startswith("dedup_"):
+                self._metrics.increment_dedup_dropped(self._parser_id)
+            elif outcome.reason == "prefilter":
+                self._metrics.increment_prefilter_dropped(self._parser_id)
+            else:
+                self._metrics.increment_content_dropped(self._parser_id)
             return
 
-        # Freshness gate (post-enrich arm)
-        if not self._freshness.admit(
-            stub, gate_arm="post_enrich", deadline=stub.deadline
-        ):
-            self._metrics.increment_freshness_dropped(self._parser_id)
-            return
-
-        # Content gate
-        if not self._content_gate.admit(body, stub):
-            self._metrics.increment_content_dropped(self._parser_id)
-            return
-
-        # Forward to classify queue
+        assert isinstance(outcome, ClassifyForwarded)
+        self._metrics.enriched(self._parser_id, outcome.enrich_mode)
         self._classify_queue.put(
             _ClassifyRequest(
-                stub=stub,
-                body=body,
+                stub=outcome.stub,
+                body=outcome.body,
                 parser_id=self._parser_id,
-                listing_id=post_enrich_result.listing_id,
+                listing_id=outcome.listing_id,
             )
         )
         self._metrics.classify_buffered(1)

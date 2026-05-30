@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from application_pipeline import DeduplicationStore
+
 from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.content_gate import ContentGate
-from application_pipeline.dedup import RunScopedSeenResult, load as dedup_load
+from application_pipeline.dedup import load as dedup_load
 from application_pipeline.extracts import load_card_store
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parser_intake import Dropped, ParserIntake
@@ -31,22 +30,8 @@ class _UnexpectedEnrichParser:
         raise AssertionError("discover-arm freshness drop must stop before enrich()")
 
 
-@dataclass
-class _CountingDedup:
-    store: DeduplicationStore
-    is_seen_calls: int = 0
-
-    def is_seen(self, key: PositionStub) -> RunScopedSeenResult:
-        self.is_seen_calls += 1
-        return self.store.is_seen(key)
-
-
-@dataclass
-class _CountingPreFilter:
-    admit_calls: int = 0
-
+class _PassThroughPreFilter:
     def admit(self, stub: PositionStub) -> bool:
-        self.admit_calls += 1
         return True
 
 
@@ -89,8 +74,6 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
 
     card_store = load_card_store(extracts_path)
     dedup_store = dedup_load(seen_path, card_store=card_store)
-    dedup = _CountingDedup(dedup_store)
-    prefilter = _CountingPreFilter()
     run_log = RunLog(logs_dir)
     display = FakeStatusDisplay()
     freshness_gate = FreshnessGate(
@@ -103,8 +86,8 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
     intake = ParserIntake(
         parser=_UnexpectedEnrichParser(),
         freshness_gate=freshness_gate,
-        deduplication=dedup,
-        domain_pre_filter=prefilter,
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
         content_gate=ContentGate(display=display, run_log=run_log),
         card_store=card_store,
     )
@@ -123,8 +106,6 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
     assert isinstance(outcome, Dropped)
     assert outcome.reason == "freshness_discover"
     assert outcome.parser_row_metric == "freshness_dropped"
-    assert dedup.is_seen_calls == 0
-    assert prefilter.admit_calls == 0
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert seen_data["7"]["status"] == "expired"

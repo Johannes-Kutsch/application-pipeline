@@ -312,6 +312,7 @@ class _ParserThread(threading.Thread):
         self._pool_collector = pool_collector
         self._metrics = metrics
         self._parser_intake = ParserIntake(
+            parser_id=parser_id,
             parser=parser,
             freshness_gate=freshness,
             deduplication=dedup,
@@ -431,7 +432,7 @@ class _ParserThread(threading.Thread):
         return _ClassifyRequest(
             stub=outcome.stub,
             body=outcome.body,
-            parser_id=self._parser_id,
+            parser_id=outcome.parser_id,
             listing_id=outcome.listing_id,
         )
 

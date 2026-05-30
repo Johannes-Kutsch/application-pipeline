@@ -61,11 +61,13 @@ DropReason = Literal[
 
 @dataclass(frozen=True)
 class ClassifyForwarded:
+    parser_id: str
     stub: PositionStub
     listing_id: ListingId
     body: str
     enrich_mode: Literal["native", "fallback"]
-    dedup_events: tuple[RunScopedSeenKind, ...] = ("miss",)
+    post_enrich_dedup_kind: RunScopedSeenKind
+    dedup_events: tuple[RunScopedSeenKind, ...]
 
     @property
     def parser_row_metric(self) -> ParserRowMetric:
@@ -196,6 +198,7 @@ class ParserIntake:
     def __init__(
         self,
         *,
+        parser_id: str = "",
         parser: Parser,
         freshness_gate: FreshnessGate,
         deduplication: Deduplication,
@@ -203,6 +206,7 @@ class ParserIntake:
         content_gate: ContentGate,
         card_store: CardStore,
     ) -> None:
+        self._parser_id = parser_id
         self._parser = parser
         self._freshness_gate = freshness_gate
         self._deduplication = deduplication
@@ -307,10 +311,12 @@ class ParserIntake:
             return Dropped(reason="content", stub=stub, dedup_events=("miss",))
 
         return ClassifyForwarded(
+            parser_id=self._parser_id,
             stub=stub,
             listing_id=post_enrich_dedup.listing_id,
             body=body,
             enrich_mode=enrich_result.mode,
+            post_enrich_dedup_kind=post_enrich_dedup.kind,
             dedup_events=("miss",),
         )
 

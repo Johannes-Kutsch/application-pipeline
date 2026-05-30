@@ -1455,8 +1455,8 @@ def test_external_redirect_skips_stub_and_increments_counter(
     assert warning_records == [], f"unexpected WARNING(s): {warning_records}"
 
 
-def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> None:
-    """LLMEnricher returns None → enrich_failed metric increments, classify_relevance event with matches=None is logged."""
+def test_retryable_classify_outcome_logs_matches_none_event(tmp_path: Path) -> None:
+    """Retryable per-listing classify outcome: enrich_failed increments, classify_relevance event has matches=None."""
     import application_pipeline.parser_log as parser_log
 
     logs_dir = tmp_path / "synched" / "logs"
@@ -1509,7 +1509,6 @@ def test_external_redirect_event_row_includes_skipped_true(tmp_path: Path) -> No
         .splitlines()
         if line.strip()
     ]
-    # v2 logs a classify_relevance event with matches=None when enricher returns None
     classify_rows = [r for r in events if r.get("event") == "classify_relevance"]
     assert len(classify_rows) == 1
     assert classify_rows[0].get("matches") is None
@@ -4541,6 +4540,37 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     assert classify_bodies, "expected at least one classify_relevance body update"
     last_body = classify_bodies[-1]
     assert "malformed" in last_body
+
+
+def test_retryable_classify_outcome_shows_malformed_not_forwarded(
+    tmp_path: Path,
+) -> None:
+    """Retryable per-listing classify outcome: status row shows malformed count, not forwarded."""
+    card_store = _make_card_store(tmp_path)
+
+    class _AllRetryableEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            return AppliedClassifyOutcome.from_verdicts(items, [None for _ in items])
+
+    display = FakeStatusDisplay()
+
+    run(
+        _two_stub_config(tmp_path),
+        llm_enricher=_AllRetryableEnricher(),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        status_display=display,
+    )
+
+    classify_bodies = display.body_updates_for("llm classify relevance")
+    assert classify_bodies, "expected at least one classify_relevance body update"
+    last_body = classify_bodies[-1]
+    assert "malformed" in last_body
+    assert "forwarded" not in last_body
 
 
 def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:

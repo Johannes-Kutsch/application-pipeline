@@ -629,7 +629,7 @@ def test_enrich_batch_routes_match_reject_none_independently(
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
-    """Matches write card store + mark_matched; rejections mark_out_of_domain; None untouched."""
+    """Matches write card store + mark_matched; rejections expose a rejected outcome; None untouched."""
     extractor = MagicMock()
     extractor.classify_relevance.return_value = (
         [
@@ -680,7 +680,7 @@ def test_enrich_batch_routes_match_reject_none_independently(
 
     assert [item.state for item in results.items] == [
         "matched",
-        "out_of_domain",
+        "rejected",
         "retryable",
     ]
     assert results.matched_listings == [(1, stub_match)]

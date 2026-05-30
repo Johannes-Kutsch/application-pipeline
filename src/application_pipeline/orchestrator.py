@@ -627,8 +627,7 @@ class _ClassifyWorker(_QueueWorker):
             )
             if item_outcome.state in {"retryable", "expired"}:
                 self._metrics.enrich_failed(req.stub.source)
-            elif item_outcome.state == "out_of_domain":
-                self._dedup_store.mark_out_of_domain(req.listing_id, req.stub)
+            elif item_outcome.state == "rejected":
                 dropped += 1
             elif item_outcome.state == "matched":
                 matched = item_outcome.matched_listing

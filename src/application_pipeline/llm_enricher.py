@@ -153,7 +153,7 @@ class LLMEnricher:
                     self._dedup_store.mark_out_of_domain(listing_id, stub)
                 outcome_items.append(
                     AppliedClassifyItemOutcome(
-                        state="out_of_domain",
+                        state="rejected",
                         event_matches=False,
                     )
                 )

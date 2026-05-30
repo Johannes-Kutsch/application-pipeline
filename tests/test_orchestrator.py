@@ -28,6 +28,7 @@ from application_pipeline.extracts.card_store import (
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
+    ClassifyItem,
     JudgeCandidate,
     MatchVerdict,
     RelevanceVerdict,
@@ -49,6 +50,7 @@ from application_pipeline.parsers.types import (
 )
 from application_pipeline.prompts import PromptError
 from application_pipeline.daily_results_file import DailyResultsFile, ResultsFileError
+from application_pipeline.parser_log import RunLog
 
 
 class _StubParserBase:
@@ -852,6 +854,8 @@ class _FakeLLMEnricherRejectJob1:
     ) -> AppliedClassifyOutcome:
         listing_id, stub, body = items[0]
         if stub.title == "Job 1":
+            if self._dedup_store is not None:
+                self._dedup_store.mark_out_of_domain(listing_id, stub)
             return AppliedClassifyOutcome.from_verdicts(
                 items, [RelevanceVerdict(matches=False)]
             )
@@ -898,14 +902,15 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
         negative_keywords='["excluded"]',
     )
     card_store = _make_card_store(tmp_path)
+    dedup_store = dedup_module.load(seen_path)
 
     summary = run(
         config_path,
-        llm_enricher=_FakeLLMEnricherRejectJob1(card_store),
+        llm_enricher=_FakeLLMEnricherRejectJob1(card_store, dedup_store=dedup_store),
         extractor=_FakeExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
+        dedup_store=dedup_store,
     )
 
     assert summary.discovered == 6
@@ -1011,13 +1016,16 @@ def test_integration_dedup_skip_rerun(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     def _make_run() -> RunSummary:
+        dedup_store = dedup_module.load(seen_path)
         return run(
             config_path,
-            llm_enricher=_FakeLLMEnricherRejectJob1(card_store),
+            llm_enricher=_FakeLLMEnricherRejectJob1(
+                card_store, dedup_store=dedup_store
+            ),
             extractor=_FakeExtractor(),
             card_store=card_store,
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
-            dedup_store=dedup_module.load(seen_path),
+            dedup_store=dedup_store,
         )
 
     first = _make_run()
@@ -3042,39 +3050,31 @@ def test_10_items_parallelism_4_batch_size_10_fires_1_enricher_call(
 
 
 def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
-    """Positions classified as off-domain by llm_enricher are not included in judge_top_n candidates."""
+    """Rejected real LLM Enricher outcomes mark seen, skip Card writes, and stay out of judge candidates."""
     seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
     _OFF_URL = "https://offdomain.example/0"
     _ON_URL = "https://offdomain.example/1"
-    card_store = _make_card_store(tmp_path)
-
-    class _SelectiveEnricher:
-        def enrich(
-            self, items: list[tuple[int, PositionStub, str]]
-        ) -> AppliedClassifyOutcome:
-            listing_id, stub, body = items[0]
-            if stub.url == _OFF_URL:
-                return AppliedClassifyOutcome.from_verdicts(
-                    items, [RelevanceVerdict(matches=False)]
-                )
-            card_store.put(
-                listing_id,
-                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
-            )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+    card_store = load_card_store(extracts_path)
 
     judge_candidate_ids: list[list[int]] = []
 
-    class _TrackingJudge:
+    class _TrackingExtractor:
+        def classify_relevance(
+            self, items: list[ClassifyItem]
+        ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
+            assert len(items) == 1
+            if items[0].title == "Off-domain Job":
+                return [RelevanceVerdict(matches=False)], _ZERO_USAGE
+            return [
+                RelevanceVerdict(
+                    matches=True,
+                    header=_FAKE_ENRICH_HEADER,
+                    summary=_FAKE_ENRICH_SUMMARY,
+                )
+            ], _ZERO_USAGE
+
         def judge_top_n(
             self, candidates: "list[JudgeCandidate]"
         ) -> "tuple[list[MatchVerdict], CallUsage]":
@@ -3096,13 +3096,14 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
                 PositionStub(url=_ON_URL, title="On-domain Job", source="s"),
             ]
 
+    run_log = RunLog(logs_dir)
     summary = run(
         _batch_size_config(tmp_path),
-        llm_enricher=_SelectiveEnricher(),
-        extractor=_TrackingJudge(),
+        extractor=_TrackingExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _TwoLangParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
     )
 
     assert summary.classifier_dropped == 1
@@ -3110,12 +3111,27 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     # judge_top_n called with only the in-domain candidate
     assert len(judge_candidate_ids) == 1
     assert len(judge_candidate_ids[0]) == 1  # only the in-domain candidate
+    assert card_store.get(1) is None
+    assert card_store.get(2) is not None
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert (
         next(r["status"] for r in seen_data.values() if _OFF_URL in r.get("urls", []))
         == "out_of_domain"
     )
+    events = [
+        json.loads(line)
+        for line in (logs_dir / "llm" / "classify_relevance.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert [
+        row["matches"] for row in events if row.get("event") == "classify_relevance"
+    ] == [
+        False,
+        True,
+    ]
 
 
 def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
@@ -4744,25 +4760,31 @@ def test_second_run_skips_all_urls_and_seen_json_unchanged(tmp_path: Path) -> No
         negative_keywords='["excluded"]',
     )
     card_store = _make_card_store(tmp_path)
+    first_dedup_store = dedup_module.load(seen_path)
 
     first = run(
         config_path,
-        llm_enricher=_FakeLLMEnricherRejectJob1(card_store),
+        llm_enricher=_FakeLLMEnricherRejectJob1(
+            card_store, dedup_store=first_dedup_store
+        ),
         extractor=_FakeExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
+        dedup_store=first_dedup_store,
     )
 
     seen_after_first = json.loads(seen_path.read_text(encoding="utf-8"))
 
+    second_dedup_store = dedup_module.load(seen_path)
     second = run(
         config_path,
-        llm_enricher=_FakeLLMEnricherRejectJob1(card_store),
+        llm_enricher=_FakeLLMEnricherRejectJob1(
+            card_store, dedup_store=second_dedup_store
+        ),
         extractor=_FakeExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
+        dedup_store=second_dedup_store,
     )
 
     seen_after_second = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -5451,13 +5473,14 @@ def test_parallel_classify_n1_recovers_serial_results(tmp_path: Path) -> None:
         claude_classify_parallelism=1,
     )
 
+    dedup_store = dedup_module.load(seen_path)
     summary = run(
         config_path,
-        llm_enricher=_FakeLLMEnricherRejectJob1(card_store),
+        llm_enricher=_FakeLLMEnricherRejectJob1(card_store, dedup_store=dedup_store),
         extractor=_FakeExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
+        dedup_store=dedup_store,
     )
 
     assert summary.discovered == 6

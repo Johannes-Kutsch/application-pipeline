@@ -98,7 +98,7 @@ class RelevanceVerdict:
 
 AppliedClassifyState = Literal[
     "matched",
-    "out_of_domain",
+    "rejected",
     "retryable",
     "expired",
 ]
@@ -117,14 +117,14 @@ class AppliedClassifyItemOutcome:
     matched_listing: MatchedListing | None = None
 
     def __post_init__(self) -> None:
-        valid_states = {"matched", "out_of_domain", "retryable", "expired"}
+        valid_states = {"matched", "rejected", "retryable", "expired"}
         if self.state not in valid_states:
             raise ExtractorSchemaError(
                 f"invalid applied classify state: {self.state!r}"
             )
         expected_event_matches = {
             "matched": True,
-            "out_of_domain": False,
+            "rejected": False,
             "retryable": None,
             "expired": None,
         }[self.state]
@@ -183,7 +183,7 @@ class AppliedClassifyOutcome:
                 continue
             outcome_items.append(
                 AppliedClassifyItemOutcome(
-                    state="out_of_domain",
+                    state="rejected",
                     event_matches=False,
                 )
             )

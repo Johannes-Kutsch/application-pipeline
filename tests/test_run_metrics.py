@@ -161,6 +161,28 @@ def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     assert "dropped" not in body
 
 
+def test_classify_body_retryable_items_count_as_malformed_not_forwarded(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    usage = _make_usage()
+    metrics.classify_buffered(2)
+    metrics.classify_batch_enqueued(2)
+    metrics.classify_batch_dequeued(2)
+    metrics.classify_batch_complete(
+        usage,
+        items=2,
+        classifier_dropped=0,
+        retryable_items=1,
+    )
+
+    body = _last_body(display, "llm classify relevance")
+    assert body == "1 malformed · 1 forwarded"
+
+
 def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)

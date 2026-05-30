@@ -619,13 +619,17 @@ class _ClassifyWorker(_QueueWorker):
                 return
 
         dropped = 0
+        retryable = 0
         for req, item_outcome in zip(batch, outcome.items):
             self._run_log.event(
                 "llm_classify_relevance",
                 "classify_relevance",
                 matches=item_outcome.event_matches,
             )
-            if item_outcome.state in {"retryable", "expired"}:
+            if item_outcome.state == "retryable":
+                retryable += 1
+                self._metrics.enrich_failed(req.stub.source)
+            elif item_outcome.state == "expired":
                 self._metrics.enrich_failed(req.stub.source)
             elif item_outcome.state == "rejected":
                 dropped += 1
@@ -637,7 +641,12 @@ class _ClassifyWorker(_QueueWorker):
         for listing_id, stub in outcome.matched_listings:
             self._pool_collector.add_matched(stub, listing_id)
 
-        self._metrics.classify_batch_complete(_ZERO_USAGE, len(batch), dropped)
+        self._metrics.classify_batch_complete(
+            _ZERO_USAGE,
+            len(batch),
+            dropped,
+            retryable_items=retryable,
+        )
 
 
 @dataclass

@@ -90,6 +90,7 @@ class RunMetrics:
         self._classify_cost_usd = 0.0
         self._classifier_dropped = 0
         self._classify_items_errored = 0
+        self._classify_items_retryable = 0
         self._total_batches = 0
         self._classify_queued = 0
         self._classifying = 0
@@ -338,7 +339,11 @@ class RunMetrics:
         self._display.update_body("llm classify relevance", body=body)
 
     def classify_batch_complete(
-        self, usage: CallUsage, items: int, classifier_dropped: int
+        self,
+        usage: CallUsage,
+        items: int,
+        classifier_dropped: int,
+        retryable_items: int = 0,
     ) -> None:
         with self._classify_lock:
             self._classify_calls += 1
@@ -349,6 +354,7 @@ class RunMetrics:
             self._classify_cost_usd += usage.cost_usd
             self._classify_total_s += usage.duration_s
             self._classifier_dropped += classifier_dropped
+            self._classify_items_retryable += retryable_items
             self._classifying -= items
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
@@ -675,14 +681,19 @@ class RunMetrics:
         depth = (
             self._classify_queued - self._classify_items - self._classify_items_errored
         )
-        forwarded = self._classify_items - self._classifier_dropped
+        malformed = self._classify_items_errored + self._classify_items_retryable
+        forwarded = (
+            self._classify_items
+            - self._classifier_dropped
+            - self._classify_items_retryable
+        )
         parts = []
         if depth > 0:
             parts.append(f"{depth} queued")
         if self._classifying > 0:
             parts.append(f"{self._classifying} classifying")
-        if self._classify_items_errored > 0:
-            parts.append(f"{self._classify_items_errored} malformed")
+        if malformed > 0:
+            parts.append(f"{malformed} malformed")
         if self._classifier_dropped > 0:
             parts.append(f"{self._classifier_dropped} dropped")
         if forwarded > 0:

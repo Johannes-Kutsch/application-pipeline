@@ -16,6 +16,7 @@ from application_pipeline.llm.types import (
     ClassifyItem,
     ExtractorMalformedError,
     ExtractorMalformedJSONError,
+    MatchedListing,
     RelevanceVerdict,
 )
 from application_pipeline.parser_log import RunLog
@@ -101,7 +102,6 @@ class LLMEnricher:
             raise
 
         outcome_items: list[AppliedClassifyItemOutcome] = []
-        matched_listings: list[tuple[int, PositionStub]] = []
         for (listing_id, stub, body), verdict in zip(items, raw_verdicts):
             if verdict is None:
                 outcome_items.append(
@@ -139,11 +139,13 @@ class LLMEnricher:
                 )
                 if self._dedup_store is not None:
                     self._dedup_store.mark_matched(listing_id, stub)
-                matched_listings.append((listing_id, stub))
                 outcome_items.append(
                     AppliedClassifyItemOutcome(
                         state="matched",
                         event_matches=True,
+                        matched_listing=MatchedListing(
+                            listing_id=listing_id, stub=stub
+                        ),
                     )
                 )
             else:
@@ -156,10 +158,7 @@ class LLMEnricher:
                     )
                 )
 
-        return AppliedClassifyOutcome(
-            items=outcome_items,
-            matched_listings=matched_listings,
-        )
+        return AppliedClassifyOutcome(items=outcome_items)
 
     def _stash_failure(
         self, kind: str, stub: PositionStub, content: str, *, ext: str = "html"

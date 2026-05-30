@@ -105,9 +105,16 @@ AppliedClassifyState = Literal[
 
 
 @dataclass(frozen=True)
+class MatchedListing:
+    listing_id: int
+    stub: "PositionStub"
+
+
+@dataclass(frozen=True)
 class AppliedClassifyItemOutcome:
     state: AppliedClassifyState
     event_matches: bool | None
+    matched_listing: MatchedListing | None = None
 
     def __post_init__(self) -> None:
         valid_states = {"matched", "out_of_domain", "retryable", "expired"}
@@ -125,12 +132,27 @@ class AppliedClassifyItemOutcome:
             raise ExtractorSchemaError(
                 "event_matches must match applied classify state"
             )
+        if self.state == "matched" and self.matched_listing is None:
+            raise ExtractorSchemaError(
+                "matched outcomes must include matched listing data"
+            )
+        if self.state != "matched" and self.matched_listing is not None:
+            raise ExtractorSchemaError(
+                "only matched outcomes may include matched listing data"
+            )
 
 
 @dataclass(frozen=True)
 class AppliedClassifyOutcome:
     items: list[AppliedClassifyItemOutcome]
-    matched_listings: list[tuple[int, "PositionStub"]]
+
+    @property
+    def matched_listings(self) -> list[tuple[int, "PositionStub"]]:
+        return [
+            (item.matched_listing.listing_id, item.matched_listing.stub)
+            for item in self.items
+            if item.matched_listing is not None
+        ]
 
     @classmethod
     def from_verdicts(
@@ -139,7 +161,6 @@ class AppliedClassifyOutcome:
         verdicts: list[RelevanceVerdict | None],
     ) -> "AppliedClassifyOutcome":
         outcome_items: list[AppliedClassifyItemOutcome] = []
-        matched_listings: list[tuple[int, "PositionStub"]] = []
         for (listing_id, stub, _), verdict in zip(items, verdicts):
             if verdict is None:
                 outcome_items.append(
@@ -150,11 +171,13 @@ class AppliedClassifyOutcome:
                 )
                 continue
             if verdict.matches:
-                matched_listings.append((listing_id, stub))
                 outcome_items.append(
                     AppliedClassifyItemOutcome(
                         state="matched",
                         event_matches=True,
+                        matched_listing=MatchedListing(
+                            listing_id=listing_id, stub=stub
+                        ),
                     )
                 )
                 continue
@@ -164,7 +187,7 @@ class AppliedClassifyOutcome:
                     event_matches=False,
                 )
             )
-        return cls(items=outcome_items, matched_listings=matched_listings)
+        return cls(items=outcome_items)
 
 
 @dataclass(frozen=True)

@@ -169,6 +169,53 @@ def test_enricher_matched_returns_applied_outcome_and_writes_card_store(
     assert card.body == body
 
 
+def test_enricher_matched_item_exposes_pool_admission_data_and_persists_dedup(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    body = "Senior Python Engineer – remote ML role."
+
+    extractor = MagicMock()
+    extractor.classify_relevance.return_value = (
+        [
+            RelevanceVerdict(
+                matches=True,
+                header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+                summary="Great ML role.",
+            )
+        ],
+        _call_usage(),
+    )
+
+    enricher, dedup = _make_enricher_with_dedup(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/1",
+        title="Senior Python Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+    )
+
+    with dedup.run_scope():
+        dedup.is_seen(stub)
+        result = enricher.enrich([(1, stub, body)])
+
+    matched = result.items[0].matched_listing
+    assert matched is not None
+    assert matched.listing_id == 1
+    assert matched.stub == stub
+
+    card = load_card_store(tmp_path / "extracts.json").get(1)
+    assert card is not None
+    assert card.body == body
+
+    reloaded = dedup_load(tmp_path / ".seen.json")
+    assert reloaded.is_seen(stub).kind == "judge_pending"
+
+
 # ---------------------------------------------------------------------------
 # LLMEnricher: malformed LLM output stashed to failures/malformed/
 # ---------------------------------------------------------------------------

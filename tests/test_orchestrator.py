@@ -14,7 +14,7 @@ from fake_status_display import FakeStatusDisplay
 
 from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
-from application_pipeline.dedup import DedupStoreError
+from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.llm import (
     CallUsage,
     ExtractorError,
@@ -149,10 +149,15 @@ def _make_fake_llm_enricher(
     matches: bool = True,
     header: str = "Test Role · ACME · Hamburg",
     summary: str = "A test role description.",
+    dedup_store: DeduplicationStore | None = None,
 ) -> "_FakeLLMEnricherHelper":
     """Create a fake LLMEnricher that writes cards and returns verdicts."""
     return _FakeLLMEnricherHelper(
-        card_store, matches=matches, header=header, summary=summary
+        card_store,
+        matches=matches,
+        header=header,
+        summary=summary,
+        dedup_store=dedup_store,
     )
 
 
@@ -166,11 +171,13 @@ class _FakeLLMEnricherHelper:
         matches: bool = True,
         header: str = "Test Role · ACME · Hamburg",
         summary: str = "A test role description.",
+        dedup_store: DeduplicationStore | None = None,
     ) -> None:
         self._card_store = card_store
         self._matches = matches
         self._header = header
         self._summary = summary
+        self._dedup_store = dedup_store
 
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
@@ -181,6 +188,8 @@ class _FakeLLMEnricherHelper:
                 listing_id,
                 CardExtract(header=self._header, summary=self._summary),
             )
+            if self._dedup_store is not None:
+                self._dedup_store.mark_matched(listing_id, stub)
             return AppliedClassifyOutcome.from_verdicts(
                 items,
                 [
@@ -830,8 +839,13 @@ class _FakeLLMEnricherRejectJob1:
     Tracks per-call usage: _FAKE_CLASSIFY_USAGE per call.
     """
 
-    def __init__(self, card_store: CardStore) -> None:
+    def __init__(
+        self,
+        card_store: CardStore,
+        dedup_store: DeduplicationStore | None = None,
+    ) -> None:
         self._card_store = card_store
+        self._dedup_store = dedup_store
 
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
@@ -845,6 +859,8 @@ class _FakeLLMEnricherRejectJob1:
             listing_id,
             CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
         )
+        if self._dedup_store is not None:
+            self._dedup_store.mark_matched(listing_id, stub)
         return AppliedClassifyOutcome.from_verdicts(
             items,
             [
@@ -951,7 +967,9 @@ def test_no_judge_skips_judge_no_daily_file_listings_remain_matched(
 
     summary = run(
         config_path,
-        llm_enricher=_FakeLLMEnricherRejectJob1(card_store),
+        llm_enricher=_FakeLLMEnricherRejectJob1(
+            card_store, dedup_store=dedup_module.load(seen_path)
+        ),
         extractor=_TrackingExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
@@ -1169,7 +1187,9 @@ def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
 
     summary = run(
         _two_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(card_store),
+        llm_enricher=_make_fake_llm_enricher(
+            card_store, dedup_store=dedup_module.load(seen_path)
+        ),
         extractor=ext,
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
@@ -1564,7 +1584,9 @@ def test_judge_failure_leaves_status_matched(tmp_path: Path) -> None:
 
     run(
         _one_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(card_store),
+        llm_enricher=_make_fake_llm_enricher(
+            card_store, dedup_store=dedup_module.load(seen_path)
+        ),
         extractor=ext,
         card_store=card_store,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]

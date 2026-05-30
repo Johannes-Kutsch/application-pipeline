@@ -619,7 +619,6 @@ class _ClassifyWorker(_QueueWorker):
                 return
 
         dropped = 0
-        matched_listing_ids = {listing_id for listing_id, _ in outcome.matched_listings}
         for req, item_outcome in zip(batch, outcome.items):
             self._run_log.event(
                 "llm_classify_relevance",
@@ -632,8 +631,8 @@ class _ClassifyWorker(_QueueWorker):
                 self._dedup_store.mark_out_of_domain(req.listing_id, req.stub)
                 dropped += 1
             elif item_outcome.state == "matched":
-                self._dedup_store.mark_matched(req.listing_id, req.stub)
-                if req.listing_id not in matched_listing_ids:
+                matched = item_outcome.matched_listing
+                if matched is None or matched.listing_id != req.listing_id:
                     raise AssertionError("matched outcome missing matched listing data")
 
         for listing_id, stub in outcome.matched_listings:

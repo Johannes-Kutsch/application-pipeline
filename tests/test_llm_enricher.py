@@ -690,14 +690,16 @@ def test_enrich_batch_routes_match_reject_none_independently(
     assert card_store.get(2) is None, "rejection should not write card"
     assert card_store.get(3) is None, "None verdict should not write card"
 
-    assert isinstance(dedup, DeduplicationStore)
-    assert dedup._records[1]["status"] == "matched", (
-        "match listing should be marked matched"
-    )
-    assert dedup._records[2]["status"] == "out_of_domain", (
-        "reject listing should be marked out_of_domain"
-    )
-    assert 3 not in dedup._records, (
+    seen_data = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
+    assert any(
+        stub_match.url in r.get("urls", []) and r["status"] == "matched"
+        for r in seen_data.values()
+    ), "match listing should be marked matched"
+    assert any(
+        stub_reject.url in r.get("urls", []) and r["status"] == "out_of_domain"
+        for r in seen_data.values()
+    ), "reject listing should be marked out_of_domain"
+    assert not any(stub_none.url in r.get("urls", []) for r in seen_data.values()), (
         "None verdict listing should be evicted (never promoted from pending)"
     )
 

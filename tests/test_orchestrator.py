@@ -6072,6 +6072,76 @@ def test_post_enrich_non_expired_stub_reaches_llm_enricher(
     assert body_received == "fresh job body " + "x" * 86
 
 
+def test_parser_intake_classify_handoff_keeps_listing_id_stub_and_body(
+    tmp_path: Path,
+) -> None:
+    """Parser Intake classify handoff preserves Listing ID, Position Stub facts, and Raw Description."""
+    stub_url = "https://handoff.example/1"
+    handoff_items: list[tuple[int, PositionStub, str]] = []
+
+    class _BackfillingParser(_StubParserBase):
+        def __enter__(self) -> "_BackfillingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [PositionStub(url=stub_url, title="Backend Engineer", source="stub")]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enriched = PositionStub(
+                url=stub.url,
+                title=stub.title,
+                source=stub.source,
+                company="Acme",
+                location="Hamburg",
+            )
+            return EnrichResult(
+                stub=enriched,
+                body="handoff body " + "x" * 90,
+                mode="native",
+            )
+
+    class _CapturingLLMEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            handoff_items.extend(items)
+            return _rejected_outcome(items)
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_CapturingLLMEnricher(),
+        extractor=_stub_extractor(),
+        card_store=_make_card_store(tmp_path),
+        parser_registry=lambda _: _BackfillingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert summary.discovered == 1
+    assert summary.classifier_dropped == 1
+    assert handoff_items == [
+        (
+            1,
+            PositionStub(
+                url=stub_url,
+                title="Backend Engineer",
+                source="stub",
+                company="Acme",
+                location="Hamburg",
+            ),
+            "handoff body " + "x" * 90,
+        )
+    ]
+
+
 def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
     tmp_path: Path,
 ) -> None:
@@ -6437,6 +6507,96 @@ def test_transient_http_error_from_parser_enrich_does_not_mark_enrich_failed(
     assert not any(_EF_URL in r.get("urls", []) for r in seen_data.values()), (
         "transient-error URL must not appear in seen.json so it is retried next run"
     )
+
+
+def test_parser_enrich_skip_outcomes_keep_log_artifacts(tmp_path: Path) -> None:
+    """Parser Intake skip outcomes keep the same Log Artifacts after parser-thread delegation."""
+    import httpx
+
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+    urls = [
+        "https://skip-log.example/enrich-failed",
+        "https://skip-log.example/body-oversized",
+        "https://skip-log.example/transient-http",
+    ]
+
+    class _SkipOutcomeParser(_StubParserBase):
+        def __enter__(self) -> "_SkipOutcomeParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=url, title=f"Job {index}", source="stub")
+                for index, url in enumerate(urls)
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            if stub.url == urls[0]:
+                raise EnrichFailedError("native fetch failed")
+            if stub.url == urls[1]:
+                raise OversizedBodyError(
+                    url=stub.url, source=stub.source, body_len=4321
+                )
+            raise httpx.HTTPStatusError(
+                "503 Service Unavailable",
+                request=httpx.Request("GET", stub.url),
+                response=httpx.Response(503),
+            )
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _SkipOutcomeParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        run_log=run_log,
+    )
+
+    assert summary.enrich_failed == 1
+    assert summary.parsers_dead == 0
+
+    pipeline_rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "orchestrator.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(
+        row.get("event") == "enrich_failed"
+        and row.get("url") == urls[0]
+        and row.get("source") == "stub"
+        for row in pipeline_rows
+    ), "parser enrich failure must keep the existing enrich_failed Log Artifact"
+
+    llm_rows = [
+        json.loads(line)
+        for line in (logs_dir / "llm" / "enricher.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(
+        row.get("event") == "body_oversized"
+        and row.get("url") == urls[1]
+        and row.get("source") == "stub"
+        and row.get("body_len") == 4321
+        for row in llm_rows
+    ), "oversized-body skip must keep the existing body_oversized Log Artifact"
+    assert any(
+        row.get("event") == "fetch_transient_error"
+        and row.get("url") == urls[2]
+        and row.get("source") == "stub"
+        and "503 Service Unavailable" in str(row.get("error"))
+        for row in llm_rows
+    ), "transient HTTP skip must keep the existing fetch_transient_error Log Artifact"
 
 
 # ---------------------------------------------------------------------------

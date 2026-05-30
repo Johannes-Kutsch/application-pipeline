@@ -6,6 +6,7 @@ import re
 import textwrap
 from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -7450,6 +7451,83 @@ def test_post_discover_judge_pending_routes_to_pool_without_enrich_or_body_refre
     assert rediscovered_url in content
     assert canonical_url not in content
     assert persisted_body in content
+
+
+def test_classify_forwarded_queue_delivery_keeps_enriched_stub_listing_id_and_body(
+    tmp_path: Path,
+) -> None:
+    """A classify-forwarded Parser Intake outcome reaches the LLM Enricher unchanged."""
+    captured_items: list[tuple[int, PositionStub, str]] = []
+
+    class _ForwardingParser(_StubParserBase):
+        def __enter__(self) -> "_ForwardingParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://queue-forward.example/new",
+                    title="Backend Engineer",
+                    source="stub",
+                    posted_date=date(2026, 5, 29),
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enriched = PositionStub(
+                url=stub.url,
+                title=stub.title,
+                source=stub.source,
+                company="Acme",
+                location="Hamburg",
+                posted_date=stub.posted_date,
+            )
+            return EnrichResult(
+                stub=enriched,
+                body="Fresh backend role " + "x" * 120,
+                mode="native",
+            )
+
+    class _CapturingLLMEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            captured_items.extend(items)
+            return _matched_outcome(items)
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["backend"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_CapturingLLMEnricher(),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _ForwardingParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert summary.discovered == 1
+    assert summary.classify_items == 1
+    assert captured_items == [
+        (
+            1,
+            PositionStub(
+                url="https://queue-forward.example/new",
+                title="Backend Engineer",
+                source="stub",
+                company="Acme",
+                location="Hamburg",
+                posted_date=date(2026, 5, 29),
+            ),
+            "Fresh backend role " + "x" * 120,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------

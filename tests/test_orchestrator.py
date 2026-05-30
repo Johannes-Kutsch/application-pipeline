@@ -28,10 +28,12 @@ from application_pipeline.extracts.card_store import (
 )
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.llm.types import (
+    AppliedClassifyItemOutcome,
     AppliedClassifyOutcome,
     ClassifyItem,
     JudgeCandidate,
     MatchVerdict,
+    MatchedListing,
     RelevanceVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
@@ -154,13 +156,50 @@ def _make_fake_llm_enricher(
     summary: str = "A test role description.",
     dedup_store: DeduplicationStore | None = None,
 ) -> "_FakeLLMEnricherHelper":
-    """Create a fake LLMEnricher that writes cards and returns verdicts."""
+    """Create a fake LLMEnricher that applies classify outcomes."""
     return _FakeLLMEnricherHelper(
         card_store,
         matches=matches,
         header=header,
         summary=summary,
         dedup_store=dedup_store,
+    )
+
+
+def _matched_outcome(
+    items: list[tuple[int, PositionStub, str]],
+) -> AppliedClassifyOutcome:
+    return AppliedClassifyOutcome(
+        items=[
+            AppliedClassifyItemOutcome(
+                state="matched",
+                event_matches=True,
+                matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+            )
+            for listing_id, stub, _ in items
+        ]
+    )
+
+
+def _rejected_outcome(
+    items: list[tuple[int, PositionStub, str]],
+) -> AppliedClassifyOutcome:
+    return AppliedClassifyOutcome(
+        items=[
+            AppliedClassifyItemOutcome(state="rejected", event_matches=False)
+            for _ in items
+        ]
+    )
+
+
+def _retryable_outcome(
+    items: list[tuple[int, PositionStub, str]],
+) -> AppliedClassifyOutcome:
+    return AppliedClassifyOutcome(
+        items=[
+            AppliedClassifyItemOutcome(state="retryable", event_matches=None)
+            for _ in items
+        ]
     )
 
 
@@ -193,17 +232,8 @@ class _FakeLLMEnricherHelper:
             )
             if self._dedup_store is not None:
                 self._dedup_store.mark_matched(listing_id, stub)
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True, header=self._header, summary=self._summary
-                    )
-                ],
-            )
-        return AppliedClassifyOutcome.from_verdicts(
-            items, [RelevanceVerdict(matches=False)]
-        )
+            return _matched_outcome(items)
+        return _rejected_outcome(items)
 
 
 def _read_all_results(results_dir: Path) -> str:
@@ -857,25 +887,14 @@ class _FakeLLMEnricherRejectJob1:
         if stub.title == "Job 1":
             if self._dedup_store is not None:
                 self._dedup_store.mark_out_of_domain(listing_id, stub)
-            return AppliedClassifyOutcome.from_verdicts(
-                items, [RelevanceVerdict(matches=False)]
-            )
+            return _rejected_outcome(items)
         self._card_store.put(
             listing_id,
             CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
         )
         if self._dedup_store is not None:
             self._dedup_store.mark_matched(listing_id, stub)
-        return AppliedClassifyOutcome.from_verdicts(
-            items,
-            [
-                RelevanceVerdict(
-                    matches=True,
-                    header=_FAKE_ENRICH_HEADER,
-                    summary=_FAKE_ENRICH_SUMMARY,
-                )
-            ],
-        )
+        return _matched_outcome(items)
 
 
 class _FakeExtractor:
@@ -1248,7 +1267,7 @@ def test_parser_error_on_enrich_skips_stub_and_increments_metric(
         ) -> AppliedClassifyOutcome:
             listing_id, stub, body = items[0]
             if stub.url == _ERR_URLS[1]:
-                return AppliedClassifyOutcome.from_verdicts(items, [None])
+                return _retryable_outcome(items)
             return super().enrich(items)
 
     summary = run(
@@ -1303,7 +1322,7 @@ def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
         ) -> AppliedClassifyOutcome:
             listing_id, stub, body = items[0]
             if stub.url == _ERR_URLS[1]:
-                return AppliedClassifyOutcome.from_verdicts(items, [None])
+                return _retryable_outcome(items)
             return super().enrich(items)
 
     summary = run(
@@ -1422,7 +1441,7 @@ def test_external_redirect_skips_stub_and_increments_counter(
         ) -> AppliedClassifyOutcome:
             listing_id, stub, body = items[0]
             if stub.url == _ERR_URLS[0]:
-                return AppliedClassifyOutcome.from_verdicts(items, [None])
+                return _retryable_outcome(items)
             return super().enrich(items)
 
     with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
@@ -1483,7 +1502,7 @@ def test_retryable_classify_outcome_logs_matches_none_event(tmp_path: Path) -> N
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
             listing_id, stub, body = items[0]
-            return AppliedClassifyOutcome.from_verdicts(items, [None])
+            return _retryable_outcome(items)
 
     summary = run(
         _write_config(
@@ -1832,7 +1851,7 @@ def test_judge_pending_enrich_failure_skips_stub_without_seen_write(
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
             listing_id, stub, body = items[0]
-            return AppliedClassifyOutcome.from_verdicts(items, [None])
+            return _retryable_outcome(items)
 
     class _FailStubParser(_StubParserBase):
         def __enter__(self) -> "_FailStubParser":
@@ -2451,21 +2470,12 @@ def test_parser_log_records_enrich_failed_redirect_and_dead(
         ) -> AppliedClassifyOutcome:
             listing_id, stub, body = items[0]
             if stub.url == _STUB_URLS[0]:
-                return AppliedClassifyOutcome.from_verdicts(items, [None])
+                return _retryable_outcome(items)
             card_store.put(
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
         summary = run(
@@ -2626,16 +2636,7 @@ def test_four_positions_each_get_solo_classify_call(tmp_path: Path) -> None:
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
@@ -2797,16 +2798,7 @@ def test_mixed_listing_set_all_classified(tmp_path: Path) -> None:
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
@@ -2848,7 +2840,6 @@ def test_25_items_batch_size_10_fires_3_enricher_calls(tmp_path: Path) -> None:
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
             batch_sizes_seen.append(len(items))
-            verdicts: list[RelevanceVerdict | None] = []
             for listing_id, stub, body in items:
                 card_store.put(
                     listing_id,
@@ -2856,14 +2847,7 @@ def test_25_items_batch_size_10_fires_3_enricher_calls(tmp_path: Path) -> None:
                         header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
                     ),
                 )
-                verdicts.append(
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                )
-            return AppliedClassifyOutcome.from_verdicts(items, verdicts)
+            return _matched_outcome(items)
 
     class _TwentyFiveStubParser(_StubParserBase):
         def __enter__(self) -> "_TwentyFiveStubParser":
@@ -2921,7 +2905,6 @@ def test_25_items_parallelism_4_batch_size_10_fires_3_enricher_calls(
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
             batch_sizes_seen.append(len(items))
-            verdicts: list[RelevanceVerdict | None] = []
             for listing_id, stub, body in items:
                 card_store.put(
                     listing_id,
@@ -2929,14 +2912,7 @@ def test_25_items_parallelism_4_batch_size_10_fires_3_enricher_calls(
                         header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
                     ),
                 )
-                verdicts.append(
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                )
-            return AppliedClassifyOutcome.from_verdicts(items, verdicts)
+            return _matched_outcome(items)
 
     class _TwentyFiveStubParser(_StubParserBase):
         def __enter__(self) -> "_TwentyFiveStubParser":
@@ -2993,7 +2969,6 @@ def test_10_items_parallelism_4_batch_size_10_fires_1_enricher_call(
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
             batch_sizes_seen.append(len(items))
-            verdicts: list[RelevanceVerdict | None] = []
             for listing_id, stub, body in items:
                 card_store.put(
                     listing_id,
@@ -3001,14 +2976,7 @@ def test_10_items_parallelism_4_batch_size_10_fires_1_enricher_call(
                         header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY
                     ),
                 )
-                verdicts.append(
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                )
-            return AppliedClassifyOutcome.from_verdicts(items, verdicts)
+            return _matched_outcome(items)
 
     class _TenStubParser(_StubParserBase):
         def __enter__(self) -> "_TenStubParser":
@@ -3155,16 +3123,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -4417,16 +4376,7 @@ def test_non_quota_worker_exception_writes_failure_report(
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     monkeypatch.setattr(
         "application_pipeline.orchestrator.ClaudeExtractor",
@@ -4513,9 +4463,7 @@ def test_default_llm_enricher_receives_run_scoped_dependencies(
         def enrich(
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
-            return AppliedClassifyOutcome.from_verdicts(
-                items, [RelevanceVerdict(matches=False) for _ in items]
-            )
+            return _rejected_outcome(items)
 
     class _OneStubParser(_StubParserBase):
         def __enter__(self) -> "_OneStubParser":
@@ -4647,7 +4595,7 @@ def test_retryable_classify_outcome_shows_malformed_not_forwarded(
         def enrich(
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
-            return AppliedClassifyOutcome.from_verdicts(items, [None for _ in items])
+            return _retryable_outcome(items)
 
     display = FakeStatusDisplay()
 
@@ -4992,16 +4940,7 @@ def test_quota_classify_retries_and_completes(tmp_path: Path) -> None:
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     summary = run(
         _write_config(
@@ -5057,16 +4996,7 @@ def test_quota_sleep_event_logged_to_pipeline_orchestrator_events(
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     run(
         _write_config(
@@ -5389,16 +5319,7 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     class _FourStubParser(_StubParserBase):
         def __enter__(self) -> "_FourStubParser":
@@ -5480,16 +5401,7 @@ def test_parallel_classify_exactly_one_quota_sleep_event_per_wall_raise(
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_FAKE_ENRICH_HEADER,
-                        summary=_FAKE_ENRICH_SUMMARY,
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     class _FourStubParser2(_StubParserBase):
         def __enter__(self) -> "_FourStubParser2":
@@ -5717,19 +5629,8 @@ class _FakeLLMEnricher:
                 listing_id,
                 CardExtract(header=_CARD_HEADER, summary=_CARD_SUMMARY),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=_CARD_HEADER,
-                        summary=_CARD_SUMMARY,
-                    )
-                ],
-            )
-        return AppliedClassifyOutcome.from_verdicts(
-            items, [RelevanceVerdict(matches=False)]
-        )
+            return _matched_outcome(items)
+        return _rejected_outcome(items)
 
 
 class _FakeJudgeExtractor:
@@ -6669,9 +6570,7 @@ def test_classify_workers_sized_by_claude_classify_parallelism(tmp_path: Path) -
                 listing_id,
                 CardExtract(header="H", summary="S"),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items, [RelevanceVerdict(matches=True, header="H", summary="S")]
-            )
+            return _matched_outcome(items)
 
     run(
         _write_config(
@@ -7032,14 +6931,7 @@ def test_rendered_card_includes_url_and_body(tmp_path: Path) -> None:
                 listing_id,
                 CardExtract(header=_CARD_HEADER, summary=_CARD_SUMMARY, body=body),
             )
-            return AppliedClassifyOutcome.from_verdicts(
-                items,
-                [
-                    RelevanceVerdict(
-                        matches=True, header=_CARD_HEADER, summary=_CARD_SUMMARY
-                    )
-                ],
-            )
+            return _matched_outcome(items)
 
     run(
         _write_config(

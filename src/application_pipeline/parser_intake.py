@@ -274,6 +274,7 @@ class ParserIntake:
         body = enrich_result.body
 
         post_enrich_dedup = self._deduplication.is_seen(stub)
+        post_enrich_events = _post_enrich_dedup_events(post_enrich_dedup.kind)
         if post_enrich_dedup.kind == "judge_pending":
             self._refresh_card_store_body(
                 listing_id=post_enrich_dedup.listing_id,
@@ -285,15 +286,15 @@ class ParserIntake:
                     stub=stub,
                 ),
                 dedup_kind="judge_pending",
-                dedup_events=("miss", "judge_pending"),
+                dedup_events=post_enrich_events,
             )
-        if post_enrich_dedup.kind == "tuple_hit":
+        if post_enrich_dedup.kind not in ("miss", "run_hit"):
             return Dropped(
                 reason=_drop_reason_for_dedup(post_enrich_dedup.kind),
                 stub=stub,
                 listing_id=post_enrich_dedup.listing_id,
                 dedup_kind=post_enrich_dedup.kind,
-                dedup_events=("miss", "tuple_hit"),
+                dedup_events=post_enrich_events,
             )
 
         if not self._freshness_gate.admit(
@@ -304,11 +305,11 @@ class ParserIntake:
             return Dropped(
                 reason="freshness_post_enrich",
                 stub=stub,
-                dedup_events=("miss",),
+                dedup_events=post_enrich_events,
             )
 
         if not self._content_gate.admit(body, stub):
-            return Dropped(reason="content", stub=stub, dedup_events=("miss",))
+            return Dropped(reason="content", stub=stub, dedup_events=post_enrich_events)
 
         return ClassifyForwarded(
             parser_id=self._parser_id,
@@ -317,7 +318,7 @@ class ParserIntake:
             body=body,
             enrich_mode=enrich_result.mode,
             post_enrich_dedup_kind=post_enrich_dedup.kind,
-            dedup_events=("miss",),
+            dedup_events=post_enrich_events,
         )
 
     def _refresh_card_store_body(self, *, listing_id: ListingId, body: str) -> None:
@@ -344,3 +345,11 @@ def _drop_reason_for_dedup(kind: RunScopedSeenKind) -> DropReason:
     if kind == "run_hit":
         return "dedup_run_hit"
     raise ValueError(f"unsupported dedup drop kind: {kind}")
+
+
+def _post_enrich_dedup_events(
+    kind: RunScopedSeenKind,
+) -> tuple[RunScopedSeenKind, ...]:
+    if kind == "miss":
+        return ("miss",)
+    return (kind,)

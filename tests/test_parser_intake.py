@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import httpx
 import pytest
@@ -13,6 +13,7 @@ from fake_status_display import FakeStatusDisplay
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import load as dedup_load
 from application_pipeline.extracts import load_card_store
+from application_pipeline.extracts.card_store import CardExtract
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parser_intake import (
     ClassifyForwarded,
@@ -59,6 +60,26 @@ class _CountingPreFilter:
     def admit(self, stub: PositionStub) -> bool:
         self.calls += 1
         return True
+
+
+class _FailOnPostEnrichFreshnessGate:
+    def admit(
+        self,
+        stub: PositionStub,
+        *,
+        gate_arm: str,
+        deadline: date | None,
+    ) -> bool:
+        if gate_arm == "post_enrich":
+            raise AssertionError(
+                "post-enrich dedup drop must stop before post-enrich freshness"
+            )
+        return True
+
+
+class _UnexpectedContentGate:
+    def admit(self, body: str, stub: PositionStub) -> bool:
+        raise AssertionError("post-enrich dedup drop must stop before Content Gate")
 
 
 class _EnrichFailedParser:
@@ -133,6 +154,38 @@ class _BackfillingParser:
         )
 
 
+class _BackfillingAliasParser:
+    def __init__(self, *, url: str, company: str, location: str, title: str) -> None:
+        self._url = url
+        self._company = company
+        self._location = location
+        self._title = title
+
+    def __enter__(self) -> "_BackfillingAliasParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        enriched = PositionStub(
+            url=self._url,
+            title=self._title,
+            source=stub.source,
+            company=self._company,
+            location=self._location,
+            posted_date=stub.posted_date,
+        )
+        return EnrichResult(
+            stub=enriched,
+            body="Backfilled body " + "x" * 120,
+            mode="native",
+        )
+
+
 def _seed_url_hit(dedup_store: Any, stub: PositionStub) -> int:
     dedup_store.mark_out_of_domain(stub)
     return dedup_store.listing_id_for(stub.url)
@@ -164,6 +217,42 @@ def _seed_fuzzy_hit(dedup_store: Any, stub: PositionStub) -> int:
 
 def _seed_run_hit(dedup_store: Any, stub: PositionStub) -> int:
     return dedup_store.is_seen(stub).listing_id
+
+
+def _seed_post_enrich_url_hit(dedup_store: Any, stub: PositionStub) -> int:
+    original = PositionStub(
+        url="https://example.com/canonical-url-hit",
+        title="Original title",
+        source=stub.source,
+        company="Acme",
+        location="Hamburg",
+    )
+    dedup_store.mark_out_of_domain(original)
+    return dedup_store.listing_id_for(original.url)
+
+
+def _seed_post_enrich_tuple_hit(dedup_store: Any, stub: PositionStub) -> int:
+    original = PositionStub(
+        url="https://example.com/original-tuple",
+        title="Platform Engineer",
+        source=stub.source,
+        company="Acme",
+        location="Hamburg",
+    )
+    dedup_store.mark_out_of_domain(original)
+    return dedup_store.listing_id_for(original.url)
+
+
+def _seed_post_enrich_fuzzy_hit(dedup_store: Any, stub: PositionStub) -> int:
+    original = PositionStub(
+        url="https://example.com/original-fuzzy",
+        title="Senior Lead Platform Backend Engineer",
+        source=stub.source,
+        company="Acme",
+        location="Hamburg",
+    )
+    dedup_store.mark_out_of_domain(original)
+    return dedup_store.listing_id_for(original.url)
 
 
 @pytest.mark.parametrize(
@@ -541,8 +630,94 @@ def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data
     assert outcome.parser_id == "parser_test"
     assert outcome.enrich_mode == "native"
     assert outcome.post_enrich_dedup_kind == "run_hit"
-    assert outcome.dedup_events == ("miss",)
+    assert outcome.dedup_events == ("run_hit",)
     assert outcome.parser_row_metric == "forwarded"
+
+
+@pytest.mark.parametrize(
+    ("dedup_kind", "prepare", "enriched_url", "enriched_title"),
+    [
+        (
+            "url_hit",
+            _seed_post_enrich_url_hit,
+            "https://example.com/canonical-url-hit",
+            "Original title",
+        ),
+        (
+            "tuple_hit",
+            _seed_post_enrich_tuple_hit,
+            "https://example.com/post-enrich-alias",
+            "Platform Engineer",
+        ),
+        (
+            "fuzzy_hit",
+            _seed_post_enrich_fuzzy_hit,
+            "https://example.com/post-enrich-alias",
+            "Lead Platform Backend Engineer",
+        ),
+    ],
+)
+def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_hit_kind(
+    tmp_path: Path,
+    dedup_kind: str,
+    prepare: _DedupSeeder,
+    enriched_url: str,
+    enriched_title: str,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    stub = PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Discovered title",
+        source="test",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    expected_listing_id = prepare(dedup_store, stub)
+    card_store.put(
+        expected_listing_id,
+        CardExtract(
+            header="Persisted header",
+            summary="Persisted summary",
+            body="Persisted body",
+        ),
+    )
+    intake = ParserIntake(
+        parser=_BackfillingAliasParser(
+            url=enriched_url,
+            company="Acme",
+            location="Hamburg",
+            title=enriched_title,
+        ),
+        freshness_gate=cast(Any, _FailOnPostEnrichFreshnessGate()),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=cast(Any, _UnexpectedContentGate()),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(stub)
+
+    assert isinstance(outcome, Dropped)
+    assert outcome.reason == f"dedup_{dedup_kind}"
+    assert outcome.dedup_kind == dedup_kind
+    assert outcome.dedup_events == (dedup_kind,)
+    assert outcome.listing_id == expected_listing_id
+    assert outcome.stub == PositionStub(
+        url=enriched_url,
+        title=enriched_title,
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+
+    card = card_store.get(expected_listing_id)
+    assert card is not None
+    assert card.body == "Persisted body"
 
 
 def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_write(

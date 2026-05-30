@@ -124,7 +124,7 @@ def test_skipped_is_sum_of_hit_variants(
     counters.record("miss")  # does not contribute to skipped
     counters.record("judge_pending")  # does not contribute to skipped
     snap = counters.snapshot()
-    assert snap.skipped == 5
+    assert snap.skipped == 4
 
 
 def test_snapshot_is_frozen(run_log: RunLog, display: FakeStatusDisplay) -> None:

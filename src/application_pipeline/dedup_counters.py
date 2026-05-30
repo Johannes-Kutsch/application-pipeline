@@ -19,12 +19,7 @@ class DedupSnapshot:
 
     @property
     def skipped(self) -> int:
-        return (
-            self.dedup_url_hits
-            + self.dedup_tuple_hits
-            + self.dedup_fuzzy_hits
-            + self.dedup_run_hits
-        )
+        return self.dedup_url_hits + self.dedup_tuple_hits + self.dedup_fuzzy_hits
 
 
 class DedupCounters:

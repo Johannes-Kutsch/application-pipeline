@@ -499,7 +499,7 @@ def test_integration_include_remote_emits_extra_discover_calls(tmp_path: Path) -
 def test_integration_dedup_counter_breakdown(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """2 url_hits + 1 tuple_hit + 4 misses â†' dedup_url_hits=2 dedup_tuple_hits=1 dedup_misses=4 in RunSummary and run complete: log."""
+    """2 url_hits + 1 tuple_hit + 4 post-enrich run_hits keep terminal dedup counts accurate."""
     import logging
 
     _DEDUP_URLS = [f"https://dedup.example/{i}" for i in range(7)]
@@ -559,7 +559,8 @@ def test_integration_dedup_counter_breakdown(
 
     assert summary.dedup_url_hits == 2
     assert summary.dedup_tuple_hits == 1
-    assert summary.dedup_misses == 4
+    assert summary.dedup_run_hits == 4
+    assert summary.dedup_misses == 0
     assert summary.skipped == summary.dedup_url_hits + summary.dedup_tuple_hits
 
     run_complete = next(
@@ -567,7 +568,8 @@ def test_integration_dedup_counter_breakdown(
     )
     assert "dedup_url_hits=2" in run_complete
     assert "dedup_tuple_hits=1" in run_complete
-    assert "dedup_misses=4" in run_complete
+    assert "dedup_run_hits=4" in run_complete
+    assert "dedup_misses=0" in run_complete
 
 
 # ---------------------------------------------------------------------------
@@ -615,7 +617,7 @@ def test_in_run_dedup_same_url_across_two_queries(tmp_path: Path) -> None:
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
     )
 
-    assert summary.dedup_run_hits == 1
+    assert summary.dedup_run_hits == 2
     assert enrich_calls.count(duplicate_url) == 1
 
 
@@ -732,7 +734,8 @@ def test_off_domain_leading_stubs_do_not_hide_unseen_trailing_stub(
     assert unseen_url in enrich_calls, "trailing unseen stub must be enriched"
     assert summary.discovered == 81
     assert summary.dedup_url_hits == 80
-    assert summary.dedup_misses == 1
+    assert summary.dedup_run_hits == 1
+    assert summary.dedup_misses == 0
 
 
 def test_in_run_dedup_run_hits_in_log_line(
@@ -770,7 +773,7 @@ def test_in_run_dedup_run_hits_in_log_line(
     run_complete = next(
         r.getMessage() for r in caplog.records if "run complete:" in r.getMessage()
     )
-    assert "dedup_run_hits=1" in run_complete
+    assert "dedup_run_hits=2" in run_complete
 
 
 @pytest.mark.parametrize(
@@ -949,8 +952,8 @@ def test_post_discover_run_hit_stays_local_and_updates_parser_gates_row(
     run_complete_rows = [row for row in rows if row.get("event") == "run_complete"]
     assert len(run_complete_rows) == 1
     row = run_complete_rows[0]
-    assert row["dedup_run_hits"] == 1
-    assert row["dedup_misses"] == 1
+    assert row["dedup_run_hits"] == 2
+    assert row["dedup_misses"] == 0
     assert row["dedup_url_hits"] == 0
     assert row["dedup_tuple_hits"] == 0
     assert row["dedup_fuzzy_hits"] == 0
@@ -2389,7 +2392,7 @@ def test_run_complete_event_carries_dedup_run_hits(tmp_path: Path) -> None:
     ]
     run_complete_rows = [r for r in rows if r.get("event") == "run_complete"]
     assert len(run_complete_rows) == 1
-    assert run_complete_rows[0]["dedup_run_hits"] == 1
+    assert run_complete_rows[0]["dedup_run_hits"] == 2
 
 
 def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
@@ -7279,6 +7282,100 @@ def test_post_enrich_dedup_drops_listing_with_backfilled_company(
     assert summary.dedup_tuple_hits == 1
     assert summary.skipped == 1
     assert summary.written == 0
+
+
+def test_post_enrich_fuzzy_hit_stays_local_and_records_only_terminal_hit_kind(
+    tmp_path: Path,
+) -> None:
+    import dataclasses as _dc
+
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    display = FakeStatusDisplay()
+    extractor = _stub_extractor()
+    existing_url = "https://dedup-test.example/original-fuzzy"
+    new_url = "https://dedup-test.example/new-fuzzy"
+    seen_path = tmp_path / ".runtime-data" / "seen.json"
+    seen_path.parent.mkdir(parents=True)
+    seen_path.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "urls": [existing_url],
+                    "company_lc": "acme",
+                    "title_lc": "senior lead platform backend engineer",
+                    "location_lc": "hamburg",
+                    "status": "out_of_domain",
+                    "status_last_changed": "2024-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _BackfillFuzzyParser(_StubParserBase):
+        def __enter__(self) -> "_BackfillFuzzyParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=new_url,
+                    title="Engineer",
+                    source="stub",
+                    company=None,
+                    location=None,
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            enriched = _dc.replace(
+                stub,
+                company="Acme",
+                location="Hamburg",
+                title="Lead Platform Backend Engineer",
+            )
+            return EnrichResult(stub=enriched, body="body " + "x" * 91, mode="fallback")
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=extractor,
+        parser_registry=lambda _: _BackfillFuzzyParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+        status_display=display,
+        run_log=run_log,
+    )
+
+    assert summary.discovered == 1
+    assert summary.classify_items == 0
+    assert summary.written == 0
+    assert summary.skipped == 1
+    assert extractor.classify_relevance.call_count == 0
+
+    gates_bodies = display.body_updates_for("parser bundesagentur api gates")
+    assert any("1 dedup" in body for body in gates_bodies)
+
+    rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "dedup.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    run_complete_rows = [row for row in rows if row.get("event") == "run_complete"]
+    assert len(run_complete_rows) == 1
+    row = run_complete_rows[0]
+    assert row["dedup_fuzzy_hits"] == 1
+    assert row["dedup_misses"] == 0
 
 
 def test_post_enrich_dedup_judge_pending_routes_to_pool(tmp_path: Path) -> None:

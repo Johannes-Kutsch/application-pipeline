@@ -895,7 +895,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
         ),
         deduplication=dedup_store,
         domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=cast(Any, _UnexpectedContentGate()),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
     )
 
@@ -966,7 +966,7 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
         ),
         deduplication=dedup_store,
         domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=cast(Any, _UnexpectedContentGate()),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
         card_store=card_store,
     )
 
@@ -977,6 +977,88 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
     assert outcome.pool_admission.listing_id == listing_id
     assert outcome.dedup_events == ("judge_pending",)
     assert card_store.get(listing_id) is None
+
+
+@pytest.mark.parametrize(
+    ("body", "drop_reason"),
+    [
+        ("   \n\t  ", "content_empty_body"),
+        ("x" * 99, "content_too_short"),
+    ],
+)
+def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refresh(
+    tmp_path: Path,
+    body: str,
+    drop_reason: str,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    logs_dir = tmp_path / "logs"
+    discovered_stub = PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Discovered title",
+        source="test",
+        posted_date=date(2026, 5, 29),
+    )
+
+    original = PositionStub(
+        url="https://example.com/original-tuple",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+    )
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    dedup_store.mark_matched(original)
+    listing_id = dedup_store.listing_id_for(original.url)
+    assert listing_id is not None
+    card_store.put(
+        listing_id,
+        CardExtract(
+            header="Persisted header",
+            summary="Persisted summary",
+            body="Persisted body",
+        ),
+    )
+    run_log = RunLog(logs_dir)
+    intake = ParserIntake(
+        parser=_BackfillingMatchedParser(
+            url="https://example.com/post-enrich-alias",
+            company="Acme",
+            location="Hamburg",
+            title="Platform Engineer",
+            body=body,
+        ),
+        freshness_gate=FreshnessGate(
+            anchored_today=date(2026, 5, 30),
+            max_listing_age_days=30,
+            dedup=dedup_store,
+            display=FakeStatusDisplay(),
+            run_log=run_log,
+        ),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(discovered_stub)
+
+    assert isinstance(outcome, Dropped)
+    assert not isinstance(outcome, PoolAdmitted)
+    assert not isinstance(outcome, ClassifyForwarded)
+    assert outcome.reason == drop_reason
+    assert outcome.listing_id == listing_id
+    assert outcome.dedup_kind == "judge_pending"
+    assert outcome.dedup_events == ("judge_pending",)
+    assert outcome.parser_row_metric == "content_dropped"
+    assert card_store.get(listing_id) == CardExtract(
+        header="Persisted header",
+        summary="Persisted summary",
+        body="Persisted body",
+    )
 
 
 @pytest.mark.parametrize(

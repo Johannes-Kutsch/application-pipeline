@@ -298,6 +298,16 @@ class ParserIntake:
                 dedup_events=post_enrich_events,
             )
 
+        content_decision = self._content_gate.inspect(body, stub)
+        if not content_decision.passes:
+            return Dropped(
+                reason=_drop_reason_for_content(content_decision.reason),
+                stub=stub,
+                listing_id=post_enrich_dedup.listing_id,
+                dedup_kind=post_enrich_dedup.kind,
+                dedup_events=post_enrich_events,
+            )
+
         if post_enrich_dedup.kind == "judge_pending":
             self._refresh_card_store_body(
                 listing_id=post_enrich_dedup.listing_id,
@@ -309,16 +319,6 @@ class ParserIntake:
                     stub=stub,
                 ),
                 dedup_kind="judge_pending",
-                dedup_events=post_enrich_events,
-            )
-
-        content_decision = self._content_gate.inspect(body, stub)
-        if not content_decision.passes:
-            return Dropped(
-                reason=_drop_reason_for_content(content_decision.reason),
-                stub=stub,
-                listing_id=post_enrich_dedup.listing_id,
-                dedup_kind=post_enrich_dedup.kind,
                 dedup_events=post_enrich_events,
             )
 

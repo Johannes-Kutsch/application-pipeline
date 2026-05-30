@@ -186,6 +186,43 @@ class _BackfillingAliasParser:
         )
 
 
+class _BackfillingMatchedParser:
+    def __init__(
+        self,
+        *,
+        url: str,
+        company: str,
+        location: str,
+        title: str,
+        body: str,
+    ) -> None:
+        self._url = url
+        self._company = company
+        self._location = location
+        self._title = title
+        self._body = body
+
+    def __enter__(self) -> "_BackfillingMatchedParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        enriched = PositionStub(
+            url=self._url,
+            title=self._title,
+            source=stub.source,
+            company=self._company,
+            location=self._location,
+            posted_date=stub.posted_date,
+        )
+        return EnrichResult(stub=enriched, body=self._body, mode="native")
+
+
 def _seed_url_hit(dedup_store: Any, stub: PositionStub) -> int:
     dedup_store.mark_out_of_domain(stub)
     return dedup_store.listing_id_for(stub.url)
@@ -718,6 +755,126 @@ def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_hi
     card = card_store.get(expected_listing_id)
     assert card is not None
     assert card.body == "Persisted body"
+
+
+def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refreshes_body(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    discovered_stub = PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Discovered title",
+        source="test",
+        posted_date=date(2026, 5, 29),
+    )
+    fresh_body = "Fresh raw description " + "x" * 120
+
+    original = PositionStub(
+        url="https://example.com/original-tuple",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+    )
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    dedup_store.mark_matched(original)
+    listing_id = dedup_store.listing_id_for(original.url)
+    assert listing_id is not None
+    card_store.put(
+        listing_id,
+        CardExtract(
+            header="Persisted header",
+            summary="Persisted summary",
+            body="Persisted body",
+        ),
+    )
+    intake = ParserIntake(
+        parser=_BackfillingMatchedParser(
+            url="https://example.com/post-enrich-alias",
+            company="Acme",
+            location="Hamburg",
+            title="Platform Engineer",
+            body=fresh_body,
+        ),
+        freshness_gate=cast(Any, _FailOnPostEnrichFreshnessGate()),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=cast(Any, _UnexpectedContentGate()),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(discovered_stub)
+
+    assert isinstance(outcome, PoolAdmitted)
+    assert not isinstance(outcome, ClassifyForwarded)
+    assert outcome.pool_admission.listing_id == listing_id
+    assert outcome.pool_admission.stub == PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+    assert outcome.dedup_kind == "judge_pending"
+    assert outcome.dedup_events == ("judge_pending",)
+
+    assert card_store.get(listing_id) == CardExtract(
+        header="Persisted header",
+        summary="Persisted summary",
+        body=fresh_body,
+    )
+
+
+def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_extract(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    extracts_path = tmp_path / "extracts.json"
+    discovered_stub = PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Discovered title",
+        source="test",
+        posted_date=date(2026, 5, 29),
+    )
+
+    original = PositionStub(
+        url="https://example.com/original-tuple",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+    )
+    card_store = load_card_store(extracts_path)
+    dedup_store = dedup_load(seen_path, card_store=card_store)
+    dedup_store.mark_matched(original)
+    listing_id = dedup_store.listing_id_for(original.url)
+    assert listing_id is not None
+    intake = ParserIntake(
+        parser=_BackfillingMatchedParser(
+            url="https://example.com/post-enrich-alias",
+            company="Acme",
+            location="Hamburg",
+            title="Platform Engineer",
+            body="Fresh raw description " + "x" * 120,
+        ),
+        freshness_gate=cast(Any, _FailOnPostEnrichFreshnessGate()),
+        deduplication=dedup_store,
+        domain_pre_filter=_PassThroughPreFilter(),
+        content_gate=cast(Any, _UnexpectedContentGate()),
+        card_store=card_store,
+    )
+
+    with dedup_store.run_scope():
+        outcome = intake.process_position_stub(discovered_stub)
+
+    assert isinstance(outcome, PoolAdmitted)
+    assert outcome.pool_admission.listing_id == listing_id
+    assert outcome.dedup_events == ("judge_pending",)
+    assert card_store.get(listing_id) is None
 
 
 def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_write(

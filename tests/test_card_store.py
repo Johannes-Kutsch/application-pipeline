@@ -132,6 +132,24 @@ def test_legacy_record_without_body_loads_with_empty_default(store_path: Path) -
     assert card == CardExtract(header="H", summary="S", body="")
 
 
+def test_replace_body_if_present_keeps_header_and_summary_and_noops_for_missing_key(
+    store: CardStore,
+) -> None:
+    store.put(
+        1,
+        CardExtract(header="Persisted header", summary="Persisted summary", body="Old"),
+    )
+
+    assert store.replace_body_if_present(1, "Fresh raw description") is True
+    assert store.get(1) == CardExtract(
+        header="Persisted header",
+        summary="Persisted summary",
+        body="Fresh raw description",
+    )
+    assert store.replace_body_if_present(2, "Should not be stored") is False
+    assert store.get(2) is None
+
+
 def test_concurrent_writers_do_not_corrupt_file(store_path: Path) -> None:
     store = load_card_store(store_path)
     barrier = threading.Barrier(8)

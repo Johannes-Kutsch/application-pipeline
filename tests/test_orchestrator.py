@@ -6795,6 +6795,97 @@ def test_rendered_card_includes_url_and_body(tmp_path: Path) -> None:
     assert stub_body_prefix in content, "raw body must appear in the rendered card"
 
 
+def test_matched_llm_enricher_outcome_reaches_judge_and_daily_results_file(
+    tmp_path: Path,
+) -> None:
+    """A matched LLM Enricher outcome persists Card data and reaches judge/rendering."""
+    runtime_dir = tmp_path / ".runtime-data"
+    extracts_path = runtime_dir / "extracts.json"
+    seen_path = runtime_dir / "seen.json"
+    results_dir = tmp_path / "results"
+    stub_url = "https://judge-flow.example/job/1"
+    body = "Persisted body from the real LLM Enricher path. " + "x" * 120
+    header = "Senior Python Engineer\nAcme · Hamburg · remote\n2026-01-01 · Senior"
+    card_summary = "Strong fit for the candidate profile."
+    judge_candidates: list[JudgeCandidate] = []
+
+    class _SingleStubParser(_StubParserBase):
+        def __enter__(self) -> "_SingleStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url=stub_url,
+                    title="Senior Python Engineer",
+                    source="stub",
+                    company="Acme",
+                    location="Hamburg",
+                )
+            ]
+
+        def enrich(self, stub: PositionStub) -> EnrichResult:
+            return EnrichResult(stub=stub, body=body, mode="fallback")
+
+    class _Extractor:
+        def classify_relevance(
+            self, items: list[object]
+        ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
+            return [
+                RelevanceVerdict(matches=True, header=header, summary=card_summary)
+            ], _ZERO_USAGE
+
+        def judge_top_n(
+            self, candidates: list[JudgeCandidate]
+        ) -> tuple[list[MatchVerdict], CallUsage]:
+            judge_candidates.extend(candidates)
+            return [MatchVerdict(id=candidates[0].id, rank=1)], _ZERO_USAGE
+
+    extractor = _Extractor()
+    dedup_store = dedup_module.load(seen_path)
+    card_store = load_card_store(extracts_path)
+
+    run_summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        extractor=extractor,
+        card_store=card_store,
+        parser_registry=lambda _: _SingleStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_store,
+    )
+
+    assert run_summary.written == 1
+
+    reloaded_card_store = load_card_store(extracts_path)
+    persisted = reloaded_card_store.get(1)
+    assert persisted is not None
+    assert persisted.header == header
+    assert persisted.summary == card_summary
+    assert persisted.body == body
+
+    assert judge_candidates == [
+        JudgeCandidate(id=1, header=header, summary=card_summary)
+    ]
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert next(iter(seen_data.values()))["status"] == "selected_by_judge"
+
+    content = _read_all_results(results_dir)
+    assert "# **1:** Senior Python Engineer" in content
+    assert "Acme · Hamburg · remote" in content
+    assert "2026-01-01 · Senior" in content
+    assert card_summary in content
+    assert body in content
+
+
 # ---------------------------------------------------------------------------
 # Post-enrich judge-pending body storage (#673)
 # ---------------------------------------------------------------------------

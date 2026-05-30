@@ -16,14 +16,7 @@ from application_pipeline.dedup_counters import DedupCounters
 from application_pipeline.extracts import load_card_store
 from application_pipeline.extracts.card_store import CardExtract
 from application_pipeline.freshness_gate import FreshnessGate
-from application_pipeline.parser_intake import (
-    ClassifyForwarded,
-    Dropped,
-    OversizedBodySkip,
-    ParserIntake,
-    RetryableEnrichFailure,
-    TransientHttpSkip,
-)
+from application_pipeline.parser_intake import ParserIntake
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
 from application_pipeline.parsers.body_fetch import OversizedBodyError
@@ -452,7 +445,7 @@ def _seed_post_enrich_fuzzy_hit(dedup_store: Any, stub: PositionStub) -> int:
         ),
     ],
 )
-def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_listing_id(
+def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_store_state(
     tmp_path: Path,
     dedup_kind: str,
     prepare: _DedupSeeder,
@@ -496,13 +489,8 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_lis
 
     with dedup_store.run_scope():
         expected_listing_id = prepare(dedup_store, stub)
-        outcome = intake.process_position_stub(stub)
-
-    assert isinstance(outcome, Dropped)
-    assert outcome.reason == f"dedup_{dedup_kind}"
-    assert outcome.dedup_kind == dedup_kind
+        intake.process_position_stub(stub)
     _assert_dedup_recorded(dedup_counters, dedup_kind)
-    assert outcome.listing_id == expected_listing_id
     assert _last_body(metrics_display, "parser test gates") == "1 dedup"
     assert prefilter.calls == 0
     assert card_store.get(expected_listing_id) is None
@@ -554,12 +542,7 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(stub)
-
-    assert isinstance(outcome, Dropped)
-    assert outcome.reason == "prefilter"
-    assert outcome.listing_id == 1
-    assert outcome.dedup_kind is None
+        intake.process_position_stub(stub)
     _assert_dedup_recorded(dedup_counters, "miss")
     assert _last_body(metrics_display, "parser test gates") == "1 pre-filter"
     assert card_store.get(1) is None
@@ -651,7 +634,7 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
         metrics=metrics,
     )
 
-    outcome = intake.process_position_stub(
+    intake.process_position_stub(
         PositionStub(
             url=alias_url,
             title="Platform Engineer",
@@ -662,8 +645,6 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
         )
     )
 
-    assert isinstance(outcome, Dropped)
-    assert outcome.reason == "freshness_discover"
     assert _last_body(metrics_display, "parser test gates") == "1 freshness"
     _assert_dedup_recorded(dedup_counters, None)
 
@@ -768,9 +749,7 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(rediscovered_stub)
-
-    assert outcome is None
+        intake.process_position_stub(rediscovered_stub)
     assert pool_collector.admissions == [(7, rediscovered_stub)]
     _assert_dedup_recorded(dedup_counters, "judge_pending")
     assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
@@ -829,9 +808,7 @@ def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(discovered_stub)
-
-    assert isinstance(outcome, ClassifyForwarded)
+        intake.process_position_stub(discovered_stub)
     assert len(sink.calls) == 1
     call = sink.calls[0]
     assert call["listing_id"] == 1
@@ -846,7 +823,7 @@ def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
     assert call["body"] == "Fresh backend role " + "x" * 120
 
 
-def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data(
+def test_fresh_stub_reaching_classify_updates_queue_and_metrics(
     tmp_path: Path,
 ) -> None:
     seen_path = tmp_path / ".seen.json"
@@ -884,22 +861,7 @@ def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(discovered_stub)
-
-    assert isinstance(outcome, ClassifyForwarded)
-    assert outcome.listing_id == 1
-    assert outcome.stub == PositionStub(
-        url="https://example.com/fresh-forward",
-        title="Backend Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=date(2026, 5, 29),
-    )
-    assert outcome.body == "Fresh backend role " + "x" * 120
-    assert outcome.parser_id == "parser_test"
-    assert outcome.enrich_mode == "native"
-    assert outcome.post_enrich_dedup_kind == "run_hit"
+        intake.process_position_stub(discovered_stub)
     _assert_dedup_recorded(dedup_counters, "run_hit")
     assert (
         _last_body(metrics_display, "parser parser test")
@@ -930,7 +892,7 @@ def test_fresh_stub_reaching_classify_forwarded_keeps_parser_thread_handoff_data
         ),
     ],
 )
-def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_hit_kind(
+def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_card(
     tmp_path: Path,
     dedup_kind: str,
     prepare: _DedupSeeder,
@@ -977,21 +939,8 @@ def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_hi
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(stub)
-
-    assert isinstance(outcome, Dropped)
-    assert outcome.reason == f"dedup_{dedup_kind}"
-    assert outcome.dedup_kind == dedup_kind
+        intake.process_position_stub(stub)
     _assert_dedup_recorded(dedup_counters, dedup_kind)
-    assert outcome.listing_id == expected_listing_id
-    assert outcome.stub == PositionStub(
-        url=enriched_url,
-        title=enriched_title,
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=date(2026, 5, 29),
-    )
 
     card = card_store.get(expected_listing_id)
     assert card is not None
@@ -1063,9 +1012,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(discovered_stub)
-
-    assert outcome is None
+        intake.process_position_stub(discovered_stub)
     assert pool_collector.admissions == [
         (
             listing_id,
@@ -1141,9 +1088,7 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(discovered_stub)
-
-    assert outcome is None
+        intake.process_position_stub(discovered_stub)
     assert pool_collector.admissions == [
         (
             listing_id,
@@ -1162,16 +1107,16 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
 
 
 @pytest.mark.parametrize(
-    ("body", "drop_reason"),
+    ("body", "_drop_reason"),
     [
         ("   \n\t  ", "content_empty_body"),
         ("x" * 99, "content_too_short"),
     ],
 )
-def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refresh(
+def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_card(
     tmp_path: Path,
     body: str,
-    drop_reason: str,
+    _drop_reason: str,
 ) -> None:
     seen_path = tmp_path / ".seen.json"
     extracts_path = tmp_path / "extracts.json"
@@ -1232,14 +1177,7 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refre
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(discovered_stub)
-
-    assert isinstance(outcome, Dropped)
-    assert outcome is not None
-    assert not isinstance(outcome, ClassifyForwarded)
-    assert outcome.reason == drop_reason
-    assert outcome.listing_id == listing_id
-    assert outcome.dedup_kind == "judge_pending"
+        intake.process_position_stub(discovered_stub)
     _assert_dedup_recorded(dedup_counters, "judge_pending")
     assert _last_body(metrics_display, "parser test gates") == "1 content"
     assert card_store.get(listing_id) == CardExtract(
@@ -1256,7 +1194,7 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_card_refre
         (None, date(2026, 5, 29), "deadline_passed", None, "2026-05-29"),
     ],
 )
-def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_and_content_and_expires_matched_record(
+def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_record_before_pool_and_content(
     tmp_path: Path,
     posted_date: date | None,
     deadline: date | None,
@@ -1325,23 +1263,7 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_a
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(discovered_stub)
-
-    assert isinstance(outcome, Dropped)
-    assert outcome is not None
-    assert not isinstance(outcome, ClassifyForwarded)
-    assert outcome.reason == "freshness_post_enrich"
-    assert outcome.stub == PositionStub(
-        url="https://example.com/post-enrich-alias",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=posted_date,
-        deadline=deadline,
-    )
-    assert outcome.listing_id == listing_id
-    assert outcome.dedup_kind == "judge_pending"
+        intake.process_position_stub(discovered_stub)
     _assert_dedup_recorded(dedup_counters, "judge_pending")
     assert _last_body(metrics_display, "parser test gates") == "1 freshness"
     assert card_store.get(listing_id) is None
@@ -1376,7 +1298,7 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_stops_before_pool_a
     ]
 
 
-def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_write(
+def test_parser_enrich_failed_logs_and_updates_metrics_without_seen_or_card_write(
     tmp_path: Path,
 ) -> None:
     seen_path = tmp_path / ".seen.json"
@@ -1416,11 +1338,7 @@ def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_wri
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(stub)
-
-    assert isinstance(outcome, RetryableEnrichFailure)
-    assert outcome.stub == stub
-    assert str(outcome.error) == "native enrich failed"
+        intake.process_position_stub(stub)
     _assert_dedup_recorded(dedup_counters, "miss")
     assert _last_body(metrics_display, "parser test") == (
         "0 discovered · 1 enrich_failed · 0 forwarded"
@@ -1439,7 +1357,7 @@ def test_parser_enrich_failed_returns_retryable_outcome_without_seen_or_card_wri
     assert not seen_path.exists()
 
 
-def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_card_write(
+def test_post_enrich_empty_body_logs_content_drop_without_seen_or_card_write(
     tmp_path: Path,
 ) -> None:
     seen_path = tmp_path / ".seen.json"
@@ -1477,22 +1395,7 @@ def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_ca
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(stub)
-
-    assert isinstance(outcome, Dropped)
-    assert outcome is not None
-    assert not isinstance(outcome, ClassifyForwarded)
-    assert outcome.reason == "content_empty_body"
-    assert outcome.stub == PositionStub(
-        url="https://example.com/empty-body",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=date(2026, 5, 29),
-    )
-    assert outcome.listing_id == 1
-    assert outcome.dedup_kind == "run_hit"
+        intake.process_position_stub(stub)
     _assert_dedup_recorded(dedup_counters, "run_hit")
     assert _last_body(metrics_display, "parser test gates") == "1 content"
     assert card_store.get(1) is None
@@ -1517,7 +1420,7 @@ def test_post_enrich_empty_body_returns_reasoned_content_drop_without_seen_or_ca
     ]
 
 
-def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_or_card_write(
+def test_post_enrich_too_short_body_logs_content_drop_without_seen_or_card_write(
     tmp_path: Path,
 ) -> None:
     seen_path = tmp_path / ".seen.json"
@@ -1555,22 +1458,7 @@ def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_o
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(stub)
-
-    assert isinstance(outcome, Dropped)
-    assert outcome is not None
-    assert not isinstance(outcome, ClassifyForwarded)
-    assert outcome.reason == "content_too_short"
-    assert outcome.stub == PositionStub(
-        url="https://example.com/too-short-body",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=date(2026, 5, 29),
-    )
-    assert outcome.listing_id == 1
-    assert outcome.dedup_kind == "run_hit"
+        intake.process_position_stub(stub)
     _assert_dedup_recorded(dedup_counters, "run_hit")
     assert _last_body(metrics_display, "parser test gates") == "1 content"
     assert card_store.get(1) is None
@@ -1595,7 +1483,7 @@ def test_post_enrich_too_short_body_returns_reasoned_content_drop_without_seen_o
     ]
 
 
-def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
+def test_parser_oversized_body_logs_skip_without_seen_or_card_write(
     tmp_path: Path,
 ) -> None:
     seen_path = tmp_path / ".seen.json"
@@ -1635,13 +1523,7 @@ def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(stub)
-
-    assert isinstance(outcome, OversizedBodySkip)
-    assert outcome.stub == stub
-    assert outcome.error.url == stub.url
-    assert outcome.error.source == stub.source
-    assert outcome.error.body_len == 4321
+        intake.process_position_stub(stub)
     _assert_dedup_recorded(dedup_counters, "miss")
     assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
     assert [
@@ -1655,12 +1537,11 @@ def test_parser_oversized_body_returns_skip_outcome_without_seen_or_card_write(
             "body_len": 4321,
         }
     ]
-    assert outcome is not None
     assert card_store.get(1) is None
     assert not seen_path.exists()
 
 
-def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_write(
+def test_parser_transient_http_error_logs_skip_without_seen_or_card_write(
     tmp_path: Path,
 ) -> None:
     seen_path = tmp_path / ".seen.json"
@@ -1700,11 +1581,7 @@ def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_w
     )
 
     with dedup_store.run_scope():
-        outcome = intake.process_position_stub(stub)
-
-    assert isinstance(outcome, TransientHttpSkip)
-    assert outcome.stub == stub
-    assert "503 Service Unavailable" in str(outcome.error)
+        intake.process_position_stub(stub)
     _assert_dedup_recorded(dedup_counters, "miss")
     assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
     assert [
@@ -1718,6 +1595,5 @@ def test_parser_transient_http_error_returns_skip_outcome_without_seen_or_card_w
             "error": "503 Service Unavailable",
         }
     ]
-    assert outcome is not None
     assert card_store.get(1) is None
     assert not seen_path.exists()

@@ -46,13 +46,7 @@ from application_pipeline.parsers import (
 )
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
-from application_pipeline.parser_intake import (
-    Dropped,
-    OversizedBodySkip,
-    ParserIntake,
-    RetryableEnrichFailure,
-    TransientHttpSkip,
-)
+from application_pipeline.parser_intake import ParserIntake
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
@@ -394,18 +388,7 @@ class _ParserThread(threading.Thread):
 
     def _process_stub(self, stub: PositionStub) -> None:
         self._metrics.discovered(self._parser_id)
-
-        outcome = self._parser_intake.process_position_stub(stub)
-
-        if isinstance(outcome, RetryableEnrichFailure):
-            return
-        if isinstance(outcome, OversizedBodySkip):
-            return
-        if isinstance(outcome, TransientHttpSkip):
-            return
-        if isinstance(outcome, Dropped):
-            return
-        return
+        self._parser_intake.process_position_stub(stub)
 
 
 # ---------------------------------------------------------------------------

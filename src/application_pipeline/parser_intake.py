@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
 import httpx
@@ -84,51 +83,6 @@ DropReason = Literal[
 ]
 
 
-@dataclass(frozen=True)
-class ClassifyForwarded:
-    parser_id: str
-    stub: PositionStub
-    listing_id: ListingId
-    body: str
-    enrich_mode: Literal["native", "fallback"]
-    post_enrich_dedup_kind: RunScopedSeenKind
-
-
-@dataclass(frozen=True)
-class Dropped:
-    reason: DropReason
-    stub: PositionStub
-    listing_id: ListingId | None = None
-    dedup_kind: RunScopedSeenKind | None = None
-
-
-@dataclass(frozen=True)
-class RetryableEnrichFailure:
-    stub: PositionStub
-    error: EnrichFailedError
-
-
-@dataclass(frozen=True)
-class OversizedBodySkip:
-    stub: PositionStub
-    error: OversizedBodyError
-
-
-@dataclass(frozen=True)
-class TransientHttpSkip:
-    stub: PositionStub
-    error: httpx.HTTPError
-
-
-ParserIntakeOutcome = (
-    ClassifyForwarded
-    | Dropped
-    | RetryableEnrichFailure
-    | OversizedBodySkip
-    | TransientHttpSkip
-)
-
-
 class ParserIntake:
     def __init__(
         self,
@@ -159,16 +113,14 @@ class ParserIntake:
         self._run_log = run_log
         self._metrics = metrics
 
-    def process_position_stub(
-        self, position_stub: PositionStub
-    ) -> ParserIntakeOutcome | None:
+    def process_position_stub(self, position_stub: PositionStub) -> None:
         if not self._freshness_gate.admit(
             position_stub,
             gate_arm="discover",
             deadline=position_stub.deadline,
         ):
             self._increment_drop_metric("freshness_discover")
-            return Dropped(reason="freshness_discover", stub=position_stub)
+            return
 
         discover_dedup = self._deduplication.is_seen(position_stub)
         if discover_dedup.kind == "judge_pending":
@@ -177,29 +129,20 @@ class ParserIntake:
                 stub=position_stub,
             )
             self._record_dedup("judge_pending")
-            return None
+            return
         if discover_dedup.kind != "miss":
             self._record_dedup(discover_dedup.kind)
             self._increment_drop_metric(_drop_reason_for_dedup(discover_dedup.kind))
-            return Dropped(
-                reason=_drop_reason_for_dedup(discover_dedup.kind),
-                stub=position_stub,
-                listing_id=discover_dedup.listing_id,
-                dedup_kind=discover_dedup.kind,
-            )
+            return
 
         if not self._domain_pre_filter.admit(position_stub):
             self._record_dedup("miss")
             self._increment_drop_metric("prefilter")
-            return Dropped(
-                reason="prefilter",
-                stub=position_stub,
-                listing_id=discover_dedup.listing_id,
-            )
+            return
 
         try:
             enrich_result = self._parser.enrich(position_stub)
-        except EnrichFailedError as exc:
+        except EnrichFailedError:
             self._record_dedup("miss")
             self._run_log.event(
                 "pipeline_orchestrator",
@@ -208,10 +151,7 @@ class ParserIntake:
                 source=position_stub.source,
             )
             self._increment_enrich_failed_metric()
-            return RetryableEnrichFailure(
-                stub=position_stub,
-                error=exc,
-            )
+            return
         except OversizedBodyError as exc:
             self._record_dedup("miss")
             self._run_log.event(
@@ -221,10 +161,7 @@ class ParserIntake:
                 source=exc.source,
                 body_len=exc.body_len,
             )
-            return OversizedBodySkip(
-                stub=position_stub,
-                error=exc,
-            )
+            return
         except httpx.HTTPError as exc:
             self._record_dedup("miss")
             self._run_log.event(
@@ -234,10 +171,7 @@ class ParserIntake:
                 source=position_stub.source,
                 error=str(exc),
             )
-            return TransientHttpSkip(
-                stub=position_stub,
-                error=exc,
-            )
+            return
 
         stub = enrich_result.stub
         body = enrich_result.body
@@ -246,12 +180,7 @@ class ParserIntake:
         if post_enrich_dedup.kind not in ("miss", "run_hit", "judge_pending"):
             self._record_dedup(post_enrich_dedup.kind)
             self._increment_drop_metric(_drop_reason_for_dedup(post_enrich_dedup.kind))
-            return Dropped(
-                reason=_drop_reason_for_dedup(post_enrich_dedup.kind),
-                stub=stub,
-                listing_id=post_enrich_dedup.listing_id,
-                dedup_kind=post_enrich_dedup.kind,
-            )
+            return
 
         if not self._freshness_gate.admit(
             stub,
@@ -260,12 +189,7 @@ class ParserIntake:
         ):
             self._record_dedup(post_enrich_dedup.kind)
             self._increment_drop_metric("freshness_post_enrich")
-            return Dropped(
-                reason="freshness_post_enrich",
-                stub=stub,
-                listing_id=post_enrich_dedup.listing_id,
-                dedup_kind=post_enrich_dedup.kind,
-            )
+            return
 
         content_decision = self._content_gate.inspect(body, stub)
         if not content_decision.passes:
@@ -273,12 +197,7 @@ class ParserIntake:
             self._increment_drop_metric(
                 _drop_reason_for_content(content_decision.reason)
             )
-            return Dropped(
-                reason=_drop_reason_for_content(content_decision.reason),
-                stub=stub,
-                listing_id=post_enrich_dedup.listing_id,
-                dedup_kind=post_enrich_dedup.kind,
-            )
+            return
 
         if post_enrich_dedup.kind == "judge_pending":
             self._refresh_card_store_body(
@@ -290,7 +209,7 @@ class ParserIntake:
                 stub=stub,
             )
             self._record_dedup("judge_pending")
-            return None
+            return
 
         self._record_dedup(post_enrich_dedup.kind)
         self._increment_forwarded_metrics(enrich_result.mode)
@@ -299,14 +218,7 @@ class ParserIntake:
             stub=stub,
             body=body,
         )
-        return ClassifyForwarded(
-            parser_id=self._parser_id,
-            stub=stub,
-            listing_id=post_enrich_dedup.listing_id,
-            body=body,
-            enrich_mode=enrich_result.mode,
-            post_enrich_dedup_kind=post_enrich_dedup.kind,
-        )
+        return
 
     def _refresh_card_store_body(self, *, listing_id: ListingId, body: str) -> None:
         self._card_store.replace_body_if_present(listing_id, body)

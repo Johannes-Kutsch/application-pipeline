@@ -369,6 +369,23 @@ class ParserIntakeHarness:
             self.card_store.put(listing_id, card)
         return listing_id
 
+    def seed_judge_pending_listing_with_persisted_card(
+        self,
+        stub: PositionStub | None = None,
+        *,
+        header: str = "Persisted header",
+        summary: str = "Persisted summary",
+        body: str = "Persisted body",
+    ) -> int:
+        listing_id = self.seed_judge_pending_listing(stub)
+        self.seed_persisted_card(
+            listing_id,
+            header=header,
+            summary=summary,
+            body=body,
+        )
+        return listing_id
+
     def set_parser_enrich_result(
         self,
         *,
@@ -385,6 +402,31 @@ class ParserIntakeHarness:
                 body=self.default_body if body is None else body,
                 mode=mode,
             )
+        )
+
+    def set_parser_backfilled_enrich_result(
+        self,
+        *,
+        title: str,
+        company: str,
+        location: str,
+        posted_date: date | None = None,
+        deadline: date | None = None,
+        body: str | None = None,
+        mode: Literal["native", "fallback"] = "native",
+    ) -> None:
+        self.set_parser_enrich_result(
+            stub=PositionStub(
+                url=self.default_position_stub.url,
+                title=title,
+                source=self.default_position_stub.source,
+                company=company,
+                location=location,
+                posted_date=posted_date,
+                deadline=deadline,
+            ),
+            body=body,
+            mode=mode,
         )
 
     def classify_handoffs(self) -> list[ClassifyCall]:

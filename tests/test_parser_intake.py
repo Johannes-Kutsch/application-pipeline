@@ -759,25 +759,19 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
         discovered_stub=discovered_stub,
         content_gate=cast(Any, _UnexpectedContentGate()),
     )
-    harness.set_parser_enrich_result(
-        stub=PositionStub(
-            url="https://example.com/post-enrich-alias",
-            title="Platform Engineer",
-            source="test",
-            company="Acme",
-            location="Hamburg",
-            posted_date=posted_date,
-            deadline=deadline,
-        ),
+    harness.set_parser_backfilled_enrich_result(
+        title="Platform Engineer",
+        company="Acme",
+        location="Hamburg",
+        posted_date=posted_date,
+        deadline=deadline,
         body="Fresh raw description " + "x" * 120,
     )
-    listing_id = harness.seed_judge_pending_listing(
+    listing_id = harness.seed_judge_pending_listing_with_persisted_card(
         original,
-        card=CardExtract(
-            header="Persisted header",
-            summary="Persisted summary",
-            body="Persisted body",
-        ),
+        header="Persisted header",
+        summary="Persisted summary",
+        body="Persisted body",
     )
 
     harness.process_one_position_stub(discovered_stub)

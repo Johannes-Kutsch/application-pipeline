@@ -174,85 +174,6 @@ class _TransientHttpErrorParser:
         )
 
 
-class _BackfillingMatchedParser:
-    def __init__(
-        self,
-        *,
-        url: str,
-        company: str,
-        location: str,
-        title: str,
-        body: str,
-    ) -> None:
-        self._url = url
-        self._company = company
-        self._location = location
-        self._title = title
-        self._body = body
-
-    def __enter__(self) -> "_BackfillingMatchedParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        enriched = PositionStub(
-            url=self._url,
-            title=self._title,
-            source=stub.source,
-            company=self._company,
-            location=self._location,
-            posted_date=stub.posted_date,
-        )
-        return EnrichResult(stub=enriched, body=self._body, mode="native")
-
-
-class _BackfillingMatchedFreshnessDropParser:
-    def __init__(
-        self,
-        *,
-        url: str,
-        company: str,
-        location: str,
-        title: str,
-        posted_date: date | None = None,
-        deadline: date | None = None,
-        body: str,
-    ) -> None:
-        self._url = url
-        self._company = company
-        self._location = location
-        self._title = title
-        self._posted_date = posted_date
-        self._deadline = deadline
-        self._body = body
-
-    def __enter__(self) -> "_BackfillingMatchedFreshnessDropParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        enriched = PositionStub(
-            url=self._url,
-            title=self._title,
-            source=stub.source,
-            company=self._company,
-            location=self._location,
-            posted_date=self._posted_date,
-            deadline=self._deadline,
-        )
-        return EnrichResult(stub=enriched, body=self._body, mode="native")
-
-
 class _EmptyBodyParser:
     def __enter__(self) -> "_EmptyBodyParser":
         return self
@@ -483,7 +404,6 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
         parser_id="test",
         tmp_path=tmp_path,
         discovered_stub=rediscovered_stub,
-        parser=_UnexpectedEnrichParser(),
     )
     listing_id = harness.seed_judge_pending_listing(
         PositionStub(
@@ -643,13 +563,17 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
         tmp_path,
         parser_id="test",
         discovered_stub=discovered_stub,
-        parser=_BackfillingMatchedParser(
+    )
+    harness.set_parser_enrich_result(
+        stub=PositionStub(
             url="https://example.com/post-enrich-alias",
+            title="Platform Engineer",
+            source="test",
             company="Acme",
             location="Hamburg",
-            title="Platform Engineer",
-            body=fresh_body,
+            posted_date=date(2026, 5, 29),
         ),
+        body=fresh_body,
     )
     listing_id = harness.seed_judge_pending_listing(
         original,
@@ -706,13 +630,17 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
         tmp_path,
         parser_id="test",
         discovered_stub=discovered_stub,
-        parser=_BackfillingMatchedParser(
+    )
+    harness.set_parser_enrich_result(
+        stub=PositionStub(
             url="https://example.com/post-enrich-alias",
+            title="Platform Engineer",
+            source="test",
             company="Acme",
             location="Hamburg",
-            title="Platform Engineer",
-            body="Fresh raw description " + "x" * 120,
+            posted_date=date(2026, 5, 29),
         ),
+        body="Fresh raw description " + "x" * 120,
     )
     listing_id = harness.seed_judge_pending_listing(original)
 
@@ -765,13 +693,17 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
         tmp_path,
         parser_id="test",
         discovered_stub=discovered_stub,
-        parser=_BackfillingMatchedParser(
+    )
+    harness.set_parser_enrich_result(
+        stub=PositionStub(
             url="https://example.com/post-enrich-alias",
+            title="Platform Engineer",
+            source="test",
             company="Acme",
             location="Hamburg",
-            title="Platform Engineer",
-            body=body,
+            posted_date=date(2026, 5, 29),
         ),
+        body=body,
     )
     listing_id = harness.seed_judge_pending_listing(
         original,
@@ -825,16 +757,19 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
         tmp_path,
         parser_id="test",
         discovered_stub=discovered_stub,
-        parser=_BackfillingMatchedFreshnessDropParser(
+        content_gate=cast(Any, _UnexpectedContentGate()),
+    )
+    harness.set_parser_enrich_result(
+        stub=PositionStub(
             url="https://example.com/post-enrich-alias",
+            title="Platform Engineer",
+            source="test",
             company="Acme",
             location="Hamburg",
-            title="Platform Engineer",
             posted_date=posted_date,
             deadline=deadline,
-            body="Fresh raw description " + "x" * 120,
         ),
-        content_gate=cast(Any, _UnexpectedContentGate()),
+        body="Fresh raw description " + "x" * 120,
     )
     listing_id = harness.seed_judge_pending_listing(
         original,

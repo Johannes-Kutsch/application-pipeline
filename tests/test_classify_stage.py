@@ -562,6 +562,51 @@ class _RetryBeforeLaterDispatchEnricher:
         )
 
 
+class _ParallelDoubleQuotaWallEnricher:
+    def __init__(self, *, reset_time: datetime) -> None:
+        self._reset_time = reset_time
+        self._lock = threading.Lock()
+        self._calls: dict[int, int] = {}
+        self.initial_quota_hits = threading.Event()
+        self.release_retries = threading.Event()
+        self.retry_calls: list[int] = []
+
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        listing_id, stub, _ = items[0]
+        with self._lock:
+            attempt = self._calls.get(listing_id, 0) + 1
+            self._calls[listing_id] = attempt
+            if attempt == 1 and listing_id in {1, 2}:
+                if self._calls.get(1, 0) >= 1 and self._calls.get(2, 0) >= 1:
+                    self.initial_quota_hits.set()
+            if attempt == 2:
+                self.retry_calls.append(listing_id)
+
+        if attempt == 1 and listing_id in {1, 2}:
+            self.initial_quota_hits.wait(timeout=1)
+            raise ClaudeUsageLimitError(
+                "quota hit",
+                returncode=1,
+                stdout="",
+                stderr="",
+                envelope=None,
+                reset_time=self._reset_time,
+            )
+        if attempt == 2:
+            self.release_retries.wait(timeout=1)
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+                )
+            ]
+        )
+
+
 def _build_stage(
     *,
     logs_dir: Path,
@@ -1362,3 +1407,62 @@ def test_classify_stage_retries_quota_batch_before_later_dispatch_after_wall_cle
         (2, _classify_request(2).submission.stub),
         (3, _classify_request(3).submission.stub),
     ]
+
+
+def test_classify_stage_parallel_quota_hits_log_one_sleep_and_retry_every_batch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+    start = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+    reset_time = start + timedelta(minutes=5)
+    clock = _ControllableSleepClock(start)
+    quota_wall = _quota.QuotaWall(now_fn=clock.now, sleep_fn=clock.sleep)
+    llm_enricher = _ParallelDoubleQuotaWallEnricher(reset_time=reset_time)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            now = clock.now()
+            if tz is None:
+                return now.replace(tzinfo=None)
+            return now.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.classify_stage.datetime", _FakeDateTime)
+
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=2,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(logs_dir),
+        quota_wall=quota_wall,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    _submit_ready(handoff, 1)
+    _submit_ready(handoff, 2)
+    stage.close()
+
+    assert llm_enricher.initial_quota_hits.wait(timeout=1)
+    assert clock.sleep_started.wait(timeout=1)
+
+    clock.allow_sleep.set()
+    assert llm_enricher.release_retries.wait(timeout=0.1) is False
+    llm_enricher.release_retries.set()
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert sorted(llm_enricher.retry_calls) == [1, 2]
+    assert metrics.classify_calls == 2
+    assert sorted(pool_collector.matched, key=lambda item: item[0]) == [
+        (1, _classify_request(1).submission.stub),
+        (2, _classify_request(2).submission.stub),
+    ]
+    assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]

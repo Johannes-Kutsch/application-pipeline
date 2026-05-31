@@ -16,6 +16,7 @@ from typing import Protocol, runtime_checkable
 
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
+from application_pipeline.classify_stage import ClassifyReadySubmission, ClassifyRequest
 from application_pipeline.llm import quota as _quota
 from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
@@ -151,19 +152,6 @@ class _QueryDone:
 _QUERY_DONE = _QueryDone()
 
 
-# ---------------------------------------------------------------------------
-# Classify queue protocol
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _ClassifyRequest:
-    stub: PositionStub
-    body: str
-    parser_id: str
-    listing_id: int = 0
-
-
 class _ParserIntakeClassifySink:
     def __init__(
         self,
@@ -178,11 +166,13 @@ class _ParserIntakeClassifySink:
 
     def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None:
         self._classify_queue.put(
-            _ClassifyRequest(
-                stub=stub,
-                body=body,
+            ClassifyRequest(
+                submission=ClassifyReadySubmission(
+                    listing_id=listing_id,
+                    stub=stub,
+                    raw_description=body,
+                ),
                 parser_id=self._parser_id,
-                listing_id=listing_id,
             )
         )
         self._metrics.classify_buffered(1)
@@ -418,7 +408,7 @@ def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
 class _ClassifyAccumulator(threading.Thread):
     """Single thread that fills classify batches sequentially.
 
-    Pulls _ClassifyRequest items from classify_queue, assembles batches of
+    Pulls ClassifyRequest items from classify_queue, assembles batches of
     batch_size, and puts each complete batch onto dispatch_queue. On sentinel,
     flushes any partial batch and then sends num_workers sentinels to workers.
     """
@@ -445,7 +435,7 @@ class _ClassifyAccumulator(threading.Thread):
     def run(self) -> None:
         current_stage.set("classify-accumulator")
         try:
-            batch: list[_ClassifyRequest] = []
+            batch: list[ClassifyRequest] = []
             while True:
                 item = self._classify_queue.get()
                 if item is _NO_MORE_BATCHES:
@@ -455,7 +445,7 @@ class _ClassifyAccumulator(threading.Thread):
                     for _ in range(self._num_workers):
                         self._dispatch_queue.put(_NO_MORE_BATCHES)
                     break
-                assert isinstance(item, _ClassifyRequest)
+                assert isinstance(item, ClassifyRequest)
                 batch.append(item)
                 if len(batch) >= self._batch_size:
                     self._metrics.classify_batch_dequeued(len(batch))
@@ -509,7 +499,7 @@ class _ClassifyWorker(_QueueWorker):
                 if item is self._sentinel:
                     break
                 assert isinstance(item, list)
-                batch: list[_ClassifyRequest] = item
+                batch: list[ClassifyRequest] = item
                 if not self._run_state.is_degraded:
                     self._process_batch(batch)
         except BaseException as exc:
@@ -518,8 +508,15 @@ class _ClassifyWorker(_QueueWorker):
         finally:
             self._on_shutdown()
 
-    def _process_batch(self, batch: list[_ClassifyRequest]) -> None:
-        items = [(req.listing_id, req.stub, req.body) for req in batch]
+    def _process_batch(self, batch: list[ClassifyRequest]) -> None:
+        items = [
+            (
+                req.submission.listing_id,
+                req.submission.stub,
+                req.submission.raw_description,
+            )
+            for req in batch
+        ]
 
         while True:
             self._quota_wall.wait_if_blocked()
@@ -564,14 +561,14 @@ class _ClassifyWorker(_QueueWorker):
             )
             if item_outcome.state == "retryable":
                 retryable += 1
-                self._metrics.enrich_failed(req.stub.source)
+                self._metrics.enrich_failed(req.submission.stub.source)
             elif item_outcome.state == "expired":
                 dropped += 1
             elif item_outcome.state == "rejected":
                 dropped += 1
             elif item_outcome.state == "matched":
                 matched = item_outcome.matched_listing
-                if matched is None or matched.listing_id != req.listing_id:
+                if matched is None or matched.listing_id != req.submission.listing_id:
                     raise AssertionError("matched outcome missing matched listing data")
 
         for listing_id, stub in outcome.matched_listings:

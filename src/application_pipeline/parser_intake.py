@@ -4,6 +4,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 import httpx
 
+from application_pipeline.classify_stage import ListingId, RawDescription
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import RunScopedSeenKind, RunScopedSeenResult
 from application_pipeline.extracts.card_store import CardStore
@@ -12,8 +13,6 @@ from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, PositionStub
 from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError
-
-ListingId = int
 
 
 @runtime_checkable
@@ -220,7 +219,9 @@ class ParserIntake:
         )
         return
 
-    def _refresh_card_store_body(self, *, listing_id: ListingId, body: str) -> None:
+    def _refresh_card_store_body(
+        self, *, listing_id: ListingId, body: RawDescription
+    ) -> None:
         self._card_store.replace_body_if_present(listing_id, body)
 
     def _admit_judge_pending(

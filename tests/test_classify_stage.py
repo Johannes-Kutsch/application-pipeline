@@ -6,7 +6,11 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from application_pipeline.run_metrics import RunMetrics
+from application_pipeline.run_metrics import RunMetrics, RunSummary
+from application_pipeline.content_gate import ContentSnapshot
+from application_pipeline.dedup_counters import DedupSnapshot
+from application_pipeline.freshness_gate import FreshnessSnapshot
+from application_pipeline.prefilter_gate import PreFilterSnapshot
 
 from application_pipeline.classify_stage import (
     CLASSIFY_SHUTDOWN,
@@ -165,6 +169,16 @@ def _pipeline_event_rows(logs_dir: Path) -> list[dict[str, object]]:
         for line in events_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def _run_summary(metrics: RunMetrics) -> RunSummary:
+    return metrics.to_run_summary(
+        0.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
 
 
 def test_classify_stage_accumulator_fills_one_complete_batch_before_next() -> None:
@@ -1068,6 +1082,7 @@ def test_classify_stage_rejected_outcome_skips_pool_and_counts_classifier_drop(
     assert completion.first_failure is None
     assert pool_collector.matched == []
     assert _last_body(display, "llm classify relevance") == "1 dropped"
+    assert _run_summary(metrics).classifier_dropped == 1
     assert _classify_event_rows(logs_dir)[0]["matches"] is False
 
 
@@ -1109,6 +1124,7 @@ def test_classify_stage_expired_outcome_skips_pool_counts_drop_and_logs_matches_
     assert completion.first_failure is None
     assert pool_collector.matched == []
     assert _last_body(display, "llm classify relevance") == "1 dropped"
+    assert _run_summary(metrics).classifier_dropped == 1
     assert _classify_event_rows(logs_dir)[0]["matches"] is None
 
 
@@ -1150,6 +1166,7 @@ def test_classify_stage_retryable_outcome_skips_pool_and_counts_malformed(
     assert completion.first_failure is None
     assert pool_collector.matched == []
     assert _last_body(display, "llm classify relevance") == "1 malformed"
+    assert _run_summary(metrics).enrich_failed == 1
     assert _classify_event_rows(logs_dir)[0]["matches"] is None
 
 

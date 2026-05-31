@@ -16,6 +16,7 @@ from application_pipeline.classify_stage import (
     ClassifyReadySubmission,
     ClassifyRequest,
     ClassifyStage,
+    ClassifyStageHandoff,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm import quota as _quota
@@ -115,6 +116,16 @@ def _classify_request(listing_id: int) -> ClassifyRequest:
             raw_description=f"Raw description {listing_id}",
         ),
         parser_id="parser.test",
+    )
+
+
+def _submit_ready(handoff: ClassifyStageHandoff, listing_id: int) -> None:
+    request = _classify_request(listing_id)
+    handoff.submit_ready(
+        listing_id=request.submission.listing_id,
+        stub=request.submission.stub,
+        raw_description=request.submission.raw_description,
+        parser_id=request.parser_id,
     )
 
 
@@ -535,7 +546,7 @@ def test_classify_stage_worker_failure_surfaces_as_first_failure(
     stage = _make_stage(tmp_path, llm_enricher=_ExplodingEnricher())
     handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
     stage.start()
-    handoff.submit(_classify_request(1))
+    _submit_ready(handoff, 1)
     stage.close()
     completion = stage.wait()
     assert completion.first_failure is boom
@@ -563,7 +574,7 @@ def test_classify_stage_wait_flushes_partial_batch_and_marks_classify_done(
 
     stage.start()
     for listing_id in range(1, 6):
-        handoff.submit(_classify_request(listing_id))
+        _submit_ready(handoff, listing_id)
     stage.close()
 
     completion_holder: list[object] = []
@@ -610,7 +621,7 @@ def test_classify_stage_batches_25_items_and_shows_in_flight_status_updates(
 
     stage.start()
     for listing_id in range(1, 26):
-        handoff.submit(_classify_request(listing_id))
+        _submit_ready(handoff, listing_id)
     stage.close()
 
     assert llm_enricher.started.wait(timeout=1)
@@ -645,7 +656,7 @@ def test_classify_stage_batches_exactly_10_items_into_one_llm_call(
 
     stage.start()
     for listing_id in range(1, 11):
-        handoff.submit(_classify_request(listing_id))
+        _submit_ready(handoff, listing_id)
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -693,7 +704,12 @@ def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_l
     request = _classify_request(1)
 
     stage.start()
-    handoff.submit(request)
+    handoff.submit_ready(
+        listing_id=request.submission.listing_id,
+        stub=request.submission.stub,
+        raw_description=request.submission.raw_description,
+        parser_id=request.parser_id,
+    )
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -737,7 +753,7 @@ def test_classify_stage_rejected_outcome_skips_pool_and_counts_classifier_drop(
     handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
 
     stage.start()
-    handoff.submit(_classify_request(1))
+    _submit_ready(handoff, 1)
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -777,7 +793,7 @@ def test_classify_stage_expired_outcome_skips_pool_counts_drop_and_logs_matches_
     handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
 
     stage.start()
-    handoff.submit(_classify_request(1))
+    _submit_ready(handoff, 1)
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -817,7 +833,7 @@ def test_classify_stage_retryable_outcome_skips_pool_and_counts_malformed(
     handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
 
     stage.start()
-    handoff.submit(_classify_request(1))
+    _submit_ready(handoff, 1)
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -871,9 +887,9 @@ def test_classify_stage_batch_level_malformed_failure_skips_failed_batch_and_con
     handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
 
     stage.start()
-    handoff.submit(_classify_request(1))
-    handoff.submit(_classify_request(2))
-    handoff.submit(_classify_request(3))
+    _submit_ready(handoff, 1)
+    _submit_ready(handoff, 2)
+    _submit_ready(handoff, 3)
     stage.close()
     completion = stage.wait()
 
@@ -934,7 +950,7 @@ def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
     handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
 
     stage.start()
-    handoff.submit(_classify_request(1))
+    _submit_ready(handoff, 1)
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -991,9 +1007,9 @@ def test_classify_stage_parallel_workers_log_one_quota_sleep_and_wait_for_active
     handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
 
     stage.start()
-    handoff.submit(_classify_request(1))
-    handoff.submit(_classify_request(2))
-    handoff.submit(_classify_request(3))
+    _submit_ready(handoff, 1)
+    _submit_ready(handoff, 2)
+    _submit_ready(handoff, 3)
     stage.close()
 
     assert llm_enricher.wall_raised.wait(timeout=1)

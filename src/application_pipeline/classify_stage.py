@@ -38,8 +38,6 @@ class ClassifyRequest:
 
 @runtime_checkable
 class ClassifyStageHandoff(Protocol):
-    def submit(self, request: ClassifyRequest) -> None: ...
-
     def submit_ready(
         self,
         *,
@@ -126,7 +124,7 @@ class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
         self._metrics = metrics
         self._parser_id = parser_id
 
-    def submit(self, request: ClassifyRequest) -> None:
+    def _submit_request(self, request: ClassifyRequest) -> None:
         assert request.parser_id == self._parser_id
         self._classify_queue.put(request)
         self._metrics.classify_buffered(1)
@@ -139,7 +137,7 @@ class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
         raw_description: RawDescription,
         parser_id: ParserIdentity,
     ) -> None:
-        self.submit(
+        self._submit_request(
             ClassifyRequest(
                 submission=ClassifyReadySubmission(
                     listing_id=listing_id,

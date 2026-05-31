@@ -12,7 +12,7 @@ import httpx
 
 from fake_status_display import FakeStatusDisplay
 
-from application_pipeline.classify_stage import ClassifyRequest
+from application_pipeline.classify_stage import ClassifyStageHandoff
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import (
     DeduplicationStore,
@@ -137,14 +137,6 @@ class InMemoryParser:
 class CollectingClassifyHandoff:
     def __init__(self) -> None:
         self.calls: list[ClassifyCall] = []
-
-    def submit(self, request: ClassifyRequest) -> None:
-        self.submit_ready(
-            listing_id=request.submission.listing_id,
-            stub=request.submission.stub,
-            raw_description=request.submission.raw_description,
-            parser_id=request.parser_id,
-        )
 
     def submit_ready(
         self,
@@ -331,7 +323,7 @@ class ParserIntakeHarness:
             content_gate=cast(ContentGate, configured_content_gate),
             card_store=card_store,
             pool_collector=pool_collector,
-            classify_handoff=classify_handoff,
+            classify_handoff=cast(ClassifyStageHandoff, classify_handoff),
             run_log=run_log,
             metrics=metrics,
         )

@@ -53,6 +53,40 @@ def test_classify_stage_builds_classify_request_from_classify_ready_submission()
     assert request.parser_id == "parser.test"
 
 
+def test_classify_stage_handoff_submit_ready_routes_listing_through_stage(
+    tmp_path: Path,
+) -> None:
+    stub = PositionStub(
+        url="https://example.com/role",
+        title="Platform Engineer",
+        source="test",
+    )
+    pool_collector = _CollectingPoolCollector()
+    metrics = _FakeMetrics()
+    llm_enricher = _MatchedEnricher()
+    stage = _build_stage(
+        logs_dir=tmp_path / "logs",
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    handoff.submit_ready(
+        listing_id=7,
+        stub=stub,
+        raw_description="Raw description for classify handoff",
+        parser_id="parser.test",
+    )
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert metrics.buffered == 1
+    assert llm_enricher.batch_sizes == [1]
+    assert pool_collector.matched == [(7, stub)]
+
+
 class _RecordingMetrics:
     def __init__(self) -> None:
         self.batch_sizes: list[int] = []

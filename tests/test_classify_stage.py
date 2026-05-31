@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from application_pipeline.run_metrics import RunMetrics
@@ -16,6 +17,7 @@ from application_pipeline.classify_stage import (
     ClassifyRequest,
     ClassifyStage,
 )
+from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
@@ -88,6 +90,15 @@ def _last_body(display: FakeStatusDisplay, name: str) -> str:
 
 def _classify_event_rows(logs_dir: Path) -> list[dict[str, object]]:
     events_path = logs_dir / "llm" / "classify_relevance.events.jsonl"
+    return [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _pipeline_event_rows(logs_dir: Path) -> list[dict[str, object]]:
+    events_path = logs_dir / "pipeline" / "orchestrator.events.jsonl"
     return [
         json.loads(line)
         for line in events_path.read_text(encoding="utf-8").splitlines()
@@ -306,6 +317,115 @@ class _CollectingPoolCollector:
 
     def add_matched(self, stub: PositionStub, listing_id: int) -> None:
         self.matched.append((listing_id, stub))
+
+
+class _FakeClock:
+    def __init__(self, now: datetime) -> None:
+        self._now = now
+        self.sleep_calls: list[float] = []
+        self._lock = threading.Lock()
+
+    def now(self) -> datetime:
+        with self._lock:
+            return self._now
+
+    def sleep(self, seconds: float) -> None:
+        with self._lock:
+            self.sleep_calls.append(seconds)
+            self._now += timedelta(seconds=seconds)
+
+
+class _UsageLimitThenMatchedEnricher:
+    def __init__(self, *, reset_time: datetime) -> None:
+        self._reset_time = reset_time
+        self.calls = 0
+
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        self.calls += 1
+        if self.calls == 1:
+            raise ClaudeUsageLimitError(
+                "quota hit",
+                returncode=1,
+                stdout="",
+                stderr="",
+                envelope=None,
+                reset_time=self._reset_time,
+            )
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+                )
+                for listing_id, stub, _ in items
+            ]
+        )
+
+
+class _ControllableSleepClock:
+    def __init__(self, now: datetime) -> None:
+        self._now = now
+        self.sleep_calls: list[float] = []
+        self.sleep_started = threading.Event()
+        self.allow_sleep = threading.Event()
+        self._lock = threading.Lock()
+
+    def now(self) -> datetime:
+        with self._lock:
+            return self._now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleep_started.set()
+        self.allow_sleep.wait(timeout=1)
+        with self._lock:
+            self.sleep_calls.append(seconds)
+            self._now += timedelta(seconds=seconds)
+
+
+class _ParallelQuotaWallEnricher:
+    def __init__(self, *, reset_time: datetime) -> None:
+        self._reset_time = reset_time
+        self.calls: list[int] = []
+        self.wall_raised = threading.Event()
+        self.release_second_batch = threading.Event()
+        self.third_batch_started = threading.Event()
+        self._lock = threading.Lock()
+        self._quota_seen = False
+
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        listing_id, stub, _ = items[0]
+        with self._lock:
+            self.calls.append(listing_id)
+            if listing_id == 1 and not self._quota_seen:
+                self._quota_seen = True
+                self.wall_raised.set()
+                raise ClaudeUsageLimitError(
+                    "quota hit",
+                    returncode=1,
+                    stdout="",
+                    stderr="",
+                    envelope=None,
+                    reset_time=self._reset_time,
+                )
+        if listing_id == 2:
+            assert self.wall_raised.wait(timeout=1)
+            self.release_second_batch.wait(timeout=1)
+        if listing_id == 3:
+            self.third_batch_started.set()
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+                )
+            ]
+        )
 
 
 def _build_stage(
@@ -741,3 +861,121 @@ def test_classify_stage_batch_level_malformed_failure_skips_failed_batch_and_con
             "matches": True,
         },
     ]
+
+
+def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
+    tmp_path: Path, monkeypatch
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+    start = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+    reset_time = start + timedelta(minutes=5)
+    clock = _FakeClock(start)
+    quota_wall = _quota.QuotaWall(now_fn=clock.now, sleep_fn=clock.sleep)
+    llm_enricher = _UsageLimitThenMatchedEnricher(reset_time=reset_time)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            now = clock.now()
+            if tz is None:
+                return now.replace(tzinfo=None)
+            return now.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.classify_stage.datetime", _FakeDateTime)
+
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=1,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(logs_dir),
+        quota_wall=quota_wall,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    handoff.submit(_classify_request(1))
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert llm_enricher.calls == 2
+    assert clock.sleep_calls == [420.0]
+    assert metrics.classify_calls == 1
+    assert _last_body(display, "llm classify relevance") == "1 forwarded"
+    assert pool_collector.matched == [(1, _classify_request(1).submission.stub)]
+    assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]
+    classify_rows = _classify_event_rows(logs_dir)
+    assert classify_rows == [
+        {
+            "ts": classify_rows[0]["ts"],
+            "event": "classify_relevance",
+            "matches": True,
+        }
+    ]
+
+
+def test_classify_stage_parallel_workers_log_one_quota_sleep_and_wait_for_active_wall(
+    tmp_path: Path, monkeypatch
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+    start = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+    reset_time = start + timedelta(minutes=5)
+    clock = _ControllableSleepClock(start)
+    quota_wall = _quota.QuotaWall(now_fn=clock.now, sleep_fn=clock.sleep)
+    llm_enricher = _ParallelQuotaWallEnricher(reset_time=reset_time)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            now = clock.now()
+            if tz is None:
+                return now.replace(tzinfo=None)
+            return now.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.classify_stage.datetime", _FakeDateTime)
+
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=2,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(logs_dir),
+        quota_wall=quota_wall,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    handoff.submit(_classify_request(1))
+    handoff.submit(_classify_request(2))
+    handoff.submit(_classify_request(3))
+    stage.close()
+
+    assert llm_enricher.wall_raised.wait(timeout=1)
+    llm_enricher.release_second_batch.set()
+    assert clock.sleep_started.wait(timeout=1)
+    assert llm_enricher.third_batch_started.is_set() is False
+
+    clock.allow_sleep.set()
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert metrics.classify_calls == 3
+    assert sorted(pool_collector.matched, key=lambda item: item[0]) == [
+        (1, _classify_request(1).submission.stub),
+        (2, _classify_request(2).submission.stub),
+        (3, _classify_request(3).submission.stub),
+    ]
+    assert clock.sleep_calls == [420.0]
+    assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]

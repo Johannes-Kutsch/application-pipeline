@@ -281,6 +281,22 @@ class _FakeRunState:
         self.aborted_with = exc
 
 
+class _AbortAwareRunState:
+    def __init__(self) -> None:
+        self.aborted_with: BaseException | None = None
+
+    @property
+    def is_degraded(self) -> bool:
+        return False
+
+    @property
+    def is_aborted(self) -> bool:
+        return self.aborted_with is not None
+
+    def set_aborted(self, exc: BaseException) -> None:
+        self.aborted_with = exc
+
+
 class _FakePoolCollector:
     def add_matched(self, stub: PositionStub, listing_id: int) -> None:
         pass
@@ -595,6 +611,69 @@ def test_classify_stage_worker_failure_surfaces_as_first_failure(
     stage.close()
     completion = stage.wait()
     assert completion.first_failure is boom
+
+
+def test_classify_stage_wait_surfaces_worker_abort_and_skips_later_batches(
+    tmp_path: Path,
+) -> None:
+    boom = RuntimeError("enricher exploded")
+
+    class _FailFirstThenMatchEnricher:
+        def __init__(self) -> None:
+            self.calls: list[int] = []
+            self.allow_second_batch = threading.Event()
+
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            listing_id, stub, _ = items[0]
+            self.calls.append(listing_id)
+            if listing_id == 1:
+                raise boom
+            if listing_id == 2:
+                self.allow_second_batch.wait(timeout=1)
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="matched",
+                        event_matches=True,
+                        matched_listing=MatchedListing(
+                            listing_id=listing_id,
+                            stub=stub,
+                        ),
+                    )
+                ]
+            )
+
+    metrics = _FakeMetrics()
+    pool_collector = _CollectingPoolCollector()
+    run_state = _AbortAwareRunState()
+    llm_enricher = _FailFirstThenMatchEnricher()
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=2,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=run_state,
+        run_log=RunLog(tmp_path / "logs"),
+        quota_wall=_quota.QuotaWall(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    for listing_id in range(1, 4):
+        _submit_ready(handoff, listing_id)
+    stage.close()
+
+    llm_enricher.allow_second_batch.set()
+    completion = stage.wait()
+
+    assert completion.first_failure is boom
+    assert run_state.aborted_with is boom
+    assert metrics.done == 1
+    assert llm_enricher.calls == [1, 2]
+    assert [listing_id for listing_id, _ in pool_collector.matched] == [2]
 
 
 def test_classify_stage_wait_flushes_partial_batch_and_marks_classify_done(

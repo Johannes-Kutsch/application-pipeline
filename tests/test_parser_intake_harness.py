@@ -119,3 +119,37 @@ def test_parser_intake_harness_reads_log_artifact_rows_for_events_and_transcript
     assert parser_intake_harness.log_artifact_transcript_rows("pipeline_prefilter") == [
         {"url": "https://example.com/role", "passes": True}
     ]
+
+
+def test_parser_intake_harness_binds_oversized_body_skip_to_processed_stub(
+    tmp_path,
+) -> None:
+    default_stub = PositionStub(
+        url="https://example.com/default",
+        title="Backend Engineer",
+        source="test",
+    )
+    processed_stub = PositionStub(
+        url="https://example.com/processed",
+        title="Backend Engineer",
+        source="alternate",
+    )
+    parser_intake_harness = ParserIntakeHarness.create(
+        tmp_path,
+        discovered_stub=default_stub,
+    )
+
+    parser_intake_harness.set_parser_oversized_body_error(stub=processed_stub)
+    parser_intake_harness.process_one_position_stub(processed_stub)
+
+    assert [
+        {k: v for k, v in row.items() if k != "ts"}
+        for row in parser_intake_harness.log_artifact_event_rows("llm_enricher")
+    ] == [
+        {
+            "url": processed_stub.url,
+            "source": processed_stub.source,
+            "body_len": 4321,
+            "event": "body_oversized",
+        }
+    ]

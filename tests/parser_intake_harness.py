@@ -431,15 +431,16 @@ class ParserIntakeHarness:
     def set_parser_oversized_body_error(
         self,
         *,
+        stub: PositionStub | None = None,
         url: str | None = None,
         source: str | None = None,
         body_len: int = 4321,
     ) -> None:
-        stub = self.default_position_stub
+        position_stub = self.default_position_stub if stub is None else stub
         self._set_parser_enrich_error(
             OversizedBodyError(
-                url=stub.url if url is None else url,
-                source=stub.source if source is None else source,
+                url=position_stub.url if url is None else url,
+                source=position_stub.source if source is None else source,
                 body_len=body_len,
             )
         )
@@ -448,10 +449,12 @@ class ParserIntakeHarness:
         self,
         message: str = "503 Service Unavailable",
         *,
+        stub: PositionStub | None = None,
         url: str | None = None,
         status_code: int = 503,
     ) -> None:
-        request_url = self.default_position_stub.url if url is None else url
+        position_stub = self.default_position_stub if stub is None else stub
+        request_url = position_stub.url if url is None else url
         self._set_parser_enrich_error(
             httpx.HTTPStatusError(
                 message,

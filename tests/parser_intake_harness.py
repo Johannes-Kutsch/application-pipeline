@@ -82,6 +82,7 @@ class ClassifyCall:
     listing_id: int
     stub: PositionStub
     body: str
+    parser_id: str
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,7 @@ class InMemoryParser:
         self._enrich_error = enrich_error
 
 
-class CollectingClassifySink:
+class CollectingClassifyHandoff:
     def __init__(self) -> None:
         self.calls: list[ClassifyCall] = []
 
@@ -143,6 +144,7 @@ class CollectingClassifySink:
                 listing_id=request.submission.listing_id,
                 stub=request.submission.stub,
                 body=request.submission.raw_description,
+                parser_id=request.parser_id,
             )
         )
 
@@ -228,7 +230,7 @@ class ParserIntakeHarness:
     run_log: RunLog
     metrics: RunMetrics
     status_display: FakeStatusDisplay
-    classify_sink: CollectingClassifySink
+    classify_handoff: CollectingClassifyHandoff
     pool_collector: CollectingPoolCollector
     seen_path: Path
     extracts_path: Path
@@ -302,7 +304,7 @@ class ParserIntakeHarness:
             EnrichResult(stub=enriched_stub, body=body, mode="native"),
             enrich_error=parser_enrich_error,
         )
-        classify_handoff = CollectingClassifySink()
+        classify_handoff = CollectingClassifyHandoff()
         pool_collector = CollectingPoolCollector()
         parser_intake = ParserIntake(
             parser_id=parser_id,
@@ -330,7 +332,7 @@ class ParserIntakeHarness:
             run_log=run_log,
             metrics=metrics,
             status_display=status_display,
-            classify_sink=classify_handoff,
+            classify_handoff=classify_handoff,
             pool_collector=pool_collector,
             seen_path=seen_path,
             extracts_path=extracts_path,
@@ -682,7 +684,7 @@ class ParserIntakeHarness:
         return stub
 
     def classify_handoffs(self) -> list[ClassifyCall]:
-        return list(self.classify_sink.calls)
+        return list(self.classify_handoff.calls)
 
     def pool_admissions(self) -> list[PoolAdmission]:
         return list(self.pool_collector.admissions)

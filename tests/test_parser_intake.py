@@ -253,6 +253,21 @@ def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
     assert handoffs[0].body == harness.default_body
 
 
+def test_accepted_listing_delivered_to_classify_handoff_with_parser_identity(
+    tmp_path: Path,
+) -> None:
+    harness = ParserIntakeHarness.create(tmp_path, parser_id="parser.test")
+
+    harness.process_one_position_stub()
+
+    handoffs = harness.classify_handoffs()
+    assert len(handoffs) == 1
+    assert handoffs[0].parser_id == "parser.test"
+    assert handoffs[0].listing_id == 1
+    assert handoffs[0].stub == harness.default_enriched_stub
+    assert handoffs[0].body == harness.default_body
+
+
 def test_fresh_stub_reaching_classify_updates_queue_and_metrics(tmp_path: Path) -> None:
     harness = ParserIntakeHarness.create(tmp_path)
 

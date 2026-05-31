@@ -6,14 +6,17 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal, Protocol, cast
 
 import httpx
 
 from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.content_gate import ContentGate
-from application_pipeline.dedup import DeduplicationStore, load as load_dedup
+from application_pipeline.dedup import (
+    DeduplicationStore,
+    load as load_dedup,
+)
 from application_pipeline.dedup_counters import DedupCounters, DedupSnapshot
 from application_pipeline.extracts import CardStore, load_card_store
 from application_pipeline.extracts.card_store import CardExtract
@@ -44,6 +47,31 @@ DEFAULT_ENRICHED_STUB = PositionStub(
     posted_date=DEFAULT_DISCOVERED_STUB.posted_date,
 )
 DEFAULT_BODY = "Fresh backend role " + "x" * 120
+HarnessSeedHelper = Callable[["ParserIntakeHarness"], int]
+
+
+class ContentGateLike(Protocol):
+    def inspect(self, body: str, stub: PositionStub) -> object: ...
+
+    def snapshot(self) -> object: ...
+
+
+class FreshnessGateLike(Protocol):
+    def admit(
+        self,
+        stub: PositionStub,
+        *,
+        gate_arm: Literal["discover", "post_enrich", "post_llm"],
+        deadline: date | None,
+    ) -> bool: ...
+
+    def snapshot(self) -> object: ...
+
+
+class PreFilterGateLike(Protocol):
+    def admit(self, stub: PositionStub) -> bool: ...
+
+    def snapshot(self) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -118,6 +146,66 @@ class CollectingPoolCollector:
         self.admissions.append(PoolAdmission(listing_id=listing_id, stub=stub))
 
 
+class UnexpectedEnrichParser:
+    def __enter__(self) -> "UnexpectedEnrichParser":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: object) -> list[PositionStub]:
+        return []
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        raise AssertionError("discover-arm freshness drop must stop before enrich()")
+
+
+class PassThroughPreFilter:
+    def admit(self, stub: PositionStub) -> bool:
+        return True
+
+    def snapshot(self) -> object:
+        return None
+
+
+class CountingPreFilter:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def admit(self, stub: PositionStub) -> bool:
+        self.calls += 1
+        return True
+
+    def snapshot(self) -> object:
+        return None
+
+
+class FailOnPostEnrichFreshnessGate:
+    def admit(
+        self,
+        stub: PositionStub,
+        *,
+        gate_arm: str,
+        deadline: date | None,
+    ) -> bool:
+        if gate_arm == "post_enrich":
+            raise AssertionError(
+                "post-enrich dedup drop must stop before post-enrich freshness"
+            )
+        return True
+
+    def snapshot(self) -> object:
+        return None
+
+
+class UnexpectedContentGate:
+    def inspect(self, body: str, stub: PositionStub) -> object:
+        raise AssertionError("post-enrich dedup drop must stop before Content Gate")
+
+    def snapshot(self) -> object:
+        return None
+
+
 @dataclass
 class ParserIntakeHarness:
     parser_intake: ParserIntake
@@ -125,9 +213,9 @@ class ParserIntakeHarness:
     dedup_store: DeduplicationStore
     dedup_counters: DedupCounters
     card_store: CardStore
-    freshness_gate: FreshnessGate
-    content_gate: ContentGate
-    domain_pre_filter: PreFilterGate
+    freshness_gate: FreshnessGateLike
+    content_gate: ContentGateLike
+    domain_pre_filter: PreFilterGateLike
     run_log: RunLog
     metrics: RunMetrics
     status_display: FakeStatusDisplay
@@ -154,9 +242,9 @@ class ParserIntakeHarness:
         body: str = DEFAULT_BODY,
         parser: Parser | None = None,
         parser_enrich_error: Exception | None = None,
-        freshness_gate: FreshnessGate | None = None,
-        content_gate: ContentGate | None = None,
-        domain_pre_filter: PreFilterGate | None = None,
+        freshness_gate: FreshnessGateLike | None = None,
+        content_gate: ContentGateLike | None = None,
+        domain_pre_filter: PreFilterGateLike | None = None,
         negative_keywords: list[str] | None = None,
     ) -> "ParserIntakeHarness":
         seen_path = tmp_path / ".seen.json"
@@ -167,24 +255,33 @@ class ParserIntakeHarness:
         card_store = load_card_store(extracts_path)
         dedup_store = load_dedup(seen_path, card_store=card_store, run_log=run_log)
         dedup_counters = DedupCounters(display=status_display, run_log=run_log)
-        configured_freshness_gate = freshness_gate or FreshnessGate(
-            anchored_today=anchored_today,
-            max_listing_age_days=max_listing_age_days,
-            dedup=dedup_store,
-            display=status_display,
-            run_log=run_log,
-            card_store=card_store,
-        )
-        configured_content_gate = content_gate or ContentGate(
-            display=status_display,
-            run_log=run_log,
-        )
-        configured_pre_filter = domain_pre_filter or PreFilterGate(
-            blacklist=[] if negative_keywords is None else negative_keywords,
-            dedup=dedup_store,
-            display=status_display,
-            run_log=run_log,
-        )
+        if freshness_gate is None:
+            configured_freshness_gate: FreshnessGateLike = FreshnessGate(
+                anchored_today=anchored_today,
+                max_listing_age_days=max_listing_age_days,
+                dedup=dedup_store,
+                display=status_display,
+                run_log=run_log,
+                card_store=card_store,
+            )
+        else:
+            configured_freshness_gate = freshness_gate
+        if content_gate is None:
+            configured_content_gate: ContentGateLike = ContentGate(
+                display=status_display,
+                run_log=run_log,
+            )
+        else:
+            configured_content_gate = content_gate
+        if domain_pre_filter is None:
+            configured_pre_filter: PreFilterGateLike = PreFilterGate(
+                blacklist=[] if negative_keywords is None else negative_keywords,
+                dedup=dedup_store,
+                display=status_display,
+                run_log=run_log,
+            )
+        else:
+            configured_pre_filter = domain_pre_filter
         metrics = RunMetrics(status_display, run_log=run_log)
         metrics.register_parser(
             parser_id,
@@ -201,11 +298,11 @@ class ParserIntakeHarness:
         parser_intake = ParserIntake(
             parser_id=parser_id,
             parser=parser_instance,
-            freshness_gate=configured_freshness_gate,
+            freshness_gate=cast(FreshnessGate, configured_freshness_gate),
             deduplication=dedup_store,
             dedup_counters=dedup_counters,
-            domain_pre_filter=configured_pre_filter,
-            content_gate=configured_content_gate,
+            domain_pre_filter=cast(PreFilterGate, configured_pre_filter),
+            content_gate=cast(ContentGate, configured_content_gate),
             card_store=card_store,
             pool_collector=pool_collector,
             classify_sink=classify_sink,
@@ -550,6 +647,15 @@ class ParserIntakeHarness:
 
     def dedup_counter_snapshot(self) -> DedupSnapshot:
         return self.dedup_counters.snapshot()
+
+    def assert_dedup_recorded(self, expected: str | None) -> None:
+        snapshot = self.dedup_counters.snapshot()
+        assert snapshot.dedup_url_hits == (1 if expected == "url_hit" else 0)
+        assert snapshot.dedup_tuple_hits == (1 if expected == "tuple_hit" else 0)
+        assert snapshot.dedup_fuzzy_hits == (1 if expected == "fuzzy_hit" else 0)
+        assert snapshot.dedup_run_hits == (1 if expected == "run_hit" else 0)
+        assert snapshot.dedup_misses == (1 if expected == "miss" else 0)
+        assert snapshot.judge_resumed == (1 if expected == "judge_pending" else 0)
 
     def log_artifact_event_rows(self, component_id: str) -> list[dict[str, object]]:
         return _read_jsonl_rows(

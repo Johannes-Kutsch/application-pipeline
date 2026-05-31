@@ -2,80 +2,21 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, cast
 
 import pytest
 
 from application_pipeline.content_gate import ContentSnapshot
-from application_pipeline.dedup_counters import DedupCounters
 from application_pipeline.extracts.card_store import CardExtract
 from application_pipeline.parsers import PositionStub
-from application_pipeline.parsers.types import EnrichResult
-from tests.parser_intake_harness import ParserIntakeHarness
-
-
-_HarnessSeedHelper = Callable[[ParserIntakeHarness], int]
-
-
-def _assert_dedup_recorded(
-    counters: DedupCounters,
-    expected: str | None,
-) -> None:
-    snapshot = counters.snapshot()
-    assert snapshot.dedup_url_hits == (1 if expected == "url_hit" else 0)
-    assert snapshot.dedup_tuple_hits == (1 if expected == "tuple_hit" else 0)
-    assert snapshot.dedup_fuzzy_hits == (1 if expected == "fuzzy_hit" else 0)
-    assert snapshot.dedup_run_hits == (1 if expected == "run_hit" else 0)
-    assert snapshot.dedup_misses == (1 if expected == "miss" else 0)
-    assert snapshot.judge_resumed == (1 if expected == "judge_pending" else 0)
-
-
-class _UnexpectedEnrichParser:
-    def __enter__(self) -> "_UnexpectedEnrichParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        raise AssertionError("discover-arm freshness drop must stop before enrich()")
-
-
-class _PassThroughPreFilter:
-    def admit(self, stub: PositionStub) -> bool:
-        return True
-
-
-class _CountingPreFilter:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def admit(self, stub: PositionStub) -> bool:
-        self.calls += 1
-        return True
-
-
-class _FailOnPostEnrichFreshnessGate:
-    def admit(
-        self,
-        stub: PositionStub,
-        *,
-        gate_arm: str,
-        deadline: date | None,
-    ) -> bool:
-        if gate_arm == "post_enrich":
-            raise AssertionError(
-                "post-enrich dedup drop must stop before post-enrich freshness"
-            )
-        return True
-
-
-class _UnexpectedContentGate:
-    def inspect(self, body: str, stub: PositionStub) -> object:
-        raise AssertionError("post-enrich dedup drop must stop before Content Gate")
+from tests.parser_intake_harness import (
+    CountingPreFilter,
+    FailOnPostEnrichFreshnessGate,
+    HarnessSeedHelper,
+    ParserIntakeHarness,
+    PassThroughPreFilter,
+    UnexpectedContentGate,
+    UnexpectedEnrichParser,
+)
 
 
 @pytest.mark.parametrize(
@@ -102,7 +43,7 @@ class _UnexpectedContentGate:
 def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_store_state(
     tmp_path: Path,
     dedup_kind: str,
-    seed_listing: _HarnessSeedHelper,
+    seed_listing: HarnessSeedHelper,
 ) -> None:
     stub = PositionStub(
         url="https://example.com/alias",
@@ -113,21 +54,21 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_sto
         posted_date=date(2026, 5, 29),
     )
 
-    prefilter = _CountingPreFilter()
+    prefilter = CountingPreFilter()
     harness = ParserIntakeHarness.create(
         tmp_path,
         parser_id="test",
         discovered_stub=stub,
         enriched_stub=stub,
-        parser=_UnexpectedEnrichParser(),
-        domain_pre_filter=cast(Any, prefilter),
+        parser=UnexpectedEnrichParser(),
+        domain_pre_filter=prefilter,
     )
 
     with harness.run_scope():
         expected_listing_id = seed_listing(harness)
         harness.process_one_position_stub(stub)
 
-    _assert_dedup_recorded(harness.dedup_counters, dedup_kind)
+    harness.assert_dedup_recorded(dedup_kind)
     assert harness.status_display_row_body("parser test gates") == "1 dedup"
     assert prefilter.calls == 0
     assert harness.card_content(expected_listing_id) is None
@@ -149,7 +90,7 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
         parser_id="test",
         discovered_stub=stub,
         enriched_stub=stub,
-        parser=_UnexpectedEnrichParser(),
+        parser=UnexpectedEnrichParser(),
         negative_keywords=["python"],
     )
 
@@ -157,7 +98,7 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
 
     listing_id = harness.listing_id_for_url(stub.url)
     assert listing_id == 1
-    _assert_dedup_recorded(harness.dedup_counters, "miss")
+    harness.assert_dedup_recorded("miss")
     assert harness.status_display_row_body("parser test gates") == "1 pre-filter"
     assert harness.card_content(listing_id) is None
     assert harness.classify_handoffs() == []
@@ -207,7 +148,7 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
             location="Hamburg",
             posted_date=date(2026, 5, 29),
         ),
-        parser=_UnexpectedEnrichParser(),
+        parser=UnexpectedEnrichParser(),
     )
     listing_id = harness.seed_matched_pool_reentry_listing()
     harness.seed_persisted_card(
@@ -220,7 +161,7 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
     harness.process_one_position_stub(alias_stub)
 
     assert harness.status_display_row_body("parser test gates") == "1 freshness"
-    _assert_dedup_recorded(harness.dedup_counters, None)
+    harness.assert_dedup_recorded(None)
 
     dedup_record = harness.dedup_observation(listing_id)
     assert dedup_record is not None
@@ -286,7 +227,7 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     assert len(admissions) == 1
     assert admissions[0].listing_id == listing_id
     assert admissions[0].stub == rediscovered_stub
-    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    harness.assert_dedup_recorded("judge_pending")
     assert (
         harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
     )
@@ -317,7 +258,7 @@ def test_fresh_stub_reaching_classify_updates_queue_and_metrics(tmp_path: Path) 
 
     harness.process_one_position_stub()
 
-    _assert_dedup_recorded(harness.dedup_counters, "run_hit")
+    harness.assert_dedup_recorded("run_hit")
     assert (
         harness.status_display_row_body("parser parser test")
         == "0 discovered · 1 forwarded"
@@ -368,7 +309,7 @@ def test_fresh_stub_reaching_classify_updates_queue_and_metrics(tmp_path: Path) 
 def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_card(
     tmp_path: Path,
     dedup_kind: str,
-    seed_listing: _HarnessSeedHelper,
+    seed_listing: HarnessSeedHelper,
     enriched_stub: PositionStub,
 ) -> None:
     discovered_stub = PositionStub(
@@ -383,16 +324,16 @@ def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_ca
         discovered_stub=discovered_stub,
         enriched_stub=enriched_stub,
         body="Backfilled body " + "x" * 120,
-        freshness_gate=cast(Any, _FailOnPostEnrichFreshnessGate()),
-        content_gate=cast(Any, _UnexpectedContentGate()),
-        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
+        freshness_gate=FailOnPostEnrichFreshnessGate(),
+        content_gate=UnexpectedContentGate(),
+        domain_pre_filter=PassThroughPreFilter(),
     )
 
     expected_listing_id = seed_listing(harness)
     harness.seed_persisted_card(expected_listing_id, body="Persisted body")
 
     harness.process_one_position_stub(discovered_stub)
-    _assert_dedup_recorded(harness.dedup_counters, dedup_kind)
+    harness.assert_dedup_recorded(dedup_kind)
 
     card = harness.card_content(expected_listing_id)
     assert card is not None
@@ -457,7 +398,7 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
         location="Hamburg",
         posted_date=date(2026, 5, 29),
     )
-    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    harness.assert_dedup_recorded("judge_pending")
     assert (
         harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
     )
@@ -517,7 +458,7 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
         location="Hamburg",
         posted_date=date(2026, 5, 29),
     )
-    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    harness.assert_dedup_recorded("judge_pending")
     assert (
         harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
     )
@@ -576,7 +517,7 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
 
     harness.process_one_position_stub(discovered_stub)
 
-    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    harness.assert_dedup_recorded("judge_pending")
     assert harness.status_display_row_body("parser test gates") == "1 content"
     assert harness.pool_admissions() == []
     assert harness.card_content(listing_id) == CardExtract(
@@ -628,7 +569,7 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
         tmp_path,
         parser_id="test",
         discovered_stub=discovered_stub,
-        content_gate=cast(Any, _UnexpectedContentGate()),
+        content_gate=UnexpectedContentGate(),
     )
     harness.set_parser_backfilled_enrich_result(
         title="Platform Engineer",
@@ -647,7 +588,7 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
 
     harness.process_one_position_stub(discovered_stub)
 
-    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    harness.assert_dedup_recorded("judge_pending")
     assert harness.status_display_row_body("parser test gates") == "1 freshness"
     assert harness.card_content(listing_id) is None
 
@@ -690,14 +631,14 @@ def test_parser_enrich_failed_logs_and_updates_metrics_without_seen_or_card_writ
         tmp_path,
         parser_id="test",
         discovered_stub=stub,
-        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
+        domain_pre_filter=PassThroughPreFilter(),
     )
     harness.set_parser_enrich_failed_error()
 
     harness.process_one_position_stub(stub)
 
     listing_id = 1
-    _assert_dedup_recorded(harness.dedup_counters, "miss")
+    harness.assert_dedup_recorded("miss")
     assert harness.status_display_row_body("parser test") == (
         "0 discovered · 1 enrich_failed · 0 forwarded"
     )
@@ -742,7 +683,7 @@ def test_post_enrich_content_drop_uses_harness_observations_without_persisting_s
         tmp_path,
         parser_id="test",
         discovered_stub=stub,
-        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
+        domain_pre_filter=PassThroughPreFilter(),
     )
     harness.set_parser_enrich_result(
         stub=PositionStub(
@@ -801,14 +742,14 @@ def test_parser_oversized_body_logs_skip_without_seen_or_card_write(
         tmp_path,
         parser_id="test",
         discovered_stub=stub,
-        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
+        domain_pre_filter=PassThroughPreFilter(),
     )
     harness.set_parser_oversized_body_error()
 
     harness.process_one_position_stub(stub)
 
     listing_id = 1
-    _assert_dedup_recorded(harness.dedup_counters, "miss")
+    harness.assert_dedup_recorded("miss")
     assert harness.status_display_row_body("parser test") == (
         "0 discovered · 0 forwarded"
     )
@@ -846,14 +787,14 @@ def test_parser_transient_http_error_logs_skip_without_seen_or_card_write(
         tmp_path,
         parser_id="test",
         discovered_stub=stub,
-        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
+        domain_pre_filter=PassThroughPreFilter(),
     )
     harness.set_parser_transient_http_error()
 
     harness.process_one_position_stub(stub)
 
     listing_id = 1
-    _assert_dedup_recorded(harness.dedup_counters, "miss")
+    harness.assert_dedup_recorded("miss")
     assert harness.status_display_row_body("parser test") == (
         "0 discovered · 0 forwarded"
     )

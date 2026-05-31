@@ -8,6 +8,8 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
+import httpx
+
 from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.content_gate import ContentGate
@@ -19,6 +21,8 @@ from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parser_intake import ParserIntake
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, PositionStub
+from application_pipeline.parsers.body_fetch import OversizedBodyError
+from application_pipeline.parsers.types import EnrichFailedError
 from application_pipeline.parsers.types import EnrichResult
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.run_metrics import RunMetrics
@@ -67,8 +71,14 @@ class DeduplicationObservation:
 
 
 class InMemoryParser:
-    def __init__(self, enrich_result: EnrichResult) -> None:
+    def __init__(
+        self,
+        enrich_result: EnrichResult,
+        *,
+        enrich_error: Exception | None = None,
+    ) -> None:
         self._enrich_result = enrich_result
+        self._enrich_error = enrich_error
 
     def __enter__(self) -> InMemoryParser:
         return self
@@ -80,10 +90,16 @@ class InMemoryParser:
         return []
 
     def enrich(self, stub: PositionStub) -> EnrichResult:
+        if self._enrich_error is not None:
+            raise self._enrich_error
         return self._enrich_result
 
     def set_enrich_result(self, enrich_result: EnrichResult) -> None:
         self._enrich_result = enrich_result
+        self._enrich_error = None
+
+    def set_enrich_error(self, enrich_error: Exception | None) -> None:
+        self._enrich_error = enrich_error
 
 
 class CollectingClassifySink:
@@ -137,6 +153,7 @@ class ParserIntakeHarness:
         enriched_stub: PositionStub = DEFAULT_ENRICHED_STUB,
         body: str = DEFAULT_BODY,
         parser: Parser | None = None,
+        parser_enrich_error: Exception | None = None,
         freshness_gate: FreshnessGate | None = None,
         content_gate: ContentGate | None = None,
         domain_pre_filter: PreFilterGate | None = None,
@@ -176,7 +193,8 @@ class ParserIntakeHarness:
             has_native_enrich=True,
         )
         parser_instance = parser or InMemoryParser(
-            EnrichResult(stub=enriched_stub, body=body, mode="native")
+            EnrichResult(stub=enriched_stub, body=body, mode="native"),
+            enrich_error=parser_enrich_error,
         )
         classify_sink = CollectingClassifySink()
         pool_collector = CollectingPoolCollector()
@@ -403,6 +421,50 @@ class ParserIntakeHarness:
                 mode=mode,
             )
         )
+
+    def set_parser_enrich_failed_error(
+        self,
+        message: str = "native enrich failed",
+    ) -> None:
+        self._set_parser_enrich_error(EnrichFailedError(message))
+
+    def set_parser_oversized_body_error(
+        self,
+        *,
+        url: str | None = None,
+        source: str | None = None,
+        body_len: int = 4321,
+    ) -> None:
+        stub = self.default_position_stub
+        self._set_parser_enrich_error(
+            OversizedBodyError(
+                url=stub.url if url is None else url,
+                source=stub.source if source is None else source,
+                body_len=body_len,
+            )
+        )
+
+    def set_parser_transient_http_error(
+        self,
+        message: str = "503 Service Unavailable",
+        *,
+        url: str | None = None,
+        status_code: int = 503,
+    ) -> None:
+        request_url = self.default_position_stub.url if url is None else url
+        self._set_parser_enrich_error(
+            httpx.HTTPStatusError(
+                message,
+                request=httpx.Request("GET", request_url),
+                response=httpx.Response(status_code),
+            )
+        )
+
+    def _set_parser_enrich_error(self, enrich_error: Exception | None) -> None:
+        assert isinstance(self.parser, InMemoryParser), (
+            "_set_parser_enrich_error() requires the default InMemoryParser"
+        )
+        self.parser.set_enrich_error(enrich_error)
 
     def set_parser_backfilled_enrich_result(
         self,

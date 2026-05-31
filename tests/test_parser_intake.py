@@ -1,50 +1,20 @@
 from __future__ import annotations
 
-import json
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable, cast
 
-import httpx
 import pytest
 
-from fake_status_display import FakeStatusDisplay
-
-from application_pipeline.content_gate import ContentGate, ContentSnapshot
-from application_pipeline.dedup import load as dedup_load
+from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupCounters
-from application_pipeline.extracts import load_card_store
 from application_pipeline.extracts.card_store import CardExtract
-from application_pipeline.freshness_gate import FreshnessGate
-from application_pipeline.parser_intake import ParserIntake
-from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
-from application_pipeline.parsers.body_fetch import OversizedBodyError
-from application_pipeline.parsers.types import EnrichFailedError, EnrichResult
-from application_pipeline.run_metrics import RunMetrics
+from application_pipeline.parsers.types import EnrichResult
 from tests.parser_intake_harness import ParserIntakeHarness
 
 
 _HarnessSeedHelper = Callable[[ParserIntakeHarness], int]
-
-
-def _make_dedup_counters(run_log: RunLog) -> DedupCounters:
-    return DedupCounters(display=FakeStatusDisplay(), run_log=run_log)
-
-
-def _make_run_metrics(
-    run_log: RunLog, *, parser_id: str = "test"
-) -> tuple[RunMetrics, FakeStatusDisplay]:
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=run_log)
-    metrics.register_parser(parser_id, order=0, total_queries=1, has_native_enrich=True)
-    return metrics, display
-
-
-def _last_body(display: FakeStatusDisplay, row: str) -> str:
-    updates = display.body_updates_for(row)
-    assert updates, f"no body updates for row {row!r}"
-    return updates[-1]
 
 
 def _assert_dedup_recorded(
@@ -58,26 +28,6 @@ def _assert_dedup_recorded(
     assert snapshot.dedup_run_hits == (1 if expected == "run_hit" else 0)
     assert snapshot.dedup_misses == (1 if expected == "miss" else 0)
     assert snapshot.judge_resumed == (1 if expected == "judge_pending" else 0)
-
-
-def _read_event_rows(
-    logs_dir: Path, layer: str, component: str
-) -> list[dict[str, object]]:
-    return [
-        json.loads(line)
-        for line in (logs_dir / layer / f"{component}.events.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip()
-    ]
-
-
-class _RecordingPoolCollector:
-    def __init__(self) -> None:
-        self.admissions: list[tuple[int, PositionStub]] = []
-
-    def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None:
-        self.admissions.append((listing_id, stub))
 
 
 class _UnexpectedEnrichParser:
@@ -126,52 +76,6 @@ class _FailOnPostEnrichFreshnessGate:
 class _UnexpectedContentGate:
     def inspect(self, body: str, stub: PositionStub) -> object:
         raise AssertionError("post-enrich dedup drop must stop before Content Gate")
-
-
-class _EnrichFailedParser:
-    def __enter__(self) -> "_EnrichFailedParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        raise EnrichFailedError("native enrich failed")
-
-
-class _OversizedBodyParser:
-    def __enter__(self) -> "_OversizedBodyParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        raise OversizedBodyError(url=stub.url, source=stub.source, body_len=4321)
-
-
-class _TransientHttpErrorParser:
-    def __enter__(self) -> "_TransientHttpErrorParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        raise httpx.HTTPStatusError(
-            "503 Service Unavailable",
-            request=httpx.Request("GET", stub.url),
-            response=httpx.Response(503),
-        )
 
 
 @pytest.mark.parametrize(
@@ -774,9 +678,6 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
 def test_parser_enrich_failed_logs_and_updates_metrics_without_seen_or_card_write(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     stub = PositionStub(
         url="https://example.com/enrich-failed",
         title="Platform Engineer",
@@ -785,49 +686,37 @@ def test_parser_enrich_failed_logs_and_updates_metrics_without_seen_or_card_writ
         location="Hamburg",
         posted_date=date(2026, 5, 29),
     )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
-        parser=_EnrichFailedParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
+        discovered_stub=stub,
+        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
     )
+    harness.set_parser_enrich_failed_error()
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(stub)
-    _assert_dedup_recorded(dedup_counters, "miss")
-    assert _last_body(metrics_display, "parser test") == (
+    harness.process_one_position_stub(stub)
+
+    listing_id = 1
+    _assert_dedup_recorded(harness.dedup_counters, "miss")
+    assert harness.status_display_row_body("parser test") == (
         "0 discovered · 1 enrich_failed · 0 forwarded"
     )
     assert [
         {k: v for k, v in row.items() if k != "ts"}
-        for row in _read_event_rows(logs_dir, "pipeline", "orchestrator")
+        for row in harness.log_artifact_event_rows("pipeline_orchestrator")
     ] == [
         {
-            "event": "enrich_failed",
             "url": stub.url,
             "source": stub.source,
+            "event": "enrich_failed",
         }
     ]
-    assert card_store.get(1) is None
-    assert not seen_path.exists()
+    assert harness.card_content(listing_id) is None
+    assert harness.persisted_card_content(listing_id) is None
+    assert harness.dedup_observation(listing_id) is None
+    assert harness.persisted_listing_id_for_url(stub.url) is None
+    assert harness.persisted_dedup_observation(listing_id) is None
+    assert harness.persisted_dedup_status(listing_id) is None
 
 
 @pytest.mark.parametrize(
@@ -900,9 +789,6 @@ def test_post_enrich_content_drop_uses_harness_observations_without_persisting_s
 def test_parser_oversized_body_logs_skip_without_seen_or_card_write(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     stub = PositionStub(
         url="https://example.com/oversized",
         title="Platform Engineer",
@@ -911,56 +797,43 @@ def test_parser_oversized_body_logs_skip_without_seen_or_card_write(
         location="Hamburg",
         posted_date=date(2026, 5, 29),
     )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
-        parser=_OversizedBodyParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
+        discovered_stub=stub,
+        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
     )
+    harness.set_parser_oversized_body_error()
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(stub)
-    _assert_dedup_recorded(dedup_counters, "miss")
-    assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
+    harness.process_one_position_stub(stub)
+
+    listing_id = 1
+    _assert_dedup_recorded(harness.dedup_counters, "miss")
+    assert harness.status_display_row_body("parser test") == (
+        "0 discovered · 0 forwarded"
+    )
     assert [
         {k: v for k, v in row.items() if k != "ts"}
-        for row in _read_event_rows(logs_dir, "llm", "enricher")
+        for row in harness.log_artifact_event_rows("llm_enricher")
     ] == [
         {
-            "event": "body_oversized",
             "url": stub.url,
             "source": stub.source,
             "body_len": 4321,
+            "event": "body_oversized",
         }
     ]
-    assert card_store.get(1) is None
-    assert not seen_path.exists()
+    assert harness.card_content(listing_id) is None
+    assert harness.persisted_card_content(listing_id) is None
+    assert harness.dedup_observation(listing_id) is None
+    assert harness.persisted_listing_id_for_url(stub.url) is None
+    assert harness.persisted_dedup_observation(listing_id) is None
+    assert harness.persisted_dedup_status(listing_id) is None
 
 
 def test_parser_transient_http_error_logs_skip_without_seen_or_card_write(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     stub = PositionStub(
         url="https://example.com/transient",
         title="Platform Engineer",
@@ -969,45 +842,35 @@ def test_parser_transient_http_error_logs_skip_without_seen_or_card_write(
         location="Hamburg",
         posted_date=date(2026, 5, 29),
     )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
-        parser=_TransientHttpErrorParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
+        discovered_stub=stub,
+        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
     )
+    harness.set_parser_transient_http_error()
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(stub)
-    _assert_dedup_recorded(dedup_counters, "miss")
-    assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
+    harness.process_one_position_stub(stub)
+
+    listing_id = 1
+    _assert_dedup_recorded(harness.dedup_counters, "miss")
+    assert harness.status_display_row_body("parser test") == (
+        "0 discovered · 0 forwarded"
+    )
     assert [
         {k: v for k, v in row.items() if k != "ts"}
-        for row in _read_event_rows(logs_dir, "llm", "enricher")
+        for row in harness.log_artifact_event_rows("llm_enricher")
     ] == [
         {
-            "event": "fetch_transient_error",
             "url": stub.url,
             "source": stub.source,
             "error": "503 Service Unavailable",
+            "event": "fetch_transient_error",
         }
     ]
-    assert card_store.get(1) is None
-    assert not seen_path.exists()
+    assert harness.card_content(listing_id) is None
+    assert harness.persisted_card_content(listing_id) is None
+    assert harness.dedup_observation(listing_id) is None
+    assert harness.persisted_listing_id_for_url(stub.url) is None
+    assert harness.persisted_dedup_observation(listing_id) is None
+    assert harness.persisted_dedup_status(listing_id) is None

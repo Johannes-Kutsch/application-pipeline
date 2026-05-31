@@ -119,13 +119,27 @@ def _classify_request(listing_id: int) -> ClassifyRequest:
     )
 
 
-def _submit_ready(handoff: ClassifyStageHandoff, listing_id: int) -> None:
+def _classify_ready_facts(
+    listing_id: int,
+) -> tuple[int, PositionStub, str, str]:
     request = _classify_request(listing_id)
+    return (
+        request.submission.listing_id,
+        request.submission.stub,
+        request.submission.raw_description,
+        request.parser_id,
+    )
+
+
+def _submit_ready(handoff: ClassifyStageHandoff, listing_id: int) -> None:
+    ready_listing_id, stub, raw_description, parser_id = _classify_ready_facts(
+        listing_id
+    )
     handoff.submit_ready(
-        listing_id=request.submission.listing_id,
-        stub=request.submission.stub,
-        raw_description=request.submission.raw_description,
-        parser_id=request.parser_id,
+        listing_id=ready_listing_id,
+        stub=stub,
+        raw_description=raw_description,
+        parser_id=parser_id,
     )
 
 
@@ -701,21 +715,19 @@ def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_l
         metrics=_FakeMetrics(),
     )
     handoff = stage.handoff_for(parser_id="parser.test", metrics=_FakeMetrics())
-    request = _classify_request(1)
+    listing_id, stub, raw_description, parser_id = _classify_ready_facts(1)
 
     stage.start()
     handoff.submit_ready(
-        listing_id=request.submission.listing_id,
-        stub=request.submission.stub,
-        raw_description=request.submission.raw_description,
-        parser_id=request.parser_id,
+        listing_id=listing_id,
+        stub=stub,
+        raw_description=raw_description,
+        parser_id=parser_id,
     )
     completion = stage.wait()
 
     assert completion.first_failure is None
-    assert pool_collector.matched == [
-        (request.submission.listing_id, request.submission.stub)
-    ]
+    assert pool_collector.matched == [(listing_id, stub)]
     rows = _classify_event_rows(logs_dir)
     assert len(rows) == 1
     assert rows[0]["event"] == "classify_relevance"

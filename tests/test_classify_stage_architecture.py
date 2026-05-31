@@ -48,6 +48,16 @@ def test_orchestrator_imports_only_classify_stage_facade_surface() -> None:
     }
 
 
+def test_classify_stage_handoff_exposes_submit_ready_as_only_public_operation() -> None:
+    public_methods = {
+        name
+        for name, value in classify_stage.ClassifyStageHandoff.__dict__.items()
+        if callable(value) and not name.startswith("_")
+    }
+
+    assert public_methods == {"submit_ready"}
+
+
 def test_classify_stage_ownership_guard_covers_owned_seam_symbols() -> None:
     expected_owned_symbols = {
         "ClassifyReadySubmission",

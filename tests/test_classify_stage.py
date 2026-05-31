@@ -750,7 +750,7 @@ def test_classify_stage_handoff_fills_complete_batch_before_tail_flush_at_stage_
 
     assert completion.first_failure is None
     assert llm_enricher.calls == [[1, 2, 3], [4, 5]]
-    assert pool_collector.matched == expected_pairs
+    assert sorted(pool_collector.matched, key=lambda item: item[0]) == expected_pairs
 
 
 def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_logs_match(

@@ -415,13 +415,14 @@ class _FakeClock:
 class _UsageLimitThenMatchedEnricher:
     def __init__(self, *, reset_time: datetime) -> None:
         self._reset_time = reset_time
-        self.calls = 0
+        self.calls: list[list[int]] = []
 
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
     ) -> AppliedClassifyOutcome:
-        self.calls += 1
-        if self.calls == 1:
+        listing_ids = [listing_id for listing_id, _, _ in items]
+        self.calls.append(listing_ids)
+        if len(self.calls) == 1:
             raise ClaudeUsageLimitError(
                 "quota hit",
                 returncode=1,
@@ -1143,7 +1144,7 @@ def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
     monkeypatch.setattr("application_pipeline.classify_stage.datetime", _FakeDateTime)
 
     stage = ClassifyStage(
-        batch_size=1,
+        batch_size=2,
         parallelism=1,
         pool_collector=pool_collector,
         llm_enricher=llm_enricher,
@@ -1156,15 +1157,19 @@ def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
 
     stage.start()
     _submit_ready(handoff, 1)
+    _submit_ready(handoff, 2)
     stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None
-    assert llm_enricher.calls == 2
+    assert llm_enricher.calls == [[1, 2], [1, 2]]
     assert clock.sleep_calls == [420.0]
     assert metrics.classify_calls == 1
-    assert _last_body(display, "llm classify relevance") == "1 forwarded"
-    assert pool_collector.matched == [(1, _classify_request(1).submission.stub)]
+    assert _last_body(display, "llm classify relevance") == "2 forwarded"
+    assert pool_collector.matched == [
+        (1, _classify_request(1).submission.stub),
+        (2, _classify_request(2).submission.stub),
+    ]
     assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]
     classify_rows = _classify_event_rows(logs_dir)
     assert classify_rows == [
@@ -1172,7 +1177,12 @@ def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
             "ts": classify_rows[0]["ts"],
             "event": "classify_relevance",
             "matches": True,
-        }
+        },
+        {
+            "ts": classify_rows[1]["ts"],
+            "event": "classify_relevance",
+            "matches": True,
+        },
     ]
 
 

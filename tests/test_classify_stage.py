@@ -169,12 +169,17 @@ def _pipeline_event_rows(logs_dir: Path) -> list[dict[str, object]]:
 
 def test_classify_stage_accumulator_fills_one_complete_batch_before_next() -> None:
     classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
-    dispatch_queue: queue.Queue[ClassifyDispatchItem] = queue.Queue()
+    submitted: list[ClassifyDispatchItem] = []
+
+    class _RecordingDispatch:
+        def submit(self, item: ClassifyDispatchItem) -> None:
+            submitted.append(item)
+
     metrics = _RecordingMetrics()
     run_state = _RecordingRunState()
     accumulator = ClassifyAccumulator(
         classify_queue=classify_queue,
-        dispatch_queue=dispatch_queue,
+        dispatch=_RecordingDispatch(),  # type: ignore[arg-type]
         batch_size=3,
         num_workers=2,
         metrics=metrics,
@@ -187,10 +192,7 @@ def test_classify_stage_accumulator_fills_one_complete_batch_before_next() -> No
     classify_queue.put(CLASSIFY_SHUTDOWN)
     accumulator.join(timeout=1)
 
-    first_batch = dispatch_queue.get_nowait()
-    second_batch = dispatch_queue.get_nowait()
-    first_shutdown = dispatch_queue.get_nowait()
-    second_shutdown = dispatch_queue.get_nowait()
+    first_batch, second_batch, first_shutdown, second_shutdown = submitted
 
     assert isinstance(first_batch, list)
     assert isinstance(second_batch, list)
@@ -204,7 +206,11 @@ def test_classify_stage_accumulator_fills_one_complete_batch_before_next() -> No
 
 def test_classify_stage_accumulator_aborts_run_and_stops_workers_on_failure() -> None:
     classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
-    dispatch_queue: queue.Queue[ClassifyDispatchItem] = queue.Queue()
+    submitted: list[ClassifyDispatchItem] = []
+
+    class _RecordingDispatch:
+        def submit(self, item: ClassifyDispatchItem) -> None:
+            submitted.append(item)
 
     class _FailingMetrics:
         def classify_batch_dequeued(self, size: int) -> None:
@@ -213,7 +219,7 @@ def test_classify_stage_accumulator_aborts_run_and_stops_workers_on_failure() ->
     run_state = _RecordingRunState()
     accumulator = ClassifyAccumulator(
         classify_queue=classify_queue,
-        dispatch_queue=dispatch_queue,
+        dispatch=_RecordingDispatch(),  # type: ignore[arg-type]
         batch_size=1,
         num_workers=2,
         metrics=_FailingMetrics(),
@@ -224,8 +230,7 @@ def test_classify_stage_accumulator_aborts_run_and_stops_workers_on_failure() ->
     classify_queue.put(_classify_request(1))
     accumulator.join(timeout=1)
 
-    first_shutdown = dispatch_queue.get_nowait()
-    second_shutdown = dispatch_queue.get_nowait()
+    first_shutdown, second_shutdown = submitted
 
     assert isinstance(accumulator.exc, RuntimeError)
     assert str(accumulator.exc) == "boom 1"
@@ -493,6 +498,57 @@ class _ParallelQuotaWallEnricher:
         if listing_id == 2:
             assert self.wall_raised.wait(timeout=1)
             self.release_second_batch.wait(timeout=1)
+        if listing_id == 3:
+            self.third_batch_started.set()
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+                )
+            ]
+        )
+
+
+class _RetryBeforeLaterDispatchEnricher:
+    def __init__(self, *, reset_time: datetime) -> None:
+        self._reset_time = reset_time
+        self.second_batch_started = threading.Event()
+        self.wall_raised = threading.Event()
+        self.second_batch_finished = threading.Event()
+        self.retry_started = threading.Event()
+        self.release_retry = threading.Event()
+        self.third_batch_started = threading.Event()
+        self._calls: dict[int, int] = {}
+        self._lock = threading.Lock()
+
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        listing_id, stub, _ = items[0]
+        with self._lock:
+            attempt = self._calls.get(listing_id, 0) + 1
+            self._calls[listing_id] = attempt
+
+        if listing_id == 1 and attempt == 1:
+            assert self.second_batch_started.wait(timeout=1)
+            self.wall_raised.set()
+            raise ClaudeUsageLimitError(
+                "quota hit",
+                returncode=1,
+                stdout="",
+                stderr="",
+                envelope=None,
+                reset_time=self._reset_time,
+            )
+        if listing_id == 2:
+            self.second_batch_started.set()
+            assert self.wall_raised.wait(timeout=1)
+            self.second_batch_finished.set()
+        if listing_id == 1 and attempt == 2:
+            self.retry_started.set()
+            self.release_retry.wait(timeout=1)
         if listing_id == 3:
             self.third_batch_started.set()
         return AppliedClassifyOutcome(
@@ -1244,3 +1300,65 @@ def test_classify_stage_parallel_workers_log_one_quota_sleep_and_wait_for_active
         (3, _classify_request(3).submission.stub),
     ]
     assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]
+
+
+def test_classify_stage_retries_quota_batch_before_later_dispatch_after_wall_clears(
+    tmp_path: Path, monkeypatch
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+    start = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+    reset_time = start + timedelta(minutes=5)
+    clock = _ControllableSleepClock(start)
+    quota_wall = _quota.QuotaWall(now_fn=clock.now, sleep_fn=clock.sleep)
+    llm_enricher = _RetryBeforeLaterDispatchEnricher(reset_time=reset_time)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            now = clock.now()
+            if tz is None:
+                return now.replace(tzinfo=None)
+            return now.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.classify_stage.datetime", _FakeDateTime)
+
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=2,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(logs_dir),
+        quota_wall=quota_wall,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    _submit_ready(handoff, 1)
+    _submit_ready(handoff, 2)
+    _submit_ready(handoff, 3)
+    stage.close()
+
+    assert llm_enricher.second_batch_started.wait(timeout=1)
+    assert llm_enricher.wall_raised.wait(timeout=1)
+    assert llm_enricher.second_batch_finished.wait(timeout=1)
+    assert clock.sleep_started.wait(timeout=1)
+
+    clock.allow_sleep.set()
+    assert llm_enricher.retry_started.wait(timeout=1)
+    assert llm_enricher.third_batch_started.wait(timeout=0.2) is False
+
+    llm_enricher.release_retry.set()
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert sorted(pool_collector.matched, key=lambda item: item[0]) == [
+        (1, _classify_request(1).submission.stub),
+        (2, _classify_request(2).submission.stub),
+        (3, _classify_request(3).submission.stub),
+    ]

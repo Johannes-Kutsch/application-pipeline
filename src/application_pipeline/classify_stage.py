@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+from collections import deque
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -56,6 +57,12 @@ CLASSIFY_SHUTDOWN = ClassifyShutdown()
 ClassifyBatch = list[ClassifyRequest]
 ClassifyQueueItem = ClassifyRequest | ClassifyShutdown
 ClassifyDispatchItem = ClassifyBatch | ClassifyShutdown
+
+
+@dataclass(frozen=True)
+class _ClaimedDispatchItem:
+    item: ClassifyDispatchItem
+    from_retry: bool
 
 
 @runtime_checkable
@@ -182,11 +189,11 @@ class ClassifyStage:
         quota_wall: _quota.QuotaWall,
     ) -> None:
         self._classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
-        self._dispatch_queue: queue.Queue[ClassifyDispatchItem] = queue.Queue()
         self._metrics = metrics
+        self._dispatch = _QuotaCoordinatedDispatch(quota_wall=quota_wall)
         self._accumulator = ClassifyAccumulator(
             classify_queue=self._classify_queue,
-            dispatch_queue=self._dispatch_queue,
+            dispatch=self._dispatch,
             batch_size=batch_size,
             num_workers=parallelism,
             metrics=metrics,
@@ -194,13 +201,12 @@ class ClassifyStage:
         )
         self._workers = [
             ClassifyWorker(
-                dispatch_queue=self._dispatch_queue,
+                dispatch=self._dispatch,
                 pool_collector=pool_collector,
                 llm_enricher=llm_enricher,
                 metrics=metrics,
                 run_state=run_state,
                 run_log=run_log,
-                quota_wall=quota_wall,
                 worker_index=i,
             )
             for i in range(parallelism)
@@ -245,7 +251,7 @@ class ClassifyAccumulator(threading.Thread):
         self,
         *,
         classify_queue: queue.Queue[ClassifyQueueItem],
-        dispatch_queue: queue.Queue[ClassifyDispatchItem],
+        dispatch: "_QuotaCoordinatedDispatch",
         batch_size: int,
         num_workers: int,
         metrics: ClassifyAccumulatorMetrics,
@@ -253,7 +259,7 @@ class ClassifyAccumulator(threading.Thread):
     ) -> None:
         super().__init__(name="classify-accumulator", daemon=True)
         self._classify_queue = classify_queue
-        self._dispatch_queue = dispatch_queue
+        self._dispatch = dispatch
         self._batch_size = batch_size
         self._num_workers = num_workers
         self._metrics = metrics
@@ -269,62 +275,126 @@ class ClassifyAccumulator(threading.Thread):
                 if item is CLASSIFY_SHUTDOWN:
                     if batch:
                         self._metrics.classify_batch_dequeued(len(batch))
-                        self._dispatch_queue.put(batch)
+                        self._dispatch.submit(batch)
                     for _ in range(self._num_workers):
-                        self._dispatch_queue.put(CLASSIFY_SHUTDOWN)
+                        self._dispatch.submit(CLASSIFY_SHUTDOWN)
                     break
                 assert isinstance(item, ClassifyRequest)
                 batch.append(item)
                 if len(batch) >= self._batch_size:
                     self._metrics.classify_batch_dequeued(len(batch))
-                    self._dispatch_queue.put(batch)
+                    self._dispatch.submit(batch)
                     batch = []
         except BaseException as exc:
             self.exc = exc
             self._run_state.set_aborted(exc)
             for _ in range(self._num_workers):
-                self._dispatch_queue.put(CLASSIFY_SHUTDOWN)
+                self._dispatch.submit(CLASSIFY_SHUTDOWN)
+
+
+class _QuotaCoordinatedDispatch:
+    def __init__(self, *, quota_wall: _quota.QuotaWall) -> None:
+        self._quota_wall = quota_wall
+        self._cond = threading.Condition()
+        self._ready: deque[ClassifyDispatchItem] = deque()
+        self._retry: deque[ClassifyBatch] = deque()
+        self._wall_generation = 0
+        self._retry_inflight = False
+
+    def submit(self, item: ClassifyDispatchItem) -> None:
+        with self._cond:
+            self._ready.append(item)
+            self._cond.notify_all()
+
+    def retry(self, batch: ClassifyBatch, *, from_retry: bool) -> None:
+        with self._cond:
+            if from_retry:
+                self._retry_inflight = False
+            self._retry.append(batch)
+            self._cond.notify_all()
+
+    def finish_retry(self) -> None:
+        with self._cond:
+            self._retry_inflight = False
+            self._cond.notify_all()
+
+    def raise_wall(self, reset_time: datetime) -> bool:
+        with self._cond:
+            is_first = self._quota_wall.raise_wall(reset_time)
+            if is_first:
+                self._wall_generation += 1
+            self._cond.notify_all()
+            return is_first
+
+    def claim(self) -> _ClaimedDispatchItem:
+        while True:
+            self._quota_wall.wait_if_blocked()
+            with self._cond:
+                while not self._retry and not self._ready:
+                    self._cond.wait()
+                if self._quota_wall.is_active():
+                    continue
+                if self._retry:
+                    self._retry_inflight = True
+                    return _ClaimedDispatchItem(
+                        item=self._retry.popleft(),
+                        from_retry=True,
+                    )
+                if self._retry_inflight:
+                    self._cond.wait()
+                    continue
+                generation = self._wall_generation
+                item = self._ready.popleft()
+                if self._wall_generation != generation or self._quota_wall.is_active():
+                    self._ready.appendleft(item)
+                    continue
+                return _ClaimedDispatchItem(item=item, from_retry=False)
 
 
 class ClassifyWorker(threading.Thread):
     def __init__(
         self,
         *,
-        dispatch_queue: queue.Queue[ClassifyDispatchItem],
+        dispatch: _QuotaCoordinatedDispatch,
         pool_collector: ClassifyPoolCollector,
         llm_enricher: BatchLLMEnricher,
         metrics: ClassifyWorkerMetrics,
         run_state: ClassifyWorkerRunState,
         run_log: RunLog,
-        quota_wall: _quota.QuotaWall,
         worker_index: int = 0,
     ) -> None:
         super().__init__(name=f"classify-worker-{worker_index}", daemon=True)
-        self._dispatch_queue = dispatch_queue
+        self._dispatch = dispatch
         self._pool_collector = pool_collector
         self._llm_enricher = llm_enricher
         self._metrics = metrics
         self._run_state = run_state
         self._run_log = run_log
-        self._quota_wall = quota_wall
         self.exc: BaseException | None = None
 
     def run(self) -> None:
         current_stage.set("classify")
+        claimed: _ClaimedDispatchItem | None = None
         try:
             while True:
-                item = self._dispatch_queue.get()
+                claimed = self._dispatch.claim()
+                item = claimed.item
                 if item is CLASSIFY_SHUTDOWN:
                     break
                 assert isinstance(item, list)
                 batch: list[ClassifyRequest] = item
                 if not self._run_state.is_degraded:
-                    self._process_batch(batch)
+                    self._process_batch(batch, from_retry=claimed.from_retry)
+                elif claimed.from_retry:
+                    self._dispatch.finish_retry()
+                claimed = None
         except BaseException as exc:
+            if claimed is not None and claimed.from_retry:
+                self._dispatch.finish_retry()
             self.exc = exc
             self._run_state.set_aborted(exc)
 
-    def _process_batch(self, batch: list[ClassifyRequest]) -> None:
+    def _process_batch(self, batch: list[ClassifyRequest], *, from_retry: bool) -> None:
         items = [
             (
                 req.submission.listing_id,
@@ -334,31 +404,34 @@ class ClassifyWorker(threading.Thread):
             for req in batch
         ]
 
-        while True:
-            self._quota_wall.wait_if_blocked()
-            try:
-                outcome = self._llm_enricher.enrich(items)
-                break
-            except ClaudeUsageLimitError as err:
-                self._raise_quota_wall(err)
-            except ExtractorError as exc:
-                _log.warning("llm_enricher.enrich failed: %s", exc)
-                self._metrics.classify_batch_failed(len(batch))
-                self._run_log.event(
-                    "llm_classify_relevance",
-                    "classify_relevance",
-                    status="error",
-                    error=str(exc),
-                )
-                return
+        try:
+            outcome = self._llm_enricher.enrich(items)
+        except ClaudeUsageLimitError as err:
+            self._dispatch.retry(batch, from_retry=from_retry)
+            self._raise_quota_wall(err)
+            return
+        except ExtractorError as exc:
+            if from_retry:
+                self._dispatch.finish_retry()
+            _log.warning("llm_enricher.enrich failed: %s", exc)
+            self._metrics.classify_batch_failed(len(batch))
+            self._run_log.event(
+                "llm_classify_relevance",
+                "classify_relevance",
+                status="error",
+                error=str(exc),
+            )
+            return
 
         self._apply_outcome(batch, outcome)
+        if from_retry:
+            self._dispatch.finish_retry()
 
     def _raise_quota_wall(self, err: ClaudeUsageLimitError) -> None:
         now = datetime.now(timezone.utc)
         wake = _quota.compute_wake_time(err.reset_time, now)
         duration_s = max(0.0, (wake - now).total_seconds())
-        is_first = self._quota_wall.raise_wall(wake - _quota._BUFFER)
+        is_first = self._dispatch.raise_wall(wake - _quota._BUFFER)
         if is_first:
             self._run_log.event(
                 "pipeline_orchestrator",

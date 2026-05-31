@@ -4,7 +4,13 @@ from typing import Literal, Protocol, runtime_checkable
 
 import httpx
 
-from application_pipeline.classify_stage import ListingId, RawDescription
+from application_pipeline.classify_stage import (
+    ClassifyReadySubmission,
+    ClassifyRequest,
+    ClassifyStageHandoff,
+    ListingId,
+    RawDescription,
+)
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import RunScopedSeenKind, RunScopedSeenResult
 from application_pipeline.extracts.card_store import CardStore
@@ -35,18 +41,13 @@ class PoolCollector(Protocol):
     def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None: ...
 
 
-@runtime_checkable
-class _ClassifySink(Protocol):
-    def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None: ...
-
-
 class _NullPoolCollector:
     def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None:
         pass
 
 
-class _NullClassifySink:
-    def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None:
+class _NullClassifyStageHandoff:
+    def submit(self, request: ClassifyRequest) -> None:
         pass
 
 
@@ -95,7 +96,7 @@ class ParserIntake:
         content_gate: ContentGate,
         card_store: CardStore,
         pool_collector: PoolCollector | None = None,
-        classify_sink: _ClassifySink | None = None,
+        classify_handoff: ClassifyStageHandoff | None = None,
         run_log: RunLog,
         metrics: ParserMetrics | None = None,
     ) -> None:
@@ -108,7 +109,7 @@ class ParserIntake:
         self._content_gate = content_gate
         self._card_store = card_store
         self._pool_collector = pool_collector or _NullPoolCollector()
-        self._classify_sink = classify_sink or _NullClassifySink()
+        self._classify_handoff = classify_handoff or _NullClassifyStageHandoff()
         self._run_log = run_log
         self._metrics = metrics
 
@@ -212,10 +213,15 @@ class ParserIntake:
 
         self._record_dedup(post_enrich_dedup.kind)
         self._increment_forwarded_metrics(enrich_result.mode)
-        self._classify_sink.enqueue(
-            listing_id=post_enrich_dedup.listing_id,
-            stub=stub,
-            body=body,
+        self._classify_handoff.submit(
+            ClassifyRequest(
+                submission=ClassifyReadySubmission(
+                    listing_id=post_enrich_dedup.listing_id,
+                    stub=stub,
+                    raw_description=body,
+                ),
+                parser_id=self._parser_id,
+            )
         )
         return
 

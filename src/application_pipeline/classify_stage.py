@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from application_pipeline.parsers.types import PositionStub
 
@@ -20,3 +21,8 @@ class ClassifyReadySubmission:
 class ClassifyRequest:
     submission: ClassifyReadySubmission
     parser_id: ParserIdentity
+
+
+@runtime_checkable
+class ClassifyStageHandoff(Protocol):
+    def submit(self, request: ClassifyRequest) -> None: ...

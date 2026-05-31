@@ -16,7 +16,7 @@ from typing import Protocol, runtime_checkable
 
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
-from application_pipeline.classify_stage import ClassifyReadySubmission, ClassifyRequest
+from application_pipeline.classify_stage import ClassifyRequest, ClassifyStageHandoff
 from application_pipeline.llm import quota as _quota
 from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
@@ -152,7 +152,7 @@ class _QueryDone:
 _QUERY_DONE = _QueryDone()
 
 
-class _ParserIntakeClassifySink:
+class _ParserIntakeClassifyHandoff(ClassifyStageHandoff):
     def __init__(
         self,
         *,
@@ -164,17 +164,9 @@ class _ParserIntakeClassifySink:
         self._metrics = metrics
         self._parser_id = parser_id
 
-    def enqueue(self, *, listing_id: int, stub: PositionStub, body: str) -> None:
-        self._classify_queue.put(
-            ClassifyRequest(
-                submission=ClassifyReadySubmission(
-                    listing_id=listing_id,
-                    stub=stub,
-                    raw_description=body,
-                ),
-                parser_id=self._parser_id,
-            )
-        )
+    def submit(self, request: ClassifyRequest) -> None:
+        assert request.parser_id == self._parser_id
+        self._classify_queue.put(request)
         self._metrics.classify_buffered(1)
 
 
@@ -324,7 +316,7 @@ class _ParserThread(threading.Thread):
             content_gate=content_gate,
             card_store=card_store,
             pool_collector=pool_collector,
-            classify_sink=_ParserIntakeClassifySink(
+            classify_handoff=_ParserIntakeClassifyHandoff(
                 classify_queue=classify_queue,
                 metrics=metrics,
                 parser_id=parser_id,

@@ -4953,6 +4953,38 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
     assert "malformed" in last_body
 
 
+def test_classify_error_logs_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ExtractorError from llm_enricher.enrich() logs the same warning as before the refactor."""
+    import logging
+
+    card_store = _make_card_store(tmp_path)
+
+    class _ErrorEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            raise ExtractorError("classify boom")
+
+    with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
+        run(
+            _two_stub_config(tmp_path),
+            llm_enricher=_ErrorEnricher(),
+            extractor=_stub_extractor(),
+            card_store=card_store,
+            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        )
+
+    assert any(
+        record.levelno == logging.WARNING
+        and record.name == "application_pipeline.orchestrator"
+        and record.getMessage() == "llm_enricher.enrich failed: classify boom"
+        for record in caplog.records
+    )
+
+
 def test_retryable_classify_outcome_shows_malformed_not_forwarded(
     tmp_path: Path,
 ) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from datetime import datetime, timezone
@@ -18,6 +19,8 @@ from application_pipeline.parsers.types import PositionStub
 ListingId = int
 RawDescription = str
 ParserIdentity = str
+
+_log = logging.getLogger("application_pipeline.orchestrator")
 
 
 @dataclass(frozen=True)
@@ -206,6 +209,7 @@ class ClassifyWorker(threading.Thread):
             except ClaudeUsageLimitError as err:
                 self._raise_quota_wall(err)
             except ExtractorError as exc:
+                _log.warning("llm_enricher.enrich failed: %s", exc)
                 self._metrics.classify_batch_failed(len(batch))
                 self._run_log.event(
                     "llm_classify_relevance",

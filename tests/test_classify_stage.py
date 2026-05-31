@@ -633,15 +633,18 @@ def test_classify_stage_wait_flushes_partial_batch_and_marks_classify_done(
     waiter.join(timeout=1)
 
     assert waiter.is_alive() is False
-    assert completion_holder[0] == stage.wait()
+    completion = completion_holder[0]
+    assert isinstance(completion, ClassifyStageCompletion)
+    assert completion.first_failure is None
     assert llm_enricher.batch_sizes == [5]
     assert [listing_id for listing_id, _ in pool_collector.matched] == [1, 2, 3, 4, 5]
-    assert any(
-        call.method == "update_phase"
-        and call.name == "llm classify relevance"
-        and call.kwargs["phase"] == "done"
+    phase_updates = [
+        call
         for call in display.calls
-    )
+        if call.method == "update_phase" and call.name == "llm classify relevance"
+    ]
+    assert len(phase_updates) == 1
+    assert phase_updates[0].kwargs["phase"] == "done"
 
 
 def test_classify_stage_batches_25_items_and_shows_in_flight_status_updates(

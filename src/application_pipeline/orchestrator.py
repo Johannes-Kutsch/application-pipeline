@@ -671,8 +671,6 @@ def run(
 
         classify_completion = classify_stage.wait()
 
-        metrics.classify_done()
-
         if classify_completion.first_failure is not None:
             raise classify_completion.first_failure
 

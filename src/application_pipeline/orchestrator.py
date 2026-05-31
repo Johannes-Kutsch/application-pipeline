@@ -16,7 +16,14 @@ from typing import Protocol, runtime_checkable
 
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
-from application_pipeline.classify_stage import ClassifyRequest, ClassifyStageHandoff
+from application_pipeline.classify_stage import (
+    CLASSIFY_SHUTDOWN,
+    ClassifyAccumulator,
+    ClassifyDispatchItem,
+    ClassifyQueueItem,
+    ClassifyRequest,
+    ClassifyStageHandoff,
+)
 from application_pipeline.llm import quota as _quota
 from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
@@ -156,7 +163,7 @@ class _ParserIntakeClassifyHandoff(ClassifyStageHandoff):
     def __init__(
         self,
         *,
-        classify_queue: queue.Queue[object],
+        classify_queue: queue.Queue[ClassifyQueueItem],
         metrics: "RunMetrics",
         parser_id: str,
     ) -> None:
@@ -168,13 +175,6 @@ class _ParserIntakeClassifyHandoff(ClassifyStageHandoff):
         assert request.parser_id == self._parser_id
         self._classify_queue.put(request)
         self._metrics.classify_buffered(1)
-
-
-class _NoMoreBatches:
-    __slots__ = ()
-
-
-_NO_MORE_BATCHES = _NoMoreBatches()
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ class _QueueWorker(threading.Thread):
     def __init__(
         self,
         *,
-        input_queue: queue.Queue[object],
+        input_queue: queue.Queue[ClassifyDispatchItem],
         sentinel: object,
         stage_name: str,
         run_state: "_RunState",
@@ -279,7 +279,7 @@ class _ParserThread(threading.Thread):
         parser: Parser,
         worklist: list[ParserQuery],
         outbound: queue.Queue[tuple[str, object]],
-        classify_queue: queue.Queue[object],
+        classify_queue: queue.Queue[ClassifyQueueItem],
         *,
         run_log: RunLog,
         run_state: _RunState,
@@ -393,64 +393,6 @@ def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Classify accumulator — fills batches sequentially from classify queue
-# ---------------------------------------------------------------------------
-
-
-class _ClassifyAccumulator(threading.Thread):
-    """Single thread that fills classify batches sequentially.
-
-    Pulls ClassifyRequest items from classify_queue, assembles batches of
-    batch_size, and puts each complete batch onto dispatch_queue. On sentinel,
-    flushes any partial batch and then sends num_workers sentinels to workers.
-    """
-
-    def __init__(
-        self,
-        *,
-        classify_queue: queue.Queue[object],
-        dispatch_queue: "queue.Queue[object]",
-        batch_size: int,
-        num_workers: int,
-        metrics: "RunMetrics",
-        run_state: _RunState,
-    ) -> None:
-        super().__init__(name="classify-accumulator", daemon=True)
-        self._classify_queue = classify_queue
-        self._dispatch_queue = dispatch_queue
-        self._batch_size = batch_size
-        self._num_workers = num_workers
-        self._metrics = metrics
-        self._run_state = run_state
-        self.exc: BaseException | None = None
-
-    def run(self) -> None:
-        current_stage.set("classify-accumulator")
-        try:
-            batch: list[ClassifyRequest] = []
-            while True:
-                item = self._classify_queue.get()
-                if item is _NO_MORE_BATCHES:
-                    if batch:
-                        self._metrics.classify_batch_dequeued(len(batch))
-                        self._dispatch_queue.put(batch)
-                    for _ in range(self._num_workers):
-                        self._dispatch_queue.put(_NO_MORE_BATCHES)
-                    break
-                assert isinstance(item, ClassifyRequest)
-                batch.append(item)
-                if len(batch) >= self._batch_size:
-                    self._metrics.classify_batch_dequeued(len(batch))
-                    self._dispatch_queue.put(batch)
-                    batch = []
-        except BaseException as exc:
-            self.exc = exc
-            self._run_state.set_aborted(exc)
-            for _ in range(self._num_workers):
-                self._dispatch_queue.put(_NO_MORE_BATCHES)
-
-
-# ---------------------------------------------------------------------------
 # Classify worker — runs only the LLM call + verdict handling
 # ---------------------------------------------------------------------------
 
@@ -459,7 +401,7 @@ class _ClassifyWorker(_QueueWorker):
     def __init__(
         self,
         *,
-        dispatch_queue: "queue.Queue[object]",
+        dispatch_queue: "queue.Queue[ClassifyDispatchItem]",
         pool_collector: "_PoolCollector",
         llm_enricher: "_LLMEnricherLike",
         dedup_store: DeduplicationStore,
@@ -471,7 +413,7 @@ class _ClassifyWorker(_QueueWorker):
     ) -> None:
         super().__init__(
             input_queue=dispatch_queue,
-            sentinel=_NO_MORE_BATCHES,
+            sentinel=CLASSIFY_SHUTDOWN,
             stage_name="classify",
             run_state=run_state,
         )
@@ -764,7 +706,7 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display, run_log=run_log)
-        classify_queue: queue.Queue[object] = queue.Queue()
+        classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
         pool_collector = _PoolCollector()
         _run_started_at = datetime.now(timezone.utc)
 
@@ -871,8 +813,8 @@ def run(
                 _log.info("parser %s started", pid)
                 run_log.event("parser_" + pid, "parser started")
 
-            dispatch_queue: queue.Queue[object] = queue.Queue()
-            classify_accumulator = _ClassifyAccumulator(
+            dispatch_queue: queue.Queue[ClassifyDispatchItem] = queue.Queue()
+            classify_accumulator = ClassifyAccumulator(
                 classify_queue=classify_queue,
                 dispatch_queue=dispatch_queue,
                 batch_size=cfg.claude_classify_batch_size,
@@ -972,7 +914,7 @@ def run(
             dedup_snapshot = dedup_counters.snapshot()
 
             # Signal accumulator to flush partial batch and stop workers
-            classify_queue.put(_NO_MORE_BATCHES)
+            classify_queue.put(CLASSIFY_SHUTDOWN)
 
         first_exc: BaseException | None = None
         classify_accumulator.join()

@@ -971,10 +971,13 @@ def test_classify_stage_handoff_fills_complete_batch_before_tail_flush_at_stage_
     assert sorted(pool_collector.matched, key=lambda item: item[0]) == expected_pairs
 
 
-def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_logs_match(
+def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_preserves_forwarded_metrics(
     tmp_path: Path,
 ) -> None:
     logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
     pool_collector = _CollectingPoolCollector()
 
     class _MutatingMatchedEnricher:
@@ -988,7 +991,7 @@ def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_l
                         state="matched",
                         event_matches=True,
                         matched_listing=MatchedListing(
-                            listing_id=listing_id,
+                            listing_id=listing_id + 999,
                             stub=PositionStub(
                                 url="https://example.com/rewritten",
                                 title="Rewritten title",
@@ -1003,9 +1006,9 @@ def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_l
         logs_dir=logs_dir,
         pool_collector=pool_collector,
         llm_enricher=_MutatingMatchedEnricher(),
-        metrics=_FakeMetrics(),
+        metrics=metrics,
     )
-    handoff = stage.handoff_for(parser_id="parser.test", metrics=_FakeMetrics())
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
     listing_id, stub, raw_description, parser_id = _classify_ready_facts(1)
 
     stage.start()
@@ -1020,6 +1023,7 @@ def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_l
 
     assert completion.first_failure is None
     assert pool_collector.matched == [(listing_id, stub)]
+    assert _last_body(display, "llm classify relevance") == "1 forwarded"
     rows = _classify_event_rows(logs_dir)
     assert len(rows) == 1
     assert rows[0]["event"] == "classify_relevance"

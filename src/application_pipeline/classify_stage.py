@@ -466,9 +466,6 @@ class ClassifyWorker(threading.Thread):
                 dropped += 1
                 continue
             if item_outcome.state == "matched":
-                matched = item_outcome.matched_listing
-                if matched is None or matched.listing_id != req.submission.listing_id:
-                    raise AssertionError("matched outcome missing matched listing data")
                 matched_submissions.append(
                     (req.submission.listing_id, req.submission.stub)
                 )

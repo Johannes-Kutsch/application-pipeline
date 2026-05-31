@@ -18,7 +18,9 @@ from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline.classify_stage import (
     CLASSIFY_SHUTDOWN,
+    BatchLLMEnricher,
     ClassifyAccumulator,
+    ClassifyWorker,
     ClassifyDispatchItem,
     ClassifyQueueItem,
     ClassifyRequest,
@@ -44,7 +46,7 @@ from application_pipeline.llm import (
     MatchVerdict,
 )
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
-from application_pipeline.llm.types import AppliedClassifyOutcome, CallUsage
+from application_pipeline.llm.types import CallUsage
 from application_pipeline.llm_enricher import LLMEnricher, LLMExtractor
 from application_pipeline.parsers import (
     NotServedQuery,
@@ -76,26 +78,11 @@ def _has_native_enrich(cls: type) -> bool:
     return bool(getattr(module, "has_native_enrich", False))
 
 
-_ZERO_USAGE = CallUsage(
-    input_tokens=0,
-    output_tokens=0,
-    cache_read_tokens=0,
-    cost_usd=0.0,
-    duration_s=0.0,
-)
-
-
 @runtime_checkable
 class _LLMJudge(Protocol):
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
     ) -> tuple[list[MatchVerdict], CallUsage]: ...
-
-
-class _LLMEnricherLike(Protocol):
-    def enrich(
-        self, items: "list[tuple[int, PositionStub, str]]"
-    ) -> AppliedClassifyOutcome: ...
 
 
 # ---------------------------------------------------------------------------
@@ -221,53 +208,6 @@ class _PoolCollector:
 
 
 # ---------------------------------------------------------------------------
-# Queue worker base class
-# ---------------------------------------------------------------------------
-
-
-class _QueueWorker(threading.Thread):
-    def __init__(
-        self,
-        *,
-        input_queue: queue.Queue[ClassifyDispatchItem],
-        sentinel: object,
-        stage_name: str,
-        run_state: "_RunState",
-    ) -> None:
-        super().__init__(daemon=True)
-        self._input_queue = input_queue
-        self._sentinel = sentinel
-        self._stage_name = stage_name
-        self._run_state = run_state
-        self.exc: BaseException | None = None
-
-    def run(self) -> None:
-        current_stage.set(self._stage_name)
-        try:
-            while True:
-                item = self._input_queue.get()
-                if item is self._sentinel:
-                    break
-                self._on_dequeue(item)
-                if not self._run_state.is_degraded:
-                    self._process(item)
-        except BaseException as exc:
-            self.exc = exc
-            self._run_state.set_aborted(exc)
-        finally:
-            self._on_shutdown()
-
-    def _on_dequeue(self, item: object) -> None:
-        pass
-
-    def _on_shutdown(self) -> None:
-        pass
-
-    def _process(self, item: object) -> None:
-        raise NotImplementedError
-
-
-# ---------------------------------------------------------------------------
 # Parser thread — runs full pre-LLM pipeline per stub inline
 # ---------------------------------------------------------------------------
 
@@ -373,149 +313,6 @@ class _ParserThread(threading.Thread):
         self._parser_intake.process_position_stub(stub)
 
 
-# ---------------------------------------------------------------------------
-# Quota sleep helper
-# ---------------------------------------------------------------------------
-
-
-def _quota_sleep(err: ClaudeUsageLimitError, run_log: RunLog) -> None:
-    now = datetime.now(timezone.utc)
-    wake = _quota.compute_wake_time(err.reset_time, now)
-    duration_s = max(0.0, (wake - now).total_seconds())
-    run_log.event(
-        "pipeline_orchestrator",
-        "quota_sleep",
-        reset_time=err.reset_time.isoformat() if err.reset_time is not None else None,
-        wake_time=wake.isoformat(),
-        duration_s=duration_s,
-    )
-    time.sleep(duration_s)
-
-
-# ---------------------------------------------------------------------------
-# Classify worker — runs only the LLM call + verdict handling
-# ---------------------------------------------------------------------------
-
-
-class _ClassifyWorker(_QueueWorker):
-    def __init__(
-        self,
-        *,
-        dispatch_queue: "queue.Queue[ClassifyDispatchItem]",
-        pool_collector: "_PoolCollector",
-        llm_enricher: "_LLMEnricherLike",
-        dedup_store: DeduplicationStore,
-        metrics: "RunMetrics",
-        run_state: _RunState,
-        run_log: RunLog,
-        quota_wall: "_quota.QuotaWall",
-        worker_index: int = 0,
-    ) -> None:
-        super().__init__(
-            input_queue=dispatch_queue,
-            sentinel=CLASSIFY_SHUTDOWN,
-            stage_name="classify",
-            run_state=run_state,
-        )
-        self.name = f"classify-worker-{worker_index}"
-        self._pool_collector = pool_collector
-        self._llm_enricher = llm_enricher
-        self._dedup_store = dedup_store
-        self._metrics = metrics
-        self._run_log = run_log
-        self._quota_wall = quota_wall
-
-    def run(self) -> None:
-        current_stage.set(self._stage_name)
-        try:
-            while True:
-                item = self._input_queue.get()
-                if item is self._sentinel:
-                    break
-                assert isinstance(item, list)
-                batch: list[ClassifyRequest] = item
-                if not self._run_state.is_degraded:
-                    self._process_batch(batch)
-        except BaseException as exc:
-            self.exc = exc
-            self._run_state.set_aborted(exc)
-        finally:
-            self._on_shutdown()
-
-    def _process_batch(self, batch: list[ClassifyRequest]) -> None:
-        items = [
-            (
-                req.submission.listing_id,
-                req.submission.stub,
-                req.submission.raw_description,
-            )
-            for req in batch
-        ]
-
-        while True:
-            self._quota_wall.wait_if_blocked()
-            try:
-                outcome = self._llm_enricher.enrich(items)
-                break
-            except ClaudeUsageLimitError as err:
-                now = datetime.now(timezone.utc)
-                wake = _quota.compute_wake_time(err.reset_time, now)
-                duration_s = max(0.0, (wake - now).total_seconds())
-                is_first = self._quota_wall.raise_wall(wake - _quota._BUFFER)
-                if is_first:
-                    self._run_log.event(
-                        "pipeline_orchestrator",
-                        "quota_sleep",
-                        reset_time=(
-                            err.reset_time.isoformat()
-                            if err.reset_time is not None
-                            else None
-                        ),
-                        wake_time=wake.isoformat(),
-                        duration_s=duration_s,
-                    )
-            except ExtractorError as exc:
-                _log.warning("llm_enricher.enrich failed: %s", exc)
-                self._metrics.classify_batch_failed(len(batch))
-                self._run_log.event(
-                    "llm_classify_relevance",
-                    "classify_relevance",
-                    status="error",
-                    error=str(exc),
-                )
-                return
-
-        dropped = 0
-        retryable = 0
-        for req, item_outcome in zip(batch, outcome.items):
-            self._run_log.event(
-                "llm_classify_relevance",
-                "classify_relevance",
-                matches=item_outcome.event_matches,
-            )
-            if item_outcome.state == "retryable":
-                retryable += 1
-                self._metrics.enrich_failed(req.submission.stub.source)
-            elif item_outcome.state == "expired":
-                dropped += 1
-            elif item_outcome.state == "rejected":
-                dropped += 1
-            elif item_outcome.state == "matched":
-                matched = item_outcome.matched_listing
-                if matched is None or matched.listing_id != req.submission.listing_id:
-                    raise AssertionError("matched outcome missing matched listing data")
-
-        for listing_id, stub in outcome.matched_listings:
-            self._pool_collector.add_matched(stub, listing_id)
-
-        self._metrics.classify_batch_complete(
-            _ZERO_USAGE,
-            len(batch),
-            dropped,
-            retryable_items=retryable,
-        )
-
-
 @dataclass
 class _ParserState:
     parser_id: str
@@ -616,7 +413,7 @@ def run(
     config_path: Path,
     *,
     search_terms: SearchTerms | None = None,
-    llm_enricher: "_LLMEnricherLike | None" = None,
+    llm_enricher: object | None = None,
     extractor: object = None,
     card_store: CardStore | None = None,
     parser_registry: Callable[[str], type[Parser] | None] | None = None,
@@ -823,13 +620,13 @@ def run(
                 run_state=run_state,
             )
             classify_accumulator.start()
+            assert isinstance(llm_enricher, BatchLLMEnricher)
 
             classify_workers = [
-                _ClassifyWorker(
+                ClassifyWorker(
                     dispatch_queue=dispatch_queue,
                     pool_collector=pool_collector,
                     llm_enricher=llm_enricher,
-                    dedup_store=dedup_store,
                     metrics=metrics,
                     run_state=run_state,
                     run_log=run_log,
@@ -951,7 +748,21 @@ def run(
                     verdicts, judge_usage = extractor.judge_top_n(candidates)
                     break
                 except ClaudeUsageLimitError as err:
-                    _quota_sleep(err, run_log)
+                    now_utc = datetime.now(timezone.utc)
+                    wake = _quota.compute_wake_time(err.reset_time, now_utc)
+                    duration_s = max(0.0, (wake - now_utc).total_seconds())
+                    run_log.event(
+                        "pipeline_orchestrator",
+                        "quota_sleep",
+                        reset_time=(
+                            err.reset_time.isoformat()
+                            if err.reset_time is not None
+                            else None
+                        ),
+                        wake_time=wake.isoformat(),
+                        duration_s=duration_s,
+                    )
+                    time.sleep(duration_s)
                 except ExtractorError as exc:
                     _log.warning("judge_top_n failed: %s", exc)
                     run_log.event(

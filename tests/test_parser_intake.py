@@ -10,7 +10,7 @@ import pytest
 
 from fake_status_display import FakeStatusDisplay
 
-from application_pipeline.content_gate import ContentGate
+from application_pipeline.content_gate import ContentGate, ContentSnapshot
 from application_pipeline.dedup import load as dedup_load
 from application_pipeline.dedup_counters import DedupCounters
 from application_pipeline.extracts import load_card_store
@@ -172,50 +172,6 @@ class _TransientHttpErrorParser:
             request=httpx.Request("GET", stub.url),
             response=httpx.Response(503),
         )
-
-
-class _EmptyBodyParser:
-    def __enter__(self) -> "_EmptyBodyParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        enriched = PositionStub(
-            url=stub.url,
-            title=stub.title,
-            source=stub.source,
-            company="Acme",
-            location="Hamburg",
-            posted_date=stub.posted_date,
-        )
-        return EnrichResult(stub=enriched, body="   \n\t  ", mode="native")
-
-
-class _TooShortBodyParser:
-    def __enter__(self) -> "_TooShortBodyParser":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        pass
-
-    def discover(self, query: object) -> list[PositionStub]:
-        return []
-
-    def enrich(self, stub: PositionStub) -> EnrichResult:
-        enriched = PositionStub(
-            url=stub.url,
-            title=stub.title,
-            source=stub.source,
-            company="Acme",
-            location="Hamburg",
-            posted_date=stub.posted_date,
-        )
-        return EnrichResult(stub=enriched, body="x" * 99, mode="native")
 
 
 @pytest.mark.parametrize(
@@ -875,18 +831,17 @@ def test_parser_enrich_failed_logs_and_updates_metrics_without_seen_or_card_writ
 
 
 @pytest.mark.parametrize(
-    ("parser", "url", "reason", "body_len"),
+    ("url", "body", "reason"),
     [
-        (_EmptyBodyParser(), "https://example.com/empty-body", "empty_body", 7),
-        (_TooShortBodyParser(), "https://example.com/too-short-body", "too_short", 99),
+        ("https://example.com/empty-body", "   \n\t  ", "empty_body"),
+        ("https://example.com/too-short-body", "x" * 99, "too_short"),
     ],
 )
 def test_post_enrich_content_drop_uses_harness_observations_without_persisting_seen_or_card(
     tmp_path: Path,
-    parser: object,
     url: str,
+    body: str,
     reason: str,
-    body_len: int,
 ) -> None:
     stub = PositionStub(
         url=url,
@@ -898,8 +853,18 @@ def test_post_enrich_content_drop_uses_harness_observations_without_persisting_s
         tmp_path,
         parser_id="test",
         discovered_stub=stub,
-        parser=cast(Any, parser),
         domain_pre_filter=cast(Any, _PassThroughPreFilter()),
+    )
+    harness.set_parser_enrich_result(
+        stub=PositionStub(
+            url=stub.url,
+            title=stub.title,
+            source=stub.source,
+            company="Acme",
+            location="Hamburg",
+            posted_date=stub.posted_date,
+        ),
+        body=body,
     )
 
     harness.process_one_position_stub(stub)
@@ -907,12 +872,19 @@ def test_post_enrich_content_drop_uses_harness_observations_without_persisting_s
     listing_id = 1
     assert harness.dedup_counter_snapshot().dedup_run_hits == 1
     assert harness.status_display_row_body("parser test gates") == "1 content"
+    assert harness.classify_handoffs() == []
+    assert harness.pool_admissions() == []
     assert harness.card_content(listing_id) is None
     assert harness.persisted_card_content(listing_id) is None
     assert harness.dedup_observation(listing_id) is None
     assert harness.persisted_listing_id_for_url(stub.url) is None
     assert harness.persisted_dedup_observation(listing_id) is None
     assert harness.persisted_dedup_status(listing_id) is None
+    assert harness.content_snapshot() == ContentSnapshot(
+        content_considered=1,
+        content_dropped_empty_body=1 if reason == "empty_body" else 0,
+        content_dropped_too_short=1 if reason == "too_short" else 0,
+    )
     assert harness.log_artifact_transcript_rows("pipeline_content") == [
         {
             "url": stub.url,
@@ -920,7 +892,7 @@ def test_post_enrich_content_drop_uses_harness_observations_without_persisting_s
             "source": stub.source,
             "passes": False,
             "reason": reason,
-            "body_len": body_len,
+            "body_len": len(body),
         }
     ]
 

@@ -350,6 +350,7 @@ class ClassifyWorker(threading.Thread):
     ) -> None:
         dropped = 0
         retryable = 0
+        matched_submissions: list[tuple[int, PositionStub]] = []
         for req, item_outcome in zip(batch, outcome.items):
             self._run_log.event(
                 "llm_classify_relevance",
@@ -370,8 +371,11 @@ class ClassifyWorker(threading.Thread):
                 matched = item_outcome.matched_listing
                 if matched is None or matched.listing_id != req.submission.listing_id:
                     raise AssertionError("matched outcome missing matched listing data")
+                matched_submissions.append(
+                    (req.submission.listing_id, req.submission.stub)
+                )
 
-        for listing_id, stub in outcome.matched_listings:
+        for listing_id, stub in matched_submissions:
             self._pool_collector.add_matched(stub, listing_id)
 
         self._metrics.classify_batch_complete(

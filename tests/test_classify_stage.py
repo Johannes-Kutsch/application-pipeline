@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import queue
 import threading
 from pathlib import Path
@@ -82,6 +83,15 @@ def _classify_request(listing_id: int) -> ClassifyRequest:
 
 def _last_body(display: FakeStatusDisplay, name: str) -> str:
     return display.body_updates_for(name)[-1]
+
+
+def _classify_event_rows(logs_dir: Path) -> list[dict[str, object]]:
+    events_path = logs_dir / "llm" / "classify_relevance.events.jsonl"
+    return [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def test_classify_stage_accumulator_fills_one_complete_batch_before_next() -> None:
@@ -297,6 +307,25 @@ class _CollectingPoolCollector:
         self.matched.append((listing_id, stub))
 
 
+def _build_stage(
+    *,
+    logs_dir: Path,
+    pool_collector: _CollectingPoolCollector,
+    llm_enricher: object,
+    metrics: object,
+) -> ClassifyStage:
+    return ClassifyStage(
+        batch_size=1,
+        parallelism=1,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,  # type: ignore[arg-type]
+        metrics=metrics,  # type: ignore[arg-type]
+        run_state=_FakeRunState(),
+        run_log=RunLog(logs_dir),
+        quota_wall=_quota.QuotaWall(),
+    )
+
+
 def _make_stage(tmp_path: Path, llm_enricher: object = None) -> ClassifyStage:
     return ClassifyStage(
         batch_size=1,
@@ -469,3 +498,177 @@ def test_classify_stage_batches_exactly_10_items_into_one_llm_call(
     assert [listing_id for listing_id, _ in pool_collector.matched] == list(
         range(1, 11)
     )
+
+
+def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_logs_match(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    pool_collector = _CollectingPoolCollector()
+
+    class _MutatingMatchedEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            listing_id, _, _ = items[0]
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="matched",
+                        event_matches=True,
+                        matched_listing=MatchedListing(
+                            listing_id=listing_id,
+                            stub=PositionStub(
+                                url="https://example.com/rewritten",
+                                title="Rewritten title",
+                                source="rewritten",
+                            ),
+                        ),
+                    )
+                ]
+            )
+
+    stage = _build_stage(
+        logs_dir=logs_dir,
+        pool_collector=pool_collector,
+        llm_enricher=_MutatingMatchedEnricher(),
+        metrics=_FakeMetrics(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=_FakeMetrics())
+    request = _classify_request(1)
+
+    stage.start()
+    handoff.submit(request)
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert pool_collector.matched == [
+        (request.submission.listing_id, request.submission.stub)
+    ]
+    assert _classify_event_rows(logs_dir) == [
+        {
+            "ts": _classify_event_rows(logs_dir)[0]["ts"],
+            "event": "classify_relevance",
+            "matches": True,
+        }
+    ]
+
+
+def test_classify_stage_rejected_outcome_skips_pool_and_counts_classifier_drop(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+
+    class _RejectedSingleEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="rejected",
+                        event_matches=False,
+                    )
+                ]
+            )
+
+    stage = _build_stage(
+        logs_dir=logs_dir,
+        pool_collector=pool_collector,
+        llm_enricher=_RejectedSingleEnricher(),
+        metrics=metrics,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    handoff.submit(_classify_request(1))
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert pool_collector.matched == []
+    assert _last_body(display, "llm classify relevance") == "1 dropped"
+    assert _classify_event_rows(logs_dir)[0]["matches"] is False
+
+
+def test_classify_stage_expired_outcome_skips_pool_counts_drop_and_logs_matches_null(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+
+    class _ExpiredSingleEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="expired",
+                        event_matches=None,
+                    )
+                ]
+            )
+
+    stage = _build_stage(
+        logs_dir=logs_dir,
+        pool_collector=pool_collector,
+        llm_enricher=_ExpiredSingleEnricher(),
+        metrics=metrics,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    handoff.submit(_classify_request(1))
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert pool_collector.matched == []
+    assert _last_body(display, "llm classify relevance") == "1 dropped"
+    assert _classify_event_rows(logs_dir)[0]["matches"] is None
+
+
+def test_classify_stage_retryable_outcome_skips_pool_and_counts_malformed(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+
+    class _RetryableSingleEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="retryable",
+                        event_matches=None,
+                    )
+                ]
+            )
+
+    stage = _build_stage(
+        logs_dir=logs_dir,
+        pool_collector=pool_collector,
+        llm_enricher=_RetryableSingleEnricher(),
+        metrics=metrics,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    handoff.submit(_classify_request(1))
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert pool_collector.matched == []
+    assert _last_body(display, "llm classify relevance") == "1 malformed"
+    assert _classify_event_rows(logs_dir)[0]["matches"] is None

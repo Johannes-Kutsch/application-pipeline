@@ -4,13 +4,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 import httpx
 
-from application_pipeline.classify_stage import (
-    ClassifyReadySubmission,
-    ClassifyRequest,
-    ClassifyStageHandoff,
-    ListingId,
-    RawDescription,
-)
+from application_pipeline.classify_stage import ClassifyStageHandoff
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import RunScopedSeenKind, RunScopedSeenResult
 from application_pipeline.extracts.card_store import CardStore
@@ -47,7 +41,14 @@ class _NullPoolCollector:
 
 
 class _NullClassifyStageHandoff:
-    def submit(self, request: ClassifyRequest) -> None:
+    def submit_ready(
+        self,
+        *,
+        listing_id: int,
+        stub: PositionStub,
+        raw_description: str,
+        parser_id: str,
+    ) -> None:
         pass
 
 
@@ -213,26 +214,18 @@ class ParserIntake:
 
         self._record_dedup(post_enrich_dedup.kind)
         self._increment_forwarded_metrics(enrich_result.mode)
-        self._classify_handoff.submit(
-            ClassifyRequest(
-                submission=ClassifyReadySubmission(
-                    listing_id=post_enrich_dedup.listing_id,
-                    stub=stub,
-                    raw_description=body,
-                ),
-                parser_id=self._parser_id,
-            )
+        self._classify_handoff.submit_ready(
+            listing_id=post_enrich_dedup.listing_id,
+            stub=stub,
+            raw_description=body,
+            parser_id=self._parser_id,
         )
         return
 
-    def _refresh_card_store_body(
-        self, *, listing_id: ListingId, body: RawDescription
-    ) -> None:
+    def _refresh_card_store_body(self, *, listing_id: int, body: str) -> None:
         self._card_store.replace_body_if_present(listing_id, body)
 
-    def _admit_judge_pending(
-        self, *, listing_id: ListingId, stub: PositionStub
-    ) -> None:
+    def _admit_judge_pending(self, *, listing_id: int, stub: PositionStub) -> None:
         self._pool_collector.add_judge_pending(stub, listing_id)
 
     def _record_dedup(self, kind: RunScopedSeenKind) -> None:

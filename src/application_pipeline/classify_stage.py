@@ -40,6 +40,15 @@ class ClassifyRequest:
 class ClassifyStageHandoff(Protocol):
     def submit(self, request: ClassifyRequest) -> None: ...
 
+    def submit_ready(
+        self,
+        *,
+        listing_id: ListingId,
+        stub: PositionStub,
+        raw_description: RawDescription,
+        parser_id: ParserIdentity,
+    ) -> None: ...
+
 
 class ClassifyShutdown:
     __slots__ = ()
@@ -121,6 +130,25 @@ class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
         assert request.parser_id == self._parser_id
         self._classify_queue.put(request)
         self._metrics.classify_buffered(1)
+
+    def submit_ready(
+        self,
+        *,
+        listing_id: ListingId,
+        stub: PositionStub,
+        raw_description: RawDescription,
+        parser_id: ParserIdentity,
+    ) -> None:
+        self.submit(
+            ClassifyRequest(
+                submission=ClassifyReadySubmission(
+                    listing_id=listing_id,
+                    stub=stub,
+                    raw_description=raw_description,
+                ),
+                parser_id=parser_id,
+            )
+        )
 
 
 @runtime_checkable
@@ -384,3 +412,26 @@ class ClassifyWorker(threading.Thread):
             dropped,
             retryable_items=retryable,
         )
+
+
+def assert_classify_stage_ownership() -> None:
+    owned_symbols = {
+        "ClassifyReadySubmission": ClassifyReadySubmission,
+        "ClassifyRequest": ClassifyRequest,
+        "ClassifyShutdown": ClassifyShutdown,
+        "CLASSIFY_SHUTDOWN": CLASSIFY_SHUTDOWN.__class__,
+        "ClassifyAccumulator": ClassifyAccumulator,
+        "ClassifyWorker": ClassifyWorker,
+        "_QueueBackedClassifyStageHandoff": _QueueBackedClassifyStageHandoff,
+        "ClassifyStageMetrics": ClassifyStageMetrics,
+        "ClassifyPoolCollector": ClassifyPoolCollector,
+    }
+    for name, symbol in owned_symbols.items():
+        owner = getattr(symbol, "__module__", None)
+        if owner != __name__:
+            raise AssertionError(
+                f"{name} must stay owned by {__name__}, found {owner!r}"
+            )
+
+
+assert_classify_stage_ownership()

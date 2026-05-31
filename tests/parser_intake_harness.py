@@ -139,12 +139,27 @@ class CollectingClassifyHandoff:
         self.calls: list[ClassifyCall] = []
 
     def submit(self, request: ClassifyRequest) -> None:
+        self.submit_ready(
+            listing_id=request.submission.listing_id,
+            stub=request.submission.stub,
+            raw_description=request.submission.raw_description,
+            parser_id=request.parser_id,
+        )
+
+    def submit_ready(
+        self,
+        *,
+        listing_id: int,
+        stub: PositionStub,
+        raw_description: str,
+        parser_id: str,
+    ) -> None:
         self.calls.append(
             ClassifyCall(
-                listing_id=request.submission.listing_id,
-                stub=request.submission.stub,
-                body=request.submission.raw_description,
-                parser_id=request.parser_id,
+                listing_id=listing_id,
+                stub=stub,
+                body=raw_description,
+                parser_id=parser_id,
             )
         )
 

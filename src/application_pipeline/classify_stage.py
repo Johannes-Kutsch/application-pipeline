@@ -228,7 +228,6 @@ class ClassifyStage:
         self._classify_queue.put(CLASSIFY_SHUTDOWN)
 
     def wait(self) -> ClassifyStageCompletion:
-        self.close()
         self._accumulator.join()
         first_failure = self._accumulator.exc
         for worker in self._workers:

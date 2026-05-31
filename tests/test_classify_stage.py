@@ -15,6 +15,7 @@ from application_pipeline.classify_stage import (
     ClassifyQueueItem,
     ClassifyReadySubmission,
     ClassifyRequest,
+    ClassifyStageCompletion,
     ClassifyStage,
     ClassifyStageHandoff,
 )
@@ -80,6 +81,7 @@ def test_classify_stage_handoff_submit_ready_routes_listing_through_stage(
         raw_description="Raw description for classify handoff",
         parser_id="parser.test",
     )
+    stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -527,13 +529,42 @@ def test_classify_stage_empty_run_completes_with_no_failure(tmp_path: Path) -> N
     assert completion.first_failure is None
 
 
-def test_classify_stage_wait_without_explicit_close_still_completes(
+def test_classify_stage_wait_requires_close_to_flush_partial_batch(
     tmp_path: Path,
 ) -> None:
-    stage = _make_stage(tmp_path)
+    llm_enricher = _BlockingMatchedEnricher()
+    stage = ClassifyStage(
+        batch_size=10,
+        parallelism=1,
+        pool_collector=_CollectingPoolCollector(),
+        llm_enricher=llm_enricher,
+        metrics=_FakeMetrics(),
+        run_state=_FakeRunState(),
+        run_log=RunLog(tmp_path / "logs"),
+        quota_wall=_quota.QuotaWall(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=_FakeMetrics())
+    completion_holder: list[ClassifyStageCompletion] = []
+
     stage.start()
-    completion = stage.wait()
-    assert completion.first_failure is None
+    for listing_id in range(1, 6):
+        _submit_ready(handoff, listing_id)
+
+    waiter = threading.Thread(target=lambda: completion_holder.append(stage.wait()))
+    waiter.start()
+
+    assert llm_enricher.started.wait(timeout=0.2) is False
+    assert waiter.is_alive()
+
+    stage.close()
+
+    assert llm_enricher.started.wait(timeout=1)
+    llm_enricher.release.set()
+    waiter.join(timeout=1)
+
+    assert waiter.is_alive() is False
+    assert completion_holder[0].first_failure is None
+    assert llm_enricher.batch_sizes == [5]
 
 
 def test_classify_stage_close_is_idempotent(tmp_path: Path) -> None:
@@ -671,6 +702,7 @@ def test_classify_stage_batches_exactly_10_items_into_one_llm_call(
     stage.start()
     for listing_id in range(1, 11):
         _submit_ready(handoff, listing_id)
+    stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -746,6 +778,7 @@ def test_classify_stage_handoff_fills_complete_batch_before_tail_flush_at_stage_
             raw_description=raw_description,
             parser_id=parser_id,
         )
+    stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -797,6 +830,7 @@ def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_l
         raw_description=raw_description,
         parser_id=parser_id,
     )
+    stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -839,6 +873,7 @@ def test_classify_stage_rejected_outcome_skips_pool_and_counts_classifier_drop(
 
     stage.start()
     _submit_ready(handoff, 1)
+    stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -879,6 +914,7 @@ def test_classify_stage_expired_outcome_skips_pool_counts_drop_and_logs_matches_
 
     stage.start()
     _submit_ready(handoff, 1)
+    stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -919,6 +955,7 @@ def test_classify_stage_retryable_outcome_skips_pool_and_counts_malformed(
 
     stage.start()
     _submit_ready(handoff, 1)
+    stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None
@@ -1036,6 +1073,7 @@ def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
 
     stage.start()
     _submit_ready(handoff, 1)
+    stage.close()
     completion = stage.wait()
 
     assert completion.first_failure is None

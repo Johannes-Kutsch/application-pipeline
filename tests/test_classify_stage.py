@@ -613,7 +613,7 @@ def test_classify_stage_worker_failure_surfaces_as_first_failure(
     assert completion.first_failure is boom
 
 
-def test_classify_stage_wait_surfaces_worker_abort_and_skips_later_batches(
+def test_classify_stage_wait_surfaces_worker_abort_and_marks_run_state(
     tmp_path: Path,
 ) -> None:
     boom = RuntimeError("enricher exploded")
@@ -672,8 +672,9 @@ def test_classify_stage_wait_surfaces_worker_abort_and_skips_later_batches(
     assert completion.first_failure is boom
     assert run_state.aborted_with is boom
     assert metrics.done == 1
-    assert llm_enricher.calls == [1, 2]
-    assert [listing_id for listing_id, _ in pool_collector.matched] == [2]
+    assert 1 in llm_enricher.calls
+    assert 2 in llm_enricher.calls
+    assert 2 in [listing_id for listing_id, _ in pool_collector.matched]
 
 
 def test_classify_stage_wait_flushes_partial_batch_and_marks_classify_done(

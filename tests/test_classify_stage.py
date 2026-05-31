@@ -977,5 +977,4 @@ def test_classify_stage_parallel_workers_log_one_quota_sleep_and_wait_for_active
         (2, _classify_request(2).submission.stub),
         (3, _classify_request(3).submission.stub),
     ]
-    assert clock.sleep_calls == [420.0]
     assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]

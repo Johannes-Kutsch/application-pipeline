@@ -271,12 +271,12 @@ def test_classify_queued_decreases_as_batches_complete(run_log: RunLog) -> None:
     metrics.classify_batch_dequeued(5)
 
     body_mid = _last_body(display, "llm classify relevance")
-    assert "10 queued" in body_mid
+    assert "5 queued" in body_mid
 
     metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
 
     body_after = _last_body(display, "llm classify relevance")
-    assert "5 queued" in body_after
+    assert body_after == "5 queued · 5 forwarded"
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +430,7 @@ def test_classifying_segment_position_between_queued_and_dropped(
     # 5 more still buffered but not yet dequeued — only the 5 dequeued are classifying
 
     body = _last_body(display, "llm classify relevance")
-    assert body == "10 queued · 5 classifying"
+    assert body == "5 queued · 5 classifying"
 
 
 def test_classifying_reflects_partial_completions(run_log: RunLog) -> None:

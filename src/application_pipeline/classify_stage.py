@@ -127,6 +127,8 @@ class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
 class ClassifyStageMetrics(ClassifyAccumulatorMetrics, ClassifyWorkerMetrics, Protocol):
     def classify_buffered(self, count: int) -> None: ...
 
+    def classify_done(self) -> None: ...
+
 
 @runtime_checkable
 class ClassifyStageRunState(
@@ -155,6 +157,7 @@ class ClassifyStage:
     ) -> None:
         self._classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
         self._dispatch_queue: queue.Queue[ClassifyDispatchItem] = queue.Queue()
+        self._metrics = metrics
         self._accumulator = ClassifyAccumulator(
             classify_queue=self._classify_queue,
             dispatch_queue=self._dispatch_queue,
@@ -206,6 +209,7 @@ class ClassifyStage:
             worker.join()
             if first_failure is None and worker.exc is not None:
                 first_failure = worker.exc
+        self._metrics.classify_done()
         return ClassifyStageCompletion(first_failure=first_failure)
 
 

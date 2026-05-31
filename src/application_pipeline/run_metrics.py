@@ -678,9 +678,7 @@ class RunMetrics:
         )
 
     def _classify_body(self) -> str:
-        depth = (
-            self._classify_queued - self._classify_items - self._classify_items_errored
-        )
+        depth = self._pending_classify
         malformed = self._classify_items_errored + self._classify_items_retryable
         forwarded = (
             self._classify_items

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import queue
+import threading
 from pathlib import Path
 
+from application_pipeline.run_metrics import RunMetrics
 
 from application_pipeline.classify_stage import (
     CLASSIFY_SHUTDOWN,
@@ -18,9 +20,11 @@ from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
     AppliedClassifyItemOutcome,
     CallUsage,
+    MatchedListing,
 )
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
+from fake_status_display import FakeStatusDisplay
 
 
 def test_classify_stage_builds_classify_request_from_classify_ready_submission() -> (
@@ -74,6 +78,10 @@ def _classify_request(listing_id: int) -> ClassifyRequest:
         ),
         parser_id="parser.test",
     )
+
+
+def _last_body(display: FakeStatusDisplay, name: str) -> str:
+    return display.body_updates_for(name)[-1]
 
 
 def test_classify_stage_accumulator_fills_one_complete_batch_before_next() -> None:
@@ -151,6 +159,7 @@ def test_classify_stage_accumulator_aborts_run_and_stops_workers_on_failure() ->
 class _FakeMetrics:
     def __init__(self) -> None:
         self.buffered = 0
+        self.done = 0
 
     def classify_buffered(self, count: int) -> None:
         self.buffered += count
@@ -172,6 +181,9 @@ class _FakeMetrics:
 
     def enrich_failed(self, parser_id: str = "") -> None:
         pass
+
+    def classify_done(self) -> None:
+        self.done += 1
 
 
 class _FakeRunState:
@@ -203,6 +215,86 @@ class _RejectedEnricher:
                 for _ in items
             ]
         )
+
+
+class _MatchedEnricher:
+    def __init__(self) -> None:
+        self.batch_sizes: list[int] = []
+
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        self.batch_sizes.append(len(items))
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+                )
+                for listing_id, stub, _ in items
+            ]
+        )
+
+
+class _BlockingMatchedEnricher:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.batch_sizes: list[int] = []
+
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        self.batch_sizes.append(len(items))
+        self.started.set()
+        self.release.wait(timeout=1)
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+                )
+                for listing_id, stub, _ in items
+            ]
+        )
+
+
+class _PausingMatchedEnricher:
+    def __init__(self, expected_calls: int) -> None:
+        self.expected_calls = expected_calls
+        self.batch_sizes: list[int] = []
+        self._lock = threading.Lock()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        with self._lock:
+            self.batch_sizes.append(len(items))
+            if len(self.batch_sizes) >= self.expected_calls:
+                self.started.set()
+        self.release.wait(timeout=1)
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+                )
+                for listing_id, stub, _ in items
+            ]
+        )
+
+
+class _CollectingPoolCollector:
+    def __init__(self) -> None:
+        self.matched: list[tuple[int, PositionStub]] = []
+
+    def add_matched(self, stub: PositionStub, listing_id: int) -> None:
+        self.matched.append((listing_id, stub))
 
 
 def _make_stage(tmp_path: Path, llm_enricher: object = None) -> ClassifyStage:
@@ -263,3 +355,117 @@ def test_classify_stage_worker_failure_surfaces_as_first_failure(
     stage.close()
     completion = stage.wait()
     assert completion.first_failure is boom
+
+
+def test_classify_stage_wait_flushes_partial_batch_and_marks_classify_done(
+    tmp_path: Path,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(tmp_path / "logs"))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+    llm_enricher = _BlockingMatchedEnricher()
+    stage = ClassifyStage(
+        batch_size=10,
+        parallelism=4,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(tmp_path / "logs"),
+        quota_wall=_quota.QuotaWall(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    for listing_id in range(1, 6):
+        handoff.submit(_classify_request(listing_id))
+    stage.close()
+
+    completion_holder: list[object] = []
+    waiter = threading.Thread(target=lambda: completion_holder.append(stage.wait()))
+    waiter.start()
+
+    assert llm_enricher.started.wait(timeout=1)
+    assert waiter.is_alive()
+
+    llm_enricher.release.set()
+    waiter.join(timeout=1)
+
+    assert waiter.is_alive() is False
+    assert completion_holder[0] == stage.wait()
+    assert llm_enricher.batch_sizes == [5]
+    assert [listing_id for listing_id, _ in pool_collector.matched] == [1, 2, 3, 4, 5]
+    assert any(
+        call.method == "update_phase"
+        and call.name == "llm classify relevance"
+        and call.kwargs["phase"] == "done"
+        for call in display.calls
+    )
+
+
+def test_classify_stage_batches_25_items_and_shows_in_flight_status_updates(
+    tmp_path: Path,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(tmp_path / "logs"))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+    llm_enricher = _PausingMatchedEnricher(expected_calls=3)
+    stage = ClassifyStage(
+        batch_size=10,
+        parallelism=4,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(tmp_path / "logs"),
+        quota_wall=_quota.QuotaWall(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    for listing_id in range(1, 26):
+        handoff.submit(_classify_request(listing_id))
+    stage.close()
+
+    assert llm_enricher.started.wait(timeout=1)
+    assert llm_enricher.batch_sizes == [10, 10, 5]
+    assert _last_body(display, "llm classify relevance") == "25 classifying"
+
+    llm_enricher.release.set()
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert len(pool_collector.matched) == 25
+    assert _last_body(display, "llm classify relevance") == "25 forwarded"
+
+
+def test_classify_stage_batches_exactly_10_items_into_one_llm_call(
+    tmp_path: Path,
+) -> None:
+    pool_collector = _CollectingPoolCollector()
+    llm_enricher = _MatchedEnricher()
+    metrics = _FakeMetrics()
+    stage = ClassifyStage(
+        batch_size=10,
+        parallelism=4,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(tmp_path / "logs"),
+        quota_wall=_quota.QuotaWall(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    for listing_id in range(1, 11):
+        handoff.submit(_classify_request(listing_id))
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert llm_enricher.batch_sizes == [10]
+    assert [listing_id for listing_id, _ in pool_collector.matched] == list(
+        range(1, 11)
+    )

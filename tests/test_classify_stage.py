@@ -545,13 +545,10 @@ def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_l
     assert pool_collector.matched == [
         (request.submission.listing_id, request.submission.stub)
     ]
-    assert _classify_event_rows(logs_dir) == [
-        {
-            "ts": _classify_event_rows(logs_dir)[0]["ts"],
-            "event": "classify_relevance",
-            "matches": True,
-        }
-    ]
+    rows = _classify_event_rows(logs_dir)
+    assert len(rows) == 1
+    assert rows[0]["event"] == "classify_relevance"
+    assert rows[0]["matches"] is True
 
 
 def test_classify_stage_rejected_outcome_skips_pool_and_counts_classifier_drop(

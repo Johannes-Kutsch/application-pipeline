@@ -457,7 +457,7 @@ class ClassifyWorker(threading.Thread):
             )
             if item_outcome.state == "retryable":
                 retryable += 1
-                self._metrics.enrich_failed(req.submission.stub.source)
+                self._metrics.enrich_failed(req.parser_id)
                 continue
             if item_outcome.state == "expired":
                 dropped += 1

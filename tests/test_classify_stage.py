@@ -1153,6 +1153,51 @@ def test_classify_stage_retryable_outcome_skips_pool_and_counts_malformed(
     assert _classify_event_rows(logs_dir)[0]["matches"] is None
 
 
+def test_classify_stage_retryable_outcome_counts_malformed_on_registered_parser_row(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    metrics.register_parser("parser.test", order=1, total_queries=1)
+    pool_collector = _CollectingPoolCollector()
+
+    class _RetryableSingleEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="retryable",
+                        event_matches=None,
+                    )
+                ]
+            )
+
+    stage = _build_stage(
+        logs_dir=logs_dir,
+        pool_collector=pool_collector,
+        llm_enricher=_RetryableSingleEnricher(),
+        metrics=metrics,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    _submit_ready(handoff, 1)
+    stage.close()
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert pool_collector.matched == []
+    assert _last_body(display, "llm classify relevance") == "1 malformed"
+    parser_summary = metrics.parser_summary(
+        "parser.test", end_monotonic=1.0, started_monotonic=0.0
+    )
+    assert parser_summary["enrich_failed"] == 1
+
+
 def test_classify_stage_batch_level_malformed_failure_skips_failed_batch_and_continues(
     tmp_path: Path,
 ) -> None:

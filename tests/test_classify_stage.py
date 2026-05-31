@@ -680,6 +680,79 @@ def test_classify_stage_batches_exactly_10_items_into_one_llm_call(
     )
 
 
+def test_classify_stage_handoff_fills_complete_batch_before_tail_flush_at_stage_seam(
+    tmp_path: Path,
+) -> None:
+    pool_collector = _CollectingPoolCollector()
+
+    class _RecordingOrderedEnricher:
+        def __init__(self) -> None:
+            self.calls: list[list[int]] = []
+            self._lock = threading.Lock()
+            self._first_batch_released = threading.Event()
+
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            listing_ids = [listing_id for listing_id, _, _ in items]
+            with self._lock:
+                self.calls.append(listing_ids)
+            if listing_ids == [1, 2, 3]:
+                self._first_batch_released.wait(timeout=1)
+            else:
+                self._first_batch_released.set()
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="matched",
+                        event_matches=True,
+                        matched_listing=MatchedListing(
+                            listing_id=listing_id,
+                            stub=PositionStub(
+                                url=f"https://example.com/rewritten/{listing_id}",
+                                title=f"Rewritten title {listing_id}",
+                                source="rewritten",
+                            ),
+                        ),
+                    )
+                    for listing_id, _, _ in items
+                ]
+            )
+
+    llm_enricher = _RecordingOrderedEnricher()
+    metrics = _FakeMetrics()
+    stage = ClassifyStage(
+        batch_size=3,
+        parallelism=2,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(tmp_path / "logs"),
+        quota_wall=_quota.QuotaWall(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    expected_pairs: list[tuple[int, PositionStub]] = []
+    for listing_id in range(1, 6):
+        listing_id_value, stub, raw_description, parser_id = _classify_ready_facts(
+            listing_id
+        )
+        expected_pairs.append((listing_id_value, stub))
+        handoff.submit_ready(
+            listing_id=listing_id_value,
+            stub=stub,
+            raw_description=raw_description,
+            parser_id=parser_id,
+        )
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert llm_enricher.calls == [[1, 2, 3], [4, 5]]
+    assert pool_collector.matched == expected_pairs
+
+
 def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_logs_match(
     tmp_path: Path,
 ) -> None:

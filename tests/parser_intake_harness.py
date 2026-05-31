@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from fake_status_display import FakeStatusDisplay
 
@@ -80,6 +81,9 @@ class InMemoryParser:
 
     def enrich(self, stub: PositionStub) -> EnrichResult:
         return self._enrich_result
+
+    def set_enrich_result(self, enrich_result: EnrichResult) -> None:
+        self._enrich_result = enrich_result
 
 
 class CollectingClassifySink:
@@ -330,11 +334,7 @@ class ParserIntakeHarness:
     def seed_matched_pool_reentry_listing(
         self, stub: PositionStub | None = None
     ) -> int:
-        listing = self.default_enriched_stub if stub is None else stub
-        self.dedup_store.mark_matched(listing)
-        listing_id = self.dedup_store.listing_id_for(listing.url)
-        assert listing_id is not None
-        return listing_id
+        return self.seed_judge_pending_listing(stub)
 
     def seed_in_run_pending_listing(self, stub: PositionStub | None = None) -> int:
         listing = self.default_position_stub if stub is None else stub
@@ -354,6 +354,38 @@ class ParserIntakeHarness:
         extract = CardExtract(header=header, summary=summary, body=body)
         self.card_store.put(listing_id, extract)
         return extract
+
+    def seed_judge_pending_listing(
+        self,
+        stub: PositionStub | None = None,
+        *,
+        card: CardExtract | None = None,
+    ) -> int:
+        listing = self.default_enriched_stub if stub is None else stub
+        self.dedup_store.mark_matched(listing)
+        listing_id = self.dedup_store.listing_id_for(listing.url)
+        assert listing_id is not None
+        if card is not None:
+            self.card_store.put(listing_id, card)
+        return listing_id
+
+    def set_parser_enrich_result(
+        self,
+        *,
+        stub: PositionStub | None = None,
+        body: str | None = None,
+        mode: Literal["native", "fallback"] = "native",
+    ) -> None:
+        assert isinstance(self.parser, InMemoryParser), (
+            "set_parser_enrich_result() requires the default InMemoryParser"
+        )
+        self.parser.set_enrich_result(
+            EnrichResult(
+                stub=self.default_enriched_stub if stub is None else stub,
+                body=self.default_body if body is None else body,
+                mode=mode,
+            )
+        )
 
     def classify_handoffs(self) -> list[ClassifyCall]:
         return list(self.classify_sink.calls)

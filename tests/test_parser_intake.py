@@ -470,9 +470,6 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
 def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps_card(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     canonical_url = "https://example.com/original"
     rediscovered_stub = PositionStub(
         url="https://example.com/alias",
@@ -482,69 +479,39 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
         location="Hamburg",
         posted_date=date(2026, 5, 29),
     )
-
-    seen_path.write_text(
-        json.dumps(
-            {
-                "7": {
-                    "urls": [canonical_url],
-                    "company_lc": "acme",
-                    "title_lc": "platform engineer",
-                    "location_lc": "hamburg",
-                    "status": "matched",
-                    "status_last_changed": "2026-01-01",
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    extracts_path.write_text(
-        json.dumps(
-            {
-                "7": {
-                    "header": "Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior",
-                    "summary": "Persisted summary",
-                    "body": "Persisted body",
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    display = FakeStatusDisplay()
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    pool_collector = _RecordingPoolCollector()
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
         parser_id="test",
+        tmp_path=tmp_path,
+        discovered_stub=rediscovered_stub,
         parser=_UnexpectedEnrichParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=display,
-            run_log=run_log,
+    )
+    listing_id = harness.seed_judge_pending_listing(
+        PositionStub(
+            url=canonical_url,
+            title="Platform Engineer",
+            source="test",
+            company="Acme",
+            location="Hamburg",
         ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=display, run_log=run_log),
-        card_store=card_store,
-        pool_collector=pool_collector,
-        run_log=run_log,
-        metrics=metrics,
+        card=CardExtract(
+            header="Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior",
+            summary="Persisted summary",
+            body="Persisted body",
+        ),
     )
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(rediscovered_stub)
-    assert pool_collector.admissions == [(7, rediscovered_stub)]
-    _assert_dedup_recorded(dedup_counters, "judge_pending")
-    assert _last_body(metrics_display, "parser test") == "0 discovered · 0 forwarded"
+    harness.process_one_position_stub(rediscovered_stub)
 
-    card = card_store.get(7)
+    admissions = harness.pool_admissions()
+    assert len(admissions) == 1
+    assert admissions[0].listing_id == listing_id
+    assert admissions[0].stub == rediscovered_stub
+    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    assert (
+        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
+    )
+
+    card = harness.card_content(listing_id)
     assert card is not None
     assert card.header == "Platform Engineer\nAcme · Hamburg\n2026-01-01 · Senior"
     assert card.summary == "Persisted summary"
@@ -657,9 +624,6 @@ def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_ca
 def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refreshes_body(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     discovered_stub = PositionStub(
         url="https://example.com/post-enrich-alias",
         title="Discovered title",
@@ -675,25 +639,10 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
         company="Acme",
         location="Hamburg",
     )
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    dedup_store.mark_matched(original)
-    listing_id = dedup_store.listing_id_for(original.url)
-    assert listing_id is not None
-    card_store.put(
-        listing_id,
-        CardExtract(
-            header="Persisted header",
-            summary="Persisted summary",
-            body="Persisted body",
-        ),
-    )
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    pool_collector = _RecordingPoolCollector()
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
+        discovered_stub=discovered_stub,
         parser=_BackfillingMatchedParser(
             url="https://example.com/post-enrich-alias",
             company="Acme",
@@ -701,41 +650,35 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
             title="Platform Engineer",
             body=fresh_body,
         ),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
+    )
+    listing_id = harness.seed_judge_pending_listing(
+        original,
+        card=CardExtract(
+            header="Persisted header",
+            summary="Persisted summary",
+            body="Persisted body",
         ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        pool_collector=pool_collector,
-        run_log=run_log,
-        metrics=metrics,
     )
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(discovered_stub)
-    assert pool_collector.admissions == [
-        (
-            listing_id,
-            PositionStub(
-                url="https://example.com/post-enrich-alias",
-                title="Platform Engineer",
-                source="test",
-                company="Acme",
-                location="Hamburg",
-                posted_date=date(2026, 5, 29),
-            ),
-        )
-    ]
-    _assert_dedup_recorded(dedup_counters, "judge_pending")
+    harness.process_one_position_stub(discovered_stub)
 
-    assert card_store.get(listing_id) == CardExtract(
+    admissions = harness.pool_admissions()
+    assert len(admissions) == 1
+    assert admissions[0].listing_id == listing_id
+    assert admissions[0].stub == PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    assert (
+        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
+    )
+
+    assert harness.card_content(listing_id) == CardExtract(
         header="Persisted header",
         summary="Persisted summary",
         body=fresh_body,
@@ -745,9 +688,6 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
 def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_extract(
     tmp_path: Path,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     discovered_stub = PositionStub(
         url="https://example.com/post-enrich-alias",
         title="Discovered title",
@@ -762,15 +702,10 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
         company="Acme",
         location="Hamburg",
     )
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    dedup_store.mark_matched(original)
-    listing_id = dedup_store.listing_id_for(original.url)
-    assert listing_id is not None
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    pool_collector = _RecordingPoolCollector()
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
+        parser_id="test",
+        discovered_stub=discovered_stub,
         parser=_BackfillingMatchedParser(
             url="https://example.com/post-enrich-alias",
             company="Acme",
@@ -778,39 +713,27 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
             title="Platform Engineer",
             body="Fresh raw description " + "x" * 120,
         ),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        pool_collector=pool_collector,
-        run_log=run_log,
     )
+    listing_id = harness.seed_judge_pending_listing(original)
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(discovered_stub)
-    assert pool_collector.admissions == [
-        (
-            listing_id,
-            PositionStub(
-                url="https://example.com/post-enrich-alias",
-                title="Platform Engineer",
-                source="test",
-                company="Acme",
-                location="Hamburg",
-                posted_date=date(2026, 5, 29),
-            ),
-        )
-    ]
-    _assert_dedup_recorded(dedup_counters, "judge_pending")
-    assert card_store.get(listing_id) is None
+    harness.process_one_position_stub(discovered_stub)
+
+    admissions = harness.pool_admissions()
+    assert len(admissions) == 1
+    assert admissions[0].listing_id == listing_id
+    assert admissions[0].stub == PositionStub(
+        url="https://example.com/post-enrich-alias",
+        title="Platform Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    assert (
+        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
+    )
+    assert harness.card_content(listing_id) is None
 
 
 @pytest.mark.parametrize(
@@ -824,9 +747,6 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
     tmp_path: Path,
     body: str,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     discovered_stub = PositionStub(
         url="https://example.com/post-enrich-alias",
         title="Discovered title",
@@ -841,24 +761,10 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
         company="Acme",
         location="Hamburg",
     )
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    dedup_store.mark_matched(original)
-    listing_id = dedup_store.listing_id_for(original.url)
-    assert listing_id is not None
-    card_store.put(
-        listing_id,
-        CardExtract(
-            header="Persisted header",
-            summary="Persisted summary",
-            body="Persisted body",
-        ),
-    )
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
+        discovered_stub=discovered_stub,
         parser=_BackfillingMatchedParser(
             url="https://example.com/post-enrich-alias",
             company="Acme",
@@ -866,27 +772,21 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
             title="Platform Engineer",
             body=body,
         ),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
+    )
+    listing_id = harness.seed_judge_pending_listing(
+        original,
+        card=CardExtract(
+            header="Persisted header",
+            summary="Persisted summary",
+            body="Persisted body",
         ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
     )
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(discovered_stub)
-    _assert_dedup_recorded(dedup_counters, "judge_pending")
-    assert _last_body(metrics_display, "parser test gates") == "1 content"
-    assert card_store.get(listing_id) == CardExtract(
+    harness.process_one_position_stub(discovered_stub)
+
+    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    assert harness.status_display_row_body("parser test gates") == "1 content"
+    assert harness.card_content(listing_id) == CardExtract(
         header="Persisted header",
         summary="Persisted summary",
         body="Persisted body",
@@ -908,9 +808,6 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
     age_days: int | None,
     deadline_text: str | None,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     discovered_stub = PositionStub(
         url="https://example.com/post-enrich-alias",
         title="Discovered title",
@@ -924,25 +821,10 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
         company="Acme",
         location="Hamburg",
     )
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    dedup_store.mark_matched(original)
-    listing_id = dedup_store.listing_id_for(original.url)
-    assert listing_id is not None
-    card_store.put(
-        listing_id,
-        CardExtract(
-            header="Persisted header",
-            summary="Persisted summary",
-            body="Persisted body",
-        ),
-    )
-    run_log = RunLog(logs_dir)
-    display = FakeStatusDisplay()
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
+        discovered_stub=discovered_stub,
         parser=_BackfillingMatchedFreshnessDropParser(
             url="https://example.com/post-enrich-alias",
             company="Acme",
@@ -952,43 +834,32 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
             deadline=deadline,
             body="Fresh raw description " + "x" * 120,
         ),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=display,
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
         content_gate=cast(Any, _UnexpectedContentGate()),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
+    )
+    listing_id = harness.seed_judge_pending_listing(
+        original,
+        card=CardExtract(
+            header="Persisted header",
+            summary="Persisted summary",
+            body="Persisted body",
+        ),
     )
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(discovered_stub)
-    _assert_dedup_recorded(dedup_counters, "judge_pending")
-    assert _last_body(metrics_display, "parser test gates") == "1 freshness"
-    assert card_store.get(listing_id) is None
+    harness.process_one_position_stub(discovered_stub)
 
-    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    assert seen_data[str(listing_id)]["status"] == "expired"
-    assert seen_data[str(listing_id)]["urls"] == [
+    _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
+    assert harness.status_display_row_body("parser test gates") == "1 freshness"
+    assert harness.card_content(listing_id) is None
+
+    dedup_record = harness.dedup_observation(listing_id)
+    assert dedup_record is not None
+    assert dedup_record.status == "expired"
+    assert dedup_record.urls == (
         "https://example.com/post-enrich-alias",
         "https://example.com/original-tuple",
-    ]
+    )
 
-    transcript_rows = [
-        json.loads(line)
-        for line in (logs_dir / "pipeline" / "freshness.transcripts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip()
-    ]
-    assert transcript_rows == [
+    assert harness.log_artifact_transcript_rows("pipeline_freshness") == [
         {
             "url": "https://example.com/post-enrich-alias",
             "title": "Platform Engineer",

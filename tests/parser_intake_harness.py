@@ -47,6 +47,8 @@ DEFAULT_ENRICHED_STUB = PositionStub(
     posted_date=DEFAULT_DISCOVERED_STUB.posted_date,
 )
 DEFAULT_BODY = "Fresh backend role " + "x" * 120
+POST_ENRICH_ALIAS_URL = "https://example.com/post-enrich-alias"
+POST_ENRICH_ORIGINAL_URL = "https://example.com/original-tuple"
 HarnessSeedHelper = Callable[["ParserIntakeHarness"], int]
 
 
@@ -331,6 +333,62 @@ class ParserIntakeHarness:
             default_body=body,
         )
 
+    @classmethod
+    def create_post_enrich_alias(
+        cls,
+        tmp_path: Path,
+        *,
+        parser_id: str = "test",
+        content_gate: ContentGateLike | None = None,
+        discovered_posted_date: date | None = date(2026, 5, 29),
+    ) -> "ParserIntakeHarness":
+        return cls.create(
+            tmp_path,
+            parser_id=parser_id,
+            discovered_stub=cls.post_enrich_discovered_stub(
+                posted_date=discovered_posted_date
+            ),
+            content_gate=content_gate,
+        )
+
+    @staticmethod
+    def post_enrich_discovered_stub(
+        *,
+        posted_date: date | None = date(2026, 5, 29),
+    ) -> PositionStub:
+        return PositionStub(
+            url=POST_ENRICH_ALIAS_URL,
+            title="Discovered title",
+            source="test",
+            posted_date=posted_date,
+        )
+
+    @staticmethod
+    def post_enrich_enriched_stub(
+        *,
+        posted_date: date | None = date(2026, 5, 29),
+        deadline: date | None = None,
+    ) -> PositionStub:
+        return PositionStub(
+            url=POST_ENRICH_ALIAS_URL,
+            title="Platform Engineer",
+            source="test",
+            company="Acme",
+            location="Hamburg",
+            posted_date=posted_date,
+            deadline=deadline,
+        )
+
+    @staticmethod
+    def post_enrich_original_stub() -> PositionStub:
+        return PositionStub(
+            url=POST_ENRICH_ORIGINAL_URL,
+            title="Platform Engineer",
+            source="test",
+            company="Acme",
+            location="Hamburg",
+        )
+
     @contextmanager
     def run_scope(self) -> Iterator[None]:
         if self._run_scope_depth > 0:
@@ -501,6 +559,16 @@ class ParserIntakeHarness:
         )
         return listing_id
 
+    def seed_post_enrich_judge_pending_listing(
+        self,
+        *,
+        card: CardExtract | None = None,
+    ) -> int:
+        return self.seed_judge_pending_listing(
+            self.post_enrich_original_stub(),
+            card=card,
+        )
+
     def set_parser_enrich_result(
         self,
         *,
@@ -590,6 +658,21 @@ class ParserIntakeHarness:
             body=body,
             mode=mode,
         )
+
+    def set_post_enrich_alias_result(
+        self,
+        *,
+        body: str,
+        posted_date: date | None = date(2026, 5, 29),
+        deadline: date | None = None,
+        mode: Literal["native", "fallback"] = "native",
+    ) -> PositionStub:
+        stub = self.post_enrich_enriched_stub(
+            posted_date=posted_date,
+            deadline=deadline,
+        )
+        self.set_parser_enrich_result(stub=stub, body=body, mode=mode)
+        return stub
 
     def classify_handoffs(self) -> list[ClassifyCall]:
         return list(self.classify_sink.calls)

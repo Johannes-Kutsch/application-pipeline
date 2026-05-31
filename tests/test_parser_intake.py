@@ -345,39 +345,13 @@ def test_post_enrich_non_pending_dedup_drop_stops_before_late_gates_and_keeps_ca
 def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refreshes_body(
     tmp_path: Path,
 ) -> None:
-    discovered_stub = PositionStub(
-        url="https://example.com/post-enrich-alias",
-        title="Discovered title",
-        source="test",
-        posted_date=date(2026, 5, 29),
-    )
     fresh_body = "Fresh raw description " + "x" * 120
-
-    original = PositionStub(
-        url="https://example.com/original-tuple",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-    )
-    harness = ParserIntakeHarness.create(
+    harness = ParserIntakeHarness.create_post_enrich_alias(
         tmp_path,
         parser_id="test",
-        discovered_stub=discovered_stub,
     )
-    harness.set_parser_enrich_result(
-        stub=PositionStub(
-            url="https://example.com/post-enrich-alias",
-            title="Platform Engineer",
-            source="test",
-            company="Acme",
-            location="Hamburg",
-            posted_date=date(2026, 5, 29),
-        ),
-        body=fresh_body,
-    )
-    listing_id = harness.seed_judge_pending_listing(
-        original,
+    enriched_stub = harness.set_post_enrich_alias_result(body=fresh_body)
+    listing_id = harness.seed_post_enrich_judge_pending_listing(
         card=CardExtract(
             header="Persisted header",
             summary="Persisted summary",
@@ -385,19 +359,12 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
         ),
     )
 
-    harness.process_one_position_stub(discovered_stub)
+    harness.process_one_position_stub()
 
     admissions = harness.pool_admissions()
     assert len(admissions) == 1
     assert admissions[0].listing_id == listing_id
-    assert admissions[0].stub == PositionStub(
-        url="https://example.com/post-enrich-alias",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=date(2026, 5, 29),
-    )
+    assert admissions[0].stub == enriched_stub
     harness.assert_dedup_recorded("judge_pending")
     assert (
         harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
@@ -413,51 +380,21 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
 def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_extract(
     tmp_path: Path,
 ) -> None:
-    discovered_stub = PositionStub(
-        url="https://example.com/post-enrich-alias",
-        title="Discovered title",
-        source="test",
-        posted_date=date(2026, 5, 29),
-    )
-
-    original = PositionStub(
-        url="https://example.com/original-tuple",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-    )
-    harness = ParserIntakeHarness.create(
+    harness = ParserIntakeHarness.create_post_enrich_alias(
         tmp_path,
         parser_id="test",
-        discovered_stub=discovered_stub,
     )
-    harness.set_parser_enrich_result(
-        stub=PositionStub(
-            url="https://example.com/post-enrich-alias",
-            title="Platform Engineer",
-            source="test",
-            company="Acme",
-            location="Hamburg",
-            posted_date=date(2026, 5, 29),
-        ),
+    enriched_stub = harness.set_post_enrich_alias_result(
         body="Fresh raw description " + "x" * 120,
     )
-    listing_id = harness.seed_judge_pending_listing(original)
+    listing_id = harness.seed_post_enrich_judge_pending_listing()
 
-    harness.process_one_position_stub(discovered_stub)
+    harness.process_one_position_stub()
 
     admissions = harness.pool_admissions()
     assert len(admissions) == 1
     assert admissions[0].listing_id == listing_id
-    assert admissions[0].stub == PositionStub(
-        url="https://example.com/post-enrich-alias",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-        posted_date=date(2026, 5, 29),
-    )
+    assert admissions[0].stub == enriched_stub
     harness.assert_dedup_recorded("judge_pending")
     assert (
         harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
@@ -476,38 +413,12 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
     tmp_path: Path,
     body: str,
 ) -> None:
-    discovered_stub = PositionStub(
-        url="https://example.com/post-enrich-alias",
-        title="Discovered title",
-        source="test",
-        posted_date=date(2026, 5, 29),
-    )
-
-    original = PositionStub(
-        url="https://example.com/original-tuple",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-    )
-    harness = ParserIntakeHarness.create(
+    harness = ParserIntakeHarness.create_post_enrich_alias(
         tmp_path,
         parser_id="test",
-        discovered_stub=discovered_stub,
     )
-    harness.set_parser_enrich_result(
-        stub=PositionStub(
-            url="https://example.com/post-enrich-alias",
-            title="Platform Engineer",
-            source="test",
-            company="Acme",
-            location="Hamburg",
-            posted_date=date(2026, 5, 29),
-        ),
-        body=body,
-    )
-    listing_id = harness.seed_judge_pending_listing(
-        original,
+    harness.set_post_enrich_alias_result(body=body)
+    listing_id = harness.seed_post_enrich_judge_pending_listing(
         card=CardExtract(
             header="Persisted header",
             summary="Persisted summary",
@@ -515,7 +426,7 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
         ),
     )
 
-    harness.process_one_position_stub(discovered_stub)
+    harness.process_one_position_stub()
 
     harness.assert_dedup_recorded("judge_pending")
     assert harness.status_display_row_body("parser test gates") == "1 content"
@@ -552,41 +463,26 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
     age_days: int | None,
     deadline_text: str | None,
 ) -> None:
-    discovered_stub = PositionStub(
-        url="https://example.com/post-enrich-alias",
-        title="Discovered title",
-        source="test",
-    )
-
-    original = PositionStub(
-        url="https://example.com/original-tuple",
-        title="Platform Engineer",
-        source="test",
-        company="Acme",
-        location="Hamburg",
-    )
-    harness = ParserIntakeHarness.create(
+    harness = ParserIntakeHarness.create_post_enrich_alias(
         tmp_path,
         parser_id="test",
-        discovered_stub=discovered_stub,
         content_gate=UnexpectedContentGate(),
+        discovered_posted_date=None,
     )
-    harness.set_parser_backfilled_enrich_result(
-        title="Platform Engineer",
-        company="Acme",
-        location="Hamburg",
+    harness.set_post_enrich_alias_result(
+        body="Fresh raw description " + "x" * 120,
         posted_date=posted_date,
         deadline=deadline,
-        body="Fresh raw description " + "x" * 120,
     )
-    listing_id = harness.seed_judge_pending_listing_with_persisted_card(
-        original,
-        header="Persisted header",
-        summary="Persisted summary",
-        body="Persisted body",
+    listing_id = harness.seed_post_enrich_judge_pending_listing(
+        card=CardExtract(
+            header="Persisted header",
+            summary="Persisted summary",
+            body="Persisted body",
+        ),
     )
 
-    harness.process_one_position_stub(discovered_stub)
+    harness.process_one_position_stub()
 
     harness.assert_dedup_recorded("judge_pending")
     assert harness.status_display_row_body("parser test gates") == "1 freshness"

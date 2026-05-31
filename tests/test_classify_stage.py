@@ -21,6 +21,7 @@ from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
     AppliedClassifyItemOutcome,
     CallUsage,
+    ExtractorBatchMalformedError,
     MatchedListing,
 )
 from application_pipeline.parser_log import RunLog
@@ -669,3 +670,74 @@ def test_classify_stage_retryable_outcome_skips_pool_and_counts_malformed(
     assert pool_collector.matched == []
     assert _last_body(display, "llm classify relevance") == "1 malformed"
     assert _classify_event_rows(logs_dir)[0]["matches"] is None
+
+
+def test_classify_stage_batch_level_malformed_failure_skips_failed_batch_and_continues(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+
+    class _MalformedThenMatchedEnricher:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            self.calls += 1
+            if self.calls == 1:
+                raise ExtractorBatchMalformedError("bad batch verdict")
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="matched",
+                        event_matches=True,
+                        matched_listing=MatchedListing(
+                            listing_id=listing_id, stub=stub
+                        ),
+                    )
+                    for listing_id, stub, _ in items
+                ]
+            )
+
+    stage = ClassifyStage(
+        batch_size=2,
+        parallelism=1,
+        pool_collector=pool_collector,
+        llm_enricher=_MalformedThenMatchedEnricher(),
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(logs_dir),
+        quota_wall=_quota.QuotaWall(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    handoff.submit(_classify_request(1))
+    handoff.submit(_classify_request(2))
+    handoff.submit(_classify_request(3))
+    stage.close()
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert [listing_id for listing_id, _ in pool_collector.matched] == [3]
+    assert _last_body(display, "llm classify relevance") == "2 malformed · 1 forwarded"
+
+    rows = _classify_event_rows(logs_dir)
+    assert rows == [
+        {
+            "ts": rows[0]["ts"],
+            "event": "classify_relevance",
+            "status": "error",
+            "error": "bad batch verdict",
+        },
+        {
+            "ts": rows[1]["ts"],
+            "event": "classify_relevance",
+            "matches": True,
+        },
+    ]

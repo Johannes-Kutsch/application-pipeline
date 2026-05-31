@@ -105,6 +105,109 @@ _ZERO_USAGE = CallUsage(
 )
 
 
+class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
+    def __init__(
+        self,
+        *,
+        classify_queue: queue.Queue[ClassifyQueueItem],
+        metrics: "ClassifyStageMetrics",
+        parser_id: str,
+    ) -> None:
+        self._classify_queue = classify_queue
+        self._metrics = metrics
+        self._parser_id = parser_id
+
+    def submit(self, request: ClassifyRequest) -> None:
+        assert request.parser_id == self._parser_id
+        self._classify_queue.put(request)
+        self._metrics.classify_buffered(1)
+
+
+@runtime_checkable
+class ClassifyStageMetrics(ClassifyAccumulatorMetrics, ClassifyWorkerMetrics, Protocol):
+    def classify_buffered(self, count: int) -> None: ...
+
+
+@runtime_checkable
+class ClassifyStageRunState(
+    ClassifyAccumulatorRunState, ClassifyWorkerRunState, Protocol
+):
+    pass
+
+
+@dataclass(frozen=True)
+class ClassifyStageCompletion:
+    first_failure: BaseException | None
+
+
+class ClassifyStage:
+    def __init__(
+        self,
+        *,
+        batch_size: int,
+        parallelism: int,
+        pool_collector: ClassifyPoolCollector,
+        llm_enricher: BatchLLMEnricher,
+        metrics: ClassifyStageMetrics,
+        run_state: ClassifyStageRunState,
+        run_log: RunLog,
+        quota_wall: _quota.QuotaWall,
+    ) -> None:
+        self._classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
+        self._dispatch_queue: queue.Queue[ClassifyDispatchItem] = queue.Queue()
+        self._accumulator = ClassifyAccumulator(
+            classify_queue=self._classify_queue,
+            dispatch_queue=self._dispatch_queue,
+            batch_size=batch_size,
+            num_workers=parallelism,
+            metrics=metrics,
+            run_state=run_state,
+        )
+        self._workers = [
+            ClassifyWorker(
+                dispatch_queue=self._dispatch_queue,
+                pool_collector=pool_collector,
+                llm_enricher=llm_enricher,
+                metrics=metrics,
+                run_state=run_state,
+                run_log=run_log,
+                quota_wall=quota_wall,
+                worker_index=i,
+            )
+            for i in range(parallelism)
+        ]
+        self._closed = False
+
+    def start(self) -> None:
+        self._accumulator.start()
+        for worker in self._workers:
+            worker.start()
+
+    def handoff_for(
+        self, *, parser_id: str, metrics: ClassifyStageMetrics
+    ) -> ClassifyStageHandoff:
+        return _QueueBackedClassifyStageHandoff(
+            classify_queue=self._classify_queue,
+            metrics=metrics,
+            parser_id=parser_id,
+        )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._classify_queue.put(CLASSIFY_SHUTDOWN)
+
+    def wait(self) -> ClassifyStageCompletion:
+        self._accumulator.join()
+        first_failure = self._accumulator.exc
+        for worker in self._workers:
+            worker.join()
+            if first_failure is None and worker.exc is not None:
+                first_failure = worker.exc
+        return ClassifyStageCompletion(first_failure=first_failure)
+
+
 class ClassifyAccumulator(threading.Thread):
     """Single thread that fills classify batches sequentially."""
 

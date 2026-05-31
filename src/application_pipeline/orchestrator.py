@@ -17,13 +17,8 @@ from typing import Protocol, runtime_checkable
 from application_pipeline import config as config_module
 from application_pipeline import dedup as dedup_module
 from application_pipeline.classify_stage import (
-    CLASSIFY_SHUTDOWN,
     BatchLLMEnricher,
-    ClassifyAccumulator,
-    ClassifyWorker,
-    ClassifyDispatchItem,
-    ClassifyQueueItem,
-    ClassifyRequest,
+    ClassifyStage,
     ClassifyStageHandoff,
 )
 from application_pipeline.llm import quota as _quota
@@ -146,24 +141,6 @@ class _QueryDone:
 _QUERY_DONE = _QueryDone()
 
 
-class _ParserIntakeClassifyHandoff(ClassifyStageHandoff):
-    def __init__(
-        self,
-        *,
-        classify_queue: queue.Queue[ClassifyQueueItem],
-        metrics: "RunMetrics",
-        parser_id: str,
-    ) -> None:
-        self._classify_queue = classify_queue
-        self._metrics = metrics
-        self._parser_id = parser_id
-
-    def submit(self, request: ClassifyRequest) -> None:
-        assert request.parser_id == self._parser_id
-        self._classify_queue.put(request)
-        self._metrics.classify_buffered(1)
-
-
 # ---------------------------------------------------------------------------
 # Pool collector — thread-safe accumulator for judge candidates
 # ---------------------------------------------------------------------------
@@ -219,8 +196,8 @@ class _ParserThread(threading.Thread):
         parser: Parser,
         worklist: list[ParserQuery],
         outbound: queue.Queue[tuple[str, object]],
-        classify_queue: queue.Queue[ClassifyQueueItem],
         *,
+        classify_handoff: ClassifyStageHandoff,
         run_log: RunLog,
         run_state: _RunState,
         freshness: FreshnessGate,
@@ -237,7 +214,6 @@ class _ParserThread(threading.Thread):
         self._parser = parser
         self._worklist = worklist
         self._outbound = outbound
-        self._classify_queue = classify_queue
         self._run_log = run_log
         self._run_state = run_state
         self._freshness = freshness
@@ -256,11 +232,7 @@ class _ParserThread(threading.Thread):
             content_gate=content_gate,
             card_store=card_store,
             pool_collector=pool_collector,
-            classify_handoff=_ParserIntakeClassifyHandoff(
-                classify_queue=classify_queue,
-                metrics=metrics,
-                parser_id=parser_id,
-            ),
+            classify_handoff=classify_handoff,
             run_log=run_log,
             metrics=metrics,
         )
@@ -503,7 +475,6 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display, run_log=run_log)
-        classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
         pool_collector = _PoolCollector()
         _run_started_at = datetime.now(timezone.utc)
 
@@ -570,6 +541,17 @@ def run(
                 run_log=run_log,
             )
             content_gate = ContentGate(display=status_display, run_log=run_log)
+            assert isinstance(llm_enricher, BatchLLMEnricher)
+            classify_stage = ClassifyStage(
+                batch_size=cfg.claude_classify_batch_size,
+                parallelism=cfg.claude_classify_parallelism,
+                pool_collector=pool_collector,
+                llm_enricher=llm_enricher,
+                metrics=metrics,
+                run_state=run_state,
+                run_log=run_log,
+                quota_wall=quota_wall,
+            )
 
             parser_states: dict[str, _ParserState] = {}
             threads: list[tuple[str, _ParserThread]] = []
@@ -587,7 +569,10 @@ def run(
                     parser,
                     worklist,
                     outbound,
-                    classify_queue,
+                    classify_handoff=classify_stage.handoff_for(
+                        parser_id=parser_id,
+                        metrics=metrics,
+                    ),
                     run_log=run_log,
                     run_state=run_state,
                     freshness=freshness,
@@ -601,6 +586,7 @@ def run(
                 )
                 threads.append((parser_id, t))
 
+            classify_stage.start()
             for i, (pid, t) in enumerate(threads):
                 t.start()
                 state = parser_states[pid]
@@ -609,34 +595,6 @@ def run(
                 state.last_event_monotonic = state.started_monotonic
                 _log.info("parser %s started", pid)
                 run_log.event("parser_" + pid, "parser started")
-
-            dispatch_queue: queue.Queue[ClassifyDispatchItem] = queue.Queue()
-            classify_accumulator = ClassifyAccumulator(
-                classify_queue=classify_queue,
-                dispatch_queue=dispatch_queue,
-                batch_size=cfg.claude_classify_batch_size,
-                num_workers=cfg.claude_classify_parallelism,
-                metrics=metrics,
-                run_state=run_state,
-            )
-            classify_accumulator.start()
-            assert isinstance(llm_enricher, BatchLLMEnricher)
-
-            classify_workers = [
-                ClassifyWorker(
-                    dispatch_queue=dispatch_queue,
-                    pool_collector=pool_collector,
-                    llm_enricher=llm_enricher,
-                    metrics=metrics,
-                    run_state=run_state,
-                    run_log=run_log,
-                    quota_wall=quota_wall,
-                    worker_index=i,
-                )
-                for i in range(cfg.claude_classify_parallelism)
-            ]
-            for cw in classify_workers:
-                cw.start()
 
             dispatcher = _OutboundDispatcher(
                 parser_states=parser_states,
@@ -709,24 +667,14 @@ def run(
             content_snapshot = content_gate.snapshot()
             dedup_counters.emit_run_complete()
             dedup_snapshot = dedup_counters.snapshot()
+            classify_stage.close()
 
-            # Signal accumulator to flush partial batch and stop workers
-            classify_queue.put(CLASSIFY_SHUTDOWN)
-
-        first_exc: BaseException | None = None
-        classify_accumulator.join()
-        if classify_accumulator.exc is not None:
-            first_exc = classify_accumulator.exc
-
-        for cw in classify_workers:
-            cw.join()
-            if first_exc is None and cw.exc is not None:
-                first_exc = cw.exc
+        classify_completion = classify_stage.wait()
 
         metrics.classify_done()
 
-        if first_exc is not None:
-            raise first_exc
+        if classify_completion.first_failure is not None:
+            raise classify_completion.first_failure
 
         # Emit per-call-site SUMMARY OF SESSION trailers
         metrics.summarize_to_parser_log(_run_started_at)

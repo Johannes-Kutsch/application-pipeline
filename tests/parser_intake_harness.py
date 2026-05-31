@@ -446,18 +446,42 @@ class ParserIntakeHarness:
         return self.dedup_store.listing_id_for(url)
 
     def dedup_observation(self, listing_id: int) -> DeduplicationObservation | None:
-        record = self.dedup_store._records.get(listing_id)
-        if record is None:
+        return _dedup_observation_from_records(self.dedup_store._records, listing_id)
+
+    def persisted_dedup_observation(
+        self, listing_id: int
+    ) -> DeduplicationObservation | None:
+        if not self.seen_path.exists():
             return None
-        return DeduplicationObservation(
-            listing_id=listing_id,
-            urls=tuple(str(url) for url in record.get("urls", [])),
-            status=str(record.get("status")),
-            company_lc=_optional_str(record.get("company_lc")),
-            title_lc=_optional_str(record.get("title_lc")),
-            location_lc=_optional_str(record.get("location_lc")),
-            status_last_changed=_optional_str(record.get("status_last_changed")),
-        )
+        persisted_store = load_dedup(self.seen_path)
+        return _dedup_observation_from_records(persisted_store._records, listing_id)
+
+    def persisted_dedup_status(self, listing_id: int) -> str | None:
+        record = self.persisted_dedup_observation(listing_id)
+        return None if record is None else record.status
+
+    def persisted_listing_id_for_url(self, url: str) -> int | None:
+        if not self.seen_path.exists():
+            return None
+        persisted_store = load_dedup(self.seen_path)
+        return persisted_store.listing_id_for(url)
+
+    def persisted_card_content(self, listing_id: int) -> CardExtract | None:
+        if not self.extracts_path.exists():
+            return None
+        return load_card_store(self.extracts_path).get(listing_id)
+
+    def in_memory_listing_id_for_url(self, url: str) -> int | None:
+        return self.dedup_store.listing_id_for(url)
+
+    def content_snapshot(self) -> object:
+        return self.content_gate.snapshot()
+
+    def freshness_snapshot(self) -> object:
+        return self.freshness_gate.snapshot()
+
+    def prefilter_snapshot(self) -> object:
+        return self.domain_pre_filter.snapshot()
 
     def dedup_counter_snapshot(self) -> DedupSnapshot:
         return self.dedup_counters.snapshot()
@@ -485,6 +509,24 @@ class ParserIntakeHarness:
 
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _dedup_observation_from_records(
+    records: dict[int, dict[str, object]], listing_id: int
+) -> DeduplicationObservation | None:
+    record = records.get(listing_id)
+    if record is None:
+        return None
+    urls = record.get("urls")
+    return DeduplicationObservation(
+        listing_id=listing_id,
+        urls=tuple(str(url) for url in urls) if isinstance(urls, list) else (),
+        status=str(record.get("status")),
+        company_lc=_optional_str(record.get("company_lc")),
+        title_lc=_optional_str(record.get("title_lc")),
+        location_lc=_optional_str(record.get("location_lc")),
+        status_last_changed=_optional_str(record.get("status_last_changed")),
+    )
 
 
 def _log_artifact_relpath(component_id: str, artifact_kind: str) -> Path:

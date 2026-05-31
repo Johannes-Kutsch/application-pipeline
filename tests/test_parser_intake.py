@@ -718,11 +718,22 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
 
     _assert_dedup_recorded(harness.dedup_counters, "judge_pending")
     assert harness.status_display_row_body("parser test gates") == "1 content"
+    assert harness.pool_admissions() == []
     assert harness.card_content(listing_id) == CardExtract(
         header="Persisted header",
         summary="Persisted summary",
         body="Persisted body",
     )
+    assert harness.log_artifact_transcript_rows("pipeline_content") == [
+        {
+            "url": "https://example.com/post-enrich-alias",
+            "title": "Platform Engineer",
+            "source": "test",
+            "passes": False,
+            "reason": "empty_body" if not body.strip() else "too_short",
+            "body_len": len(body),
+        }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -863,128 +874,53 @@ def test_parser_enrich_failed_logs_and_updates_metrics_without_seen_or_card_writ
     assert not seen_path.exists()
 
 
-def test_post_enrich_empty_body_logs_content_drop_without_seen_or_card_write(
+@pytest.mark.parametrize(
+    ("parser", "url", "reason", "body_len"),
+    [
+        (_EmptyBodyParser(), "https://example.com/empty-body", "empty_body", 7),
+        (_TooShortBodyParser(), "https://example.com/too-short-body", "too_short", 99),
+    ],
+)
+def test_post_enrich_content_drop_uses_harness_observations_without_persisting_seen_or_card(
     tmp_path: Path,
+    parser: object,
+    url: str,
+    reason: str,
+    body_len: int,
 ) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
     stub = PositionStub(
-        url="https://example.com/empty-body",
+        url=url,
         title="Platform Engineer",
         source="test",
         posted_date=date(2026, 5, 29),
     )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
+    harness = ParserIntakeHarness.create(
+        tmp_path,
         parser_id="test",
-        parser=_EmptyBodyParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
+        discovered_stub=stub,
+        parser=cast(Any, parser),
+        domain_pre_filter=cast(Any, _PassThroughPreFilter()),
     )
 
-    with dedup_store.run_scope():
-        intake.process_position_stub(stub)
-    _assert_dedup_recorded(dedup_counters, "run_hit")
-    assert _last_body(metrics_display, "parser test gates") == "1 content"
-    assert card_store.get(1) is None
-    assert not seen_path.exists()
+    harness.process_one_position_stub(stub)
 
-    transcript_rows = [
-        json.loads(line)
-        for line in (logs_dir / "pipeline" / "content.transcripts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip()
-    ]
-    assert transcript_rows == [
+    listing_id = 1
+    assert harness.dedup_counter_snapshot().dedup_run_hits == 1
+    assert harness.status_display_row_body("parser test gates") == "1 content"
+    assert harness.card_content(listing_id) is None
+    assert harness.persisted_card_content(listing_id) is None
+    assert harness.dedup_observation(listing_id) is None
+    assert harness.persisted_listing_id_for_url(stub.url) is None
+    assert harness.persisted_dedup_observation(listing_id) is None
+    assert harness.persisted_dedup_status(listing_id) is None
+    assert harness.log_artifact_transcript_rows("pipeline_content") == [
         {
-            "url": "https://example.com/empty-body",
-            "title": "Platform Engineer",
-            "source": "test",
+            "url": stub.url,
+            "title": stub.title,
+            "source": stub.source,
             "passes": False,
-            "reason": "empty_body",
-            "body_len": 7,
-        }
-    ]
-
-
-def test_post_enrich_too_short_body_logs_content_drop_without_seen_or_card_write(
-    tmp_path: Path,
-) -> None:
-    seen_path = tmp_path / ".seen.json"
-    extracts_path = tmp_path / "extracts.json"
-    logs_dir = tmp_path / "logs"
-    stub = PositionStub(
-        url="https://example.com/too-short-body",
-        title="Platform Engineer",
-        source="test",
-        posted_date=date(2026, 5, 29),
-    )
-
-    card_store = load_card_store(extracts_path)
-    dedup_store = dedup_load(seen_path, card_store=card_store)
-    run_log = RunLog(logs_dir)
-    dedup_counters = _make_dedup_counters(run_log)
-    metrics, metrics_display = _make_run_metrics(run_log)
-    intake = ParserIntake(
-        parser_id="test",
-        parser=_TooShortBodyParser(),
-        freshness_gate=FreshnessGate(
-            anchored_today=date(2026, 5, 30),
-            max_listing_age_days=30,
-            dedup=dedup_store,
-            display=FakeStatusDisplay(),
-            run_log=run_log,
-        ),
-        deduplication=dedup_store,
-        dedup_counters=dedup_counters,
-        domain_pre_filter=_PassThroughPreFilter(),
-        content_gate=ContentGate(display=FakeStatusDisplay(), run_log=run_log),
-        card_store=card_store,
-        run_log=run_log,
-        metrics=metrics,
-    )
-
-    with dedup_store.run_scope():
-        intake.process_position_stub(stub)
-    _assert_dedup_recorded(dedup_counters, "run_hit")
-    assert _last_body(metrics_display, "parser test gates") == "1 content"
-    assert card_store.get(1) is None
-    assert not seen_path.exists()
-
-    transcript_rows = [
-        json.loads(line)
-        for line in (logs_dir / "pipeline" / "content.transcripts.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip()
-    ]
-    assert transcript_rows == [
-        {
-            "url": "https://example.com/too-short-body",
-            "title": "Platform Engineer",
-            "source": "test",
-            "passes": False,
-            "reason": "too_short",
-            "body_len": 99,
+            "reason": reason,
+            "body_len": body_len,
         }
     ]
 

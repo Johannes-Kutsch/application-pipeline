@@ -84,41 +84,43 @@ def _analyse_listing_step_2(text: str) -> str:
     return match.group("step")
 
 
-def _assert_primary_cover_arc_contract(text: str) -> None:
+def _assert_cover_strategy_contract(text: str) -> None:
     match = re.search(
-        r"^### Primary cover arc\n(?P<body>.*?)(?=^# Tailoring hooks$)",
+        r"^### Cover strategy\n(?P<body>.*?)(?=^# Tailoring hooks$)",
         text,
         flags=re.MULTILINE | re.DOTALL,
     )
     assert match is not None
 
     body = match.group("body")
-    assert "**Primary:**" in body
-    assert "**Warum dieser Arc:**" in body
+    assert "**Lead hook:**" in body
+    assert "**Warum dieser Hook:**" in body
     assert "**Supporting hooks:**" in body
-    assert "**Unused hooks:**" in body
+    assert "**Reserve hooks:**" in body
     assert "Resume, Skills oder spätere Iteration" in body
     assert body.count("`none`") == 2
 
 
-def _assert_write_cv_primary_cover_arc_usage(text: str) -> None:
+def _assert_write_cv_cover_strategy_usage(text: str) -> None:
     assert (
         'analysis.md` — neutraler Listing-Summary + „Why apply"-Bullets + '
-        "`Primary cover arc` (ein primärer Arc mit Supporting/Unused-Hooks)"
+        "`Cover strategy` (ein Lead-Hook mit Supporting/Reserve-Hooks)"
     ) in text
-    assert "Nutze den `Primary cover arc` aus `analysis.md`" in text
+    assert "Nutze den `Lead hook` aus der `Cover strategy` in `analysis.md`" in text
     assert "`Supporting hooks` dürfen ihn stützen" in text
     assert (
-        "`Unused hooks` bleiben für Resume, Skills oder spätere Iteration liegen"
+        "`Reserve hooks` bleiben für Resume, Skills oder spätere Iteration liegen"
         in text
     )
 
 
 def _assert_write_cv_cover_strategy_contract(text: str) -> None:
-    _assert_write_cv_primary_cover_arc_usage(text)
+    _assert_write_cv_cover_strategy_usage(text)
     assert "application-pipeline/user-info/cv/cover-patterns.md" in text
-    assert "application-pipeline/user-info/cv/writing-style.md" not in text
-    assert "application-pipeline/user-info/cv/positive-exemplars.md" not in text
+    assert (
+        "`positive-exemplars.md` und `writing-style.md` werden fuer die vier "
+        "Cover-Prosa-Slots bewusst **nicht** gelesen"
+    ) in text
     assert "persönlicher, listingspezifischer Resonanz-Hook" in text
     assert "keine Mehrfach-Nennung von Projektnamen im Opener" in text
     assert "ein dominanter Capability-Arc" in text
@@ -777,7 +779,6 @@ def test_fresh_init_seeds_shared_agent_skill_bodies(tmp_path: Path) -> None:
     shared_root = _ap(tmp_path) / "agent-skills"
     expected_files = [
         "analyse-listing.md",
-        "iterate-cv.md",
         "write-cv.md",
         "_shared/APPLICATION-FOLDER-ARG.md",
         "_shared/BUILD-CONTRACT.md",
@@ -803,18 +804,18 @@ def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
     init(tmp_path)
 
     shared_root = _ap(tmp_path) / "agent-skills"
-    for rel in ("analyse-listing.md", "iterate-cv.md", "write-cv.md"):
+    for rel in ("analyse-listing.md", "write-cv.md"):
         text = (shared_root / rel).read_text()
         assert "../_shared/" not in text
         assert "_shared/" in text
 
 
-def test_fresh_init_seeds_iterate_cv_with_cover_strategy_routing_contract(
+def test_fresh_init_seeds_write_cv_with_cover_strategy_routing_contract(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
 
-    text = (_ap(tmp_path) / "agent-skills" / "iterate-cv.md").read_text()
+    text = (_ap(tmp_path) / "agent-skills" / "write-cv.md").read_text()
 
     assert "Strategie-Form, Inhalt/Bogen/Beleg pro Slot" in text
     assert "Bullet in `cv/writing-style.md` Sektion `## Cover-Strategie`" in text
@@ -851,11 +852,11 @@ def test_refresh_overwrites_shared_agent_skill_bodies(tmp_path: Path) -> None:
     assert skill_body.read_bytes() == _agent_skill_template_bytes("analyse-listing.md")
 
 
-def test_refresh_overwrites_shared_iterate_cv_with_cover_strategy_routing_contract(
+def test_refresh_overwrites_shared_write_cv_with_cover_strategy_routing_contract(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
-    skill_body = _ap(tmp_path) / "agent-skills" / "iterate-cv.md"
+    skill_body = _ap(tmp_path) / "agent-skills" / "write-cv.md"
     skill_body.write_text("# tampered\n")
 
     init(tmp_path, refresh=True)
@@ -869,7 +870,7 @@ def test_refresh_overwrites_shared_iterate_cv_with_cover_strategy_routing_contra
 def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:
     text = _agent_skill_template_bytes("analyse-listing.md").decode()
 
-    _assert_primary_cover_arc_contract(text)
+    _assert_cover_strategy_contract(text)
 
 
 def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
@@ -878,13 +879,13 @@ def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
     init(tmp_path)
 
     text = (_ap(tmp_path) / "agent-skills" / "analyse-listing.md").read_text()
-    _assert_primary_cover_arc_contract(text)
+    _assert_cover_strategy_contract(text)
 
 
-def test_write_cv_template_reads_primary_cover_strategy_arc_from_analysis() -> None:
+def test_write_cv_template_reads_cover_strategy_from_analysis() -> None:
     text = _agent_skill_template_bytes("write-cv.md").decode()
 
-    _assert_write_cv_primary_cover_arc_usage(text)
+    _assert_write_cv_cover_strategy_usage(text)
 
 
 def test_write_cv_template_follows_cover_strategy_contract() -> None:
@@ -924,10 +925,11 @@ def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None
     assert "Interactive Cover Shortening" in text
     assert "verkuerzten Varianten **vollstaendig** in Prosa" in text
 
-    # Success report must not recommend /iterate-cv as normal next step
-    assert (
-        "Empfiehl `/iterate-cv` dabei **nicht** als normalen naechsten Schritt" in text
-    )
+    # Success report must keep the user in the same /write-cv run
+    assert "bleib im selben `/write-cv`-Run" in text
+    assert "Resident-Loop" in text
+    assert "Compile-Fehler mitten in der Iteration" in text
+    assert "## Exit" in text
 
 
 def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:
@@ -1072,7 +1074,7 @@ def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
 
     codex_skills = _codex(tmp_path) / "skills"
     assert codex_skills.is_dir()
-    for d in ("analyse-listing", "iterate-cv", "write-cv"):
+    for d in ("analyse-listing", "write-cv"):
         wrapper = codex_skills / d / "SKILL.md"
         assert wrapper.exists(), f"{d}/SKILL.md missing"
         assert wrapper.read_bytes() == _codex_template_bytes(f"skills/{d}/SKILL.md")
@@ -1117,7 +1119,7 @@ def test_refresh_preserves_unknown_files_inside_package_owned_codex_skill_dirs(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
-    notes = _codex(tmp_path) / "skills" / "iterate-cv" / "notes.md"
+    notes = _codex(tmp_path) / "skills" / "write-cv" / "notes.md"
     notes.write_text("# wip\n")
 
     init(tmp_path, refresh=True)
@@ -1134,7 +1136,7 @@ def test_fresh_init_seeds_claude_skills(tmp_path: Path) -> None:
     claude_skills = _claude(tmp_path) / "skills"
     assert claude_skills.is_dir()
     assert not (claude_skills / "_shared").exists()
-    for d in ("analyse-listing", "iterate-cv", "write-cv"):
+    for d in ("analyse-listing", "write-cv"):
         assert (claude_skills / d).is_dir(), f"{d} missing"
 
 
@@ -1148,12 +1150,8 @@ def test_fresh_init_seeds_claude_wrappers_that_delegate_to_shared_bodies(
             "Grills the user about why they want to apply to a specific listing and writes the conclusion into a per-listing application folder. Always one listing per session. Runs when the user types /analyse-listing.",
             "../../../application-pipeline/agent-skills/analyse-listing.md",
         ),
-        "iterate-cv": (
-            "Applies conversational feedback to an existing cv.tex CV Slot-Map and/or to analysis.md, edits per-slot bodies in place, recompiles via the LaTeX build script when cv.tex was touched, and promotes generalisable signals into the triage profile. Resident loop — ends when the user signals done. Runs when the user types /iterate-cv.",
-            "../../../application-pipeline/agent-skills/iterate-cv.md",
-        ),
         "write-cv": (
-            "Generates a tailored cv.tex (CV Slot-Map) plus cover/resume/combined PDFs for a listing previously analysed by /analyse-listing. Calls `application-pipeline compile-cv` and iteratively strips content until cover ≤ 1 page and resume ≤ 2 pages. Runs when the user types /write-cv.",
+            "Generates a tailored cv.tex (CV Slot-Map) plus cover/resume/combined PDFs for a listing previously analysed by /analyse-listing, then stays in the same resident edit loop for follow-up cv.tex, analysis.md, and triage-profile feedback until the user signals done. Calls `application-pipeline compile-cv` and iteratively strips content until cover ≤ 1 page and resume ≤ 2 pages. Runs when the user types /write-cv.",
             "../../../application-pipeline/agent-skills/write-cv.md",
         ),
     }
@@ -1171,7 +1169,6 @@ def test_fresh_init_seeds_known_skill_files_with_template_content(
     claude_skills = _claude(tmp_path) / "skills"
     expected_files = [
         "analyse-listing/SKILL.md",
-        "iterate-cv/SKILL.md",
         "write-cv/SKILL.md",
     ]
     for rel in expected_files:
@@ -1182,14 +1179,12 @@ def test_fresh_init_seeds_known_skill_files_with_template_content(
 
 def test_refresh_overwrites_package_owned_skill_files(tmp_path: Path) -> None:
     init(tmp_path)
-    skill_file = _claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md"
+    skill_file = _claude(tmp_path) / "skills" / "write-cv" / "SKILL.md"
     skill_file.write_text("# tampered\n")
 
     init(tmp_path, refresh=True)
 
-    assert skill_file.read_bytes() == _claude_template_bytes(
-        "skills/iterate-cv/SKILL.md"
-    )
+    assert skill_file.read_bytes() == _claude_template_bytes("skills/write-cv/SKILL.md")
 
 
 def test_refresh_preserves_preexisting_adapter_local_shared_dir(tmp_path: Path) -> None:
@@ -1219,7 +1214,7 @@ def test_refresh_preserves_unknown_files_inside_package_owned_skill_dirs(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
-    notes = _claude(tmp_path) / "skills" / "iterate-cv" / "notes.md"
+    notes = _claude(tmp_path) / "skills" / "write-cv" / "notes.md"
     notes.write_text("# wip\n")
 
     init(tmp_path, refresh=True)
@@ -1231,7 +1226,7 @@ def test_refresh_restores_missing_wrapper_and_preserves_neighboring_user_files(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
-    skill_dir = _claude(tmp_path) / "skills" / "iterate-cv"
+    skill_dir = _claude(tmp_path) / "skills" / "write-cv"
     skill_file = skill_dir / "SKILL.md"
     notes = skill_dir / "notes.md"
     notes.write_text("# wip\n")
@@ -1239,9 +1234,7 @@ def test_refresh_restores_missing_wrapper_and_preserves_neighboring_user_files(
 
     init(tmp_path, refresh=True)
 
-    assert skill_file.read_bytes() == _claude_template_bytes(
-        "skills/iterate-cv/SKILL.md"
-    )
+    assert skill_file.read_bytes() == _claude_template_bytes("skills/write-cv/SKILL.md")
     assert notes.read_text() == "# wip\n"
 
 

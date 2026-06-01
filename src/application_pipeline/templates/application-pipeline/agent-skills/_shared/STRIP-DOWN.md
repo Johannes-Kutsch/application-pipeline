@@ -14,5 +14,5 @@ Keine Iterations-Obergrenze. Stopp wenn:
 - Resume noch über Budget und nur noch `always: true`-Items bleiben (ohne kürzere `group:`-Variante) — Inkonvergenz.
 - Cover noch über Budget und alle vier Absätze auf Minimum gestrafft — Inkonvergenz.
 
-Bei Inkonvergenz: **nicht** raisen. In Prosa reporten, was im finalen `cv.tex` steht, dass die Budgets nicht erreicht wurden, mit den aktuellen Seitenzahlen, und dem User `/iterate-cv` als nächsten Schritt vorschlagen (mit vollqualifiziertem Pfad).
+Bei Inkonvergenz: **nicht** raisen. In Prosa reporten, was im finalen `cv.tex` steht, dass die Budgets nicht erreicht wurden, mit den aktuellen Seitenzahlen, und den User im selben `/write-cv`-Run nach der nächsten Änderung fragen (mit vollqualifiziertem Pfad zum Application-Ordner).
 </strip-down>

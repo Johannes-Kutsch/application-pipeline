@@ -17,6 +17,7 @@ from application_pipeline.http import (
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.http import (
+    REQUEST_PACING,
     USER_AGENT,
     ParserHttp,
     _Throttle,
@@ -259,6 +260,27 @@ def test_throttle_pacing_between_consecutive_get_calls(run_log: RunLog):
 
     assert len(sleeps) == 1
     assert sleeps[0] == pytest.approx(0.4)
+
+
+def test_default_throttle_uses_injected_sleep_for_consecutive_mocked_requests(
+    run_log: RunLog,
+):
+    sleeps: list[float] = []
+
+    def http_get(url: str, timeout: float) -> bytes:
+        return b"data"
+
+    parser = ParserHttp(
+        run_log=run_log,
+        _http_get=http_get,
+        _sleep=sleeps.append,
+    )
+
+    parser.get("http://example.com/1", error_prefix="discover")
+    parser.enrich_get("http://example.com/2", error_prefix="enrich")
+
+    assert len(sleeps) == 1
+    assert sleeps[0] == pytest.approx(REQUEST_PACING, abs=0.01)
 
 
 # ---------------------------------------------------------------------------

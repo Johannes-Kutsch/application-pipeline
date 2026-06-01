@@ -19,6 +19,8 @@ from application_pipeline.parsers.types import City
 # Helpers
 # ---------------------------------------------------------------------------
 
+_NO_SLEEP = lambda _: None  # noqa: E731
+
 
 def _search_body(items: list[dict], total: int | None = None) -> bytes:
     return json.dumps(
@@ -100,6 +102,14 @@ def _make_get(responses: list[bytes]) -> Callable[[str, float], bytes]:
     return http_get
 
 
+def _http(
+    run_log: RunLog, http_get: Callable[[str, float], bytes], *, retries: int = 3
+) -> ParserHttp:
+    return ParserHttp(
+        run_log=run_log, _http_get=http_get, retries=retries, _sleep=_NO_SLEEP
+    )
+
+
 def _query(**kwargs: object) -> ParserQuery:
     defaults: dict = {
         "keyword": "python",
@@ -158,18 +168,14 @@ def test_discover_yields_one_stub_per_result(run_log: RunLog) -> None:
             _search_body([_item("1", "Dev A"), _item("2", "Dev B")]),
         ]
     )
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 2
 
 
 def test_discover_stub_title_matches_descriptor_position_title(run_log: RunLog) -> None:
     get = _make_search_get([_search_body([_item("1", "Data Scientist")])])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.title == "Data Scientist"
@@ -177,9 +183,7 @@ def test_discover_stub_title_matches_descriptor_position_title(run_log: RunLog) 
 
 def test_discover_stub_source_is_stellen_hamburg(run_log: RunLog) -> None:
     get = _make_search_get([_search_body([_item()])])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.source == "stellen.hamburg"
@@ -187,9 +191,7 @@ def test_discover_stub_source_is_stellen_hamburg(run_log: RunLog) -> None:
 
 def test_discover_stub_company_from_organization_name(run_log: RunLog) -> None:
     get = _make_search_get([_search_body([_item(company="Finanzbehörde Hamburg")])])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company == "Finanzbehörde Hamburg"
@@ -197,9 +199,7 @@ def test_discover_stub_company_from_organization_name(run_log: RunLog) -> None:
 
 def test_discover_stub_location_from_position_location(run_log: RunLog) -> None:
     get = _make_search_get([_search_body([_item(location="Hamburg")])])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
@@ -207,9 +207,7 @@ def test_discover_stub_location_from_position_location(run_log: RunLog) -> None:
 
 def test_discover_stub_url_contains_object_id(run_log: RunLog) -> None:
     get = _make_search_get([_search_body([_item("99999")])])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert "99999" in stub.url
@@ -217,9 +215,7 @@ def test_discover_stub_url_contains_object_id(run_log: RunLog) -> None:
 
 def test_discover_stub_company_none_when_organization_absent(run_log: RunLog) -> None:
     get = _make_search_get([_search_body([_item(company=None)])])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company is None
@@ -229,9 +225,7 @@ def test_discover_stub_location_none_when_position_location_absent(
     run_log: RunLog,
 ) -> None:
     get = _make_search_get([_search_body([_item(location=None)])])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location is None
@@ -246,9 +240,7 @@ def test_discover_paginates_until_total_reached(run_log: RunLog) -> None:
     page0 = _search_body([_item("1"), _item("2")], total=4)
     page1 = _search_body([_item("3"), _item("4")], total=4)
     get = _make_search_get([page0, page1])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 4
 
@@ -264,9 +256,7 @@ def test_discover_stops_on_empty_items(run_log: RunLog) -> None:
         }
     ).encode()
     get = _make_search_get([body])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         stubs = list(p.discover(_query()))
     assert stubs == []
 
@@ -282,9 +272,7 @@ def test_discover_stops_on_null_search_result_items(run_log: RunLog) -> None:
         }
     ).encode()
     get = _make_search_get([body])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         stubs = list(p.discover(_query()))
     assert stubs == []
 
@@ -297,9 +285,7 @@ def test_discover_stops_on_null_search_result_items(run_log: RunLog) -> None:
 def test_discover_returns_all_results_without_cap(run_log: RunLog) -> None:
     items = [_item(str(i)) for i in range(10)]
     get = _make_search_get([_search_body(items, total=10)])
-    with StellenHamburgParser(
-        run_log=run_log, _http=ParserHttp(run_log=run_log, _http_get=get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=_http(run_log, get)) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 10
 
@@ -317,7 +303,7 @@ def test_discover_raises_parser_error_on_http_failure(run_log: RunLog) -> None:
 
     with StellenHamburgParser(
         run_log=run_log,
-        _http=ParserHttp(run_log=run_log, _http_get=failing_get, retries=1),
+        _http=_http(run_log, failing_get, retries=1),
     ) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))

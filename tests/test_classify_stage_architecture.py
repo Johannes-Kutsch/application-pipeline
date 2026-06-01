@@ -21,7 +21,7 @@ def _imported_names(module_path: Path, imported_module: str) -> set[str]:
 
 def _owner_name(symbol_name: str) -> str | None:
     symbol = getattr(classify_stage, symbol_name)
-    if symbol_name == "CLASSIFY_SHUTDOWN":
+    if symbol_name == "_CLASSIFY_SHUTDOWN":
         return symbol.__class__.__module__
     return getattr(symbol, "__module__", None)
 
@@ -58,14 +58,27 @@ def test_classify_stage_handoff_exposes_submit_ready_as_only_public_operation() 
     assert public_methods == {"submit_ready"}
 
 
-def test_classify_stage_ownership_guard_covers_owned_seam_symbols() -> None:
+def test_classify_stage_exports_only_facade_surface() -> None:
+    assert set(classify_stage.__all__) == {
+        "BatchLLMEnricher",
+        "ClassifyPoolCollector",
+        "ClassifyStage",
+        "ClassifyStageCompletion",
+        "ClassifyStageHandoff",
+        "ClassifyStageMetrics",
+        "ClassifyStageRunState",
+        "assert_classify_stage_ownership",
+    }
+
+
+def test_classify_stage_ownership_guard_covers_private_owned_symbols() -> None:
     expected_owned_symbols = {
-        "ClassifyReadySubmission",
-        "ClassifyRequest",
-        "ClassifyShutdown",
-        "CLASSIFY_SHUTDOWN",
-        "ClassifyAccumulator",
-        "ClassifyWorker",
+        "_ClassifyReadySubmission",
+        "_ClassifyRequest",
+        "_ClassifyShutdown",
+        "_CLASSIFY_SHUTDOWN",
+        "_ClassifyAccumulator",
+        "_ClassifyWorker",
         "_QueueBackedClassifyStageHandoff",
         "ClassifyStageMetrics",
         "ClassifyPoolCollector",
@@ -77,3 +90,19 @@ def test_classify_stage_ownership_guard_covers_owned_seam_symbols() -> None:
     assert {name: _owner_name(name) for name in expected_owned_symbols} == {
         name: classify_stage.__name__ for name in expected_owned_symbols
     }
+
+
+def test_classify_stage_private_queue_and_worker_symbols_stay_off_public_api() -> None:
+    hidden_symbols = {
+        "ClassifyReadySubmission",
+        "ClassifyRequest",
+        "ClassifyShutdown",
+        "CLASSIFY_SHUTDOWN",
+        "ClassifyAccumulator",
+        "ClassifyWorker",
+        "ClassifyQueueItem",
+        "ClassifyDispatchItem",
+    }
+
+    assert hidden_symbols.isdisjoint(classify_stage.__dict__)
+    assert hidden_symbols.isdisjoint(classify_stage.__all__)

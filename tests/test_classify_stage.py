@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import queue
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,12 +12,6 @@ from application_pipeline.freshness_gate import FreshnessSnapshot
 from application_pipeline.prefilter_gate import PreFilterSnapshot
 
 from application_pipeline.classify_stage import (
-    CLASSIFY_SHUTDOWN,
-    ClassifyAccumulator,
-    ClassifyDispatchItem,
-    ClassifyQueueItem,
-    ClassifyReadySubmission,
-    ClassifyRequest,
     ClassifyStageCompletion,
     ClassifyStage,
     ClassifyStageHandoff,
@@ -35,28 +28,6 @@ from application_pipeline.llm.types import (
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
 from fake_status_display import FakeStatusDisplay
-
-
-def test_classify_stage_builds_classify_request_from_classify_ready_submission() -> (
-    None
-):
-    stub = PositionStub(
-        url="https://example.com/role",
-        title="Platform Engineer",
-        source="test",
-    )
-    submission = ClassifyReadySubmission(
-        listing_id=7,
-        stub=stub,
-        raw_description="Raw description for classify handoff",
-    )
-
-    request = ClassifyRequest(submission=submission, parser_id="parser.test")
-
-    assert request.submission.listing_id == 7
-    assert request.submission.stub == stub
-    assert request.submission.raw_description == "Raw description for classify handoff"
-    assert request.parser_id == "parser.test"
 
 
 def test_classify_stage_handoff_submit_ready_routes_listing_through_stage(
@@ -94,46 +65,22 @@ def test_classify_stage_handoff_submit_ready_routes_listing_through_stage(
     assert pool_collector.matched == [(7, stub)]
 
 
-class _RecordingMetrics:
-    def __init__(self) -> None:
-        self.batch_sizes: list[int] = []
-
-    def classify_batch_dequeued(self, size: int) -> None:
-        self.batch_sizes.append(size)
-
-
-class _RecordingRunState:
-    def __init__(self) -> None:
-        self.aborted_with: BaseException | None = None
-
-    def set_aborted(self, exc: BaseException) -> None:
-        self.aborted_with = exc
-
-
-def _classify_request(listing_id: int) -> ClassifyRequest:
-    return ClassifyRequest(
-        submission=ClassifyReadySubmission(
-            listing_id=listing_id,
-            stub=PositionStub(
-                url=f"https://example.com/role/{listing_id}",
-                title=f"Platform Engineer {listing_id}",
-                source="test",
-            ),
-            raw_description=f"Raw description {listing_id}",
-        ),
-        parser_id="parser.test",
-    )
-
-
 def _classify_ready_facts(
     listing_id: int,
 ) -> tuple[int, PositionStub, str, str]:
-    request = _classify_request(listing_id)
     return (
-        request.submission.listing_id,
-        request.submission.stub,
-        request.submission.raw_description,
-        request.parser_id,
+        listing_id,
+        _stub_for(listing_id),
+        f"Raw description {listing_id}",
+        "parser.test",
+    )
+
+
+def _stub_for(listing_id: int) -> PositionStub:
+    return PositionStub(
+        url=f"https://example.com/role/{listing_id}",
+        title=f"Platform Engineer {listing_id}",
+        source="test",
     )
 
 
@@ -179,78 +126,6 @@ def _run_summary(metrics: RunMetrics) -> RunSummary:
         content=ContentSnapshot(),
         dedup=DedupSnapshot(),
     )
-
-
-def test_classify_stage_accumulator_fills_one_complete_batch_before_next() -> None:
-    classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
-    submitted: list[ClassifyDispatchItem] = []
-
-    class _RecordingDispatch:
-        def submit(self, item: ClassifyDispatchItem) -> None:
-            submitted.append(item)
-
-    metrics = _RecordingMetrics()
-    run_state = _RecordingRunState()
-    accumulator = ClassifyAccumulator(
-        classify_queue=classify_queue,
-        dispatch=_RecordingDispatch(),  # type: ignore[arg-type]
-        batch_size=3,
-        num_workers=2,
-        metrics=metrics,
-        run_state=run_state,
-    )
-
-    accumulator.start()
-    for listing_id in range(1, 6):
-        classify_queue.put(_classify_request(listing_id))
-    classify_queue.put(CLASSIFY_SHUTDOWN)
-    accumulator.join(timeout=1)
-
-    first_batch, second_batch, first_shutdown, second_shutdown = submitted
-
-    assert isinstance(first_batch, list)
-    assert isinstance(second_batch, list)
-    assert [request.submission.listing_id for request in first_batch] == [1, 2, 3]
-    assert [request.submission.listing_id for request in second_batch] == [4, 5]
-    assert first_shutdown is CLASSIFY_SHUTDOWN
-    assert second_shutdown is CLASSIFY_SHUTDOWN
-    assert metrics.batch_sizes == [3, 2]
-    assert run_state.aborted_with is None
-
-
-def test_classify_stage_accumulator_aborts_run_and_stops_workers_on_failure() -> None:
-    classify_queue: queue.Queue[ClassifyQueueItem] = queue.Queue()
-    submitted: list[ClassifyDispatchItem] = []
-
-    class _RecordingDispatch:
-        def submit(self, item: ClassifyDispatchItem) -> None:
-            submitted.append(item)
-
-    class _FailingMetrics:
-        def classify_batch_dequeued(self, size: int) -> None:
-            raise RuntimeError(f"boom {size}")
-
-    run_state = _RecordingRunState()
-    accumulator = ClassifyAccumulator(
-        classify_queue=classify_queue,
-        dispatch=_RecordingDispatch(),  # type: ignore[arg-type]
-        batch_size=1,
-        num_workers=2,
-        metrics=_FailingMetrics(),
-        run_state=run_state,
-    )
-
-    accumulator.start()
-    classify_queue.put(_classify_request(1))
-    accumulator.join(timeout=1)
-
-    first_shutdown, second_shutdown = submitted
-
-    assert isinstance(accumulator.exc, RuntimeError)
-    assert str(accumulator.exc) == "boom 1"
-    assert run_state.aborted_with is accumulator.exc
-    assert first_shutdown is CLASSIFY_SHUTDOWN
-    assert second_shutdown is CLASSIFY_SHUTDOWN
 
 
 # ---------------------------------------------------------------------------
@@ -1334,8 +1209,8 @@ def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
     assert metrics.classify_calls == 1
     assert _last_body(display, "llm classify relevance") == "2 forwarded"
     assert pool_collector.matched == [
-        (1, _classify_request(1).submission.stub),
-        (2, _classify_request(2).submission.stub),
+        (1, _stub_for(1)),
+        (2, _stub_for(2)),
     ]
     assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]
     classify_rows = _classify_event_rows(logs_dir)
@@ -1406,9 +1281,9 @@ def test_classify_stage_parallel_workers_log_one_quota_sleep_and_wait_for_active
     assert completion.first_failure is None
     assert metrics.classify_calls == 3
     assert sorted(pool_collector.matched, key=lambda item: item[0]) == [
-        (1, _classify_request(1).submission.stub),
-        (2, _classify_request(2).submission.stub),
-        (3, _classify_request(3).submission.stub),
+        (1, _stub_for(1)),
+        (2, _stub_for(2)),
+        (3, _stub_for(3)),
     ]
     assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]
 
@@ -1469,9 +1344,9 @@ def test_classify_stage_retries_quota_batch_before_later_dispatch_after_wall_cle
 
     assert completion.first_failure is None
     assert sorted(pool_collector.matched, key=lambda item: item[0]) == [
-        (1, _classify_request(1).submission.stub),
-        (2, _classify_request(2).submission.stub),
-        (3, _classify_request(3).submission.stub),
+        (1, _stub_for(1)),
+        (2, _stub_for(2)),
+        (3, _stub_for(3)),
     ]
 
 
@@ -1528,7 +1403,7 @@ def test_classify_stage_parallel_quota_hits_log_one_sleep_and_retry_every_batch(
     assert sorted(llm_enricher.retry_calls) == [1, 2]
     assert metrics.classify_calls == 2
     assert sorted(pool_collector.matched, key=lambda item: item[0]) == [
-        (1, _classify_request(1).submission.stub),
-        (2, _classify_request(2).submission.stub),
+        (1, _stub_for(1)),
+        (2, _stub_for(2)),
     ]
     assert [row["event"] for row in _pipeline_event_rows(logs_dir)] == ["quota_sleep"]

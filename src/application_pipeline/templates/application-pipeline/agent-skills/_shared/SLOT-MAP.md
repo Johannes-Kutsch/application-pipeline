@@ -1,5 +1,3 @@
-# CV Slot-Map
-
 <slot-map>
 Eine **CV Slot-Map** ist eine `.tex`-Datei, die ausschließlich aus Slot-Headern und Bodies besteht — keine LaTeX-Präambel, kein `\documentclass`, kein `\input{cv_template}`. Spec laut ADR-0030.
 

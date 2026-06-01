@@ -9,6 +9,7 @@ import subprocess
 import textwrap
 from functools import lru_cache
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -25,6 +26,8 @@ def _setup_template(name: str) -> str:
 
 @lru_cache(maxsize=1)
 def _bash_is_usable() -> bool:
+    if sys.platform == "win32":
+        return False
     try:
         result = subprocess.run(
             ["bash", "--version"],

@@ -7,7 +7,7 @@ Amended by ADR-0048: Agent Skill workflow bodies now live in `application-pipeli
 - `templates/application-pipeline/...` → seeds to `<cwd>/application-pipeline/`.
 - `templates/claude/skills/...` → seeds to `<cwd>/.claude/skills/`.
 
-Agent skills (`_shared/`, `analyse-listing/`, `iterate-cv/`, `write-cv/`) become package-shipped, refreshable artefacts. Source of truth moves from repo-root `.claude/skills/` into `templates/claude/skills/`.
+Agent skills (`analyse-listing/`, `write-cv/`) become package-shipped, refreshable artefacts. Shared helper docs are folded into those skills where they are only used by one workflow. Source of truth moves from repo-root `.claude/skills/` into `templates/claude/skills/`.
 
 Ride-along: `cv_skeleton.tex` moves from `<settings-dir>/skills/` to `<settings-dir>/cv-template/`, eliminating the conceptual collision with `.claude/skills/`.
 

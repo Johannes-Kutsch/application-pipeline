@@ -7,7 +7,7 @@ Classifier drops from three checks (domain fit, skill/experience floor, preferen
 - `gate-criteria.md` — flat domain-in/out list + hard exclusions. Classifier only (`{GATE_CRITERIA}`).
 - `candidate-profile.md` — who-the-candidate-is (former `self-description.md`) + ranking preferences (former match-strength / pull-factors / soft-modifiers from `match-criteria.md`). Judge only (`{CANDIDATE_PROFILE}`).
 - `skills.md` — relocated from `search-terms/` to `triage-profile/`. Judge only (`{SKILLS}`). Attributes stripped inline by `prompts.py`.
-- `writing-style.md`, `positive-exemplars.md` — relocated from `triage-profile/` to `cv/` (CV-authoring-only consumers).
+- Cover-writing style and paragraph-pattern decisions move into the `/write-cv` flow; they are no longer injected as separate Triage Profile files.
 
 ## Why
 
@@ -24,6 +24,6 @@ Relocating `skills.md` out of `search-terms/` acknowledges it was never a search
 - Slot names: `{SELF_DESCRIPTION}` → `{CANDIDATE_PROFILE}`, `{MATCH_CRITERIA}` → `{GATE_CRITERIA}`.
 - Classifier prompt: single check, receives `{GATE_CRITERIA}` only.
 - Judge prompt: receives `{CANDIDATE_PROFILE}` + `{SKILLS}`, no gate criteria.
-- `init --refresh` must migrate old filenames and relocate `writing-style.md` / `positive-exemplars.md`.
-- Claude skills (`analyse-listing`, `iterate-cv`, `write-cv`, `_shared/`) updated to new filenames; `init --refresh` propagates.
+- `init --refresh` must keep the package-owned skill bodies aligned with the current `analyse-listing` / `write-cv` split.
+- Claude skills (`analyse-listing`, `write-cv`, `_shared/`) updated to the current filenames; `init --refresh` propagates.
 - Supersedes the three-check portion of ADR-0034.

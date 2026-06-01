@@ -1,5 +1,3 @@
-# Skill conventions
-
 <path-convention>
 Alle Pfade sind **CWD-relativ**. Claude Code läuft mit dem Repo-Root als primärem Arbeitsverzeichnis und wechselt während der Session nicht via `cd` — `application-pipeline/` ist daher ein stabiler Präfix. Konstruiere Pfade nicht relativ zu etwas anderem: kein `git rev-parse`, keine Upward-Walks, keine absoluten Pfade.
 </path-convention>

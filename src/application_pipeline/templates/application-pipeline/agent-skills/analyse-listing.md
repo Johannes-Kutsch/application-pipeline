@@ -1,172 +1,99 @@
-# /analyse-listing
+# Universalregeln
 
-Interviewe den User unermüdlich zu jedem Aspekt, warum er sich auf diese Position bewerben will, bis ihr ein gemeinsames Verständnis erreicht habt. Gehe jeden Branch des Entscheidungsbaums durch und löse Abhängigkeiten zwischen Entscheidungen einzeln auf. Gib pro Frage eine eigene Empfehlung mit.
+[_shared/CONVENTIONS.md](_shared/CONVENTIONS.md)
 
-Stelle die Fragen einzeln und warte auf Feedback pro Frage.
+# Aufgabe
 
-Wenn eine Frage durch Lesen des Triage-Profils oder der raw_description des Listings beantwortbar ist, lies stattdessen.
+Analyse ein Listing Schritt fuer Schritt mit dem User. Das Ziel ist ein Einstieg-plus-Begruendung pro Absatz fuer `analysis.md`.
 
-**Eine Session = ein Listing.** Keine Batch-Iteration.
+## 1. Listing bestätigen
 
-Universalregeln: [_shared/CONVENTIONS.md](_shared/CONVENTIONS.md) und [_shared/TRIAGE-ROUTING.md](_shared/TRIAGE-ROUTING.md).
+Extrahiere `Company` und `Role` aus dem gewaehlten Listing per eigenem Lesen. Das Ordner-Datum ist immer **heute**, unabhaengig vom `posted_date` im Body.
 
-## Startup-Checks
+Baue den Ordner-Slug nach folgenden Regeln: 
 
-Führe die Checks aus [_shared/STARTUP-TRIAGE.md](_shared/STARTUP-TRIAGE.md) aus.
+<slug-rules>
+1. Strippe Gender-Marker: `(m/w/d)`, `(m/f/d)`, `(d/w/m)`, `(w/m/d)` und Aequivalente.
+2. Strippe Trailing-Location-Segmente: alles nach dem letzten `-` / `--` / ` - `, falls der Schwanz nach einem Ort aussieht.
+3. Transliteriere deutsche Umlaute: `ae`, `oe`, `ue`, `ss` und grossgeschriebene Varianten.
+4. Ersetze jeden Lauf von Non-`[A-Za-z0-9]` durch ein einzelnes `-`.
+5. Strippe fuehrende/abschliessende `-`.
+6. Trunkiere bei 40 Zeichen (am letzten `-` vor dem Limit schneiden).
+7. Grossschreibung beibehalten.
+</slug-rules>
 
-## Argument-Disposition
+Bestaetige Company, Role und resultierenden Pfad (`application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/`) mit dem User. Erlaube Overrides fuer Company und Role; bei Aenderungen neu sluggen und erneut bestaetigen lassen.
 
-Aus dem Argument den Eingabe-Modus ableiten:
+## 2. Grilling-Workflow
 
-- **leer** User um Listing-Paste oder Datum bitten, dies ist dann das Argument
-- **`today` / `last`** → das aktuellste File aus `application-pipeline/results/` laden (lexikographisch größter Name; die Files sind ISO-datiert).
-- **Datum** auf `YYYY-MM-DD` normalisieren und `application-pipeline/results/<YYYY-MM-DD>.md` laden.
-- **alles andere** → das Argument selbst ist das Listing.
+Der Workflow ist inkrementell. Es gibt insgesamt 4 Turns, einen pro Absatz:
 
-Fehlt die angeforderte Results-Datei: dem User klar sagen, dann stopp.
+<Absätze>
+1. **intro:** Der persönliche Einstieg: warum diese Rolle, warum jetzt, mit dem stärksten Hook.
+2. **bridge:** Die Überleitung vom Motiv zur fachlichen Passung.
+3. **evidence:** Die konkreten Belege und Anekdoten für Resonance- und Capability-Hooks.
+4. **closing:** Der Schluss: Pull-Fit, Zusammenarbeit, Motivation für den Wechsel und Gesprächseinstieg.
+</Absätze>
 
-## Listing wählen
+### Absatz Loop
 
-**Direkt-Paste-Modi** (leer / arg-text): genau ein Listing, direkt verwendet.
-
-**Results-File-Modi** (`today` / `last` / ISO-Datum): die Datei in einer LLM-Runde in strukturierte Karten `{company, title, posted_date, summary, raw_description, url, rank}` parsen. Im Default-Layout sind Karten durch `---` und eine URL-Zeile getrennt; der User darf das Layout angepasst haben — vertraue dem eigenen Splitting.
-
-- Enthält die Datei **genau eine** Karte: direkt verwenden.
-- Enthält sie **mehrere** Karten: kurze nummerierte Übersicht (Rank, Company, Title, Ein-Zeilen-Summary) zeigen und den User fragen, welches **einzelne** Listing er analysieren will. Eine Wahl, dann weiter.
-
-## Listing bestätigen
-
-Extrahiere `Company` und `Role` aus dem gewählten Listing per eigenem Lesen. Das Ordner-Datum ist immer **heute**, unabhängig vom `posted_date` im Body.
-
-Baue den Ordner-Slug nach den Slug-Regeln unten. Bestätige Company, Role und resultierenden Pfad (`application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/`) mit dem User. Erlaube Overrides für Company und Role; bei Änderungen neu sluggen und erneut bestätigen lassen.
-
-Dann mit `{company, title, raw_description, url}` (url=None für Paste-Modi) in die Grilling-Schleife.
-
-## Per-Turn-Flow
+Pro Absatz gibt es eine Grilling-Schleife mit mehrere Grilling Turns.
 
 <per-turn-flow>
-Pro Turn in der Grilling-Schleife, in dieser Reihenfolge:
+Pro Turn in der Grilling-Schleife, in dieser Reihenfolge. Grille unermüdlich so lange, bis du und der Nutzer ein gemeinsames Verständnis haben:
 
-1. **Lies die User-Antwort.**
-2. **Vergleiche die Antwort mit den bestehenden Triage-Profil-Bullets** und extrahiere verallgemeinerbare Signale für `candidate-profile.md` — auch wenn sie bestehende Bullets vertiefen, differenzieren oder korrigieren, nicht nur wenn sie net-new sind.
-3. **Schreibe Profil-Updates** laut [_shared/TRIAGE-ROUTING.md](_shared/TRIAGE-ROUTING.md) (Routing, Conservative-Promotion, Supersede-Replace, Bullet-Stil).
-4. **Formuliere die nächste Frage** (oder gehe zur Session-Ende-Prüfung über).
-
-Schritte 1–3 müssen abgeschlossen sein, bevor Schritt 4 emittiert wird.
+1. **Formuliere eine Frage. Extrahiere mindestens drei verschiedene Antwortvorschläge aus `candidate-profile.md` und gib eine Empfehlung für die Antwort aus.**
+2. **Lies die User-Antwort.**
+3. **Schreibe Profil-Updates**: harte Domain-/Ausschluss-Signale nach `gate-criteria.md`, Identitäts-/Werte-/Präferenz-Signale nach `candidate-profile.md`.
 </per-turn-flow>
 
-## Während des Grillings
+4. **Session-Ende:** Schritte 1-3 muessen abgeschlossen sein, bevor Schritt 4 emittiert wird.
+4.1. **Update `analysis.md`:** fuehre den aktuell fertigen Absatz direkt in `analysis.md` ein. Er gilt jetzt als final.
+4.2. **Vergleiche die Antwort mit den bestehenden Triage-Profil-Bullets** und extrahiere wenn möglich verallgemeinerbare Signale fuer `gate-criteria.md` und `candidate-profile.md` - auch wenn sie bestehende Bullets vertiefen, differenzieren oder korrigieren, nicht nur wenn sie net-new sind.
+5. **Starte eine neue Grilling schleife** für den nächsten Absatz
 
-### Triage-Profil challengen
+### Form von `analysis.md`
 
-Wenn der User etwas sagt, das einem existierenden Bullet in einer der drei Profil-Files widerspricht: sofort aufdecken. *„In `gate-criteria.md` steht X — du beschreibst hier eher Y. Was stimmt?"*
-
-### Cross-Reference mit der raw_description
-
-Wenn der User behauptet, was die Position fordert: prüfe, ob die `raw_description` zustimmt. Widersprüche sofort aufdecken.
-
-### Resonance-Branches aktiv erfragen
-
-Tailoring-Hooks haben zwei Sorten — beide müssen im Grilling vorkommen:
-
-- **Resonance** — Listing-*Signale* (nicht Anforderungen), die den User anziehen. Zeigen *warum die Position zu ihm passt* — nicht *warum er sie erfüllt*.
-- **Capability** — Listing-*Anforderungen* und welcher User-Background sie deckt.
-
-Wenn das Grilling bisher nur Capability-Branches abgedeckt hat, frage aktiv nach Resonance: welche Listing-Signale ziehen den User an, und warum — Identität, Werte, biographisches Muster.
-
-### Hooks offensiv, nicht defensiv
-
-- Keine Listing-Anforderung aufgreifen, die der User nicht erfüllt, nur um sie zu entkräften. Insbesondere `idealerweise`-Anforderungen weglassen — sie sind keine Pflicht und müssen nicht verteidigt werden.
-- Anti-Frames in Worten aktiv vermeiden — sie machen den Frame erst sichtbar. Positive Substanz reicht; der Leser zieht die Schlüsse selbst.
-- Capability-Hooks als positive Behauptung formulieren, nicht als Konter zu einer fehlenden Anforderung.
-
-## Session-Ende
-
-Wenn du denkst, die großen Branches sind durch (du hast (a) ein konkretes *Warum gerade diese Position*, (b) **mindestens je einen Resonance- und einen Capability-Hook**, insgesamt 2–4 Tailoring-Hooks, (c) in der **Cover-Strategie genau einen Lead-Hook**, der den stärksten Mittelteil des Anschreibens tragen soll, und (d) keine ungelösten Zweifel): gib den Ball zurück mit einem Draft des `analysis.md`-Inhalts inline zur Prüfung und der Frage, ob das passt oder ob noch etwas unter Druck zu setzen ist.
-
-- **User-OK** → schreibe `application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/analysis.md` nach dem Schema unten. Überschreibe ohne Rückfrage, falls bereits vorhanden. Dann eine kurze Prosa-Zusammenfassung mit dem geschriebenen Pfad, Notiz zu Profil-Änderungen, und vorgeschlagenem `/write-cv`-Aufruf mit **vollqualifiziertem** Pfad (`application-pipeline/applications/<today>-<slug>/`), damit der User unabhängig von der CWD copy-pasten kann.
-- **Weiteres Feedback** → zurück ins Grilling, später erneut präsentieren.
-- **Manueller Session-Abbruch** → nichts schreiben, kein Ordner. (Triage-Profil-Updates dieser Runde bleiben — sie sind bereits inline geschrieben.)
-
-## Form von `analysis.md`
-
-Wird nur bei User-OK geschrieben. Pfad: `application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/analysis.md`.
+`analysis.md` wird im Verlauf sofort ergaenzt, nicht erst am Ende. Pfad: `application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/analysis.md`.
 
 <analysis-template>
 # Job-Listing
 
-## {Company} · {Title}
+### Triage Routing
 
-{neutral summary of relevant listing points — concise, non-evaluative; no reasoning about why they are relevant}
+[_shared/TRIAGE_ROUTING.md](_shared/TRIAGE_ROUTING.md)
+
+## {Company} - {Title}
+
+{neutrale Zusammenfassung relevanter Listing-Punkte - knapp, nicht wertend}
 
 ---
 
-## Why apply
-
-- <2–4 Bullets: persönliche Verbindung zu Company/Rolle — Material für den Anschreiben-Opener>
-
-### Cover strategy
-
-- **Lead hook:** <genau ein Hook — Resonance oder Capability — der den dominanten Cover-Arc für `/write-cv` trägt>
-  **Warum dieser Hook:** <warum dieser Hook der stärkste rote Faden ist und die anderen Hooks nur stützen>
-  **Supporting hooks:** <kommagetrennte Liste der Hooks, die denselben Arc stützen und in Cover/Resume/Skills mitlaufen können; `none`, falls keine>
-  **Reserve hooks:** <kommagetrennte Liste übriger Hooks, die bewusst erhalten bleiben für Resume, Skills oder spätere Iteration; `none`, falls keine>
-
-# Cover sections
-
+```md
 ## intro
-
-- <vorsortierte Why-apply-Bullets und der persönliche Einstieg aus dem Lead hook für den Opener; persönlicher, listingspezifischer Einstieg>
+Einstieg: ...
+Begruendung: ...
 
 ## bridge
-
-- <vorsortierte Übergangspunkte, die den Lead hook mit Supporting hooks in den Capability-Arc überführen>
+Einstieg: ...
+Begruendung: ...
 
 ## evidence
-
-- <vorsortierte Resonance- und Capability-Hooks mit Anekdoten, die den dominanten Arc belegen>
+Einstieg: ...
+Begruendung: ...
 
 ## closing
-
-- <vorsortierte Schluss-Punkte: Pull-Fit, Zusammenarbeit, Gesprächs-/Wechselmotivation; kann Reserve hooks aufnehmen, falls sie den Schluss stärken>
-
-# Tailoring hooks
-
-### Resonance — warum das Listing zu mir passt
-
-- **Listing-Signal:** <was im Listing den User anzieht — Rolle, Kultur, Greenfield, Domain, Kollegen>
-  **Resonanz:** <warum es ihn anzieht — Identität, Werte, biographisches Muster>
-  **Anekdote:** <konkrete Story, die das Muster im User-Leben belegt — max. 2–4 Zeilen, Anschreiben-tauglich>
-- ...
-
-### Capability — was ich mitbringe
-
-- **Listing fordert:** <konkrete Anforderung aus der raw_description>
-  **Hook:** <Erfahrung/Skill, als positive Substanz formuliert — nicht als Konter>
-  **Anekdote:** <konkrete Story / Metrik — max. 2–4 Zeilen, Anschreiben-tauglich>
-- ...
+Einstieg: ...
+Begruendung: ...
+```
 </analysis-template>
 
-Referenziere `content_pool.tex` nicht — `/write-cv` matched Hooks selbst gegen Content-Pool-Items.
-
-## Slug-Regeln (auf Company und Role gleich angewendet)
-
-1. Strippe Gender-Marker: `(m/w/d)`, `(m/f/d)`, `(d/w/m)`, `(w/m/d)` und Äquivalente.
-2. Strippe Trailing-Location-Segmente: alles nach dem letzten `—` / `–` / ` - `, falls der Schwanz nach einem Ort aussieht.
-3. Transliteriere deutsche Umlaute: `ä→ae`, `ö→oe`, `ü→ue`, `ß→ss` (und großgeschriebene Varianten).
-4. Ersetze jeden Lauf von Non-`[A-Za-z0-9]` durch ein einzelnes `-`.
-5. Strippe führende/abschließende `-`.
-6. Trunkiere bei 40 Zeichen (am letzten `-` vor dem Limit schneiden).
-7. Großschreibung beibehalten.
-
-## Schreib-Whitelist
+### Schreib-Whitelist
 
 <hard-rules>
-Dieser Skill schreibt ausschließlich in:
+Dieser Skill schreibt ausschliesslich in:
 
 - `application-pipeline/applications/<today>-<slug>/analysis.md`
 - `application-pipeline/user-info/triage-profile/gate-criteria.md`
 - `application-pipeline/user-info/triage-profile/candidate-profile.md`
-
-Alles andere im Repo ist read-only — insbesondere `writing-style.md`.
 </hard-rules>

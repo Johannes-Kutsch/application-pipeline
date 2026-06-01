@@ -1,6 +1,6 @@
 # Nested `user-info/` sub-dirs; search-terms split per section
 
-`user-info/` reshapes from flat into three sub-dirs: `search-terms/` (keywords.md, skills.md, negative-keywords.md), `triage-profile/` (self-description.md, match-criteria.md, writing-style.md), `cv/` (facts.tex, content_pool.tex, profile.png, signature.png). No files at root.
+`user-info/` reshapes from flat into three sub-dirs: `search-terms/` (keywords.md, skills.md, negative-keywords.md), `triage-profile/` (gate-criteria.md, candidate-profile.md, skills.md), `cv/` (facts.tex, content_pool.tex, cover-patterns.md, profile.png, signature.png). No files at root.
 
 Search-terms split: single `search-terms.md` → three files. Filename *is* the section — no `##` header inside each file. `keywords.md` missing or empty → `SearchTermsError`; `skills.md` and `negative-keywords.md` optional.
 

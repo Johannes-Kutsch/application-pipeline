@@ -73,8 +73,7 @@ application-pipeline/
 |   `-- cv/
 |       |-- facts.tex
 |       |-- content_pool.tex
-|       |-- writing-style.md
-|       |-- positive-exemplars.md
+|       |-- cover-patterns.md
 |       |-- profile.png
 |       `-- signature.png
 |-- results/
@@ -124,24 +123,11 @@ signals should rank one matched listing above another.
 Hard-skill pool. The Match Judge receives the flat skill list; `/write-cv` reads the grouped
 structure to assemble the `skills_block` slot.
 
-### `user-info/cv/writing-style.md`
+### `user-info/cv/cover-patterns.md`
 
-Cover-letter voice, phrasing rules, and cover strategy. Use short declarative bullets:
-
-- `## Voice` for high-level tone.
-- `## Do` for preferred phrasing and behavior.
-- `## Don't` for anti-rules, not concrete bad examples.
-- `## Register` for `Sie`/`Du`, greeting, and audience conventions.
-- `## Cover-Strategie` for content arc and slot strategy, such as hook placement, pivot choice, and
-  project-evidence discipline.
-
-Do not store exemplars here. If a bad draft sentence reveals a reusable rule, abstract it into a
-Do/Don't or `Cover-Strategie` bullet and discard the concrete sentence.
-
-### `user-info/cv/positive-exemplars.md`
-
-Positive style models only, usually snippets from handwritten letters. Do not add negative examples
-or "do not write like this" samples here or in `writing-style.md`.
+Reusable cover-letter paragraph patterns for `/write-cv`. Each pattern captures the slot, argument
+type, trigger conditions, placeholders, and the approved paragraph text. Use this library for
+repeatable paragraphs; ad-hoc style signals are handled inline during drafting.
 
 ### `user-info/cv/facts.tex`
 

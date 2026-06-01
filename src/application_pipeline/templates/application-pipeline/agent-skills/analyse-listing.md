@@ -112,6 +112,24 @@ Wird nur bei User-OK geschrieben. Pfad: `application-pipeline/applications/<toda
   **Supporting hooks:** <kommagetrennte Liste der Hooks, die denselben Arc stützen und in Cover/Resume/Skills mitlaufen können; `none`, falls keine>
   **Reserve hooks:** <kommagetrennte Liste übriger Hooks, die bewusst erhalten bleiben für Resume, Skills oder spätere Iteration; `none`, falls keine>
 
+# Cover sections
+
+## intro
+
+- <vorsortierte Why-apply-Bullets und der persönliche Einstieg aus dem Lead hook für den Opener; persönlicher, listingspezifischer Einstieg>
+
+## bridge
+
+- <vorsortierte Übergangspunkte, die den Lead hook mit Supporting hooks in den Capability-Arc überführen>
+
+## evidence
+
+- <vorsortierte Resonance- und Capability-Hooks mit Anekdoten, die den dominanten Arc belegen>
+
+## closing
+
+- <vorsortierte Schluss-Punkte: Pull-Fit, Zusammenarbeit, Gesprächs-/Wechselmotivation; kann Reserve hooks aufnehmen, falls sie den Schluss stärken>
+
 # Tailoring hooks
 
 ### Resonance — warum das Listing zu mir passt

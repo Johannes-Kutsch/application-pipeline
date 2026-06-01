@@ -101,6 +101,41 @@ def _assert_cover_strategy_contract(text: str) -> None:
     assert body.count("`none`") == 2
 
 
+def _assert_analysis_cover_sections(text: str) -> None:
+    match = re.search(
+        r"^# Cover sections\n(?P<body>.*?)(?=^# Tailoring hooks$)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None
+
+    body = match.group("body")
+    assert "## intro" in body
+    assert "## bridge" in body
+    assert "## evidence" in body
+    assert "## closing" in body
+    assert body.index("## intro") < body.index("## bridge")
+    assert body.index("## bridge") < body.index("## evidence")
+    assert body.index("## evidence") < body.index("## closing")
+
+
+def _assert_analysis_cover_sections_preserve_semantics(text: str) -> None:
+    match = re.search(
+        r"^# Cover sections\n(?P<body>.*?)(?=^# Tailoring hooks$)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None
+
+    body = match.group("body")
+    assert "Why-apply" in body
+    assert "Lead hook" in body
+    assert "Supporting hooks" in body
+    assert "Resonance" in body
+    assert "Capability" in body
+    assert "Anekdoten" in body
+
+
 def _assert_write_cv_cover_strategy_usage(text: str) -> None:
     assert (
         'analysis.md` — neutraler Listing-Summary + „Why apply"-Bullets + '
@@ -112,6 +147,15 @@ def _assert_write_cv_cover_strategy_usage(text: str) -> None:
         "`Reserve hooks` bleiben für Resume, Skills oder spätere Iteration liegen"
         in text
     )
+
+
+def _assert_write_cv_reads_cover_sections_directly(text: str) -> None:
+    assert "`Cover sections` (`intro`, `bridge`, `evidence`, `closing`)" in text
+    assert "direkter Handoff" in text
+    assert "`cover_intro` aus `intro`" in text
+    assert "`cover_pivot` aus `bridge`" in text
+    assert "`cover_fit` aus `evidence`" in text
+    assert "`cover_closing` aus `closing`" in text
 
 
 def _assert_write_cv_cover_strategy_contract(text: str) -> None:
@@ -882,10 +926,30 @@ def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
     _assert_cover_strategy_contract(text)
 
 
+def test_analyse_listing_template_defines_four_explicit_cover_sections() -> None:
+    text = _agent_skill_template_bytes("analyse-listing.md").decode()
+
+    _assert_analysis_cover_sections(text)
+
+
+def test_analyse_listing_template_sorts_existing_cover_semantics_into_sections() -> (
+    None
+):
+    text = _agent_skill_template_bytes("analyse-listing.md").decode()
+
+    _assert_analysis_cover_sections_preserve_semantics(text)
+
+
 def test_write_cv_template_reads_cover_strategy_from_analysis() -> None:
     text = _agent_skill_template_bytes("write-cv.md").decode()
 
     _assert_write_cv_cover_strategy_usage(text)
+
+
+def test_write_cv_template_reads_cover_sections_as_direct_handoff() -> None:
+    text = _agent_skill_template_bytes("write-cv.md").decode()
+
+    _assert_write_cv_reads_cover_sections_directly(text)
 
 
 def test_write_cv_template_follows_cover_strategy_contract() -> None:

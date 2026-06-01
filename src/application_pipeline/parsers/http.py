@@ -68,7 +68,9 @@ class ParserHttp:
         self._timeout = timeout
         self._retries = retries
         self._sleep = _sleep
-        self._throttle = _throttle if _throttle is not None else _Throttle()
+        self._throttle = (
+            _throttle if _throttle is not None else _Throttle(_sleep=_sleep)
+        )
         self._client = httpx.Client(
             timeout=httpx.Timeout(timeout, connect=HTTP_CONNECT_TIMEOUT),
             headers=merged_headers,

@@ -70,19 +70,19 @@ Wenn der User behauptet, was die Position fordert: prüfe, ob die `raw_descripti
 Tailoring-Hooks haben zwei Sorten — beide müssen im Grilling vorkommen:
 
 - **Resonance** — Listing-*Signale* (nicht Anforderungen), die den User anziehen. Zeigen *warum die Position zu ihm passt* — nicht *warum er sie erfüllt*.
-- **Competence** — Listing-*Anforderungen* und welcher User-Background sie deckt.
+- **Capability** — Listing-*Anforderungen* und welcher User-Background sie deckt.
 
-Wenn das Grilling bisher nur Competence-Branches abgedeckt hat, frage aktiv nach Resonance: welche Listing-Signale ziehen den User an, und warum — Identität, Werte, biographisches Muster.
+Wenn das Grilling bisher nur Capability-Branches abgedeckt hat, frage aktiv nach Resonance: welche Listing-Signale ziehen den User an, und warum — Identität, Werte, biographisches Muster.
 
 ### Hooks offensiv, nicht defensiv
 
 - Keine Listing-Anforderung aufgreifen, die der User nicht erfüllt, nur um sie zu entkräften. Insbesondere `idealerweise`-Anforderungen weglassen — sie sind keine Pflicht und müssen nicht verteidigt werden.
 - Anti-Frames in Worten aktiv vermeiden — sie machen den Frame erst sichtbar. Positive Substanz reicht; der Leser zieht die Schlüsse selbst.
-- Competence-Hooks als positive Behauptung formulieren, nicht als Konter zu einer fehlenden Anforderung.
+- Capability-Hooks als positive Behauptung formulieren, nicht als Konter zu einer fehlenden Anforderung.
 
 ## Session-Ende
 
-Wenn du denkst, die großen Branches sind durch (du hast (a) ein konkretes *Warum gerade diese Position*, (b) **mindestens je einen Resonance- und einen Competence-Hook**, insgesamt 2–4 Tailoring-Hooks, (c) **genau einen primären Cover-Arc**, der den stärksten Mittelteil des Anschreibens tragen soll, und (d) keine ungelösten Zweifel): gib den Ball zurück mit einem Draft des `analysis.md`-Inhalts inline zur Prüfung und der Frage, ob das passt oder ob noch etwas unter Druck zu setzen ist.
+Wenn du denkst, die großen Branches sind durch (du hast (a) ein konkretes *Warum gerade diese Position*, (b) **mindestens je einen Resonance- und einen Capability-Hook**, insgesamt 2–4 Tailoring-Hooks, (c) in der **Cover-Strategie genau einen Lead-Hook**, der den stärksten Mittelteil des Anschreibens tragen soll, und (d) keine ungelösten Zweifel): gib den Ball zurück mit einem Draft des `analysis.md`-Inhalts inline zur Prüfung und der Frage, ob das passt oder ob noch etwas unter Druck zu setzen ist.
 
 - **User-OK** → schreibe `application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/analysis.md` nach dem Schema unten. Überschreibe ohne Rückfrage, falls bereits vorhanden. Dann eine kurze Prosa-Zusammenfassung mit dem geschriebenen Pfad, Notiz zu Profil-Änderungen, und vorgeschlagenem `/write-cv`-Aufruf mit **vollqualifiziertem** Pfad (`application-pipeline/applications/<today>-<slug>/`), damit der User unabhängig von der CWD copy-pasten kann.
 - **Weiteres Feedback** → zurück ins Grilling, später erneut präsentieren.
@@ -105,12 +105,12 @@ Wird nur bei User-OK geschrieben. Pfad: `application-pipeline/applications/<toda
 
 - <2–4 Bullets: persönliche Verbindung zu Company/Rolle — Material für den Anschreiben-Opener>
 
-### Primary cover arc
+### Cover strategy
 
-- **Primary:** <genau ein Hook — Resonance oder Competence — der den dominanten Cover-Arc für `/write-cv` trägt>
-  **Warum dieser Arc:** <warum dieser Hook der stärkste rote Faden ist und die anderen Hooks nur stützen>
+- **Lead hook:** <genau ein Hook — Resonance oder Capability — der den dominanten Cover-Arc für `/write-cv` trägt>
+  **Warum dieser Hook:** <warum dieser Hook der stärkste rote Faden ist und die anderen Hooks nur stützen>
   **Supporting hooks:** <kommagetrennte Liste der Hooks, die denselben Arc stützen und in Cover/Resume/Skills mitlaufen können; `none`, falls keine>
-  **Unused hooks:** <kommagetrennte Liste übriger Hooks, die bewusst erhalten bleiben für Resume, Skills oder spätere Iteration; `none`, falls keine>
+  **Reserve hooks:** <kommagetrennte Liste übriger Hooks, die bewusst erhalten bleiben für Resume, Skills oder spätere Iteration; `none`, falls keine>
 
 # Tailoring hooks
 
@@ -121,7 +121,7 @@ Wird nur bei User-OK geschrieben. Pfad: `application-pipeline/applications/<toda
   **Anekdote:** <konkrete Story, die das Muster im User-Leben belegt — max. 2–4 Zeilen, Anschreiben-tauglich>
 - ...
 
-### Competence — was ich mitbringe
+### Capability — was ich mitbringe
 
 - **Listing fordert:** <konkrete Anforderung aus der raw_description>
   **Hook:** <Erfahrung/Skill, als positive Substanz formuliert — nicht als Konter>

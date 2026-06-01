@@ -16,6 +16,11 @@ _PRESERVE_FILES = frozenset({"config.py", ".gitignore"})
 # Templates subdirectories that are NOT routing buckets — package-internal,
 # never seeded onto the host.
 _NON_BUCKET_DIRS = frozenset({"prompts"})
+_RETIRED_REFRESH_PATHS: dict[str, tuple[Path, ...]] = {
+    "application-pipeline": (Path("agent-skills/iterate-cv.md"),),
+    "claude": (Path("skills/iterate-cv/SKILL.md"),),
+    "codex": (Path("skills/iterate-cv/SKILL.md"),),
+}
 
 
 def home_dir() -> Path:
@@ -70,6 +75,7 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
         if layout_path.exists():
             layout_path.unlink()
             reports.append(("removed", "layout.py"))
+        reports.extend(_cleanup_retired_refresh_paths(roots))
         reports.extend(_cleanup_legacy_skills_dir(ap_root))
 
         visible = [(v, d) for v, d in reports if v in ("overwrote", "removed")]
@@ -105,6 +111,31 @@ def _cleanup_legacy_skills_dir(ap_root: Path) -> list[tuple[str, str]]:
         return actions
     actions.append(("removed", "skills/"))
     return actions
+
+
+def _cleanup_retired_refresh_paths(
+    roots: dict[str, Path],
+) -> list[tuple[str, str]]:
+    actions: list[tuple[str, str]] = []
+    for bucket, rel_paths in _RETIRED_REFRESH_PATHS.items():
+        root = roots[bucket]
+        for rel in rel_paths:
+            dest = root / rel
+            if not dest.exists():
+                continue
+            dest.unlink()
+            actions.append(("removed", rel.as_posix()))
+            _prune_empty_parents(root, dest.parent)
+    return actions
+
+
+def _prune_empty_parents(root: Path, node: Path) -> None:
+    while node != root:
+        try:
+            node.rmdir()
+        except OSError:
+            return
+        node = node.parent
 
 
 def _seed(

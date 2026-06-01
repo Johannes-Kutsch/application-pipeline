@@ -1,88 +1,38 @@
-% cv_skeleton.tex — format-by-example for /write-cv
-% This file is package-shipped and refreshed by `init --refresh`.
-% Edit slot bodies below to guide the /write-cv skill.
-
 %% SLOT: recipient_company
-% Empfänger-Firma oder -Organisation (DIN 5008 Zeile 1).
-% Fett gesetzt im Anschriftenfeld. Sollte aus der Stellenanzeige hervorgehen.
-Muster GmbH
+ADRESSE recipient_company
 
 %% SLOT: recipient_name
-% Ansprechperson (Vorname Nachname) oder Abteilung (DIN 5008 Zeile 2).
-% Wenn kein Name bekannt: "Personalabteilung" oder ganz leer lassen
-% (leerer Body wird im PDF ohne Lücke übersprungen).
-Frau Dr. Müller
+ADRESSE recipient_name
 
 %% SLOT: recipient_street
-% Straße und Hausnummer (DIN 5008 Zeile 3).
-Musterstraße 42
+ADRESSE recipient_street
 
 %% SLOT: recipient_zip_city
-% Postleitzahl und Stadt (DIN 5008 Zeile 4).
-20095 Hamburg
+ADRESSE recipient_zip_city
 
 %% SLOT: opening
-% Förmliche Anrede passend zum recipient_name (bzw. recipient_company).
-% Bei unbekanntem Empfänger: "Sehr geehrte Damen und Herren,"
-Sehr geehrte Frau Dr. Müller,
+ANREDE - z.B.: Sehr geehrte Frau Musterfrau
 
 %% SLOT: cover_intro
-% 2–3 Sätze: Wer bin ich, welche Stelle interessiert mich, warum dieses Unternehmen?
-% Direkte Ansprache, keine Floskeln. Stärksten Bezugspunkt zur Stelle als Aufhänger.
-mit großem Interesse habe ich Ihre Stellenausschreibung als Senior Data Engineer gelesen.
-Die Verbindung von skalierbaren Datenpipelines und \textit{maschinellem Lernen} entspricht
-genau meinem Schwerpunkt der letzten fünf Jahre --- und Ihr Fokus auf öffentliche Dateninfrastruktur
-spricht mich besonders an.
+PARAGRAPH cover_intro
 
 %% SLOT: cover_pivot
-% 1–2 Sätze: Brücke vom bisherigen Werdegang zur neuen Stelle.
-% Warum ist dieser Wechsel der logische nächste Schritt?
-Nach meiner Tätigkeit bei der Muster GmbH, wo ich vollständige ETL-Strecken von der
-Rohdatenerfassung bis zum Reporting verantwortet habe, möchte ich dieses Know-how
-nun in einem stärker forschungsnahen Umfeld einsetzen.
+PARAGRAPH cover_pivot
 
 %% SLOT: cover_fit
-% 2–3 Sätze: Konkrete Belege für den Fit — Zahlen, Technologien, Erfolge.
-% Bezug auf die Anforderungen der Stellenausschreibung herstellen.
-Mein Open-Source-Beitrag \href{https://github.com/beispiel/pipeline-lib}{pipeline-lib}
-wird von über 300 Teams produktiv genutzt und zeigt, dass ich nicht nur implementiere,
-sondern auch dokumentiere und community-tauglich designt. Umlaute wie Ü, Ö, Ä und ß
-sind in meinen deutschen Texten selbstverständlich korrekt gesetzt.
+PARAGRAPH cover_fit
 
 %% SLOT: cover_closing
-% 1–2 Sätze: Gesprächswunsch äußern, Verfügbarkeit andeuten, freundlicher Abschluss.
-Über die Möglichkeit, meine Erfahrungen in einem persönlichen Gespräch vorzustellen,
-würde ich mich sehr freuen --- idealerweise ab dem 1. Juni.
+PARAGRAPH cover_closing
 
 %% SLOT: resume_berufserfahrung
-% Listet relevante Berufsstationen in umgekehrter chronologischer Reihenfolge.
-% Je Station ein \cventry. Schwerpunkt auf Aufgaben mit Stellenbezug.
-\cventry{2021--heute}{Senior Data Engineer}{\textit{Muster GmbH}}{Hamburg}{}{%
-  Aufbau einer Echtzeit-Datenpipeline für 50\,Mio. Ereignisse/Tag;
-  Einführung von dbt und Apache Kafka --- Laufzeit um 40\,\% reduziert.}
-\cventry{2018--2021}{Data Engineer}{Beispiel AG}{Berlin}{}{%
-  Entwicklung von ETL-Prozessen in Python; Anbindung externer APIs über
-  \href{https://beispiel.de/api}{REST-Schnittstellen}.}
+\Beispielmakro
 
 %% SLOT: resume_ausbildung
-% Akademische Abschlüsse und relevante Zertifikate, neuestes zuerst.
-% Promotion, Master, Bachelor; Berufsausbildung nur wenn fachlich relevant.
-\cventry{2015--2018}{M.\,Sc.\ Informatik}{Universität Hamburg}{Hamburg}{}{%
-  Schwerpunkt: Verteilte Systeme und maschinelles Lernen;
-  Abschlussnote \textit{sehr gut} (1,2).}
-\cventry{2012--2015}{B.\,Sc.\ Wirtschaftsinformatik}{FH Lübeck}{Lübeck}{}{}
+\Beispielmakro
 
 %% SLOT: resume_projekte
-% Eigenprojekte, Open-Source-Beiträge oder Nebenarbeiten mit technischem Belang.
-% Projekttitel verlinken wenn öffentlich zugänglich (\href).
-\cventry{2023}{pipeline-lib}{Open Source}{}{}{%
-  Python-Bibliothek für deklarative Datenpipelines ---
-  \href{https://github.com/beispiel/pipeline-lib}{github.com/beispiel/pipeline-lib};
-  300\,+ produktive Installationen, MIT-Lizenz.}
+\Beispielmakro
 
 %% SLOT: skills_block
-% Mechanisch zusammengesetzt aus user-info/triage-profile/skills.md per ADR-0033.
-% Nicht hier hand-authoren --- /write-cv emittiert die \cvitem-Zeilen anhand
-% der Gruppen-Auswahlregeln (always-Gruppen + LLM-Picks nach Jobtype-Relevanz)
-% und der Item-Auswahlregeln (always-Items + LLM-Picks innerhalb gewählter Gruppen).
-% File-Reihenfolge in skills.md = Render-Reihenfolge.
+\cvitem{Beispiel Gruppe}{Biespielskill 1, Beispielskill 2}

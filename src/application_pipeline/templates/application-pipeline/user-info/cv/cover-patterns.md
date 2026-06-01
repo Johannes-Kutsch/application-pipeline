@@ -1,4 +1,4 @@
-# Cover Paragraph Patterns
+# Intro Patterns
 
 ## Product Resonance Intro
 - slot: cover_intro

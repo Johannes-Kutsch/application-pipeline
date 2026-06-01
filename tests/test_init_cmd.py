@@ -1064,6 +1064,75 @@ def test_refresh_with_no_legacy_skills_dir_is_silent(
     assert "removed skills/" not in out
 
 
+# --- retired iterate-cv cleanup on refresh ---
+
+
+def test_refresh_removes_retired_iterate_cv_files_from_all_buckets(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    iterate_cv_md = _ap(tmp_path) / "agent-skills" / "iterate-cv.md"
+    iterate_cv_md.write_text("# old body\n")
+    claude_skill = _claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md"
+    claude_skill.parent.mkdir(parents=True, exist_ok=True)
+    claude_skill.write_text("# old claude\n")
+    codex_skill = _codex(tmp_path) / "skills" / "iterate-cv" / "SKILL.md"
+    codex_skill.parent.mkdir(parents=True, exist_ok=True)
+    codex_skill.write_text("# old codex\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert not iterate_cv_md.exists()
+    assert not claude_skill.exists()
+    assert not codex_skill.exists()
+    out = capsys.readouterr().out
+    assert "removed agent-skills/iterate-cv.md" in out
+    assert "removed skills/iterate-cv/SKILL.md" in out
+
+
+def test_refresh_prunes_empty_parent_dir_after_removing_iterate_cv_skill(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    claude_skill = _claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md"
+    claude_skill.parent.mkdir(parents=True, exist_ok=True)
+    claude_skill.write_text("# old\n")
+
+    init(tmp_path, refresh=True)
+
+    assert not claude_skill.parent.exists()
+
+
+def test_refresh_preserves_user_files_in_retired_iterate_cv_dir(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    skill_dir = _claude(tmp_path) / "skills" / "iterate-cv"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("# old\n")
+    notes = skill_dir / "notes.md"
+    notes.write_text("# my notes\n")
+
+    init(tmp_path, refresh=True)
+
+    assert not (skill_dir / "SKILL.md").exists()
+    assert skill_dir.exists()
+    assert notes.read_text() == "# my notes\n"
+
+
+def test_refresh_is_silent_when_retired_iterate_cv_files_absent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    out = capsys.readouterr().out
+    assert "iterate-cv" not in out
+
+
 # --- .codex/skills/ seeding (issue #689) ---
 
 

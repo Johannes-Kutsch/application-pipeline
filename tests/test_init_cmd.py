@@ -49,7 +49,7 @@ def _claude_template_bytes(rel: str) -> bytes:
 
 
 def _claude_template_text(rel: str) -> str:
-    return _claude_template_bytes(rel).decode()
+    return _claude_template_bytes(rel).decode().replace("\r\n", "\n")
 
 
 def _skill_frontmatter(text: str) -> tuple[str, str]:
@@ -69,13 +69,13 @@ def _codex_template_bytes(rel: str) -> bytes:
 
 
 def _codex_template_text(rel: str) -> str:
-    return _codex_template_bytes(rel).decode()
+    return _codex_template_bytes(rel).decode().replace("\r\n", "\n")
 
 
 def _front_matter_field(text: str, field: str) -> str:
     match = re.search(rf"^{field}: .+$", text, flags=re.MULTILINE)
     assert match is not None
-    return match.group(0)
+    return match.group(0).rstrip("\r")
 
 
 def _analyse_listing_step_2(text: str) -> str:
@@ -85,6 +85,7 @@ def _analyse_listing_step_2(text: str) -> str:
 
 
 def _assert_cover_strategy_contract(text: str) -> None:
+    text = text.replace("\r\n", "\n")
     match = re.search(
         r"^### Cover strategy\n(?P<body>.*?)(?=^# Tailoring hooks$)",
         text,
@@ -102,6 +103,7 @@ def _assert_cover_strategy_contract(text: str) -> None:
 
 
 def _assert_analysis_cover_sections(text: str) -> None:
+    text = text.replace("\r\n", "\n")
     match = re.search(
         r"^# Cover sections\n(?P<body>.*?)(?=^# Tailoring hooks$)",
         text,
@@ -120,6 +122,7 @@ def _assert_analysis_cover_sections(text: str) -> None:
 
 
 def _assert_analysis_cover_sections_preserve_semantics(text: str) -> None:
+    text = text.replace("\r\n", "\n")
     match = re.search(
         r"^# Cover sections\n(?P<body>.*?)(?=^# Tailoring hooks$)",
         text,
@@ -223,7 +226,7 @@ def test_first_bootstrap_writes_config(tmp_path: Path) -> None:
 def test_config_template_contains_claude_classify_parallelism(tmp_path: Path) -> None:
     init(tmp_path)
 
-    config_text = (_ap(tmp_path) / "config.py").read_text()
+    config_text = (_ap(tmp_path) / "config.py").read_text(encoding="utf-8")
     assert "CLAUDE_CLASSIFY_PARALLELISM = 4" in config_text
 
 
@@ -922,7 +925,9 @@ def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
 ) -> None:
     init(tmp_path)
 
-    text = (_ap(tmp_path) / "agent-skills" / "analyse-listing.md").read_text()
+    text = (_ap(tmp_path) / "agent-skills" / "analyse-listing.md").read_text(
+        encoding="utf-8"
+    )
     _assert_cover_strategy_contract(text)
 
 
@@ -1228,7 +1233,7 @@ def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
         assert wrapper.exists(), f"{d}/SKILL.md missing"
         assert wrapper.read_bytes() == _codex_template_bytes(f"skills/{d}/SKILL.md")
 
-        codex_text = wrapper.read_text()
+        codex_text = wrapper.read_text(encoding="utf-8")
         claude_text = _claude_template_text(f"skills/{d}/SKILL.md")
         assert _front_matter_field(codex_text, "name") == _front_matter_field(
             claude_text, "name"
@@ -1306,7 +1311,9 @@ def test_fresh_init_seeds_claude_wrappers_that_delegate_to_shared_bodies(
     }
 
     for skill, (description, body_path) in expected.items():
-        text = (_claude(tmp_path) / "skills" / skill / "SKILL.md").read_text()
+        text = (_claude(tmp_path) / "skills" / skill / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         assert _skill_frontmatter(text) == (skill, description)
         assert body_path in text
 

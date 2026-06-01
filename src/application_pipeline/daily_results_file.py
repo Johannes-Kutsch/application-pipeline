@@ -45,7 +45,7 @@ class DailyResultsFile:
             rank=rank, header=header, summary=summary, url=url, body=body
         )
         try:
-            with open(self._path, "a", encoding="utf-8") as f:
+            with open(self._path, "a", encoding="utf-8", newline="\n") as f:
                 f.write(text)
                 f.flush()
                 os.fsync(f.fileno())

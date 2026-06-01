@@ -7,6 +7,7 @@ import os
 import stat
 import subprocess
 import textwrap
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,20 @@ def _setup_template(name: str) -> str:
         / name
     )
     return node.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def _bash_is_usable() -> bool:
+    try:
+        result = subprocess.run(
+            ["bash", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0 and "GNU bash" in result.stdout
 
 
 @pytest.fixture(scope="module")
@@ -155,6 +170,8 @@ def _write_stub(venv_bin: Path, name: str, body: str, exit_code: int = 0) -> Pat
 
 def test_cron_sh_exits_with_error_when_venv_missing(tmp_path: Path) -> None:
     """When .venv/ does not exist, cron.sh exits non-zero with a message on stderr."""
+    if not _bash_is_usable():
+        pytest.skip("bash is required to execute cron.sh on this platform")
     setup_dir = tmp_path / "application-pipeline" / "setup"
     setup_dir.mkdir(parents=True)
     cron_sh = setup_dir / "cron.sh"
@@ -176,6 +193,8 @@ def test_cron_sh_exits_with_error_when_venv_missing(tmp_path: Path) -> None:
 
 def test_cron_sh_pip_failure_warns_but_continues(tmp_path: Path) -> None:
     """A pip upgrade failure prints a warning but cron still executes."""
+    if not _bash_is_usable():
+        pytest.skip("bash is required to execute cron.sh on this platform")
     cron_sh, venv_bin, env = _make_script_env(tmp_path)
 
     # pip always fails
@@ -199,6 +218,8 @@ def test_cron_sh_pip_failure_warns_but_continues(tmp_path: Path) -> None:
 
 def test_cron_sh_no_judge_passes_flag_to_cron(tmp_path: Path) -> None:
     """./cron.sh --no-judge passes --no-judge to application-pipeline cron."""
+    if not _bash_is_usable():
+        pytest.skip("bash is required to execute cron.sh on this platform")
     cron_sh, venv_bin, env = _make_script_env(tmp_path)
 
     _write_stub(venv_bin, "pip", "", exit_code=0)
@@ -234,6 +255,8 @@ def test_cron_sh_no_judge_passes_flag_to_cron(tmp_path: Path) -> None:
 
 def test_cron_sh_without_no_judge_does_not_pass_flag(tmp_path: Path) -> None:
     """./cron.sh without --no-judge invokes application-pipeline cron without --no-judge."""
+    if not _bash_is_usable():
+        pytest.skip("bash is required to execute cron.sh on this platform")
     cron_sh, venv_bin, env = _make_script_env(tmp_path)
 
     _write_stub(venv_bin, "pip", "", exit_code=0)

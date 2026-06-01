@@ -980,9 +980,17 @@ def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None
     assert "anderen** `argument_type`" in text
     assert "voll ausformulierter Absatz gezeigt, nicht als Outline" in text
 
+    # Confirmed paragraphs preserve earlier cover slots; each write is the full serialized map
+    assert (
+        "bestaetigte fruehere Cover-Slots bleiben unveraendert auf Disk erhalten"
+        in text
+    )
+
     # Pattern save rules: significant new only, during main loop or on explicit request
     assert "signifikant neu" in text
     assert "auf expliziten User-Wunsch" in text
+    # Acceptance criterion: durable pattern updates are persisted immediately
+    assert "Speichere neue Patterns sofort an `cover-patterns.md`" in text
 
     # cover-patterns.md exclusions during shortening loop
     assert (

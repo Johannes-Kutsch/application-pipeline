@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from application_pipeline._context import current_stage
-from application_pipeline.llm import ExtractorError
+from application_pipeline.llm import ExtractorBatchMalformedError, ExtractorError
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import AppliedClassifyOutcome, CallUsage
@@ -410,22 +410,34 @@ class ClassifyWorker(threading.Thread):
             self._dispatch.retry(batch, from_retry=from_retry)
             self._raise_quota_wall(err)
             return
+        except ExtractorBatchMalformedError as exc:
+            self._handle_failed_batch(batch, exc, from_retry=from_retry)
+            return
         except ExtractorError as exc:
-            if from_retry:
-                self._dispatch.finish_retry()
-            _log.warning("llm_enricher.enrich failed: %s", exc)
-            self._metrics.classify_batch_failed(len(batch))
-            self._run_log.event(
-                "llm_classify_relevance",
-                "classify_relevance",
-                status="error",
-                error=str(exc),
-            )
+            self._handle_failed_batch(batch, exc, from_retry=from_retry)
             return
 
         self._apply_outcome(batch, outcome)
         if from_retry:
             self._dispatch.finish_retry()
+
+    def _handle_failed_batch(
+        self,
+        batch: list[ClassifyRequest],
+        exc: ExtractorError,
+        *,
+        from_retry: bool,
+    ) -> None:
+        if from_retry:
+            self._dispatch.finish_retry()
+        _log.warning("llm_enricher.enrich failed: %s", exc)
+        self._metrics.classify_batch_failed(len(batch))
+        self._run_log.event(
+            "llm_classify_relevance",
+            "classify_relevance",
+            status="error",
+            error=str(exc),
+        )
 
     def _raise_quota_wall(self, err: ClaudeUsageLimitError) -> None:
         now = datetime.now(timezone.utc)

@@ -32,6 +32,7 @@ from application_pipeline.llm.types import (
     AppliedClassifyItemOutcome,
     AppliedClassifyOutcome,
     ClassifyItem,
+    ExtractorBatchMalformedError,
     JudgeCandidate,
     MatchVerdict,
     MatchedListing,
@@ -3323,6 +3324,97 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
     )
     # First item must NOT be in seen store
     assert not any(_ERR_URLS[0] in r.get("urls", []) for r in seen_data.values())
+
+
+def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+    urls = [f"https://stub.example/batch/{i}" for i in range(3)]
+
+    class _ThreeStubParser(_StubParserBase):
+        def __enter__(self) -> "_ThreeStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url=url, title=f"Batch Job {i}", source="stub")
+                for i, url in enumerate(urls, start=1)
+            ]
+
+    class _BatchMalformedThenMatchedEnricher:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            self.calls += 1
+            if self.calls == 1:
+                raise ExtractorBatchMalformedError("bad batch verdict")
+            listing_id, stub, body = items[0]
+            card_store.put(
+                listing_id,
+                CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
+            )
+            return _matched_outcome(items)
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            claude_classify_batch_size=2,
+        ),
+        llm_enricher=_BatchMalformedThenMatchedEnricher(),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _ThreeStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.errored == 2
+    assert summary.written == 1
+    assert summary.classify_items == 1
+    assert card_store.get(3) is not None
+
+    seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
+    assert not any(urls[0] in row.get("urls", []) for row in seen_data.values())
+    assert not any(urls[1] in row.get("urls", []) for row in seen_data.values())
+    assert any(urls[2] in row.get("urls", []) for row in seen_data.values())
+
+    classify_rows = [
+        json.loads(line)
+        for line in (logs_dir / "llm" / "classify_relevance.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert classify_rows == [
+        {
+            "ts": classify_rows[0]["ts"],
+            "event": "classify_relevance",
+            "status": "error",
+            "error": "bad batch verdict",
+        },
+        {
+            "ts": classify_rows[1]["ts"],
+            "event": "classify_relevance",
+            "matches": True,
+        },
+    ]
+
+    run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "batches_failed=1" in run_log_text
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:

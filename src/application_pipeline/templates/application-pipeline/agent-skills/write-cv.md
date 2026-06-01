@@ -93,7 +93,7 @@ Die Cover-Schleife sieht den bereits zusammengestellten Resume- und Skills-Stand
 
 ## Interaktives Cover Drafting
 
-Die vier Cover-Prosa-Slots werden **nacheinander** bearbeitet; immer genau ein Slot gleichzeitig. Vor dem ersten User-Prompt darfst du die automatische Vorarbeit aus der Reihenfolge oben komplett erledigen, aber `cv.tex` erst schreiben, wenn alle vier Slots bestaetigt sind.
+Die vier Cover-Prosa-Slots werden **nacheinander** bearbeitet; immer genau ein Slot gleichzeitig. Vor dem ersten User-Prompt darfst du die automatische Vorarbeit aus der Reihenfolge oben komplett erledigen. `opening` bleibt ausserhalb dieser Cover-Absatz-Schleife.
 
 Pro Slot:
 
@@ -112,14 +112,16 @@ Pro Slot:
    - ein bestaetigter neuer Absatz darf in `cover-patterns.md` gespeichert werden, aber nur wenn er gegenueber der bestehenden Bibliothek **signifikant neu** ist, also eine neue Slot-Purpose-plus-Argument-Type-Kombination oder eine klar neue argumentative Bewegung bietet;
    - bei Grenzfaellen frag kurz nach, ob der User den Absatz nur fuer dieses Listing oder dauerhaft als neues Pattern sichern will;
    - auf expliziten User-Wunsch darf ein neuer signifikanter Absatz auch dann nach `cover-patterns.md` geschrieben werden, wenn du ihn nicht von dir aus als speicherwuerdig markiert haettest.
-6. Speichere neue Patterns sofort an `cover-patterns.md`, sobald der User die dauerhafte Aufnahme bestaetigt. Pattern-Format bleibt strikt wie oben beschrieben.
-7. Geh erst zum naechsten Cover-Slot weiter, wenn der aktuelle Slot inhaltlich bestaetigt ist.
+6. Jeder bestaetigte Cover-Absatz wird sofort nach `<application-folder>/cv.tex` geschrieben. Serialisiere dabei immer die komplette Slot-Map mit allen kanonischen Slots in unveraenderter Reihenfolge; bestaetigte fruehere Cover-Slots bleiben unveraendert auf Disk erhalten.
+7. Speichere neue Patterns sofort an `cover-patterns.md`, sobald der User die dauerhafte Aufnahme bestaetigt. Pattern-Format bleibt strikt wie oben beschrieben.
+8. Geh erst zum naechsten Cover-Slot weiter, wenn der aktuelle Slot inhaltlich bestaetigt ist.
+9. Bevor du den naechsten Slot draftest, zeig dem User den unmittelbar vorherigen bestaetigten Absatz unveraendert als Referenzkontext.
 
 Wenn `cover-patterns.md` leer oder fehlend ist, starte direkt bei den drei Alternativen pro Slot. `positive-exemplars.md` und `writing-style.md` bleiben fuer diesen Cover-Drafting-Loop komplett ausser Betracht.
 
 ## `cv.tex` schreiben
 
-Sobald alle vier Cover-Prosa-Slots bestaetigt sind, schreibe die zusammengesetzte Slot-Map nach `<application-folder>/cv.tex`. Der Build-Pfad substituiert die Bodies in `cv_template.tex` (das im Package liegt).
+Der Build-Pfad liest den aktuellen Slot-Map-Stand aus `<application-folder>/cv.tex` und substituiert die Bodies in `cv_template.tex` (das im Package liegt). Nach dem vierten bestaetigten Cover-Slot liegt damit bereits der vollstaendige Draft auf Disk.
 
 ## Build-Aufruf
 

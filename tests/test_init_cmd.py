@@ -963,7 +963,15 @@ def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None
 
     # Opening is automatic; cover prose slots are interactive
     assert "Kein User-Loop fuer `opening`" in text
-    assert "`cv.tex` erst schreiben, wenn alle vier Slots bestaetigt sind" in text
+    assert (
+        "Jeder bestaetigte Cover-Absatz wird sofort nach `<application-folder>/cv.tex` geschrieben"
+        in text
+    )
+    assert (
+        "Bevor du den naechsten Slot draftest, zeig dem User den unmittelbar vorherigen bestaetigten Absatz unveraendert als Referenzkontext."
+        in text
+    )
+    assert "`opening` bleibt ausserhalb dieser Cover-Absatz-Schleife" in text
 
     # Per-slot loop: one pattern match offer, then three typed alternatives
     assert "Cover Paragraph Pattern" in text

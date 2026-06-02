@@ -133,30 +133,28 @@ def _assert_analysis_cover_sections_preserve_semantics(text: str) -> None:
 
 def _assert_write_cv_cover_strategy_usage(text: str) -> None:
     assert "application-pipeline/user-info/cv/cover-patterns.md" in text
-    assert "Hook/Why-Blocks pro Absatz" in text
-    assert "`Cover strategy` (ein Lead-Hook mit Supporting/Reserve-Hooks)" in text
-    assert "`Cover sections` (`intro`, `bridge`, `evidence`, `closing`)" in text
-    assert "direkter Handoff" in text
-    assert "Listing-Forderungen / Hook / Anekdote-Tailoring-Hooks" in text
+    assert "Schreibe die Umlaute ä, ü, ö und ß genau so." in text
+    assert "1. Leite aus `<application-folder>/analysis.md` den Slot-Zweck" in text
+    assert "2. Suche in `application-pipeline/user-info/cv/cover-patterns.md`" in text
+    assert "2.1. Wenn ein klarer Match existiert" in text
+    assert "2.2. Wenn kein klarer Match existiert oder der User ablehnt" in text
 
 
 def _assert_write_cv_reads_cover_sections_directly(text: str) -> None:
-    assert "`cover_intro` aus `intro`" in text
-    assert "`cover_pivot` aus `bridge`" in text
-    assert "`cover_fit` aus `evidence`" in text
-    assert "`cover_closing` aus `closing`" in text
-    assert "ad hoc Remapping" in text
+    assert "präsentiere genau einen Vorschlag als Cover-Paragraph-Pattern-Match" in text
+    assert "präsentiere drei Alternativen mit unterschiedlichen `argument_type`s." in text
+    assert "Schreibe den Text genau so in den entsprechenden Absatz-Slot in `<application-folder>/cv.tex`." in text
+    assert "Frage den User bei Änderungen oder neuen Formulierungen" in text
+    assert "Übernimm die Änderung oder neue Formulierung in `application-pipeline/user-info/cv/cover-patterns.md`." in text
 
 
 def _assert_write_cv_cover_strategy_contract(text: str) -> None:
     _assert_write_cv_cover_strategy_usage(text)
     assert "application-pipeline/user-info/cv/cover-patterns.md" in text
-    assert "die **einzige** Cover-Prosa-Quelle" in text
-    assert "Parse strikt: pro Pattern genau ein `##`-Name" in text
-    assert "Missing oder leer ist ein Bootstrap-Zustand" in text
     assert "Interactive Cover Shortening" in text
+    assert "Wichtig: Dieser Post-Build-Shortening-Loop schreibt nie nach `cover-patterns.md`." in text
     assert "Erfolgs-Report" in text
-    assert "Resident-Loop" in text
+    assert "Schreib-Whitelist" in text
 _TRIAGE_PROFILE_FILES = (
     "candidate-profile.md",
     "gate-criteria.md",
@@ -477,7 +475,7 @@ def test_init_seeds_cover_patterns_template(tmp_path: Path) -> None:
         _ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md"
     ).read_text()
 
-    assert "# Cover Paragraph Patterns" in cover_patterns
+    assert "# Intro Patterns" in cover_patterns
     assert "## Product Resonance Intro" in cover_patterns
     assert "- slot: cover_intro" in cover_patterns
     assert "- argument_type: resonance" in cover_patterns
@@ -825,20 +823,22 @@ def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
     for rel in ("analyse-listing.md", "write-cv.md"):
         text = (shared_root / rel).read_text()
         assert "../_shared/" not in text
-    assert "Profil-Routing" in (shared_root / "write-cv.md").read_text()
-    assert "keine separate Stil-Datei" in (shared_root / "write-cv.md").read_text()
+    write_cv = (shared_root / "write-cv.md").read_text(encoding="utf-8")
+    assert "application-pipeline/user-info/cv/cover-patterns.md" in write_cv
+    assert "Schreibe die Umlaute ä, ü, ö und ß genau so." in write_cv
+    assert "Cover-Paragraph-Pattern-Match" in write_cv
 
 
-def test_fresh_init_seeds_write_cv_with_cover_strategy_routing_contract(
+def test_fresh_init_seeds_write_cv_with_cover_pattern_library_contract(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
 
-    text = (_ap(tmp_path) / "agent-skills" / "write-cv.md").read_text()
-    assert "## Profil-Routing" in text
-    assert "keine separate Stil-Datei mehr" in text
-    assert "direkt im betroffenen Slot" in text
-    assert "Cover-Prosa-Quelle" in text
+    text = (_ap(tmp_path) / "agent-skills" / "write-cv.md").read_text(encoding="utf-8")
+    assert "application-pipeline/user-info/cv/cover-patterns.md" in text
+    assert "Schreibe die Umlaute ä, ü, ö und ß genau so." in text
+    assert "Cover-Paragraph-Pattern-Match" in text
+    assert "Interactive Cover Shortening" in text
 
 
 def test_seeded_shared_agent_skill_support_files_reference_cv_template_path(
@@ -925,55 +925,13 @@ def test_write_cv_template_follows_cover_strategy_contract() -> None:
 def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None:
     text = _agent_skill_template_bytes("write-cv.md").decode()
 
-    # Opening is automatic; cover prose slots are interactive
-    assert "Kein User-Loop fuer `opening`" in text
-    assert (
-        "Jeder bestaetigte Cover-Absatz wird sofort nach `<application-folder>/cv.tex` geschrieben"
-        in text
-    )
-    assert (
-        "Bevor du den naechsten Slot draftest, zeig dem User den unmittelbar vorherigen bestaetigten Absatz unveraendert als Referenzkontext."
-        in text
-    )
-    assert "`opening` bleibt ausserhalb dieser Cover-Absatz-Schleife" in text
-
-    # Per-slot loop: one pattern match offer, then three typed alternatives
-    assert "Cover Paragraph Pattern" in text
-    assert "genau **einen** Vorschlag als **Cover Paragraph Pattern**-Match" in text
-    assert "genau **drei** Alternativen" in text
-    assert "anderen** `argument_type`" in text
-    assert "voll ausformulierter Absatz gezeigt, nicht als Outline" in text
-
-    # Confirmed paragraphs preserve earlier cover slots; each write is the full serialized map
-    assert (
-        "bestaetigte fruehere Cover-Slots bleiben unveraendert auf Disk erhalten"
-        in text
-    )
-
-    # Pattern save rules: significant new only, during main loop or on explicit request
-    assert "signifikant neu" in text
-    assert "auf expliziten User-Wunsch" in text
-    # Acceptance criterion: durable pattern updates are persisted immediately
-    assert "Speichere neue Patterns sofort an `cover-patterns.md`" in text
-
-    # cover-patterns.md exclusions during shortening loop
-    assert (
-        "Post-Build-Shortening-Loop schreibt **nie** nach `cover-patterns.md`" in text
-    )
-    assert (
-        "Resume-Overflow bleibt automatisch; nur Cover-Prosa wird interaktiv verkuerzt"
-        in text
-    )
-
-    # Interactive Cover Shortening shows full variants
+    assert "Schreibe die Umlaute ä, ü, ö und ß genau so." in text
+    assert "präsentiere genau einen Vorschlag als Cover-Paragraph-Pattern-Match" in text
+    assert "präsentiere drei Alternativen mit unterschiedlichen `argument_type`s." in text
     assert "Interactive Cover Shortening" in text
-    assert "verkuerzten Varianten **vollstaendig** in Prosa" in text
-
-    # Success report must keep the user in the same /write-cv run
-    assert "bleib im selben `/write-cv`-Run" in text
-    assert "Resident-Loop" in text
-    assert "Compile-Fehler mitten in der Iteration" in text
-    assert "## Exit" in text
+    assert "Wichtig: Dieser Post-Build-Shortening-Loop schreibt nie nach `cover-patterns.md`." in text
+    assert "Erfolgs-Report" in text
+    assert "Schreib-Whitelist" in text
 
 
 def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:

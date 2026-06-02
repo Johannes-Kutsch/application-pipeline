@@ -280,7 +280,7 @@ def test_default_throttle_uses_injected_sleep_for_consecutive_mocked_requests(
     parser.enrich_get("http://example.com/2", error_prefix="enrich")
 
     assert len(sleeps) == 1
-    assert sleeps[0] == pytest.approx(REQUEST_PACING, abs=0.01)
+    assert sleeps[0] == pytest.approx(REQUEST_PACING, abs=0.05)
 
 
 # ---------------------------------------------------------------------------

@@ -31,16 +31,18 @@ Erstelle als erstes eine leere Slotmap in `<application-folder>/cv.tex`, indem d
 
 Gehe pro Absatz diese Schritte durch. Ziel ist es, den fertigen Text eines Absatzes zu formulieren und anschließend in `<application-folder>/cv.tex` zu schreiben.
 
+Schreibe die Umlaute ä, ü, ö und ß genau so.
+
 <per-absatz-flow>
 0. Falls vorhanden, gebe den Text des vorherigen Absatzes aus.
 1. Leite aus `<application-folder>/analysis.md` den Slot-Zweck und den wahrscheinlich passendsten `argument_type` ab.
 2. Suche in `application-pipeline/user-info/cv/cover-patterns.md` nach einem klaren Match für genau diesen Slot und diesen Argument-Typ.
-3. Wenn ein klarer Match existiert: präsentiere genau einen Vorschlag als Cover-Paragraph-Pattern-Match, erläutere kurz warum, und frage den User, ob er den Absatz akzeptiert.
-4. Wenn kein klarer Match existiert oder der User ablehnt: präsentiere drei Alternativen mit unterschiedlichen `argument_type`s.
-5. Arbeite iterativ mit dem User an den Vorschlägen, bis er mit dem Text zufrieden ist.
-6. Schreibe den Text genau so in den entsprechenden Absatz-Slot in `<application-folder>/cv.tex`.
-7. Frage den User bei Änderungen oder neuen Formulierungen, ob du sie in `application-pipeline/user-info/cv/cover-patterns.md` übernehmen sollst.
-8. Übernimm die Änderung oder neue Formulierung in `application-pipeline/user-info/cv/cover-patterns.md`.
+2.1. Wenn ein klarer Match existiert: präsentiere genau einen Vorschlag als Cover-Paragraph-Pattern-Match, erläutere kurz warum, und frage den User, ob er den Absatz akzeptiert.
+2.2. Wenn kein klarer Match existiert oder der User ablehnt: präsentiere drei Alternativen mit unterschiedlichen `argument_type`s.
+3. Arbeite iterativ mit dem User an den Vorschlägen, bis er mit dem Text zufrieden ist.
+4. Schreibe den Text genau so in den entsprechenden Absatz-Slot in `<application-folder>/cv.tex`.
+5. Frage den User bei Änderungen oder neuen Formulierungen, ob du sie in `application-pipeline/user-info/cv/cover-patterns.md` übernehmen sollst.
+6. Übernimm die Änderung oder neue Formulierung in `application-pipeline/user-info/cv/cover-patterns.md`.
 </per-absatz-flow>
 
 ## 4. Resume Slots füllen

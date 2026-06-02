@@ -348,6 +348,10 @@ def test_compile_cv_cover_letter_measures_default_stretch_first(
 
     content = (app_dir / ".build" / "cv.tex").read_text(encoding="utf-8")
     assert (
+        r"\xpatchcmd{\makelettertitle}{\@opening\\[1.5em]}{\@opening\\[\CoverLetterGap]}{}{}"
+        in content
+    )
+    assert (
         r"\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%"
         "\n\n"
         "Ich bewerbe mich hiermit."

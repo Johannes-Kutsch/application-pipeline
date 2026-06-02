@@ -38,6 +38,7 @@
 % and the Anrede are not visually crowded.
 \makeatletter
 \xpatchcmd{\makelettertitle}{\@date\\[2em]}{\@date\\[2em]\\[2em]}{}{}
+\xpatchcmd{\makelettertitle}{\@opening\\[1.5em]}{\@opening\\[\CoverLetterGap]}{}{}
 \makeatother
 
 % Strip only the applicant's name from moderncv casual.sty's letter footer,
@@ -87,13 +88,13 @@
 % Override moderncv's letter-closing to inject the signature image automatically,
 % so the applicant never has to print/sign/scan an Anschreiben. This couples to
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
+\newcommand{\CoverLetterGap}{0.6\baselineskip}
 \makeatletter
 \renewcommand*{\makeletterclosing}{%
-  % Mirror the opening's spacing recipe (\setstretch{1.8}\vspace{-1em} at the
-  % top of the cover body) so the gap before \@closing matches the gap after
-  % \opening. Reset stretch to 1 only after \@closing so the signature block
-  % stays tight.
-  \vspace{3em}\@closing\par
+  % Keep the sign-off gap proportional to the selected cover stretch so it
+  % matches the opening-to-intro gap. Reset stretch to 1 only after \@closing
+  % so the signature block stays tight.
+  \vspace{\CoverLetterGap}\@closing\par
   \setstretch{1}%
   \vspace{\baselineskip}%
   \noindent\includegraphics[height=3em]{\CvDataDir/signature}\\[-0.4em]%
@@ -153,7 +154,6 @@
 
 \makelettertitle
 \setstretch{1.8}
-\vspace{-1em}
 \AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%
 
 <<COVER_INTRO>>

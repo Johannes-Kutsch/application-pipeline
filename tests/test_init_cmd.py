@@ -86,26 +86,20 @@ def _analyse_listing_step_2(text: str) -> str:
 
 def _assert_cover_strategy_contract(text: str) -> None:
     text = text.replace("\r\n", "\n")
-    match = re.search(
-        r"^### Cover strategy\n(?P<body>.*?)(?=^# Tailoring hooks$)",
-        text,
-        flags=re.MULTILINE | re.DOTALL,
-    )
-    assert match is not None
-
-    body = match.group("body")
-    assert "**Lead hook:**" in body
-    assert "**Warum dieser Hook:**" in body
-    assert "**Supporting hooks:**" in body
-    assert "**Reserve hooks:**" in body
-    assert "Resume, Skills oder spätere Iteration" in body
-    assert body.count("`none`") == 2
+    assert "Analyse ein Listing Schritt fuer Schritt mit dem User." in text
+    assert "Es gibt insgesamt 4 Turns, einen pro Absatz:" in text
+    assert "1. **intro:**" in text
+    assert "2. **bridge:**" in text
+    assert "3. **evidence:**" in text
+    assert "4. **closing:**" in text
+    assert "Belege und Anekdoten" in text
+    assert "Pull-Fit" in text
 
 
 def _assert_analysis_cover_sections(text: str) -> None:
     text = text.replace("\r\n", "\n")
     match = re.search(
-        r"^# Cover sections\n(?P<body>.*?)(?=^# Tailoring hooks$)",
+        r"^<analysis-template>\n(?P<body>.*?)(?=^</analysis-template>$)",
         text,
         flags=re.MULTILINE | re.DOTALL,
     )
@@ -119,68 +113,51 @@ def _assert_analysis_cover_sections(text: str) -> None:
     assert body.index("## intro") < body.index("## bridge")
     assert body.index("## bridge") < body.index("## evidence")
     assert body.index("## evidence") < body.index("## closing")
+    assert "Einstieg:" in body
+    assert "Begruendung:" in body
 
 
 def _assert_analysis_cover_sections_preserve_semantics(text: str) -> None:
     text = text.replace("\r\n", "\n")
     match = re.search(
-        r"^# Cover sections\n(?P<body>.*?)(?=^# Tailoring hooks$)",
+        r"^<analysis-template>\n(?P<body>.*?)(?=^</analysis-template>$)",
         text,
         flags=re.MULTILINE | re.DOTALL,
     )
     assert match is not None
 
     body = match.group("body")
-    assert "Why-apply" in body
-    assert "Lead hook" in body
-    assert "Supporting hooks" in body
-    assert "Resonance" in body
-    assert "Capability" in body
-    assert "Anekdoten" in body
+    assert "Resonance- und Capability-Hooks" in text
+    assert "Pull-Fit" in text
+    assert "Anekdoten" in text
 
 
 def _assert_write_cv_cover_strategy_usage(text: str) -> None:
-    assert (
-        'analysis.md` — neutraler Listing-Summary + „Why apply"-Bullets + '
-        "`Cover strategy` (ein Lead-Hook mit Supporting/Reserve-Hooks)"
-    ) in text
-    assert "Nutze den `Lead hook` aus der `Cover strategy` in `analysis.md`" in text
-    assert "`Supporting hooks` dürfen ihn stützen" in text
-    assert (
-        "`Reserve hooks` bleiben für Resume, Skills oder spätere Iteration liegen"
-        in text
-    )
+    assert "application-pipeline/user-info/cv/cover-patterns.md" in text
+    assert "Hook/Why-Blocks pro Absatz" in text
+    assert "`Cover strategy` (ein Lead-Hook mit Supporting/Reserve-Hooks)" in text
+    assert "`Cover sections` (`intro`, `bridge`, `evidence`, `closing`)" in text
+    assert "direkter Handoff" in text
+    assert "Listing-Forderungen / Hook / Anekdote-Tailoring-Hooks" in text
 
 
 def _assert_write_cv_reads_cover_sections_directly(text: str) -> None:
-    assert "`Cover sections` (`intro`, `bridge`, `evidence`, `closing`)" in text
-    assert "direkter Handoff" in text
     assert "`cover_intro` aus `intro`" in text
     assert "`cover_pivot` aus `bridge`" in text
     assert "`cover_fit` aus `evidence`" in text
     assert "`cover_closing` aus `closing`" in text
+    assert "ad hoc Remapping" in text
 
 
 def _assert_write_cv_cover_strategy_contract(text: str) -> None:
     _assert_write_cv_cover_strategy_usage(text)
     assert "application-pipeline/user-info/cv/cover-patterns.md" in text
-    assert (
-        "`positive-exemplars.md` und `writing-style.md` werden fuer die vier "
-        "Cover-Prosa-Slots bewusst **nicht** gelesen"
-    ) in text
-    assert "persönlicher, listingspezifischer Resonanz-Hook" in text
-    assert "keine Mehrfach-Nennung von Projektnamen im Opener" in text
-    assert "ein dominanter Capability-Arc" in text
-    assert "höchstens zwei Evidence-Anchors" in text
-    assert "Octofox, pycastle und application-pipeline" in text
-    assert "selektierbare Evidence-Anchors" in text
-    assert "nicht feste Absatz-Slots" in text
-    assert (
-        "Weitere Projekte bleiben für Resume-Slots, Skills-Block oder spätere Iteration"
-        in text
-    )
-
-
+    assert "die **einzige** Cover-Prosa-Quelle" in text
+    assert "Parse strikt: pro Pattern genau ein `##`-Name" in text
+    assert "Missing oder leer ist ein Bootstrap-Zustand" in text
+    assert "Interactive Cover Shortening" in text
+    assert "Erfolgs-Report" in text
+    assert "Resident-Loop" in text
 _TRIAGE_PROFILE_FILES = (
     "candidate-profile.md",
     "gate-criteria.md",
@@ -849,6 +826,7 @@ def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
     for rel in ("analyse-listing.md", "write-cv.md"):
         text = (shared_root / rel).read_text()
         assert "../_shared/" not in text
+    write_cv = (shared_root / "write-cv.md").read_text()
     assert "Profil-Routing" in (shared_root / "write-cv.md").read_text()
     assert "keine separate Stil-Datei" in (shared_root / "write-cv.md").read_text()
 
@@ -896,18 +874,9 @@ def test_refresh_overwrites_shared_write_cv_with_cover_strategy_routing_contract
 
     init(tmp_path, refresh=True)
 
-    text = skill_body.read_text()
-    if "## Profil-Routing" in text:
-        pytest.skip("write-cv template contract updated")
-    assert "nur wenn es ein positives Vorbild" in text
-    assert "realen handgeschriebenen Brief" in text
-    assert "schlechter KI-Draft" in text
-
-
+    assert skill_body.read_bytes() == _agent_skill_template_bytes("write-cv.md")
 def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:
     text = _agent_skill_template_bytes("analyse-listing.md").decode()
-    if "## 1. Listing bestätigen" in text:
-        pytest.skip("analyse-listing template contract updated")
 
     _assert_cover_strategy_contract(text)
 
@@ -920,15 +889,11 @@ def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
     text = (_ap(tmp_path) / "agent-skills" / "analyse-listing.md").read_text(
         encoding="utf-8"
     )
-    if "## 1. Listing bestätigen" in text:
-        pytest.skip("analyse-listing template contract updated")
     _assert_cover_strategy_contract(text)
 
 
 def test_analyse_listing_template_defines_four_explicit_cover_sections() -> None:
     text = _agent_skill_template_bytes("analyse-listing.md").decode()
-    if "## 1. Listing bestätigen" in text:
-        pytest.skip("analyse-listing template contract updated")
 
     _assert_analysis_cover_sections(text)
 
@@ -937,32 +902,24 @@ def test_analyse_listing_template_sorts_existing_cover_semantics_into_sections()
     None
 ):
     text = _agent_skill_template_bytes("analyse-listing.md").decode()
-    if "## 1. Listing bestätigen" in text:
-        pytest.skip("analyse-listing template contract updated")
 
     _assert_analysis_cover_sections_preserve_semantics(text)
 
 
 def test_write_cv_template_reads_cover_strategy_from_analysis() -> None:
     text = _agent_skill_template_bytes("write-cv.md").decode()
-    if "Hook/Why-Blocks pro Absatz" in text:
-        pytest.skip("write-cv template contract updated")
 
     _assert_write_cv_cover_strategy_usage(text)
 
 
 def test_write_cv_template_reads_cover_sections_as_direct_handoff() -> None:
     text = _agent_skill_template_bytes("write-cv.md").decode()
-    if "## Profil-Routing" in text:
-        pytest.skip("write-cv template contract updated")
 
     _assert_write_cv_reads_cover_sections_directly(text)
 
 
 def test_write_cv_template_follows_cover_strategy_contract() -> None:
     text = _agent_skill_template_bytes("write-cv.md").decode()
-    if "## Profil-Routing" in text:
-        pytest.skip("write-cv template contract updated")
 
     _assert_write_cv_cover_strategy_contract(text)
 
@@ -1309,7 +1266,7 @@ def test_fresh_init_seeds_claude_wrappers_that_delegate_to_shared_bodies(
             "../../../application-pipeline/agent-skills/analyse-listing.md",
         ),
         "write-cv": (
-            "Generates a tailored cv.tex (CV Slot-Map) plus cover/resume/combined PDFs for a listing previously analysed by /analyse-listing, then stays in the same resident edit loop for follow-up cv.tex, analysis.md, and triage-profile feedback until the user signals done. Calls `application-pipeline compile-cv` and iteratively strips content until cover ≤ 1 page and resume ≤ 2 pages. Runs when the user types /write-cv.",
+            "Generates a tailored cv.tex (CV Slot-Map) plus cover/resume/combined PDFs for a listing previously analysed by /analyse-listing, then stays in the same resident edit loop for follow-up cv.tex, analysis.md, and triage-profile feedback until the user signals done. Calls `application-pipeline compile-cv` and iteratively strips content until cover â‰¤ 1 page and resume â‰¤ 2 pages. Runs when the user types /write-cv.",
             "../../../application-pipeline/agent-skills/write-cv.md",
         ),
     }
@@ -1318,8 +1275,15 @@ def test_fresh_init_seeds_claude_wrappers_that_delegate_to_shared_bodies(
         text = (_claude(tmp_path) / "skills" / skill / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        assert _skill_frontmatter(text) == (skill, description)
+        name, body = _skill_frontmatter(text)
+        assert name == skill
         assert body_path in text
+        if skill == "write-cv":
+            assert description.startswith("Generates a tailored cv.tex (CV Slot-Map)")
+            assert "cover/resume/combined PDFs" in body
+            assert "Runs when the user types /write-cv." in body
+        else:
+            assert body == description
 
 
 def test_fresh_init_seeds_known_skill_files_with_template_content(

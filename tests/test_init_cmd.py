@@ -126,7 +126,6 @@ def _assert_analysis_cover_sections_preserve_semantics(text: str) -> None:
     )
     assert match is not None
 
-    body = match.group("body")
     assert "Resonance- und Capability-Hooks" in text
     assert "Pull-Fit" in text
     assert "Anekdoten" in text
@@ -826,7 +825,6 @@ def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
     for rel in ("analyse-listing.md", "write-cv.md"):
         text = (shared_root / rel).read_text()
         assert "../_shared/" not in text
-    write_cv = (shared_root / "write-cv.md").read_text()
     assert "Profil-Routing" in (shared_root / "write-cv.md").read_text()
     assert "keine separate Stil-Datei" in (shared_root / "write-cv.md").read_text()
 

@@ -29,6 +29,10 @@ application-pipeline init
 Pass `--refresh` to update package-owned files such as setup scripts, CV skeleton, and agent skill
 bodies after an upgrade. User-owned files under `user-info/` are still preserved.
 
+The shared workflow bodies live in `application-pipeline/agent-skills/*.md`; edit those files
+directly. The `.claude/skills/` and `.codex/skills/` entries are generated wrappers that keep the
+tool metadata and point back to the shared body.
+
 ```bash
 application-pipeline init --refresh
 ```

@@ -4,7 +4,7 @@ Falls `<application-folder>/cv.tex` bereits existiert, frage den User, ob er die
 
 # Universalregeln
 
-[_shared/CONVENTIONS.md](_shared/CONVENTIONS.md)
+[_shared/CONVENTIONS.md](application-pipeline/agent-skills/_shared/CONVENTIONS.md)
 
 # Aufgabe
 
@@ -12,7 +12,7 @@ Erstelle eine `cv.tex`-Datei im `<application-folder>` und fülle sie mit Conten
 
 ## CV Slot-Map entwerfen
 
-[_shared/SLOT-MAP.md](_shared/SLOT-MAP.md)
+[_shared/SLOT-MAP.md](application-pipeline/agent-skills/_shared/SLOT-MAP.md)
 
 Erstelle als erstes eine leere Slotmap in `<application-folder>/cv.tex`, indem du `application-pipeline/cv-template/cv_skeleton.tex` kopierst.
 
@@ -26,23 +26,26 @@ Erstelle als erstes eine leere Slotmap in `<application-folder>/cv.tex`, indem d
 ## 2. Anschreibenstext erstellen
 
 - Lies die Datei `application-pipeline/user-info/cv/cover-patterns.md`. Für jeden Absatz im Anschreiben gibt es hier vorformulierte Texte.
+- Der Skill darf niemals direkt vom Analyse-Output zum finalen Cover-Text springen.
+- Schreibe die Umlaute ä, ü, ö und ß genau so.
+- Kein Text für cover_intro, cover_pivot, cover_fit oder cover_closing darf in cv.tex geschrieben werden, bevor der jeweilige Absatz vom User explizit freigegeben wurde.
+- pro Absatz: Vorschlag präsentieren -> auf Antwort warten -> nur bei expliziter Zustimmung schreiben -> erst dann nächster Absatz
 
 ### Absatz Loop
 
-Gehe pro Absatz diese Schritte durch. Ziel ist es, den fertigen Text eines Absatzes zu formulieren und anschließend in `<application-folder>/cv.tex` zu schreiben.
-
-Schreibe die Umlaute ä, ü, ö und ß genau so.
+Für jeden Absatz in `cover_intro`, `cover_pivot`, `cover_fit`, `cover_closing` gilt:
 
 <per-absatz-flow>
-0. Falls vorhanden, gebe den Text des vorherigen Absatzes aus.
-1. Leite aus `<application-folder>/analysis.md` den Slot-Zweck und den wahrscheinlich passendsten `argument_type` ab.
-2. Suche in `application-pipeline/user-info/cv/cover-patterns.md` nach einem klaren Match für genau diesen Slot und diesen Argument-Typ.
-2.1. Wenn ein klarer Match existiert: präsentiere genau einen Vorschlag als Cover-Paragraph-Pattern-Match, erläutere kurz warum, und frage den User, ob er den Absatz akzeptiert.
-2.2. Wenn kein klarer Match existiert oder der User ablehnt: präsentiere drei Alternativen mit unterschiedlichen `argument_type`s.
-3. Arbeite iterativ mit dem User an den Vorschlägen, bis er mit dem Text zufrieden ist.
-4. Schreibe den Text genau so in den entsprechenden Absatz-Slot in `<application-folder>/cv.tex`.
-5. Frage den User bei Änderungen oder neuen Formulierungen, ob du sie in `application-pipeline/user-info/cv/cover-patterns.md` übernehmen sollst.
-6. Übernimm die Änderung oder neue Formulierung in `application-pipeline/user-info/cv/cover-patterns.md`.
+1. Analysiere `analysis.md` und bestimme Slot-Zweck und passenden `argument_type`.
+2. Suche in `cover-patterns.md` nach einem passenden Pattern.
+3. Präsentiere dem User:
+   - bei klarem Match genau einen Vorschlag,
+   - sonst genau drei Alternativen.
+4. Frage explizit nach Freigabe.
+5. Schreibe den Text erst dann in `cv.tex`, wenn der User den konkreten Absatz ausdrücklich freigegeben hat.
+6. Wenn der User ablehnt oder umformuliert, wiederhole den Vorschlagsprozess.
+7. Wenn keine explizite Freigabe vorliegt, darf kein Schreibschritt erfolgen und es dürfen keine weiteren Cover-Absätze bearbeitet werden.
+8. Änderungen oder neue Formulierungen dürfen nur nach Freigabe in `cover-patterns.md` übernommen werden.
 </per-absatz-flow>
 
 ## 4. Resume Slots füllen
@@ -82,6 +85,7 @@ Der `skills_block`-Slot wird mechanisch aus dem Skills-Pool zusammengesetzt. Die
 
 ## 5. Build-Aufruf
 
+Build erst nach vollständig freigegebenen Cover-Absätzen und finaler Slot-Map.
 Rufe das Build-Skript `application-pipeline compile-cv <application-folder>` auf. Erfolg: `cover.pdf`, `resume.pdf` und `combined.pdf` landen im Application-Ordner. Bei Non-Zero-Exit: dem User sagen, dass der Compile fehlgeschlagen ist, mit dem `stderr` verbatim als Anhang. Dann stoppen.
 
 ## 6. Seiten-Overflow-Loop

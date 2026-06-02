@@ -1,6 +1,6 @@
 # Universalregeln
 
-[_shared/CONVENTIONS.md](_shared/CONVENTIONS.md)
+[_shared/CONVENTIONS.md](application-pipeline/agent-skills/_shared/CONVENTIONS.md)
 
 # Aufgabe
 
@@ -61,7 +61,7 @@ Pro Turn in der Grilling-Schleife, in dieser Reihenfolge. Grille unermüdlich so
 
 ### Triage Routing
 
-[_shared/TRIAGE_ROUTING.md](_shared/TRIAGE_ROUTING.md)
+[_shared/TRIAGE_ROUTING.md](application-pipeline/agent-skills/_shared/TRIAGE-ROUTING.md)
 
 ## {Company} - {Title}
 

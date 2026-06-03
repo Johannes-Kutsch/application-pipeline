@@ -37,6 +37,18 @@ def run_log(tmp_path: Path) -> RunLog:
     return RunLog(tmp_path)
 
 
+class _CloseTrackingTransport:
+    def __init__(self, response: httpx.Response) -> None:
+        self._response = response
+        self.closed = False
+
+    def get(self, url: str, *, timeout: float) -> httpx.Response:
+        return self._response
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _make_scripted_parser(
     run_log: RunLog,
     *outcomes: bytes | Exception | ScriptedParserHttpResponse,
@@ -465,6 +477,24 @@ def test_context_manager_returns_self(run_log: RunLog):
     parser, _ = _make_scripted_parser(run_log, b"ok")
     with parser as p:
         assert p is parser
+
+
+def test_context_manager_closes_custom_transport_adapter_without_httpx_client(
+    run_log: RunLog,
+):
+    transport = _CloseTrackingTransport(
+        httpx.Response(
+            200,
+            content=b"ok",
+            request=httpx.Request("GET", "http://example.com/jobs"),
+        )
+    )
+    parser = ParserHttp(run_log=run_log, _transport=transport, _sleep=_NO_SLEEP)
+
+    with parser:
+        assert parser.get("http://example.com/jobs", error_prefix="p") == b"ok"
+
+    assert transport.closed is True
 
 
 # ---------------------------------------------------------------------------

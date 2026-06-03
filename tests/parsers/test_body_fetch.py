@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from application_pipeline.http import HttpStubNotRetryableError
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.body_fetch import OversizedBodyError, fetch_and_strip
-from application_pipeline.parsers.http import ParserHttp
+from application_pipeline.parsers.http import ParserHttp, ScriptedParserHttpOutcome
 from application_pipeline.parsers.types import EnrichFailedError
-from application_pipeline.http import HttpStubNotRetryableError
+from tests.parsers.http_helpers import make_scripted_parser_http
 
 
 @pytest.fixture
@@ -18,11 +19,8 @@ def run_log(tmp_path: Path) -> RunLog:
     return RunLog(tmp_path)
 
 
-def _make_http(run_log: RunLog, body: bytes) -> ParserHttp:
-    def fake_get(url: str, timeout: float) -> bytes:
-        return body
-
-    return ParserHttp(run_log=run_log, _http_get=fake_get, _sleep=lambda _: None)
+def _make_http(run_log: RunLog, *outcomes: ScriptedParserHttpOutcome) -> ParserHttp:
+    return make_scripted_parser_http(run_log, *outcomes, sleep=lambda _: None)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -51,10 +49,10 @@ def test_fetch_and_strip_returns_stripped_text(run_log: RunLog, tmp_path: Path) 
 def test_fetch_and_strip_raises_enrich_failed_error_on_not_retryable(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def failing_get(url: str, timeout: float) -> bytes:
-        raise HttpStubNotRetryableError(f"not found: {url}")
-
-    http = ParserHttp(run_log=run_log, _http_get=failing_get, _sleep=lambda _: None)
+    http = _make_http(
+        run_log,
+        HttpStubNotRetryableError("not found: https://example.com/job/404"),
+    )
     with pytest.raises(EnrichFailedError):
         fetch_and_strip(
             "https://example.com/job/404",

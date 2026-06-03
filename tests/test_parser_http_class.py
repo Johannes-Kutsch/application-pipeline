@@ -494,7 +494,26 @@ def test_context_manager_closes_custom_transport_adapter_without_httpx_client(
 
 
 def _read_events(run_log: RunLog, component_id: str) -> list[dict[str, object]]:
-    path = run_log._component_path(component_id, "events.jsonl")
+    if component_id.startswith("parser_"):
+        path = (
+            run_log.logs_dir
+            / "parser"
+            / f"{component_id.removeprefix('parser_')}.events.jsonl"
+        )
+    elif component_id.startswith("llm_"):
+        path = (
+            run_log.logs_dir
+            / "llm"
+            / f"{component_id.removeprefix('llm_')}.events.jsonl"
+        )
+    elif component_id.startswith("pipeline_"):
+        path = (
+            run_log.logs_dir
+            / "pipeline"
+            / f"{component_id.removeprefix('pipeline_')}.events.jsonl"
+        )
+    else:
+        path = run_log.logs_dir / f"{component_id}.events.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 

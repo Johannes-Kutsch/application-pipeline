@@ -242,9 +242,11 @@ class ParserHttp:
             raise HttpRetryError("HTTP request failed after 0 retries: None")
 
         last_exc: Exception | None = None
-        self._run_log.event(component_id, "http_get_start", url=url, attempt=1)
         for attempt in range(self._retries):
             attempt_num = attempt + 1
+            self._run_log.event(
+                component_id, "http_get_start", url=url, attempt=attempt_num
+            )
             t_start = time.monotonic()
             try:
                 result = self._real_http_get(url, self._timeout)

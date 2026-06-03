@@ -235,7 +235,7 @@ def test_get_retries_then_returns_bytes_on_second_attempt(run_log: RunLog):
     assert len(transport.requests) == 2
 
 
-def test_get_retry_then_success_emits_start_retry_and_ok_events(run_log: RunLog):
+def test_get_retry_then_success_preserves_per_attempt_start_events(run_log: RunLog):
     parser, _ = _make_scripted_parser(
         run_log,
         OSError("timeout"),
@@ -250,13 +250,17 @@ def test_get_retry_then_success_emits_start_retry_and_ok_events(run_log: RunLog)
     assert [event["event"] for event in events] == [
         "http_get_start",
         "http_get_retry",
+        "http_get_start",
         "http_get_ok",
     ]
     assert events[0]["url"] == "http://example.com/"
+    assert events[0]["attempt"] == 1
     assert events[1]["url"] == "http://example.com/"
     assert events[1]["attempt"] == 1
     assert events[2]["url"] == "http://example.com/"
-    assert events[2]["bytes"] == 2
+    assert events[2]["attempt"] == 2
+    assert events[3]["url"] == "http://example.com/"
+    assert events[3]["bytes"] == 2
 
 
 def test_enrich_get_retries_then_returns_bytes_on_second_attempt(run_log: RunLog):

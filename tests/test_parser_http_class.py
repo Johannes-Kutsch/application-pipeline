@@ -23,6 +23,9 @@ from application_pipeline.parsers.http import (
     USER_AGENT,
     HttpxParserHttpTransport,
     ParserHttp,
+    ScriptedParserHttpRequest,
+    ScriptedParserHttpResponse,
+    ScriptedParserHttpTransport,
     _Throttle,
 )
 
@@ -34,17 +37,40 @@ def run_log(tmp_path: Path) -> RunLog:
     return RunLog(tmp_path)
 
 
+def _make_scripted_parser(
+    run_log: RunLog,
+    *outcomes: bytes | Exception | ScriptedParserHttpResponse,
+    retries: int = 3,
+    timeout: float = HTTP_READ_TIMEOUT,
+    sleep=_NO_SLEEP,
+    throttle: _Throttle | None = None,
+) -> tuple[ParserHttp, ScriptedParserHttpTransport]:
+    transport = ScriptedParserHttpTransport(list(outcomes))
+    parser = ParserHttp(
+        run_log=run_log,
+        retries=retries,
+        timeout=timeout,
+        _transport=transport,
+        _throttle=throttle,
+        _sleep=sleep,
+    )
+    return parser, transport
+
+
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
 
 
 def test_get_returns_bytes_on_success(run_log: RunLog):
-    def http_get(url: str, timeout: float) -> bytes:
-        return b"hello"
-
-    parser = ParserHttp(run_log=run_log, _http_get=http_get, _sleep=_NO_SLEEP)
+    parser, transport = _make_scripted_parser(run_log, b"hello")
     assert parser.get("http://example.com/", error_prefix="test") == b"hello"
+    assert transport.requests == [
+        ScriptedParserHttpRequest(
+            url="http://example.com/",
+            timeout=HTTP_READ_TIMEOUT,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -53,21 +79,15 @@ def test_get_returns_bytes_on_success(run_log: RunLog):
 
 
 def test_get_retries_then_returns_bytes_on_second_attempt(run_log: RunLog):
-    attempt = 0
-
-    def http_get(url: str, timeout: float) -> bytes:
-        nonlocal attempt
-        attempt += 1
-        if attempt == 1:
-            raise OSError("timeout")
-        return b"ok"
-
-    parser = ParserHttp(
-        run_log=run_log, retries=2, _http_get=http_get, _sleep=_NO_SLEEP
+    parser, transport = _make_scripted_parser(
+        run_log,
+        OSError("timeout"),
+        b"ok",
+        retries=2,
     )
     result = parser.get("http://example.com/", error_prefix="test")
     assert result == b"ok"
-    assert attempt == 2
+    assert len(transport.requests) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -76,36 +96,22 @@ def test_get_retries_then_returns_bytes_on_second_attempt(run_log: RunLog):
 
 
 def test_get_raises_parser_error_after_retry_exhaustion(run_log: RunLog):
-    def http_get(url: str, timeout: float) -> bytes:
-        raise OSError("refused")
-
-    parser = ParserHttp(
-        run_log=run_log, retries=2, _http_get=http_get, _sleep=_NO_SLEEP
+    parser, _ = _make_scripted_parser(
+        run_log, OSError("refused"), OSError("refused"), retries=2
     )
     with pytest.raises(ParserError):
         parser.get("http://example.com/", error_prefix="myparser")
 
 
 def test_get_parser_error_message_includes_error_prefix(run_log: RunLog):
-    def http_get(url: str, timeout: float) -> bytes:
-        raise OSError("refused")
-
-    parser = ParserHttp(
-        run_log=run_log, retries=1, _http_get=http_get, _sleep=_NO_SLEEP
-    )
+    parser, _ = _make_scripted_parser(run_log, OSError("refused"), retries=1)
     with pytest.raises(ParserError, match="myprefix"):
         parser.get("http://example.com/", error_prefix="myprefix")
 
 
 def test_get_parser_error_chains_to_underlying_cause(run_log: RunLog):
     cause = OSError("connection refused")
-
-    def http_get(url: str, timeout: float) -> bytes:
-        raise cause
-
-    parser = ParserHttp(
-        run_log=run_log, retries=1, _http_get=http_get, _sleep=_NO_SLEEP
-    )
+    parser, _ = _make_scripted_parser(run_log, cause, retries=1)
     with pytest.raises(ParserError) as exc_info:
         parser.get("http://example.com/", error_prefix="p")
 
@@ -118,11 +124,9 @@ def test_get_parser_error_chains_to_underlying_cause(run_log: RunLog):
 
 
 def test_get_wraps_stub_not_retryable_as_parser_error(run_log: RunLog):
-    def http_get(url: str, timeout: float) -> bytes:
-        raise HttpStubNotRetryableError("not found: http://example.com/")
-
-    parser = ParserHttp(
-        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
+    parser, _ = _make_scripted_parser(
+        run_log,
+        ScriptedParserHttpResponse(status=404),
     )
     with pytest.raises(ParserError, match="myprefix"):
         parser.get("http://example.com/", error_prefix="myprefix")
@@ -130,13 +134,7 @@ def test_get_wraps_stub_not_retryable_as_parser_error(run_log: RunLog):
 
 def test_get_stub_not_retryable_cause_is_original_exception(run_log: RunLog):
     original = HttpStubNotRetryableError("not found: http://example.com/")
-
-    def http_get(url: str, timeout: float) -> bytes:
-        raise original
-
-    parser = ParserHttp(
-        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
-    )
+    parser, _ = _make_scripted_parser(run_log, original)
     with pytest.raises(ParserError) as exc_info:
         parser.get("http://example.com/", error_prefix="p")
 
@@ -150,23 +148,13 @@ def test_get_stub_not_retryable_cause_is_original_exception(run_log: RunLog):
 
 @pytest.mark.parametrize("reason", ["auth:", "upstream:", "unexpected:"])
 def test_get_propagates_parser_fatal_error_unwrapped(run_log: RunLog, reason: str):
-    def http_get(url: str, timeout: float) -> bytes:
-        raise HttpParserFatalError(reason)
-
-    parser = ParserHttp(
-        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
-    )
+    parser, _ = _make_scripted_parser(run_log, HttpParserFatalError(reason))
     with pytest.raises(HttpParserFatalError):
         parser.get("http://example.com/", error_prefix="p")
 
 
 def test_get_parser_fatal_is_not_wrapped_in_parser_error(run_log: RunLog):
-    def http_get(url: str, timeout: float) -> bytes:
-        raise HttpParserFatalError("auth: url status=401")
-
-    parser = ParserHttp(
-        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
-    )
+    parser, _ = _make_scripted_parser(run_log, ScriptedParserHttpResponse(status=401))
     with pytest.raises(Exception) as exc_info:
         parser.get("http://example.com/", error_prefix="p")
     assert not isinstance(exc_info.value, ParserError)
@@ -175,19 +163,12 @@ def test_get_parser_fatal_is_not_wrapped_in_parser_error(run_log: RunLog):
 def test_get_parser_fatal_fires_on_first_attempt_without_further_tries(
     run_log: RunLog,
 ):
-    calls = 0
-
-    def http_get(url: str, timeout: float) -> bytes:
-        nonlocal calls
-        calls += 1
-        raise HttpParserFatalError("auth: url status=401")
-
-    parser = ParserHttp(
-        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
+    parser, transport = _make_scripted_parser(
+        run_log, ScriptedParserHttpResponse(status=401)
     )
     with pytest.raises(HttpParserFatalError):
         parser.get("http://example.com/", error_prefix="p")
-    assert calls == 1
+    assert len(transport.requests) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -198,19 +179,12 @@ def test_get_parser_fatal_fires_on_first_attempt_without_further_tries(
 def test_get_stub_not_retryable_fires_on_first_attempt_without_further_tries(
     run_log: RunLog,
 ):
-    calls = 0
-
-    def http_get(url: str, timeout: float) -> bytes:
-        nonlocal calls
-        calls += 1
-        raise HttpStubNotRetryableError("not found: url")
-
-    parser = ParserHttp(
-        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
+    parser, transport = _make_scripted_parser(
+        run_log, ScriptedParserHttpResponse(status=404)
     )
     with pytest.raises(ParserError):
         parser.get("http://example.com/", error_prefix="p")
-    assert calls == 1
+    assert len(transport.requests) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -220,23 +194,18 @@ def test_get_stub_not_retryable_fires_on_first_attempt_without_further_tries(
 
 @pytest.mark.parametrize("status", [429, 502, 503, 504])
 def test_get_retries_on_retryable_status_codes(run_log: RunLog, status: int):
-    req = httpx.Request("GET", "http://example.com/")
-    resp = httpx.Response(status, request=req)
-    attempt = 0
-
-    def http_get(url: str, timeout: float) -> bytes:
-        nonlocal attempt
-        attempt += 1
-        if attempt < 2:
-            raise httpx.HTTPStatusError(f"{status}", request=req, response=resp)
-        return b"ok"
-
-    parser = ParserHttp(
-        run_log=run_log, retries=3, _http_get=http_get, _sleep=_NO_SLEEP
+    parser, transport = _make_scripted_parser(
+        run_log,
+        httpx.HTTPStatusError(
+            f"{status}",
+            request=httpx.Request("GET", "http://example.com/"),
+            response=httpx.Response(status),
+        ),
+        b"ok",
     )
     result = parser.get("http://example.com/", error_prefix="p")
     assert result == b"ok"
-    assert attempt == 2
+    assert len(transport.requests) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -252,11 +221,11 @@ def test_throttle_pacing_between_consecutive_get_calls(run_log: RunLog):
         interval=0.5, _now=lambda: next(now_calls), _sleep=sleeps.append
     )
 
-    def http_get(url: str, timeout: float) -> bytes:
-        return b"data"
-
-    parser = ParserHttp(
-        run_log=run_log, _http_get=http_get, _throttle=throttle, _sleep=_NO_SLEEP
+    parser, _ = _make_scripted_parser(
+        run_log,
+        b"data",
+        b"data",
+        throttle=throttle,
     )
     parser.get("http://example.com/1", error_prefix="p")
     parser.get("http://example.com/2", error_prefix="p")
@@ -269,14 +238,11 @@ def test_default_throttle_uses_injected_sleep_for_consecutive_mocked_requests(
     run_log: RunLog,
 ):
     sleeps: list[float] = []
-
-    def http_get(url: str, timeout: float) -> bytes:
-        return b"data"
-
-    parser = ParserHttp(
-        run_log=run_log,
-        _http_get=http_get,
-        _sleep=sleeps.append,
+    parser, _ = _make_scripted_parser(
+        run_log,
+        b"data",
+        b"data",
+        sleep=sleeps.append,
     )
 
     parser.get("http://example.com/1", error_prefix="discover")
@@ -297,24 +263,16 @@ def test_throttle_fires_once_per_get_across_multiple_retry_attempts(run_log: Run
     now_values = iter([0.0])
     throttle = _Throttle(interval=0.5, _now=lambda: next(now_values), _sleep=_NO_SLEEP)
 
-    attempt = 0
-
-    def http_get(url: str, timeout: float) -> bytes:
-        nonlocal attempt
-        attempt += 1
-        if attempt < 3:
-            raise OSError("transient")
-        return b"ok"
-
-    parser = ParserHttp(
-        run_log=run_log,
+    parser, transport = _make_scripted_parser(
+        run_log,
+        OSError("transient"),
+        OSError("transient"),
+        b"ok",
         retries=3,
-        _http_get=http_get,
-        _throttle=throttle,
-        _sleep=_NO_SLEEP,
+        throttle=throttle,
     )
     parser.get("http://example.com/", error_prefix="p")
-    assert attempt == 3
+    assert len(transport.requests) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -440,10 +398,7 @@ def test_context_manager_closes_httpx_transport_on_exit(run_log: RunLog):
 
 
 def test_context_manager_returns_self(run_log: RunLog):
-    def http_get(url: str, timeout: float) -> bytes:
-        return b"ok"
-
-    parser = ParserHttp(run_log=run_log, _http_get=http_get)
+    parser, _ = _make_scripted_parser(run_log, b"ok")
     with parser as p:
         assert p is parser
 
@@ -458,11 +413,9 @@ def _read_events(run_log: RunLog, component_id: str) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-@respx.mock
 def test_get_emits_http_get_skipped_event_on_404(run_log: RunLog):
-    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(404))
-
-    with ParserHttp(run_log=run_log) as parser:
+    parser, _ = _make_scripted_parser(run_log, ScriptedParserHttpResponse(status=404))
+    with parser:
         with pytest.raises(ParserError):
             parser.get("http://example.com/job/1", error_prefix="p")
 
@@ -476,11 +429,9 @@ def test_get_emits_http_get_skipped_event_on_404(run_log: RunLog):
     assert skipped[0]["status"] == 404
 
 
-@respx.mock
 def test_get_emits_http_get_fatal_event_on_401(run_log: RunLog):
-    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(401))
-
-    with ParserHttp(run_log=run_log) as parser:
+    parser, _ = _make_scripted_parser(run_log, ScriptedParserHttpResponse(status=401))
+    with parser:
         with pytest.raises(HttpParserFatalError):
             parser.get("http://example.com/job/1", error_prefix="p")
 
@@ -495,29 +446,26 @@ def test_get_emits_http_get_fatal_event_on_401(run_log: RunLog):
 
 
 @pytest.mark.parametrize("status", [400, 422])
-@respx.mock
 def test_get_wraps_400_and_422_as_parser_error(run_log: RunLog, status: int):
-    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(status))
-
-    with ParserHttp(run_log=run_log) as parser:
+    parser, _ = _make_scripted_parser(
+        run_log,
+        ScriptedParserHttpResponse(status=status),
+    )
+    with parser:
         with pytest.raises(ParserError):
             parser.get("http://example.com/job/1", error_prefix="p")
 
 
-@respx.mock
 def test_get_raises_parser_fatal_for_non_retryable_5xx(run_log: RunLog):
-    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(501))
-
-    with ParserHttp(run_log=run_log) as parser:
+    parser, _ = _make_scripted_parser(run_log, ScriptedParserHttpResponse(status=501))
+    with parser:
         with pytest.raises(HttpParserFatalError):
             parser.get("http://example.com/job/1", error_prefix="p")
 
 
-@respx.mock
 def test_get_raises_parser_fatal_for_unknown_status(run_log: RunLog):
-    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(451))
-
-    with ParserHttp(run_log=run_log) as parser:
+    parser, _ = _make_scripted_parser(run_log, ScriptedParserHttpResponse(status=451))
+    with parser:
         with pytest.raises(HttpParserFatalError):
             parser.get("http://example.com/job/1", error_prefix="p")
 
@@ -528,15 +476,15 @@ def test_get_raises_parser_fatal_for_unknown_status(run_log: RunLog):
 
 
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
-@respx.mock
 def test_get_raises_redirect_response_on_3xx(run_log: RunLog, status: int):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(
-            status, headers={"Location": "http://other.example/landing"}
-        )
+    parser, _ = _make_scripted_parser(
+        run_log,
+        ScriptedParserHttpResponse.redirect(
+            status=status,
+            location="http://other.example/landing",
+        ),
     )
-
-    with ParserHttp(run_log=run_log) as parser:
+    with parser:
         with pytest.raises(HttpRedirectResponse) as exc_info:
             parser.get("http://example.com/job/1", error_prefix="p")
 
@@ -544,26 +492,30 @@ def test_get_raises_redirect_response_on_3xx(run_log: RunLog, status: int):
     assert exc_info.value.location == "http://other.example/landing"
 
 
-@respx.mock
 def test_get_redirect_is_not_wrapped_in_parser_error(run_log: RunLog):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(302, headers={"Location": "http://elsewhere/"})
+    parser, _ = _make_scripted_parser(
+        run_log,
+        ScriptedParserHttpResponse.redirect(
+            status=302,
+            location="http://elsewhere/",
+        ),
     )
-
-    with ParserHttp(run_log=run_log) as parser:
+    with parser:
         with pytest.raises(Exception) as exc_info:
             parser.get("http://example.com/job/1", error_prefix="p")
     assert isinstance(exc_info.value, HttpRedirectResponse)
     assert not isinstance(exc_info.value, ParserError)
 
 
-@respx.mock
 def test_get_emits_http_get_redirect_event_on_3xx(run_log: RunLog):
-    respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(302, headers={"Location": "http://elsewhere/x"})
+    parser, _ = _make_scripted_parser(
+        run_log,
+        ScriptedParserHttpResponse.redirect(
+            status=302,
+            location="http://elsewhere/x",
+        ),
     )
-
-    with ParserHttp(run_log=run_log) as parser:
+    with parser:
         with pytest.raises(HttpRedirectResponse):
             parser.get("http://example.com/job/1", error_prefix="p")
 
@@ -576,13 +528,11 @@ def test_get_emits_http_get_redirect_event_on_3xx(run_log: RunLog):
     assert not any(e["event"] == "http_get_fatal" for e in events)
 
 
-@respx.mock
 def test_get_redirect_with_missing_location_header_carries_empty_string(
     run_log: RunLog,
 ):
-    respx.get("http://example.com/job/1").mock(return_value=httpx.Response(302))
-
-    with ParserHttp(run_log=run_log) as parser:
+    parser, _ = _make_scripted_parser(run_log, ScriptedParserHttpResponse(status=302))
+    with parser:
         with pytest.raises(HttpRedirectResponse) as exc_info:
             parser.get("http://example.com/job/1", error_prefix="p")
 
@@ -595,16 +545,19 @@ def test_get_redirect_with_missing_location_header_carries_empty_string(
     assert redirects[0]["location"] == ""
 
 
-@respx.mock
 def test_get_redirect_fires_on_first_attempt_without_retry(run_log: RunLog):
-    route = respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(302, headers={"Location": "http://x/"})
+    parser, transport = _make_scripted_parser(
+        run_log,
+        ScriptedParserHttpResponse.redirect(
+            status=302,
+            location="http://x/",
+        ),
+        retries=3,
     )
-
-    with ParserHttp(run_log=run_log, retries=3, _sleep=_NO_SLEEP) as parser:
+    with parser:
         with pytest.raises(HttpRedirectResponse):
             parser.get("http://example.com/job/1", error_prefix="p")
-    assert route.call_count == 1
+    assert len(transport.requests) == 1
 
 
 @respx.mock

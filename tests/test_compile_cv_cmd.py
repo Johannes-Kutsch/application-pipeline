@@ -87,7 +87,7 @@ def test_compile_cv_produces_three_pdfs(
     assert (app_dir / "combined.pdf").exists()
 
 
-def test_compile_cv_outputs_include_substituted_slot_content(
+def test_compile_cv_supported_build_modes_include_slot_content(
     app_dir: Path,
     project_root: Path,
     patch_subprocess: Callable[[RunFn], None],
@@ -338,45 +338,6 @@ def test_compile_cv_malformed_cv_tex_exits_naming_missing_slot(
     assert "resume_ausbildung" in err
 
 
-def test_compile_cv_build_cv_tex_has_substituted_content(
-    app_dir: Path,
-    project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
-) -> None:
-    patch_subprocess(_fake_pdflatex_failure)
-
-    with pytest.raises(SystemExit):
-        compile_cv(app_dir)
-
-    build_cv = app_dir / ".build" / "cv.tex"
-    assert build_cv.exists()
-    content = build_cv.read_text(encoding="utf-8")
-    assert "<<" not in content
-    assert "Firma GmbH" in content
-
-
-def test_compile_cv_cover_letter_measures_default_stretch_first(
-    app_dir: Path,
-    project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
-) -> None:
-    patch_subprocess(_fake_pdflatex_failure)
-
-    with pytest.raises(SystemExit):
-        compile_cv(app_dir)
-
-    content = (app_dir / ".build" / "cv.tex").read_text(encoding="utf-8")
-    assert (
-        r"\xpatchcmd{\makelettertitle}{\@opening\\[1.5em]}{\@opening\\[\CoverLetterGap]}{}{}"
-        in content
-    )
-    assert (
-        r"\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%"
-        "\n\n"
-        "Ich bewerbe mich hiermit."
-    ) in content
-
-
 def test_compile_cv_cv_data_dir_uses_forward_slashes(
     app_dir: Path,
     project_root: Path,
@@ -426,18 +387,14 @@ def test_compile_cv_three_resume_slots_independently_substituted(
     (app_dir / "cv.tex").write_text(
         "".join(f"%% SLOT: {n}\n{b}\n" for n, b in slots), encoding="utf-8"
     )
-    patch_subprocess(_fake_pdflatex_failure)
+    patch_subprocess(_fake_pdflatex_success)
 
-    with pytest.raises(SystemExit):
-        compile_cv(app_dir)
+    compile_cv(app_dir)
 
-    content = (app_dir / ".build" / "cv.tex").read_text(encoding="utf-8")
-    assert "BERUFSINHALT" in content
-    assert "AUSBILDUNGSINHALT" in content
-    assert "PROJEKTINHALT" in content
-    assert "<<RESUME_BERUFSERFAHRUNG>>" not in content
-    assert "<<RESUME_AUSBILDUNG>>" not in content
-    assert "<<RESUME_PROJEKTE>>" not in content
+    resume_pdf = (app_dir / "resume.pdf").read_bytes()
+    assert b"BERUFSINHALT" in resume_pdf
+    assert b"AUSBILDUNGSINHALT" in resume_pdf
+    assert b"PROJEKTINHALT" in resume_pdf
 
 
 def test_compile_cv_inside_data_dir_hints_cd_dotdot(

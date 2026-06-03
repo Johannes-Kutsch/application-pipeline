@@ -311,10 +311,11 @@ def test_compile_cv_wires_slot_map_content_into_structural_surfaces(
         ) -> _PdflatexRunResult:
             return _PdflatexRunResult(returncode=1)
 
-    monkeypatch.setattr(_CompileCvWorkflow, "pdflatex", _FailingPdflatexAdapter())
-
     with pytest.raises(SystemExit):
-        compile_cv(app_dir)
+        _CompileCvWorkflow(
+            app_dir=app_dir,
+            pdflatex=_FailingPdflatexAdapter(),
+        ).run()
 
     build_cv = (app_dir / ".build" / "cv.tex").read_text(encoding="utf-8")
     assert_compiled_template_contract(build_cv, slot_bodies)

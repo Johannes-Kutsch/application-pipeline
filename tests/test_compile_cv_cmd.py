@@ -76,6 +76,13 @@ def _build_pdflatex_cmd(build_name: str, cv_data_dir: Path) -> list[str]:
     ]
 
 
+def _run_compile_workflow(app_dir: Path, run_fn: RunFn) -> None:
+    _CompileCvWorkflow(
+        app_dir=app_dir,
+        pdflatex=_FakePdflatexAdapter(run_fn=run_fn),
+    ).run()
+
+
 @pytest.fixture()
 def app_dir(tmp_path: Path) -> Path:
     d = tmp_path / "application"
@@ -93,26 +100,11 @@ def project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-@pytest.fixture()
-def patch_pdflatex(
-    monkeypatch: pytest.MonkeyPatch,
-) -> Callable[[RunFn], None]:
-    def patch(fn: RunFn) -> None:
-        monkeypatch.setattr(
-            _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=fn)
-        )
-
-    return patch
-
-
 def test_compile_cv_produces_three_pdfs(
     app_dir: Path,
     project_root: Path,
-    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_pdflatex(_fake_pdflatex_success)
-
-    compile_cv(app_dir)
+    _run_compile_workflow(app_dir, _fake_pdflatex_success)
 
     assert (app_dir / "cover.pdf").exists()
     assert (app_dir / "resume.pdf").exists()
@@ -122,11 +114,8 @@ def test_compile_cv_produces_three_pdfs(
 def test_compile_cv_supported_build_modes_include_slot_content(
     app_dir: Path,
     project_root: Path,
-    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_pdflatex(_fake_pdflatex_success)
-
-    compile_cv(app_dir)
+    _run_compile_workflow(app_dir, _fake_pdflatex_success)
 
     assert b"Ich bewerbe mich hiermit." in (app_dir / "cover.pdf").read_bytes()
     assert b"Developer" in (app_dir / "resume.pdf").read_bytes()
@@ -136,11 +125,8 @@ def test_compile_cv_supported_build_modes_include_slot_content(
 def test_compile_cv_removes_build_dir_on_success(
     app_dir: Path,
     project_root: Path,
-    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_pdflatex(_fake_pdflatex_success)
-
-    compile_cv(app_dir)
+    _run_compile_workflow(app_dir, _fake_pdflatex_success)
 
     assert not (app_dir / ".build").exists()
 
@@ -148,13 +134,10 @@ def test_compile_cv_removes_build_dir_on_success(
 def test_compile_cv_overwrites_existing_pdfs(
     app_dir: Path,
     project_root: Path,
-    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
     for name in ("cover", "resume", "combined"):
         (app_dir / f"{name}.pdf").write_bytes(b"stale")
-    patch_pdflatex(_fake_pdflatex_success)
-
-    compile_cv(app_dir)
+    _run_compile_workflow(app_dir, _fake_pdflatex_success)
 
     for name in ("cover", "resume", "combined"):
         pdf_bytes = (app_dir / f"{name}.pdf").read_bytes()
@@ -180,11 +163,7 @@ def test_compile_cv_ignores_application_pipeline_home(
         captured_cmds.append(cmd)
         return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
 
-    monkeypatch.setattr(
-        _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=capturing_run)
-    )
-
-    compile_cv(app_dir)
+    _run_compile_workflow(app_dir, capturing_run)
 
     expected_user_info = (
         (project_root / "application-pipeline" / "user-info").resolve().as_posix()
@@ -198,7 +177,6 @@ def test_compile_cv_ignores_application_pipeline_home(
 def test_compile_cv_exits_nonzero_on_first_failure(
     app_dir: Path,
     project_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     call_count = 0
 
@@ -209,12 +187,8 @@ def test_compile_cv_exits_nonzero_on_first_failure(
         call_count += 1
         return _fake_pdflatex_failure(build_dir, build_name, cv_data_dir)
 
-    monkeypatch.setattr(
-        _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=failing_run)
-    )
-
     with pytest.raises(SystemExit) as exc_info:
-        compile_cv(app_dir)
+        _run_compile_workflow(app_dir, failing_run)
 
     assert exc_info.value.code != 0
     assert call_count == 1, "should stop after first failure"
@@ -223,12 +197,9 @@ def test_compile_cv_exits_nonzero_on_first_failure(
 def test_compile_cv_leaves_build_dir_on_failure(
     app_dir: Path,
     project_root: Path,
-    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_pdflatex(_fake_pdflatex_failure)
-
     with pytest.raises(SystemExit):
-        compile_cv(app_dir)
+        _run_compile_workflow(app_dir, _fake_pdflatex_failure)
 
     assert (app_dir / ".build").exists()
 
@@ -236,12 +207,9 @@ def test_compile_cv_leaves_build_dir_on_failure(
 def test_compile_cv_does_not_write_pdfs_to_dir_on_failure(
     app_dir: Path,
     project_root: Path,
-    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_pdflatex(_fake_pdflatex_failure)
-
     with pytest.raises(SystemExit):
-        compile_cv(app_dir)
+        _run_compile_workflow(app_dir, _fake_pdflatex_failure)
 
     for name in ("cover", "resume", "combined"):
         assert not (app_dir / f"{name}.pdf").exists()
@@ -250,7 +218,6 @@ def test_compile_cv_does_not_write_pdfs_to_dir_on_failure(
 def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     app_dir: Path,
     project_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     def failing_run_with_log(
@@ -266,14 +233,8 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
         )
         return _PdflatexRunResult(returncode=1)
 
-    monkeypatch.setattr(
-        _CompileCvWorkflow,
-        "pdflatex",
-        _FakePdflatexAdapter(run_fn=failing_run_with_log),
-    )
-
     with pytest.raises(SystemExit):
-        compile_cv(app_dir)
+        _run_compile_workflow(app_dir, failing_run_with_log)
 
     err = capsys.readouterr().err
     assert "! Undefined control sequence." in err
@@ -283,25 +244,26 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
 def test_compile_cv_via_cli_dispatch(
     app_dir: Path,
     project_root: Path,
-    patch_pdflatex: Callable[[RunFn], None],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    patch_pdflatex(_fake_pdflatex_success)
+    captured_app_dirs: list[Path] = []
+
+    def fake_run(self: _CompileCvWorkflow) -> None:
+        captured_app_dirs.append(self.app_dir)
+
+    monkeypatch.setattr(_CompileCvWorkflow, "run", fake_run)
     monkeypatch.setattr(
         sys, "argv", ["application-pipeline", "compile-cv", str(app_dir)]
     )
 
     main()
 
-    assert (app_dir / "cover.pdf").exists()
-    assert (app_dir / "resume.pdf").exists()
-    assert (app_dir / "combined.pdf").exists()
+    assert captured_app_dirs == [app_dir]
 
 
 def test_compile_cv_uses_cwd_relative_user_info(
     app_dir: Path,
     project_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_cmds: list[list[str]] = []
 
@@ -312,11 +274,7 @@ def test_compile_cv_uses_cwd_relative_user_info(
         captured_cmds.append(cmd)
         return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
 
-    monkeypatch.setattr(
-        _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=capturing_run)
-    )
-
-    compile_cv(app_dir)
+    _run_compile_workflow(app_dir, capturing_run)
 
     expected_user_info = (
         (project_root / "application-pipeline" / "user-info").resolve().as_posix()
@@ -382,7 +340,6 @@ def test_compile_cv_malformed_cv_tex_exits_naming_missing_slot(
 def test_compile_cv_cv_data_dir_uses_forward_slashes(
     app_dir: Path,
     project_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_cmds: list[list[str]] = []
 
@@ -393,10 +350,7 @@ def test_compile_cv_cv_data_dir_uses_forward_slashes(
         captured_cmds.append(cmd)
         return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
 
-    monkeypatch.setattr(
-        _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=capturing_run)
-    )
-    compile_cv(app_dir)
+    _run_compile_workflow(app_dir, capturing_run)
 
     cv_data_args = [arg for cmd in captured_cmds for arg in cmd if "CvDataDir" in arg]
     assert cv_data_args, "no CvDataDir arg found in pdflatex commands"
@@ -409,7 +363,6 @@ def test_compile_cv_cv_data_dir_uses_forward_slashes(
 def test_compile_cv_three_resume_slots_independently_substituted(
     project_root: Path,
     tmp_path: Path,
-    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
     app_dir = tmp_path / "app_resume"
     app_dir.mkdir()
@@ -431,9 +384,7 @@ def test_compile_cv_three_resume_slots_independently_substituted(
     (app_dir / "cv.tex").write_text(
         "".join(f"%% SLOT: {n}\n{b}\n" for n, b in slots), encoding="utf-8"
     )
-    patch_pdflatex(_fake_pdflatex_success)
-
-    compile_cv(app_dir)
+    _run_compile_workflow(app_dir, _fake_pdflatex_success)
 
     resume_pdf = (app_dir / "resume.pdf").read_bytes()
     assert b"BERUFSINHALT" in resume_pdf

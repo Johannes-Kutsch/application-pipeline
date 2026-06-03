@@ -3,9 +3,8 @@ from __future__ import annotations
 import importlib.resources
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
 
 from application_pipeline.compile_cv_local import (
     _CompileCvLocalProductionAdapter,
@@ -26,7 +25,7 @@ def compile_cv(app_dir: Path) -> None:
 @dataclass(slots=True)
 class _CompileCvWorkflow:
     app_dir: Path
-    pdflatex: ClassVar[_PdflatexAdapter] = _CompileCvLocalProductionAdapter()
+    pdflatex: _PdflatexAdapter = field(default_factory=_CompileCvLocalProductionAdapter)
 
     def run(self) -> None:
         self._require_config()

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import inspect
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any, Callable, cast
 
 import httpx
 import pytest
@@ -18,6 +20,8 @@ from application_pipeline.http import (
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.http import (
+    HTTP_CONNECT_TIMEOUT,
+    USER_AGENT,
     HTTP_READ_TIMEOUT,
     REQUEST_PACING,
     ParserHttp,
@@ -82,6 +86,53 @@ class _StatusErrorTransport:
 
     def close(self) -> None:
         return None
+
+
+@dataclass(frozen=True)
+class _ProductionAdapterRequest:
+    request: httpx.Request
+    timeout: httpx.Timeout
+
+
+def _install_recording_httpx_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    response_factory: Callable[[httpx.Request, httpx.Timeout, bool], httpx.Response],
+) -> list[Any]:
+    clients: list[Any] = []
+
+    class _RecordingClient:
+        def __init__(self, **kwargs: object) -> None:
+            self.follow_redirects = cast(bool, kwargs["follow_redirects"])
+            self.client_timeout = cast(httpx.Timeout, kwargs["timeout"])
+            self.client_headers = httpx.Headers(
+                cast(Mapping[str, str], kwargs["headers"])
+            )
+            self.requests: list[_ProductionAdapterRequest] = []
+            self.closed = False
+            self.close_calls = 0
+            clients.append(self)
+
+        def get(self, url: str, *, timeout: httpx.Timeout) -> httpx.Response:
+            if self.closed:
+                raise RuntimeError(
+                    "Cannot send a request, as the client has been closed."
+                )
+            request = httpx.Request("GET", url, headers=self.client_headers)
+            self.requests.append(
+                _ProductionAdapterRequest(request=request, timeout=timeout)
+            )
+            return response_factory(request, timeout, self.follow_redirects)
+
+        def close(self) -> None:
+            self.close_calls += 1
+            self.closed = True
+
+    monkeypatch.setattr(
+        "application_pipeline.parsers.http.httpx.Client",
+        _RecordingClient,
+    )
+    return clients
 
 
 def _make_status_error_parser(
@@ -247,6 +298,104 @@ def test_parser_http_constructor_rejects_retired_underscore_controls(run_log: Ru
             run_log=run_log,
             _sleep=_NO_SLEEP,
         )
+
+
+def test_default_parser_http_production_adapter_sends_user_agent_and_caller_headers(
+    monkeypatch: pytest.MonkeyPatch,
+    run_log: RunLog,
+) -> None:
+    clients = _install_recording_httpx_client(
+        monkeypatch,
+        response_factory=lambda request, _timeout, _follow_redirects: httpx.Response(
+            200, content=b"ok", request=request
+        ),
+    )
+
+    parser = ParserHttp(
+        run_log=run_log,
+        headers={
+            "X-API-Key": "bund-key",
+            "X-Caller": "caller-header",
+        },
+    )
+
+    assert parser.get("http://example.com/jobs", error_prefix="p") == b"ok"
+    request = clients[0].requests[0].request
+    assert request.headers["user-agent"] == USER_AGENT
+    assert request.headers["x-api-key"] == "bund-key"
+    assert request.headers["x-caller"] == "caller-header"
+
+
+def test_default_parser_http_production_adapter_passes_read_and_connect_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+    run_log: RunLog,
+) -> None:
+    clients = _install_recording_httpx_client(
+        monkeypatch,
+        response_factory=lambda request, _timeout, _follow_redirects: httpx.Response(
+            200, content=b"ok", request=request
+        ),
+    )
+    parser = ParserHttp(run_log=run_log, timeout=7.5)
+
+    assert parser.get("http://example.com/jobs", error_prefix="p") == b"ok"
+
+    timeout = clients[0].requests[0].timeout
+    assert timeout.read == 7.5
+    assert timeout.connect == HTTP_CONNECT_TIMEOUT
+
+
+def test_default_parser_http_context_closes_real_client_lifetime(
+    monkeypatch: pytest.MonkeyPatch,
+    run_log: RunLog,
+) -> None:
+    clients = _install_recording_httpx_client(
+        monkeypatch,
+        response_factory=lambda request, _timeout, _follow_redirects: httpx.Response(
+            200, content=b"ok", request=request
+        ),
+    )
+    parser = ParserHttp(run_log=run_log)
+
+    with parser:
+        assert parser.get("http://example.com/jobs", error_prefix="p") == b"ok"
+
+    client = clients[0]
+    with pytest.raises(ParserError, match="p") as exc_info:
+        parser.get("http://example.com/jobs", error_prefix="p")
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert client.closed is True
+    assert client.close_calls == 1
+
+
+def test_default_parser_http_production_adapter_does_not_follow_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+    run_log: RunLog,
+) -> None:
+    clients = _install_recording_httpx_client(
+        monkeypatch,
+        response_factory=lambda request, _timeout, follow_redirects: (
+            httpx.Response(200, content=b"followed", request=request)
+            if follow_redirects
+            else httpx.Response(
+                302,
+                headers={"location": "http://redirect.example/jobs/1"},
+                request=request,
+            )
+        ),
+    )
+    parser = ParserHttp(run_log=run_log)
+
+    with pytest.raises(HttpRedirectResponse) as exc_info:
+        parser.get("http://example.com/jobs", error_prefix="p")
+
+    assert exc_info.value.status == 302
+    assert exc_info.value.location == "http://redirect.example/jobs/1"
+    assert clients[0].follow_redirects is False
+    assert [record.request.url for record in clients[0].requests] == [
+        httpx.URL("http://example.com/jobs")
+    ]
 
 
 def test_enrich_get_returns_bytes_on_success(run_log: RunLog):

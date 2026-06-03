@@ -84,6 +84,23 @@ class _StatusErrorTransport:
         return None
 
 
+def _make_status_error_parser(
+    run_log: RunLog,
+    *,
+    url: str,
+    status: int,
+    location: str | None = None,
+    retries: int = 3,
+) -> tuple[ParserHttp, _StatusErrorTransport]:
+    transport = _StatusErrorTransport(url=url, status=status, location=location)
+    parser = ParserHttp.for_test(
+        run_log=run_log,
+        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+        retries=retries,
+    )
+    return parser, transport
+
+
 def _make_scripted_parser(
     run_log: RunLog,
     *outcomes: bytes | Exception | ScriptedParserHttpResponse,
@@ -375,14 +392,64 @@ def test_enrich_get_wraps_stub_not_retryable_as_enrich_failed_error(run_log: Run
         parser.enrich_get("http://example.com/", error_prefix="myprefix")
 
 
-def test_enrich_get_preserves_stub_status_from_transport_http_status_error(
-    run_log: RunLog,
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        (404, "not found: http://example.com/job/1"),
+        (400, "malformed: http://example.com/job/1 status=400"),
+        (422, "malformed: http://example.com/job/1 status=422"),
+    ],
+)
+def test_get_preserves_stub_status_from_transport_http_status_error(
+    run_log: RunLog, status: int, reason: str
 ):
-    transport = _StatusErrorTransport(url="http://example.com/job/1", status=422)
-    parser = ParserHttp.for_test(
-        run_log=run_log,
-        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
-        retries=3,
+    parser, transport = _make_status_error_parser(
+        run_log,
+        url="http://example.com/job/1",
+        status=status,
+    )
+
+    with parser:
+        with pytest.raises(ParserError, match="myprefix"):
+            parser.get("http://example.com/job/1", error_prefix="myprefix")
+
+    skipped = [
+        e
+        for e in _read_events(run_log, "parser_http")
+        if e["event"] == "http_get_skipped"
+    ]
+    assert skipped == [
+        {
+            "ts": skipped[0]["ts"],
+            "event": "http_get_skipped",
+            "url": "http://example.com/job/1",
+            "status": status,
+            "reason": reason,
+        }
+    ]
+    assert transport.requests == [
+        ScriptedParserHttpRequest(
+            url="http://example.com/job/1",
+            timeout=HTTP_READ_TIMEOUT,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        (404, "not found: http://example.com/job/1"),
+        (400, "malformed: http://example.com/job/1 status=400"),
+        (422, "malformed: http://example.com/job/1 status=422"),
+    ],
+)
+def test_enrich_get_preserves_stub_status_from_transport_http_status_error(
+    run_log: RunLog, status: int, reason: str
+):
+    parser, transport = _make_status_error_parser(
+        run_log,
+        url="http://example.com/job/1",
+        status=status,
     )
 
     with parser:
@@ -399,8 +466,8 @@ def test_enrich_get_preserves_stub_status_from_transport_http_status_error(
             "ts": skipped[0]["ts"],
             "event": "http_get_skipped",
             "url": "http://example.com/job/1",
-            "status": 422,
-            "reason": "malformed: http://example.com/job/1 status=422",
+            "status": status,
+            "reason": reason,
         }
     ]
     assert transport.requests == [
@@ -451,18 +518,26 @@ def test_get_parser_fatal_fires_on_first_attempt_without_further_tries(
     assert len(transport.requests) == 1
 
 
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        (401, "auth: http://example.com/job/1 status=401"),
+        (403, "auth: http://example.com/job/1 status=403"),
+        (501, "upstream: http://example.com/job/1 status=501"),
+        (451, "unexpected: http://example.com/job/1 status=451"),
+    ],
+)
 def test_get_preserves_parser_fatal_status_from_transport_http_status_error(
-    run_log: RunLog,
+    run_log: RunLog, status: int, reason: str
 ):
-    transport = _StatusErrorTransport(url="http://example.com/job/1", status=403)
-    parser = ParserHttp.for_test(
-        run_log=run_log,
-        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
-        retries=3,
+    parser, transport = _make_status_error_parser(
+        run_log,
+        url="http://example.com/job/1",
+        status=status,
     )
 
     with parser:
-        with pytest.raises(HttpParserFatalError, match="auth:"):
+        with pytest.raises(HttpParserFatalError, match=reason):
             parser.get("http://example.com/job/1", error_prefix="myprefix")
 
     fatal = [
@@ -475,8 +550,8 @@ def test_get_preserves_parser_fatal_status_from_transport_http_status_error(
             "ts": fatal[0]["ts"],
             "event": "http_get_fatal",
             "url": "http://example.com/job/1",
-            "status": 403,
-            "reason": "auth: http://example.com/job/1 status=403",
+            "status": status,
+            "reason": reason,
         }
     ]
     assert transport.requests == [
@@ -873,15 +948,11 @@ def test_get_redirect_fires_on_first_attempt_without_retry(run_log: RunLog):
 
 
 def test_get_preserves_redirect_from_transport_http_status_error(run_log: RunLog):
-    transport = _StatusErrorTransport(
+    parser, transport = _make_status_error_parser(
+        run_log,
         url="http://example.com/job/1",
         status=302,
         location="http://elsewhere/x",
-    )
-    parser = ParserHttp.for_test(
-        run_log=run_log,
-        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
-        retries=3,
     )
 
     with parser:

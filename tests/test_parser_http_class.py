@@ -58,6 +58,32 @@ class _CloseTrackingTransport:
         self._transport.close()
 
 
+class _StatusErrorTransport:
+    def __init__(self, *, url: str, status: int, location: str | None = None) -> None:
+        self._url = url
+        self._status = status
+        self._location = location
+        self.requests: list[ScriptedParserHttpRequest] = []
+
+    def get(self, url: str, *, timeout: float) -> httpx.Response:
+        self.requests.append(ScriptedParserHttpRequest(url=url, timeout=timeout))
+        response = httpx.Response(
+            self._status,
+            headers={"location": self._location}
+            if self._location is not None
+            else None,
+            request=httpx.Request("GET", self._url),
+        )
+        raise httpx.HTTPStatusError(
+            f"{self._status}",
+            request=response.request,
+            response=response,
+        )
+
+    def close(self) -> None:
+        return None
+
+
 def _make_scripted_parser(
     run_log: RunLog,
     *outcomes: bytes | Exception | ScriptedParserHttpResponse,
@@ -349,6 +375,42 @@ def test_enrich_get_wraps_stub_not_retryable_as_enrich_failed_error(run_log: Run
         parser.enrich_get("http://example.com/", error_prefix="myprefix")
 
 
+def test_enrich_get_preserves_stub_status_from_transport_http_status_error(
+    run_log: RunLog,
+):
+    transport = _StatusErrorTransport(url="http://example.com/job/1", status=422)
+    parser = ParserHttp.for_test(
+        run_log=run_log,
+        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+        retries=3,
+    )
+
+    with parser:
+        with pytest.raises(EnrichFailedError, match="myprefix"):
+            parser.enrich_get("http://example.com/job/1", error_prefix="myprefix")
+
+    skipped = [
+        e
+        for e in _read_events(run_log, "parser_http")
+        if e["event"] == "http_get_skipped"
+    ]
+    assert skipped == [
+        {
+            "ts": skipped[0]["ts"],
+            "event": "http_get_skipped",
+            "url": "http://example.com/job/1",
+            "status": 422,
+            "reason": "malformed: http://example.com/job/1 status=422",
+        }
+    ]
+    assert transport.requests == [
+        ScriptedParserHttpRequest(
+            url="http://example.com/job/1",
+            timeout=HTTP_READ_TIMEOUT,
+        )
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Parser-fatal HTTP errors (401/403/5xx/unknown) → HttpParserFatalError propagates
 # ---------------------------------------------------------------------------
@@ -387,6 +449,42 @@ def test_get_parser_fatal_fires_on_first_attempt_without_further_tries(
     with pytest.raises(HttpParserFatalError):
         parser.get("http://example.com/", error_prefix="p")
     assert len(transport.requests) == 1
+
+
+def test_get_preserves_parser_fatal_status_from_transport_http_status_error(
+    run_log: RunLog,
+):
+    transport = _StatusErrorTransport(url="http://example.com/job/1", status=403)
+    parser = ParserHttp.for_test(
+        run_log=run_log,
+        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+        retries=3,
+    )
+
+    with parser:
+        with pytest.raises(HttpParserFatalError, match="auth:"):
+            parser.get("http://example.com/job/1", error_prefix="myprefix")
+
+    fatal = [
+        e
+        for e in _read_events(run_log, "parser_http")
+        if e["event"] == "http_get_fatal"
+    ]
+    assert fatal == [
+        {
+            "ts": fatal[0]["ts"],
+            "event": "http_get_fatal",
+            "url": "http://example.com/job/1",
+            "status": 403,
+            "reason": "auth: http://example.com/job/1 status=403",
+        }
+    ]
+    assert transport.requests == [
+        ScriptedParserHttpRequest(
+            url="http://example.com/job/1",
+            timeout=HTTP_READ_TIMEOUT,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -772,6 +870,44 @@ def test_get_redirect_fires_on_first_attempt_without_retry(run_log: RunLog):
         with pytest.raises(HttpRedirectResponse):
             parser.get("http://example.com/job/1", error_prefix="p")
     assert len(transport.requests) == 1
+
+
+def test_get_preserves_redirect_from_transport_http_status_error(run_log: RunLog):
+    transport = _StatusErrorTransport(
+        url="http://example.com/job/1",
+        status=302,
+        location="http://elsewhere/x",
+    )
+    parser = ParserHttp.for_test(
+        run_log=run_log,
+        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+        retries=3,
+    )
+
+    with parser:
+        with pytest.raises(HttpRedirectResponse) as exc_info:
+            parser.get("http://example.com/job/1", error_prefix="myprefix")
+
+    assert exc_info.value.status == 302
+    assert exc_info.value.location == "http://elsewhere/x"
+    events = _read_events(run_log, "parser_http")
+    redirects = [e for e in events if e["event"] == "http_get_redirect"]
+    assert redirects == [
+        {
+            "ts": redirects[0]["ts"],
+            "event": "http_get_redirect",
+            "url": "http://example.com/job/1",
+            "status": 302,
+            "location": "http://elsewhere/x",
+        }
+    ]
+    assert not any(e["event"] == "http_get_fatal" for e in events)
+    assert transport.requests == [
+        ScriptedParserHttpRequest(
+            url="http://example.com/job/1",
+            timeout=HTTP_READ_TIMEOUT,
+        )
+    ]
 
 
 def test_enrich_get_raises_redirect_response_on_3xx(run_log: RunLog):

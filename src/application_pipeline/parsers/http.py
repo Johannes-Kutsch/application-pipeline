@@ -196,7 +196,16 @@ class ParserHttp:
         return parser
 
     def _real_http_get(self, url: str, timeout: float) -> bytes:
-        resp = self._transport.get(url, timeout=timeout)
+        try:
+            resp = self._transport.get(url, timeout=timeout)
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            if response is None:
+                raise
+            return self._handle_response(response, url=url)
+        return self._handle_response(resp, url=url)
+
+    def _handle_response(self, resp: httpx.Response, *, url: str) -> bytes:
         if resp.is_success:
             return resp.content
         status = resp.status_code

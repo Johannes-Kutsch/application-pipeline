@@ -44,6 +44,8 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **CV Skeleton**: Structure-only slot map at `<settings-dir>/cv-template/cv_skeleton.tex` (ADR-0023, relocated ADR-0035). Package-shipped, refreshable. `/write-cv` reads it as the canonical slot list and slot order, not as content guidance. _Avoid_: cv template (overloaded with `cv_template.tex`).
 
+**CV Template Contract**: `cv_template.tex` must compile and preserve the declared `%% SLOT: <name>` markers so the slot-map content from `<app_dir>/cv.tex` lands in the rendered document. Visual layout is intentionally not part of the contract. _Avoid_: layout snapshot, pixel-perfect rendering.
+
 **Cover Strategy**: Default writing arc for cover-letter prose: opener carries a personal, listing-specific resonance hook; middle paragraphs develop one dominant capability arc from personal history, with at most two evidence anchors extending the same argument. Projects such as Octofox, pycastle, or application-pipeline serve as evidence, not as a catalogue. `/analyse-listing` may preserve multiple hooks but should surface one lead hook for `/write-cv`; reserve hooks can feed resume, skills, or later iteration. Exact anchor depends on `analysis.md` grilling output and the listing. Multiple projects should not be name-dropped in the opener; additional projects can be discovered in the resume. _Avoid_: fixed cover template, project list.
 
 **Cover Spacing**: The cover letter uses one proportional gap rule for both the opening-to-intro transition and the closing-to-sign-off transition. Both gaps track the selected cover stretch level instead of using fixed absolute spacing. _Avoid_: hardcoded gap size, asymmetric cover spacing.

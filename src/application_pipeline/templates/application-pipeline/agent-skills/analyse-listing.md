@@ -59,13 +59,12 @@ Pro Turn in der Grilling-Schleife, in dieser Reihenfolge. Grille unermüdlich so
 <analysis-template>
 # Job-Listing
 
-### Triage Routing
-
-[_shared/TRIAGE_ROUTING.md](application-pipeline/agent-skills/_shared/TRIAGE-ROUTING.md)
-
 ## {Company} - {Title}
 
 {neutrale Zusammenfassung relevanter Listing-Punkte - knapp, nicht wertend}
+
+## Link
+{URL zum Listing}
 
 ---
 

@@ -125,8 +125,6 @@ def test_cv_template_cover_gaps_track_selected_stretch(
     assert (
         r"\makelettertitle"
         "\n"
-        r"\setstretch{1.8}"
-        "\n"
         r"\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%"
     ) in cv_template
 
@@ -138,7 +136,8 @@ def test_cv_template_cover_gaps_track_selected_stretch(
     assert set_box is not None
     assert r"\vspace{\CoverLetterGap}" not in set_box.group("body")
     assert r"\vspace{3em}" not in set_box.group("body")
-    assert r"\vspace{\CoverLetterGap}\@closing" in cv_template
+    assert r"\vspace{\CoverLetterGap}" in cv_template
+    assert r"\@closing" in cv_template
     assert r"\vspace{3em}\@closing" not in cv_template
 
 

@@ -17,8 +17,11 @@ from application_pipeline.http import (
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.http import (
+    HTTP_CONNECT_TIMEOUT,
+    HTTP_READ_TIMEOUT,
     REQUEST_PACING,
     USER_AGENT,
+    HttpxParserHttpTransport,
     ParserHttp,
     _Throttle,
 )
@@ -315,7 +318,7 @@ def test_throttle_fires_once_per_get_across_multiple_retry_attempts(run_log: Run
 
 
 # ---------------------------------------------------------------------------
-# Real httpx User-Agent + per-instance header propagation (via respx)
+# Real httpx adapter header + timeout behavior (via respx)
 # ---------------------------------------------------------------------------
 
 
@@ -333,12 +336,13 @@ def test_real_httpx_sends_default_user_agent_header(run_log: RunLog):
 
 
 @respx.mock
-def test_real_httpx_sends_per_instance_custom_header(run_log: RunLog):
+def test_real_httpx_transport_sends_per_instance_custom_header(run_log: RunLog):
     route = respx.get("http://example.com/jobs").mock(
         return_value=httpx.Response(200, content=b"ok")
     )
 
-    with ParserHttp(run_log=run_log, headers={"X-Custom": "value"}) as parser:
+    with HttpxParserHttpTransport(headers={"X-Custom": "value"}) as transport:
+        parser = ParserHttp(run_log=run_log, _transport=transport, _sleep=_NO_SLEEP)
         parser.get("http://example.com/jobs", error_prefix="p")
 
     request = route.calls.last.request
@@ -347,12 +351,15 @@ def test_real_httpx_sends_per_instance_custom_header(run_log: RunLog):
 
 
 @respx.mock
-def test_real_httpx_custom_header_does_not_override_user_agent(run_log: RunLog):
+def test_real_httpx_transport_custom_header_does_not_override_user_agent(
+    run_log: RunLog,
+):
     route = respx.get("http://example.com/jobs").mock(
         return_value=httpx.Response(200, content=b"ok")
     )
 
-    with ParserHttp(run_log=run_log, headers={"X-Other": "x"}) as parser:
+    with HttpxParserHttpTransport(headers={"X-Other": "x"}) as transport:
+        parser = ParserHttp(run_log=run_log, _transport=transport, _sleep=_NO_SLEEP)
         parser.get("http://example.com/jobs", error_prefix="p")
 
     request = route.calls.last.request
@@ -360,18 +367,76 @@ def test_real_httpx_custom_header_does_not_override_user_agent(run_log: RunLog):
 
 
 # ---------------------------------------------------------------------------
-# Context manager closes the httpx.Client on __exit__
+# Real httpx adapter preserves configured timeout behavior
 # ---------------------------------------------------------------------------
 
 
-def test_context_manager_closes_client_on_exit(run_log: RunLog):
-    def http_get(url: str, timeout: float) -> bytes:
-        return b"ok"
+@respx.mock
+def test_real_httpx_transport_uses_call_timeout_with_fixed_connect_timeout(
+    run_log: RunLog,
+):
+    captured: dict[str, object] = {}
 
-    parser = ParserHttp(run_log=run_log, _http_get=http_get)
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(request.extensions["timeout"])
+        return httpx.Response(200, content=b"ok")
+
+    respx.get("http://example.com/jobs").mock(side_effect=handler)
+
+    timeout = 7.5
+    with HttpxParserHttpTransport(timeout=HTTP_READ_TIMEOUT) as transport:
+        parser = ParserHttp(
+            run_log=run_log,
+            timeout=timeout,
+            _transport=transport,
+            _sleep=_NO_SLEEP,
+        )
+        parser.get("http://example.com/jobs", error_prefix="p")
+
+    assert captured == {
+        "connect": HTTP_CONNECT_TIMEOUT,
+        "read": timeout,
+        "write": timeout,
+        "pool": timeout,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Explicit close/context boundary owns the real client lifetime
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+def test_close_prevents_further_http_requests(run_log: RunLog):
+    route = respx.get("http://example.com/jobs").mock(
+        return_value=httpx.Response(200, content=b"ok")
+    )
+
+    parser = ParserHttp(run_log=run_log, retries=1, _sleep=_NO_SLEEP)
+    parser.close()
+
+    with pytest.raises(ParserError, match="p") as exc_info:
+        parser.get("http://example.com/jobs", error_prefix="p")
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert route.call_count == 0
+
+
+@respx.mock
+def test_context_manager_closes_httpx_transport_on_exit(run_log: RunLog):
+    route = respx.get("http://example.com/jobs").mock(
+        return_value=httpx.Response(200, content=b"ok")
+    )
+
+    parser = ParserHttp(run_log=run_log, retries=1, _sleep=_NO_SLEEP)
     with parser:
         pass
-    assert parser._client.is_closed
+
+    with pytest.raises(ParserError, match="p") as exc_info:
+        parser.get("http://example.com/jobs", error_prefix="p")
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert route.call_count == 0
 
 
 def test_context_manager_returns_self(run_log: RunLog):

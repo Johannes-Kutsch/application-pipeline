@@ -1,13 +1,16 @@
-"""Tests for the LaTeX template files — identity-token leak prevention."""
+"""Structural contract tests for the LaTeX template files."""
 
 from __future__ import annotations
 
 import importlib.resources
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from application_pipeline.compile_cv_cmd import compile_cv
 from application_pipeline.latex import slot_map
 
 _EXPECTED_LATEX_PACKAGE_FILES = frozenset(
@@ -42,6 +45,36 @@ _IDENTITY_TOKENS = (
     "<<LINKEDIN_URL>>",
 )
 
+_RECIPIENT_PATTERN = re.compile(
+    r"\\recipient\{\s*<<RECIPIENT_COMPANY>>\s*\}\{.*?"
+    r"<<RECIPIENT_NAME>>.*?"
+    r"<<RECIPIENT_STREET>>.*?"
+    r"<<RECIPIENT_ZIP_CITY>>.*?\}",
+    re.DOTALL,
+)
+_COVER_BODY_PATTERN = re.compile(
+    r"\\AutoCoverLetterStretch\{[^}]+\}\{[^}]+\}\{[^}]+\}\{[^}]+\}\{.*?"
+    r"<<COVER_INTRO>>.*?"
+    r"<<COVER_PIVOT>>.*?"
+    r"<<COVER_FIT>>.*?"
+    r"<<COVER_CLOSING>>.*?\}",
+    re.DOTALL,
+)
+_RESUME_PATTERN = re.compile(
+    r"\\section\{Ausbildung\}\s*<<RESUME_AUSBILDUNG>>.*?"
+    r"\\section\{Projekte\}\s*<<RESUME_PROJEKTE>>.*?"
+    r"\\section\{Berufserfahrung\}\s*<<RESUME_BERUFSERFAHRUNG>>.*?"
+    r"\\section\{Kenntnisse\}\s*<<SKILLS_BLOCK>>",
+    re.DOTALL,
+)
+_TEMPLATE_SLOT_PATTERN = re.compile(r"<<([A-Z_]+)>>")
+_MINIMAL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a"
+    "0000000d49484452000000010000000108060000001f15c489"
+    "0000000d49444154789c63f8cfc0f01f00050001ff89993d1d"
+    "0000000049454e44ae426082"
+)
+
 
 @pytest.fixture(scope="module")
 def cv_template() -> str:
@@ -50,9 +83,74 @@ def cv_template() -> str:
     ).read_text(encoding="utf-8")
 
 
-def test_cv_template_contains_no_identity_tokens(cv_template: str) -> None:
-    leaked = [t for t in _IDENTITY_TOKENS if t in cv_template]
+def assert_template_contract(template: str) -> None:
+    leaked = [t for t in _IDENTITY_TOKENS if t in template]
     assert leaked == [], f"cv_template.tex leaks identity tokens: {leaked}"
+    actual_slots = {
+        match.group(1).lower() for match in _TEMPLATE_SLOT_PATTERN.finditer(template)
+    }
+    assert actual_slots == slot_map._CANONICAL_SLOTS
+    assert _RECIPIENT_PATTERN.search(template)
+    assert re.search(r"\\opening\{\s*<<OPENING>>\s*\}", template)
+    assert _COVER_BODY_PATTERN.search(template)
+    assert _RESUME_PATTERN.search(template)
+
+
+def assert_compiled_template_contract(
+    compiled_template: str,
+    slot_bodies: dict[str, str],
+) -> None:
+    leaked = [t for t in _IDENTITY_TOKENS if t in compiled_template]
+    assert leaked == [], f"compiled cv.tex leaks identity tokens: {leaked}"
+    assert "<<" not in compiled_template
+
+    for slot_body in slot_bodies.values():
+        assert slot_body in compiled_template
+
+    recipient = re.compile(
+        r"\\recipient\{\s*"
+        + re.escape(slot_bodies["recipient_company"])
+        + r"\s*\}\{.*?"
+        + re.escape(slot_bodies["recipient_name"])
+        + r".*?"
+        + re.escape(slot_bodies["recipient_street"])
+        + r".*?"
+        + re.escape(slot_bodies["recipient_zip_city"])
+        + r".*?\}",
+        re.DOTALL,
+    )
+    cover = re.compile(
+        r"\\opening\{\s*"
+        + re.escape(slot_bodies["opening"])
+        + r"\s*\}.*?"
+        + re.escape(slot_bodies["cover_intro"])
+        + r".*?"
+        + re.escape(slot_bodies["cover_pivot"])
+        + r".*?"
+        + re.escape(slot_bodies["cover_fit"])
+        + r".*?"
+        + re.escape(slot_bodies["cover_closing"]),
+        re.DOTALL,
+    )
+    resume = re.compile(
+        r"\\section\{Ausbildung\}\s*"
+        + re.escape(slot_bodies["resume_ausbildung"])
+        + r".*?\\section\{Projekte\}\s*"
+        + re.escape(slot_bodies["resume_projekte"])
+        + r".*?\\section\{Berufserfahrung\}\s*"
+        + re.escape(slot_bodies["resume_berufserfahrung"])
+        + r".*?\\section\{Kenntnisse\}\s*"
+        + re.escape(slot_bodies["skills_block"]),
+        re.DOTALL,
+    )
+
+    assert recipient.search(compiled_template)
+    assert cover.search(compiled_template)
+    assert resume.search(compiled_template)
+
+
+def test_cv_template_matches_structural_contract(cv_template: str) -> None:
+    assert_template_contract(cv_template)
 
 
 def test_latex_package_ships_vendored_moderncv_tree() -> None:
@@ -65,89 +163,153 @@ def test_latex_package_ships_vendored_moderncv_tree() -> None:
     assert unexpected == set(), f"unexpected files in latex package: {unexpected}"
 
 
-def test_cv_template_makeletterclosing_uses_at_closing(cv_template: str) -> None:
-    assert r"\@closing" in cv_template, (
-        r"makeletterclosing override must use \@closing (not \closing)"
-    )
-
-
-def test_cv_template_resume_name_uses_my_macros(cv_template: str) -> None:
-    """Resume body must use \\myFirstname/\\myFamilyname, not \\@firstname/\\@familyname.
-
-    The \\ifdefstring{\\BUILD}{cover}{}{...} body is tokenised at outer scope
-    where @ is "other"; \\@firstname inside it parses as \\@ (LaTeX's
-    abbreviation-period macro) followed by letters, firing \\spacefactor in
-    vertical mode. \\myFirstname/\\myFamilyname (from facts.tex) have no @.
-    """
-    assert r"\cvitem{Name}{\myFirstname{} \myFamilyname}" in cv_template
-    resume_marker = r"\ifdefstring{\BUILD}{cover}{}{"
-    idx = cv_template.find(resume_marker)
-    assert idx != -1, "resume \\ifdefstring block not found"
-    resume_body = cv_template[idx:]
-    assert r"\@firstname" not in resume_body, (
-        r"resume body uses \@firstname; tokenisation at outer-scope catcodes "
-        r"breaks it. Use \myFirstname instead."
-    )
-    assert r"\@familyname" not in resume_body, (
-        r"resume body uses \@familyname; tokenisation at outer-scope catcodes "
-        r"breaks it. Use \myFamilyname instead."
-    )
-
-
-def test_cv_template_reduces_cover_stretch_in_order(cv_template: str) -> None:
-    body = re.search(
-        r"\\newcommand\{\\AutoCoverLetterStretch\}\[5\]\{(?P<body>.*?)\\unvbox",
-        cv_template,
-        re.DOTALL,
-    )
-    assert body is not None
-    candidates = re.findall(
-        r"\\SetCoverLetterBox\{#([1-4])\}\{#5\}", body.group("body")
-    )
-    assert candidates == ["1", "2", "3", "4"]
-    assert body.group("body").count(r"\ifdim") == 3
-
-
-def test_cv_template_cover_stretch_accepts_paragraph_slots(cv_template: str) -> None:
-    assert r"\newcommand{\AutoCoverLetterStretch}" in cv_template
-    assert r"\newcommand*{\AutoCoverLetterStretch}" not in cv_template
-    assert r"\newcommand{\SetCoverLetterBox}" in cv_template
-    assert r"\newcommand*{\SetCoverLetterBox}" not in cv_template
-
-
-def test_cv_template_cover_gaps_track_selected_stretch(
+def test_cv_template_contract_tolerates_spacing_and_comment_changes(
     cv_template: str,
 ) -> None:
-    assert (
-        r"\xpatchcmd{\makelettertitle}{\@opening\\[1.5em]}{\@opening\\[\CoverLetterGap]}{}{}"
-        in cv_template
+    structurally_equivalent = cv_template.replace(
+        r"\closing{Mit freundlichen Grüßen,}",
+        "% harmless comment\n\\closing{Mit freundlichen Grüßen,}",
+    ).replace(
+        "\n\n<<COVER_INTRO>>\n\n",
+        "\n% harmless comment between paragraphs\n<<COVER_INTRO>>\n",
     )
-    assert (
-        r"\makelettertitle"
-        "\n"
-        r"\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%"
-    ) in cv_template
 
-    set_box = re.search(
-        r"\\newcommand\{\\SetCoverLetterBox\}\[2\]\{(?P<body>.*?)\\makeletterclosing",
-        cv_template,
-        re.DOTALL,
-    )
-    assert set_box is not None
-    assert r"\vspace{\CoverLetterGap}" not in set_box.group("body")
-    assert r"\vspace{3em}" not in set_box.group("body")
-    assert r"\vspace{\CoverLetterGap}" in cv_template
-    assert r"\@closing" in cv_template
-    assert r"\vspace{3em}\@closing" not in cv_template
+    assert_template_contract(structurally_equivalent)
 
 
-def test_cv_template_hardcodes_cover_stretch_minimum_without_new_slot(
+def test_cv_template_contract_rejects_unexpected_slot_markers(
     cv_template: str,
+) -> None:
+    with pytest.raises(AssertionError):
+        assert_template_contract(f"{cv_template}\n<<COVER_STRETCH>>\n")
+
+
+def test_cv_template_contract_rejects_renamed_slot_markers(cv_template: str) -> None:
+    with pytest.raises(AssertionError):
+        assert_template_contract(
+            cv_template.replace("<<COVER_FIT>>", "<<COVER_MATCH>>", 1)
+        )
+
+
+@pytest.mark.skipif(shutil.which("pdflatex") is None, reason="pdflatex not installed")
+def test_compile_cv_template_is_compileable(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert r"\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}" in cv_template
-    cv_tex = tmp_path / "cv.tex"
-    cv_tex.write_text("%% SLOT: cover_stretch\n1.5\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    app_dir = tmp_path / "application"
+    cv_dir = project_root / "application-pipeline" / "user-info" / "cv"
+    (project_root / "application-pipeline").mkdir(parents=True)
+    (project_root / "application-pipeline" / "config.py").write_text("")
+    cv_dir.mkdir(parents=True)
+    app_dir.mkdir()
+    monkeypatch.chdir(project_root)
 
-    with pytest.raises(slot_map.UnknownSlotError):
-        slot_map.parse(cv_tex)
+    (cv_dir / "facts.tex").write_text(
+        "\n".join(
+            (
+                r"\def\myFirstname{Test}",
+                r"\def\myFamilyname{User}",
+                r"\def\myCity{Berlin}",
+                r"\def\PersonalInfo{}",
+                r"\def\Languages{}",
+                r"\def\Hobbies{}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (cv_dir / "content_pool.tex").write_text("", encoding="utf-8")
+    (cv_dir / "profile.png").write_bytes(_MINIMAL_PNG)
+    (cv_dir / "signature.png").write_bytes(_MINIMAL_PNG)
+    app_dir.joinpath("cv.tex").write_text(
+        "\n".join(
+            (
+                "%% SLOT: recipient_company",
+                "Firma GmbH",
+                "%% SLOT: recipient_name",
+                "Frau Dr. Muller",
+                "%% SLOT: recipient_street",
+                "Musterstrasse 1",
+                "%% SLOT: recipient_zip_city",
+                "12345 Berlin",
+                "%% SLOT: opening",
+                "Sehr geehrte Damen und Herren,",
+                "%% SLOT: cover_intro",
+                "Ich bewerbe mich hiermit.",
+                "%% SLOT: cover_pivot",
+                "Mein Hintergrund ist relevant.",
+                "%% SLOT: cover_fit",
+                "Ich passe gut zu Ihrer Firma.",
+                "%% SLOT: cover_closing",
+                "Ich freue mich auf Ihre Antwort.",
+                "%% SLOT: resume_berufserfahrung",
+                r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+                "%% SLOT: resume_ausbildung",
+                r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+                "%% SLOT: resume_projekte",
+                r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+                "%% SLOT: skills_block",
+                "Python, LaTeX",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    compile_cv(app_dir)
+
+    assert (app_dir / "cover.pdf").exists()
+    assert (app_dir / "resume.pdf").exists()
+    assert (app_dir / "combined.pdf").exists()
+
+
+def test_compile_cv_wires_slot_map_content_into_structural_surfaces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    app_dir = tmp_path / "application"
+    cv_dir = project_root / "application-pipeline" / "user-info" / "cv"
+    (project_root / "application-pipeline").mkdir(parents=True)
+    (project_root / "application-pipeline" / "config.py").write_text("")
+    cv_dir.mkdir(parents=True)
+    app_dir.mkdir()
+    monkeypatch.chdir(project_root)
+
+    (cv_dir / "facts.tex").write_text(
+        "\n".join(
+            (
+                r"\def\myFirstname{Test}",
+                r"\def\myFamilyname{User}",
+                r"\def\myCity{Berlin}",
+                r"\def\PersonalInfo{}",
+                r"\def\Languages{}",
+                r"\def\Hobbies{}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (cv_dir / "content_pool.tex").write_text("", encoding="utf-8")
+
+    slot_bodies = {
+        name: f"slot-body-{name}" for name in sorted(slot_map._CANONICAL_SLOTS)
+    }
+    app_dir.joinpath("cv.tex").write_text(
+        "".join(f"%% SLOT: {name}\n{body}\n" for name, body in slot_bodies.items()),
+        encoding="utf-8",
+    )
+
+    def failing_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr("subprocess.run", failing_run)
+
+    with pytest.raises(SystemExit):
+        compile_cv(app_dir)
+
+    build_cv = (app_dir / ".build" / "cv.tex").read_text(encoding="utf-8")
+    assert_compiled_template_contract(build_cv, slot_bodies)

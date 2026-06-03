@@ -85,21 +85,27 @@
 \title{Lebenslauf}
 \photo[120pt][1pt]{\CvDataDir/profile}
 
+% Gemeinsamer Block
+\newcommand{\SignatureBlock}{%
+  \noindent\includegraphics[height=3em]{\CvDataDir/signature}\\
+  \textbf{\myFirstname{} \myFamilyname}\\%
+  \myCity{}, \today%
+}
+
 % Override moderncv's letter-closing to inject the signature image automatically,
 % so the applicant never has to print/sign/scan an Anschreiben. This couples to
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
-\newcommand{\CoverLetterGap}{0.6\baselineskip}
+\newcommand{\CoverLetterGap}{1.75\baselineskip}
 \makeatletter
 \renewcommand*{\makeletterclosing}{%
   % Keep the sign-off gap proportional to the selected cover stretch so it
   % matches the opening-to-intro gap. Reset stretch to 1 only after \@closing
   % so the signature block stays tight.
-  \vspace{\CoverLetterGap}\@closing\par
   \setstretch{1}%
-  \vspace{\baselineskip}%
-  \noindent\includegraphics[height=3em]{\CvDataDir/signature}\\[-0.4em]%
-  \textbf{\@firstname~\@familyname}\\%
-  \myCity{}, \today%
+  \vspace{\CoverLetterGap}
+  \vfill
+  \@closing\par
+  \SignatureBlock
 }
 \makeatother
 
@@ -153,7 +159,6 @@
 \closing{Mit freundlichen Grüßen,}
 
 \makelettertitle
-\setstretch{1.8}
 \AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%
 
 <<COVER_INTRO>>
@@ -213,9 +218,7 @@
 % \noindent enters horizontal mode (the surrounding context is vertical after
 % \Hobbies) so the \\ line breaks have something to terminate.
 \vfill
-\noindent\includegraphics[height=3em]{\CvDataDir/signature}\\[-0.4em]
-\textbf{\myFirstname{} \myFamilyname}\\
-\myCity{}, \today
+\SignatureBlock
 }
 
 \end{document}

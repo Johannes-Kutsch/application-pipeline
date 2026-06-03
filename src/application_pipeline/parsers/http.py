@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
+from typing import Protocol
 
 import httpx
 
@@ -27,6 +28,46 @@ REQUEST_PACING: float = 0.5
 USER_AGENT: str = "application-pipeline/0.1 (job-discovery-bot)"
 
 
+class ParserHttpTransport(Protocol):
+    def get(self, url: str, *, timeout: float) -> httpx.Response: ...
+
+    def close(self) -> None: ...
+
+
+class HttpxParserHttpTransport:
+    def __init__(
+        self,
+        *,
+        headers: Mapping[str, str] | None = None,
+        timeout: float = HTTP_READ_TIMEOUT,
+    ) -> None:
+        merged_headers: dict[str, str] = {"User-Agent": USER_AGENT, **(headers or {})}
+        self._client = httpx.Client(
+            follow_redirects=False,
+            timeout=httpx.Timeout(timeout, connect=HTTP_CONNECT_TIMEOUT),
+            headers=merged_headers,
+        )
+
+    @property
+    def client(self) -> httpx.Client:
+        return self._client
+
+    def get(self, url: str, *, timeout: float) -> httpx.Response:
+        return self._client.get(
+            url,
+            timeout=httpx.Timeout(timeout, connect=HTTP_CONNECT_TIMEOUT),
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> HttpxParserHttpTransport:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+
 class _Throttle:
     """Enforces a minimum interval between calls — one instance per parser, one host."""
 
@@ -50,7 +91,7 @@ class _Throttle:
 
 
 class ParserHttp:
-    """Owns one httpx.Client, one _Throttle, the retry loop, and error wrapping."""
+    """Owns one transport, one _Throttle, the retry loop, and error wrapping."""
 
     def __init__(
         self,
@@ -60,10 +101,10 @@ class ParserHttp:
         timeout: float = HTTP_READ_TIMEOUT,
         retries: int = MAX_RETRIES,
         _http_get: Callable[[str, float], bytes] | None = None,
+        _transport: ParserHttpTransport | None = None,
         _throttle: _Throttle | None = None,
         _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        merged_headers: dict[str, str] = {"User-Agent": USER_AGENT, **(headers or {})}
         self._run_log = run_log
         self._timeout = timeout
         self._retries = retries
@@ -71,16 +112,28 @@ class ParserHttp:
         self._throttle = (
             _throttle if _throttle is not None else _Throttle(_sleep=_sleep)
         )
-        self._client = httpx.Client(
-            timeout=httpx.Timeout(timeout, connect=HTTP_CONNECT_TIMEOUT),
-            headers=merged_headers,
+        self._transport = (
+            _transport
+            if _transport is not None
+            else HttpxParserHttpTransport(headers=headers, timeout=timeout)
+        )
+        self._native_client = (
+            self._transport.client
+            if isinstance(self._transport, HttpxParserHttpTransport)
+            else None
         )
         self._http_get: Callable[[str, float], bytes] = (
             _http_get if _http_get is not None else self._real_http_get
         )
 
+    @property
+    def _client(self) -> httpx.Client:
+        if self._native_client is None:
+            raise AttributeError("ParserHttp transport does not expose an httpx.Client")
+        return self._native_client
+
     def _real_http_get(self, url: str, timeout: float) -> bytes:
-        resp = self._client.get(url, timeout=timeout)
+        resp = self._transport.get(url, timeout=timeout)
         if resp.is_success:
             return resp.content
         status = resp.status_code
@@ -189,5 +242,8 @@ class ParserHttp:
     def __enter__(self) -> ParserHttp:
         return self
 
+    def close(self) -> None:
+        self._transport.close()
+
     def __exit__(self, *args: object) -> None:
-        self._client.close()
+        self.close()

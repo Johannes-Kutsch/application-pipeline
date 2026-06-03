@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import urllib.parse
-from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -11,13 +10,16 @@ import pytest
 
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.http import ParserHttp
+from application_pipeline.parsers.http import (
+    ParserHttp,
+    ScriptedParserHttpOutcome,
+    ScriptedParserHttpResponse,
+    ScriptedParserHttpTransport,
+)
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
 )
-import httpx
-import respx
 
 from application_pipeline.parsers.types import (
     City,
@@ -39,21 +41,20 @@ def _load(name: str) -> bytes:
     return (_FIXTURES / name).read_bytes()
 
 
-def _make_get(responses: dict[str, bytes]) -> Callable[[str, float], bytes]:
-    def http_get(url: str, timeout: float) -> bytes:
-        for key, body in responses.items():
-            if key in url:
-                return body
-        raise OSError(f"unexpected URL: {url}")
-
-    return http_get
-
-
 def _make_http(
-    run_log: RunLog, http_get: Callable[[str, float], bytes], *, retries: int = 3
-) -> ParserHttp:
-    return ParserHttp(
-        run_log=run_log, _http_get=http_get, retries=retries, _sleep=_NO_SLEEP
+    run_log: RunLog,
+    *outcomes: ScriptedParserHttpOutcome,
+    retries: int = 3,
+) -> tuple[ParserHttp, ScriptedParserHttpTransport]:
+    transport = ScriptedParserHttpTransport(list(outcomes))
+    return (
+        ParserHttp(
+            run_log=run_log,
+            retries=retries,
+            _transport=transport,
+            _sleep=_NO_SLEEP,
+        ),
+        transport,
     )
 
 
@@ -115,49 +116,40 @@ def test_parser_is_usable_as_context_manager(run_log: RunLog) -> None:
 
 
 def test_discover_remote_location_yields_not_served_sentinel(run_log: RunLog) -> None:
-    def never_called(url: str, timeout: float) -> bytes:
-        raise AssertionError("should not GET")
-
-    with StellenHamburgParser(
-        run_log=run_log, _http=_make_http(run_log, never_called)
-    ) as p:
+    http, transport = _make_http(run_log)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query(location=Remote())))
 
     assert stubs == [NotServedQuery()]
+    assert transport.requests == []
 
 
 def test_discover_yields_not_served_sentinel_when_location_unmapped(
     run_log: RunLog,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    def never_called(url: str, timeout: float) -> bytes:
-        raise AssertionError("should not GET")
-
     with caplog.at_level(
         logging.INFO, logger="application_pipeline.parsers.stellen_hamburg_api"
     ):
-        with StellenHamburgParser(
-            run_log=run_log, _http=_make_http(run_log, never_called)
-        ) as p:
+        http, transport = _make_http(run_log)
+        with StellenHamburgParser(run_log=run_log, _http=http) as p:
             stubs = list(p.discover(_query(location=City("berlin"))))
 
     assert stubs == [NotServedQuery()]
     assert not any("not_served" in r.getMessage() for r in caplog.records)
+    assert transport.requests == []
 
 
 def test_discover_unmapped_location_does_not_make_http_request(run_log: RunLog) -> None:
-    def never_called(url: str, timeout: float) -> bytes:
-        raise AssertionError("should not GET")
-
-    with StellenHamburgParser(
-        run_log=run_log, _http=_make_http(run_log, never_called)
-    ) as p:
+    http, transport = _make_http(run_log)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query(location=City("munich"))))
+    assert transport.requests == []
 
 
 def test_discover_normalizes_location_case(run_log: RunLog, search_json: bytes) -> None:
-    get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query(location=City("Hamburg"))))
     assert len(stubs) == 2
 
@@ -170,8 +162,8 @@ def test_discover_normalizes_location_case(run_log: RunLog, search_json: bytes) 
 def test_discover_yields_stubs_from_search_response(
     run_log: RunLog, search_json: bytes
 ) -> None:
-    get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 2
 
@@ -179,40 +171,40 @@ def test_discover_yields_stubs_from_search_response(
 def test_discover_stub_source_is_display_name(
     run_log: RunLog, search_json: bytes
 ) -> None:
-    get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.source == "stellen.hamburg"
 
 
 def test_discover_stub_title_extracted(run_log: RunLog, search_json: bytes) -> None:
-    get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.title == "Softwareentwickler/in (m/w/d)"
 
 
 def test_discover_stub_url_extracted(run_log: RunLog, search_json: bytes) -> None:
-    get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert "jobad/11111" in stub.url
 
 
 def test_discover_stub_company_extracted(run_log: RunLog, search_json: bytes) -> None:
-    get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.company == "Stadtverwaltung Hamburg"
 
 
 def test_discover_stub_location_extracted(run_log: RunLog, search_json: bytes) -> None:
-    get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub, *_) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.location == "Hamburg"
@@ -226,8 +218,8 @@ def test_discover_stub_location_extracted(run_log: RunLog, search_json: bytes) -
 def test_discover_returns_all_results_without_cap(
     run_log: RunLog, search_json: bytes
 ) -> None:
-    get = _make_get({"api-stellen": search_json})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) >= 1
 
@@ -241,18 +233,15 @@ def test_discover_issues_get_with_data_param_carrying_search_criteria(
     run_log: RunLog,
     search_json: bytes,
 ) -> None:
-    captured_urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        captured_urls.append(url)
-        return search_json
-
-    with StellenHamburgParser(
-        run_log=run_log, _http=_make_http(run_log, capturing_get)
-    ) as p:
+    http, transport = _make_http(run_log, search_json)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query(keyword="python")))
 
-    search_calls = [u for u in captured_urls if "api-stellen.hamburg.de" in u]
+    search_calls = [
+        request.url
+        for request in transport.requests
+        if "api-stellen.hamburg.de" in request.url
+    ]
     assert search_calls, "no GET to api-stellen.hamburg.de was made"
 
     parsed = urllib.parse.urlparse(search_calls[0])
@@ -286,19 +275,15 @@ def test_discover_pagination_second_page_sends_page_number_two(run_log: RunLog) 
 
     page1 = _body([_item("1")], total=50)
     page2 = _body([], total=50)
-    responses = iter([page1, page2])
-    captured_urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        captured_urls.append(url)
-        return next(responses)
-
-    with StellenHamburgParser(
-        run_log=run_log, _http=_make_http(run_log, capturing_get)
-    ) as p:
+    http, transport = _make_http(run_log, page1, page2)
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query()))
 
-    search_calls = [u for u in captured_urls if "api-stellen.hamburg.de" in u]
+    search_calls = [
+        request.url
+        for request in transport.requests
+        if "api-stellen.hamburg.de" in request.url
+    ]
     assert len(search_calls) == 2
 
     parsed2 = urllib.parse.urlparse(search_calls[1])
@@ -331,16 +316,12 @@ def test_discover_emits_discover_page_heartbeat_per_page(tmp_path: Path) -> None
             }
         ).encode()
 
-    responses = iter(
-        [_sh_body([_sh_item("1")], total=2), _sh_body([_sh_item("2")], total=2)]
+    http, _ = _make_http(
+        run_log,
+        _sh_body([_sh_item("1")], total=2),
+        _sh_body([_sh_item("2")], total=2),
     )
-
-    def sequential_get(url: str, timeout: float) -> bytes:
-        return next(responses)
-
-    with StellenHamburgParser(
-        run_log=run_log, _http=_make_http(run_log, sequential_get)
-    ) as p:
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
 
     assert len(stubs) == 2
@@ -365,12 +346,9 @@ def test_discover_emits_discover_page_heartbeat_per_page(tmp_path: Path) -> None
 def test_discover_raises_parser_error_on_http_failure(run_log: RunLog) -> None:
     from application_pipeline.parsers import ParserError
 
-    def failing_get(url: str, timeout: float) -> bytes:
-        raise OSError("connection refused")
-
     with StellenHamburgParser(
         run_log=run_log,
-        _http=_make_http(run_log, failing_get, retries=1),
+        _http=_make_http(run_log, OSError("connection refused"), retries=1)[0],
     ) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
@@ -384,11 +362,10 @@ def test_discover_raises_parser_error_on_http_failure(run_log: RunLog) -> None:
 def test_enrich_raises_enrich_failed_error_on_404(
     run_log: RunLog, tmp_path: Path, stub: PositionStub
 ) -> None:
-    with respx.mock:
-        respx.get(stub.url).mock(return_value=httpx.Response(404))
-        with StellenHamburgParser(run_log=run_log, failures_dir=tmp_path) as p:
-            with pytest.raises(EnrichFailedError):
-                p.enrich(stub)
+    http, _ = _make_http(run_log, ScriptedParserHttpResponse(status=404))
+    with StellenHamburgParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
 
 
 def test_enrich_retries_transient_503_and_raises_parser_error(
@@ -396,19 +373,17 @@ def test_enrich_retries_transient_503_and_raises_parser_error(
 ) -> None:
     from application_pipeline.parsers import ParserError
 
-    attempts: list[str] = []
-
-    def always_503(url: str, timeout: float) -> bytes:
-        attempts.append(url)
-        raise OSError("simulated 503")
-
-    http = ParserHttp(
-        run_log=run_log, _http_get=always_503, retries=3, _sleep=lambda _: None
+    http, transport = _make_http(
+        run_log,
+        OSError("simulated 503"),
+        OSError("simulated 503"),
+        OSError("simulated 503"),
+        retries=3,
     )
     with StellenHamburgParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(ParserError):
             p.enrich(stub)
-    assert len(attempts) == 3
+    assert len(transport.requests) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -439,8 +414,8 @@ def test_discover_stub_posted_date_extracted_from_publication_start_date(
         "PositionTitle": "Test Job",
         "PublicationStartDate": "2025-03-15",
     }
-    get = _make_get({"api-stellen": _single_item_response(descriptor)})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, _single_item_response(descriptor))
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.posted_date == date(2025, 3, 15)
@@ -450,8 +425,8 @@ def test_discover_stub_posted_date_is_none_when_publication_start_date_absent(
     run_log: RunLog,
 ) -> None:
     descriptor = {"PositionTitle": "Test Job"}
-    get = _make_get({"api-stellen": _single_item_response(descriptor)})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, _single_item_response(descriptor))
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.posted_date is None
@@ -461,8 +436,8 @@ def test_discover_stub_posted_date_is_none_when_publication_start_date_malformed
     run_log: RunLog,
 ) -> None:
     descriptor = {"PositionTitle": "Test Job", "PublicationStartDate": "not-a-date"}
-    get = _make_get({"api-stellen": _single_item_response(descriptor)})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, _single_item_response(descriptor))
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.posted_date is None
@@ -475,8 +450,8 @@ def test_discover_stub_deadline_extracted_from_publication_end_date(
         "PositionTitle": "Test Job",
         "PublicationEndDate": "2025-06-30",
     }
-    get = _make_get({"api-stellen": _single_item_response(descriptor)})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, _single_item_response(descriptor))
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.deadline == date(2025, 6, 30)
@@ -486,8 +461,8 @@ def test_discover_stub_deadline_is_none_when_publication_end_date_absent(
     run_log: RunLog,
 ) -> None:
     descriptor = {"PositionTitle": "Test Job"}
-    get = _make_get({"api-stellen": _single_item_response(descriptor)})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, _single_item_response(descriptor))
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.deadline is None
@@ -497,8 +472,8 @@ def test_discover_stub_deadline_is_none_when_publication_end_date_malformed(
     run_log: RunLog,
 ) -> None:
     descriptor = {"PositionTitle": "Test Job", "PublicationEndDate": "bad-date"}
-    get = _make_get({"api-stellen": _single_item_response(descriptor)})
-    with StellenHamburgParser(run_log=run_log, _http=_make_http(run_log, get)) as p:
+    http, _ = _make_http(run_log, _single_item_response(descriptor))
+    with StellenHamburgParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
     assert stub.deadline is None

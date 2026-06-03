@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -20,7 +19,11 @@ from application_pipeline.parsers.bundesagentur_api import (
     BundesagenturParser,
     parser_class,
 )
-from application_pipeline.parsers.http import ParserHttp
+from application_pipeline.parsers.http import (
+    ParserHttp,
+    ScriptedParserHttpOutcome,
+    ScriptedParserHttpTransport,
+)
 from application_pipeline.parsers.types import (
     City,
     EnrichFailedError,
@@ -68,24 +71,20 @@ def _item(
     return result
 
 
-def _make_get(responses: list[bytes]) -> Callable[[str, float], bytes]:
-    it = iter(responses)
-
-    def http_get(url: str, timeout: float) -> bytes:
-        return next(it)
-
-    return http_get
-
-
-def _make_http(responses: list[bytes], run_log: RunLog) -> ParserHttp:
-    return ParserHttp(run_log=run_log, _http_get=_make_get(responses), _sleep=_NO_SLEEP)
-
-
-def _http(
-    run_log: RunLog, http_get: Callable[[str, float], bytes], *, retries: int = 3
-) -> ParserHttp:
-    return ParserHttp(
-        run_log=run_log, _http_get=http_get, retries=retries, _sleep=_NO_SLEEP
+def _make_http(
+    run_log: RunLog,
+    *outcomes: ScriptedParserHttpOutcome,
+    retries: int = 3,
+) -> tuple[ParserHttp, ScriptedParserHttpTransport]:
+    transport = ScriptedParserHttpTransport(list(outcomes))
+    return (
+        ParserHttp(
+            run_log=run_log,
+            retries=retries,
+            _transport=transport,
+            _sleep=_NO_SLEEP,
+        ),
+        transport,
     )
 
 
@@ -148,12 +147,10 @@ def test_parser_is_usable_as_context_manager(run_log: RunLog) -> None:
 
 
 def test_discover_yields_one_stub_per_result(run_log: RunLog) -> None:
-    http = _make_http(
-        [
-            _search_body([_item("id1", "Dev A"), _item("id2", "Dev B")]),
-            _search_body([]),
-        ],
+    http, _ = _make_http(
         run_log,
+        _search_body([_item("id1", "Dev A"), _item("id2", "Dev B")]),
+        _search_body([]),
     )
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
@@ -161,8 +158,8 @@ def test_discover_yields_one_stub_per_result(run_log: RunLog) -> None:
 
 
 def test_discover_stub_title_matches_api_stellenangebotsTitel(run_log: RunLog) -> None:
-    http = _make_http(
-        [_search_body([_item("x", "Data Scientist")]), _search_body([])], run_log
+    http, _ = _make_http(
+        run_log, _search_body([_item("x", "Data Scientist")]), _search_body([])
     )
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
@@ -171,7 +168,7 @@ def test_discover_stub_title_matches_api_stellenangebotsTitel(run_log: RunLog) -
 
 
 def test_discover_stub_source_is_display_name(run_log: RunLog) -> None:
-    http = _make_http([_search_body([_item()]), _search_body([])], run_log)
+    http, _ = _make_http(run_log, _search_body([_item()]), _search_body([]))
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
@@ -179,8 +176,8 @@ def test_discover_stub_source_is_display_name(run_log: RunLog) -> None:
 
 
 def test_discover_stub_company_from_firma(run_log: RunLog) -> None:
-    http = _make_http(
-        [_search_body([_item(company="Muster GmbH")]), _search_body([])], run_log
+    http, _ = _make_http(
+        run_log, _search_body([_item(company="Muster GmbH")]), _search_body([])
     )
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
@@ -191,7 +188,9 @@ def test_discover_stub_company_from_firma(run_log: RunLog) -> None:
 def test_discover_stub_location_from_stellenlokationen_first_ort(
     run_log: RunLog,
 ) -> None:
-    http = _make_http([_search_body([_item(city="Berlin")]), _search_body([])], run_log)
+    http, _ = _make_http(
+        run_log, _search_body([_item(city="Berlin")]), _search_body([])
+    )
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
@@ -200,7 +199,7 @@ def test_discover_stub_location_from_stellenlokationen_first_ort(
 
 def test_discover_stub_url_is_public_job_page_url_with_raw_ref(run_log: RunLog) -> None:
     ref = "myhash"
-    http = _make_http([_search_body([_item(ref)]), _search_body([])], run_log)
+    http, _ = _make_http(run_log, _search_body([_item(ref)]), _search_body([]))
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
@@ -208,7 +207,7 @@ def test_discover_stub_url_is_public_job_page_url_with_raw_ref(run_log: RunLog) 
 
 
 def test_discover_stub_company_none_when_firma_absent(run_log: RunLog) -> None:
-    http = _make_http([_search_body([_item(company=None)]), _search_body([])], run_log)
+    http, _ = _make_http(run_log, _search_body([_item(company=None)]), _search_body([]))
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
@@ -218,7 +217,7 @@ def test_discover_stub_company_none_when_firma_absent(run_log: RunLog) -> None:
 def test_discover_stub_location_none_when_stellenlokationen_absent(
     run_log: RunLog,
 ) -> None:
-    http = _make_http([_search_body([_item(city=None)]), _search_body([])], run_log)
+    http, _ = _make_http(run_log, _search_body([_item(city=None)]), _search_body([]))
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
@@ -240,7 +239,7 @@ def test_discover_multi_location_uses_first_entry(run_log: RunLog) -> None:
             {"adresse": {"ort": "Berlin", "plz": "10115"}},
         ],
     }
-    http = _make_http([_search_body([item]), _search_body([])], run_log)
+    http, _ = _make_http(run_log, _search_body([item]), _search_body([]))
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         (stub,) = list(p.discover(_query()))
     assert isinstance(stub, PositionStub)
@@ -258,7 +257,7 @@ def test_discover_skips_item_without_referenznummer(run_log: RunLog) -> None:
         "veroeffentlichungszeitraum": {"von": "2024-01-15"},
     }
     good_item = _item("good1")
-    http = _make_http([_search_body([bad_item, good_item]), _search_body([])], run_log)
+    http, _ = _make_http(run_log, _search_body([bad_item, good_item]), _search_body([]))
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 1
@@ -276,7 +275,7 @@ def test_discover_emits_discover_page_heartbeat_per_page(tmp_path: Path) -> None
     page1 = _search_body([_item("id1"), _item("id2")])
     page2 = _search_body([_item("id3")])
     page3 = _search_body([])
-    http = _make_http([page1, page2, page3], run_log)
+    http, _ = _make_http(run_log, page1, page2, page3)
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query()))
     events_rows = [
@@ -300,7 +299,7 @@ def test_discover_missing_title_does_not_generate_failure_report(
         "referenznummer": "notitle1",
         "veroeffentlichungszeitraum": {"von": "2024-01-15"},
     }
-    http = _make_http([_search_body([no_title_item]), _search_body([])], run_log)
+    http, _ = _make_http(run_log, _search_body([no_title_item]), _search_body([]))
     failures_dir = tmp_path / "failures"
     failures_dir.mkdir()
     with BundesagenturParser(
@@ -320,8 +319,8 @@ def test_discover_skips_item_with_missing_title_and_logs_info(
         "veroeffentlichungszeitraum": {"von": "2024-01-15"},
     }
     good_item = _item("good1", "Backend Engineer")
-    http = _make_http(
-        [_search_body([no_title_item, good_item]), _search_body([])], run_log
+    http, _ = _make_http(
+        run_log, _search_body([no_title_item, good_item]), _search_body([])
     )
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
@@ -343,7 +342,7 @@ def test_discover_skips_item_with_missing_title_and_logs_info(
 def test_discover_skips_item_with_empty_string_title(tmp_path: Path) -> None:
     run_log = RunLog(tmp_path)
     empty_title_item = {"referenznummer": "empty1", "stellenangebotsTitel": ""}
-    http = _make_http([_search_body([empty_title_item]), _search_body([])], run_log)
+    http, _ = _make_http(run_log, _search_body([empty_title_item]), _search_body([]))
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
 
@@ -357,7 +356,7 @@ def test_discover_skips_item_with_empty_string_title(tmp_path: Path) -> None:
 
 def test_discover_parses_search_fixture(run_log: RunLog) -> None:
     search = _load("search.json")
-    http = _make_http([search, _search_body([])], run_log)
+    http, _ = _make_http(run_log, search, _search_body([]))
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 2
@@ -377,29 +376,24 @@ def test_discover_paginates_until_empty_page(run_log: RunLog) -> None:
     page1 = _search_body([_item("id1"), _item("id2")])
     page2 = _search_body([_item("id3")])
     page3 = _search_body([])
-    http = _make_http([page1, page2, page3], run_log)
+    http, _ = _make_http(run_log, page1, page2, page3)
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
     assert len(stubs) == 3
 
 
 def test_discover_first_page_is_1_indexed(run_log: RunLog) -> None:
-    urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        urls.append(url)
-        return _search_body([])
-
-    with BundesagenturParser(run_log=run_log, _http=_http(run_log, capturing_get)) as p:
+    http, transport = _make_http(run_log, _search_body([]))
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query()))
 
-    assert any("page=1" in u for u in urls)
-    assert all("page=0" not in u for u in urls)
+    assert any("page=1" in request.url for request in transport.requests)
+    assert all("page=0" not in request.url for request in transport.requests)
 
 
 def test_discover_stops_on_null_ergebnisliste(run_log: RunLog) -> None:
     body = json.dumps({"maxErgebnisse": 0, "ergebnisliste": None}).encode()
-    http = _make_http([body], run_log)
+    http, _ = _make_http(run_log, body)
     with BundesagenturParser(run_log=run_log, _http=http) as p:
         stubs = list(p.discover(_query()))
     assert stubs == []
@@ -411,64 +405,51 @@ def test_discover_stops_on_null_ergebnisliste(run_log: RunLog) -> None:
 
 
 def test_discover_resolves_location_to_slug_in_url(run_log: RunLog) -> None:
-    urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        urls.append(url)
-        return _search_body([])
-
-    with BundesagenturParser(run_log=run_log, _http=_http(run_log, capturing_get)) as p:
+    http, transport = _make_http(run_log, _search_body([]))
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query(location=City("Hamburg"))))
 
-    assert any("wo=Hamburg" in u for u in urls)
+    assert any("wo=Hamburg" in request.url for request in transport.requests)
 
 
 def test_discover_normalizes_location_before_slug_lookup(run_log: RunLog) -> None:
-    urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        urls.append(url)
-        return _search_body([])
-
-    with BundesagenturParser(run_log=run_log, _http=_http(run_log, capturing_get)) as p:
+    http, transport = _make_http(run_log, _search_body([]))
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query(location=City("  MÜNCHEN  "))))
 
-    assert any("M%C3%BCnchen" in u or "München" in u for u in urls)
+    assert any(
+        "M%C3%BCnchen" in request.url or "München" in request.url
+        for request in transport.requests
+    )
 
 
 def test_discover_unknown_location_yields_not_served_sentinel(
     run_log: RunLog,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    def capturing_get(url: str, timeout: float) -> bytes:
-        return _search_body([])
-
     with caplog.at_level(
         logging.INFO, logger="application_pipeline.parsers.bundesagentur_api"
     ):
-        with BundesagenturParser(
-            run_log=run_log, _http=_http(run_log, capturing_get)
-        ) as p:
+        http, transport = _make_http(run_log)
+        with BundesagenturParser(run_log=run_log, _http=http) as p:
             stubs = list(p.discover(_query(location=City("unknown_city_xyz"))))
 
     assert stubs == [NotServedQuery()]
     assert not any("not_served" in r.getMessage() for r in caplog.records)
+    assert transport.requests == []
 
 
 def test_discover_unknown_location_does_not_log_warning(
     run_log: RunLog,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    def capturing_get(url: str, timeout: float) -> bytes:
-        return _search_body([])
-
     with caplog.at_level(logging.WARNING):
-        with BundesagenturParser(
-            run_log=run_log, _http=_http(run_log, capturing_get)
-        ) as p:
+        http, transport = _make_http(run_log)
+        with BundesagenturParser(run_log=run_log, _http=http) as p:
             list(p.discover(_query(location=City("unknown_city_xyz"))))
 
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert transport.requests == []
 
 
 # ---------------------------------------------------------------------------
@@ -477,29 +458,19 @@ def test_discover_unknown_location_does_not_log_warning(
 
 
 def test_discover_location_none_uses_arbeitszeit_ho(run_log: RunLog) -> None:
-    urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        urls.append(url)
-        return _search_body([])
-
-    with BundesagenturParser(run_log=run_log, _http=_http(run_log, capturing_get)) as p:
+    http, transport = _make_http(run_log, _search_body([]))
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query(location=Remote())))
 
-    assert any("arbeitszeit=ho" in u for u in urls)
+    assert any("arbeitszeit=ho" in request.url for request in transport.requests)
 
 
 def test_discover_location_none_omits_wo_param(run_log: RunLog) -> None:
-    urls: list[str] = []
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        urls.append(url)
-        return _search_body([])
-
-    with BundesagenturParser(run_log=run_log, _http=_http(run_log, capturing_get)) as p:
+    http, transport = _make_http(run_log, _search_body([]))
+    with BundesagenturParser(run_log=run_log, _http=http) as p:
         list(p.discover(_query(location=Remote())))
 
-    assert all("wo=" not in u for u in urls)
+    assert all("wo=" not in request.url for request in transport.requests)
 
 
 # ---------------------------------------------------------------------------
@@ -508,13 +479,9 @@ def test_discover_location_none_omits_wo_param(run_log: RunLog) -> None:
 
 
 def test_discover_raises_parser_error_on_http_failure(run_log: RunLog) -> None:
-
-    def failing_get(url: str, timeout: float) -> bytes:
-        raise OSError("refused")
-
     with BundesagenturParser(
         run_log=run_log,
-        _http=_http(run_log, failing_get, retries=1),
+        _http=_make_http(run_log, OSError("refused"), retries=1)[0],
     ) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))
@@ -534,7 +501,7 @@ def test_enrich_native_returns_mode_native_with_body_from_jobdetails(
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _make_http([detail], run_log)
+    http, _ = _make_http(run_log, detail)
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         result = p.enrich(stub)
     assert result.mode == "native"
@@ -544,15 +511,12 @@ def test_enrich_native_returns_mode_native_with_body_from_jobdetails(
 def test_enrich_raises_enrich_failed_error_on_native_404(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def not_found_get(url: str, timeout: float) -> bytes:
-        raise HttpStubNotRetryableError("not found: ...")
-
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, not_found_get)
+    http, _ = _make_http(run_log, HttpStubNotRetryableError("not found: ..."))
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(EnrichFailedError):
             p.enrich(stub)
@@ -561,15 +525,12 @@ def test_enrich_raises_enrich_failed_error_on_native_404(
 def test_enrich_propagates_parser_fatal_error_on_native_401(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def auth_error_get(url: str, timeout: float) -> bytes:
-        raise HttpParserFatalError("auth: forbidden")
-
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, auth_error_get)
+    http, _ = _make_http(run_log, HttpParserFatalError("auth: forbidden"))
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(HttpParserFatalError):
             p.enrich(stub)
@@ -578,15 +539,12 @@ def test_enrich_propagates_parser_fatal_error_on_native_401(
 def test_enrich_propagates_redirect_response_on_native_3xx(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def redirect_get(url: str, timeout: float) -> bytes:
-        raise HttpRedirectResponse(301, "https://new.example.com/")
-
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, redirect_get)
+    http, _ = _make_http(run_log, HttpRedirectResponse(301, "https://new.example.com/"))
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(HttpRedirectResponse):
             p.enrich(stub)
@@ -595,15 +553,12 @@ def test_enrich_propagates_redirect_response_on_native_3xx(
 def test_enrich_propagates_json_decode_error_on_malformed_response(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def bad_json_get(url: str, timeout: float) -> bytes:
-        return b"not valid json {"
-
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, bad_json_get)
+    http, _ = _make_http(run_log, b"not valid json {")
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(json.JSONDecodeError):
             p.enrich(stub)
@@ -619,7 +574,7 @@ def test_enrich_native_backfills_posted_date_when_stub_has_none(
         source="Bundesagentur",
     )
     assert stub.posted_date is None
-    http = _make_http([detail], run_log)
+    http, _ = _make_http(run_log, detail)
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         result = p.enrich(stub)
     assert result.stub.posted_date == date(2024, 1, 15)
@@ -628,12 +583,7 @@ def test_enrich_native_backfills_posted_date_when_stub_has_none(
 def test_enrich_native_calls_v4_api_with_base64_encoded_ref(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    called_urls: list[str] = []
     detail = _load("detail.json")
-
-    def capturing_get(url: str, timeout: float) -> bytes:
-        called_urls.append(url)
-        return detail
 
     ref = "abc123"
     expected_ref_b64 = base64.b64encode(ref.encode()).decode()
@@ -642,12 +592,12 @@ def test_enrich_native_calls_v4_api_with_base64_encoded_ref(
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, capturing_get)
+    http, transport = _make_http(run_log, detail)
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         p.enrich(stub)
 
-    assert called_urls, "expected at least one HTTP call to jobdetails"
-    detail_url = called_urls[0]
+    assert transport.requests, "expected at least one HTTP call to jobdetails"
+    detail_url = transport.requests[0].url
     assert "/v4/" in detail_url, f"expected v4 API path, got: {detail_url}"
     assert detail_url.endswith(expected_ref_b64), (
         f"expected base64-encoded ref '{expected_ref_b64}' at end of URL, got: {detail_url}"
@@ -662,15 +612,12 @@ def test_enrich_native_calls_v4_api_with_base64_encoded_ref(
 def test_enrich_raises_enrich_failed_error_when_native_api_retries_exhausted(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def failing_get(url: str, timeout: float) -> bytes:
-        raise OSError("connection refused")
-
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, failing_get, retries=1)
+    http, _ = _make_http(run_log, OSError("connection refused"), retries=1)
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(EnrichFailedError):
             p.enrich(stub)
@@ -684,15 +631,12 @@ def test_enrich_raises_enrich_failed_error_when_native_api_retries_exhausted(
 def test_enrich_writes_failure_report_and_raises_when_description_missing(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def no_desc_get(url: str, timeout: float) -> bytes:
-        return json.dumps({"referenznummer": "abc123"}).encode()
-
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, no_desc_get)
+    http, _ = _make_http(run_log, json.dumps({"referenznummer": "abc123"}).encode())
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(EnrichFailedError):
             p.enrich(stub)
@@ -704,15 +648,14 @@ def test_enrich_writes_failure_report_and_raises_when_description_missing(
 def test_enrich_writes_failure_report_and_raises_when_description_is_empty_string(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def empty_str_get(url: str, timeout: float) -> bytes:
-        return json.dumps({"stellenangebotsBeschreibung": ""}).encode()
-
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, empty_str_get)
+    http, _ = _make_http(
+        run_log, json.dumps({"stellenangebotsBeschreibung": ""}).encode()
+    )
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(EnrichFailedError):
             p.enrich(stub)
@@ -724,15 +667,14 @@ def test_enrich_writes_failure_report_and_raises_when_description_is_empty_strin
 def test_enrich_writes_failure_report_and_raises_when_description_strips_to_empty(
     run_log: RunLog, tmp_path: Path
 ) -> None:
-    def html_only_get(url: str, timeout: float) -> bytes:
-        return json.dumps({"stellenangebotsBeschreibung": "<br/><p></p>"}).encode()
-
     stub = PositionStub(
         url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
         title="Software Engineer",
         source="Bundesagentur",
     )
-    http = _http(run_log, html_only_get)
+    http, _ = _make_http(
+        run_log, json.dumps({"stellenangebotsBeschreibung": "<br/><p></p>"}).encode()
+    )
     with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
         with pytest.raises(EnrichFailedError):
             p.enrich(stub)

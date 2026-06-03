@@ -173,20 +173,9 @@ class ParserHttp:
             if _transport is not None
             else HttpxParserHttpTransport(headers=headers, timeout=timeout)
         )
-        self._native_client = (
-            self._transport.client
-            if isinstance(self._transport, HttpxParserHttpTransport)
-            else None
-        )
         self._http_get: Callable[[str, float], bytes] = (
             _http_get if _http_get is not None else self._real_http_get
         )
-
-    @property
-    def _client(self) -> httpx.Client:
-        if self._native_client is None:
-            raise AttributeError("ParserHttp transport does not expose an httpx.Client")
-        return self._native_client
 
     def _real_http_get(self, url: str, timeout: float) -> bytes:
         resp = self._transport.get(url, timeout=timeout)

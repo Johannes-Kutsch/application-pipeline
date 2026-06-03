@@ -19,6 +19,7 @@ from application_pipeline.parsers.jobs_beim_staat_html import (
     _parse_posted_date,
     parser_class,
 )
+from tests.parsers.http_helpers import make_scripted_parser_http
 from application_pipeline.parsers.types import (
     City,
     EnrichFailedError,
@@ -45,15 +46,11 @@ def _make_http(
     *outcomes: ScriptedParserHttpOutcome,
     retries: int = 3,
 ) -> tuple[ParserHttp, ScriptedParserHttpTransport]:
-    transport = ScriptedParserHttpTransport(list(outcomes))
-    return (
-        ParserHttp(
-            run_log=run_log,
-            retries=retries,
-            _transport=transport,
-            _sleep=_NO_SLEEP,
-        ),
-        transport,
+    return make_scripted_parser_http(
+        run_log,
+        *outcomes,
+        retries=retries,
+        sleep=_NO_SLEEP,
     )
 
 

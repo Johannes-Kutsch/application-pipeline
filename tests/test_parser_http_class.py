@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -176,6 +178,32 @@ def test_get_passes_configured_timeout_to_scripted_transport(run_log: RunLog):
     assert transport.requests == [
         ScriptedParserHttpRequest(url="http://example.com/", timeout=7.5)
     ]
+
+
+def test_parser_http_constructor_exposes_only_caller_relevant_arguments() -> None:
+    parameters = inspect.signature(ParserHttp).parameters
+
+    assert list(parameters) == ["run_log", "headers", "timeout", "retries"]
+
+
+def test_parser_http_constructor_rejects_retired_underscore_controls(run_log: RunLog):
+    constructor = cast(Any, ParserHttp)
+
+    with pytest.raises(TypeError):
+        constructor(
+            run_log=run_log,
+            _http_get=lambda url, timeout: b"",
+        )
+    with pytest.raises(TypeError):
+        constructor(
+            run_log=run_log,
+            _throttle=_Throttle(),
+        )
+    with pytest.raises(TypeError):
+        constructor(
+            run_log=run_log,
+            _sleep=_NO_SLEEP,
+        )
 
 
 def test_enrich_get_returns_bytes_on_success(run_log: RunLog):

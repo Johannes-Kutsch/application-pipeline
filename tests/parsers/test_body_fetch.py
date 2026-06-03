@@ -9,9 +9,12 @@ import pytest
 from application_pipeline.http import HttpStubNotRetryableError
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.body_fetch import OversizedBodyError, fetch_and_strip
-from application_pipeline.parsers.http import ParserHttp, ScriptedParserHttpOutcome
+from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.types import EnrichFailedError
-from tests.parsers.http_helpers import make_scripted_parser_http
+from tests.parsers.http_helpers import (
+    ScriptedParserHttpOutcome,
+    make_scripted_parser_http,
+)
 
 
 @pytest.fixture

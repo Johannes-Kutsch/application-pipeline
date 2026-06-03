@@ -8,17 +8,16 @@ import pytest
 
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.http import (
-    ParserHttp,
-    ParserHttpTestSeam,
-    ScriptedParserHttpOutcome,
-    ScriptedParserHttpTransport,
-)
+from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
 )
 from application_pipeline.parsers.types import City
+from tests.parsers.http_helpers import (
+    ScriptedParserHttpOutcome,
+    ScriptedParserHttpTransport,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,13 +94,12 @@ def _http(
     *,
     retries: int = 3,
 ) -> ParserHttp:
+    transport = ScriptedParserHttpTransport(list(responses))
     return ParserHttp.for_test(
         run_log=run_log,
-        seam=ParserHttpTestSeam(
-            transport=ScriptedParserHttpTransport(list(responses)),
-            sleep=_NO_SLEEP,
-        ),
+        transport=transport,
         retries=retries,
+        sleep=_NO_SLEEP,
     )
 
 

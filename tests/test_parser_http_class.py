@@ -20,15 +20,14 @@ from application_pipeline.http import (
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.http import (
-    HTTP_CONNECT_TIMEOUT,
-    USER_AGENT,
-    HTTP_READ_TIMEOUT,
-    REQUEST_PACING,
     ParserHttp,
-    ParserHttpTestSeam,
-    ScriptedParserHttpRequest,
-    ScriptedParserHttpResponse,
-    ScriptedParserHttpTransport,
+    _HTTP_CONNECT_TIMEOUT as HTTP_CONNECT_TIMEOUT,
+    _HTTP_READ_TIMEOUT as HTTP_READ_TIMEOUT,
+    _REQUEST_PACING as REQUEST_PACING,
+    _USER_AGENT as USER_AGENT,
+    _ScriptedParserHttpRequest as ScriptedParserHttpRequest,
+    _ScriptedParserHttpResponse as ScriptedParserHttpResponse,
+    _ScriptedParserHttpTransport as ScriptedParserHttpTransport,
     _Throttle,
 )
 from application_pipeline.parsers.types import EnrichFailedError
@@ -146,8 +145,9 @@ def _make_status_error_parser(
     transport = _StatusErrorTransport(url=url, status=status, location=location)
     parser = ParserHttp.for_test(
         run_log=run_log,
-        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+        transport=transport,
         retries=retries,
+        sleep=_NO_SLEEP,
     )
     return parser, transport
 
@@ -163,13 +163,11 @@ def _make_scripted_parser(
     transport = ScriptedParserHttpTransport(list(outcomes))
     parser = ParserHttp.for_test(
         run_log=run_log,
-        seam=ParserHttpTestSeam(
-            transport=transport,
-            throttle=throttle,
-            sleep=sleep,
-        ),
+        transport=transport,
         retries=retries,
         timeout=timeout,
+        throttle=throttle,
+        sleep=sleep,
     )
     return parser, transport
 
@@ -860,8 +858,9 @@ def test_close_prevents_further_http_requests(run_log: RunLog):
     transport = _CloseTrackingTransport(b"ok")
     parser = ParserHttp.for_test(
         run_log=run_log,
-        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+        transport=transport,
         retries=1,
+        sleep=_NO_SLEEP,
     )
     parser.close()
 
@@ -878,8 +877,9 @@ def test_context_manager_closes_transport_on_exit(run_log: RunLog):
     transport = _CloseTrackingTransport(b"ok")
     parser = ParserHttp.for_test(
         run_log=run_log,
-        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+        transport=transport,
         retries=1,
+        sleep=_NO_SLEEP,
     )
     with parser:
         pass
@@ -905,7 +905,8 @@ def test_context_manager_closes_custom_transport_adapter_without_httpx_client(
     transport = _CloseTrackingTransport(b"ok")
     parser = ParserHttp.for_test(
         run_log=run_log,
-        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+        transport=transport,
+        sleep=_NO_SLEEP,
     )
 
     with parser:

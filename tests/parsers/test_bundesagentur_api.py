@@ -19,18 +19,18 @@ from application_pipeline.parsers.bundesagentur_api import (
     BundesagenturParser,
     parser_class,
 )
-from application_pipeline.parsers.http import (
-    ParserHttp,
-    ScriptedParserHttpOutcome,
-    ScriptedParserHttpTransport,
-)
+from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.types import (
     City,
     EnrichFailedError,
     NotServedQuery,
     Remote,
 )
-from tests.parsers.http_helpers import make_scripted_parser_http
+from tests.parsers.http_helpers import (
+    ScriptedParserHttpOutcome,
+    ScriptedParserHttpTransport,
+    make_scripted_parser_http,
+)
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "bundesagentur"
 _NO_SLEEP = lambda _: None  # noqa: E731

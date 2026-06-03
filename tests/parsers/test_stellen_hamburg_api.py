@@ -10,12 +10,7 @@ import pytest
 
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.http import (
-    ParserHttp,
-    ScriptedParserHttpOutcome,
-    ScriptedParserHttpResponse,
-    ScriptedParserHttpTransport,
-)
+from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
@@ -27,7 +22,12 @@ from application_pipeline.parsers.types import (
     NotServedQuery,
     Remote,
 )
-from tests.parsers.http_helpers import make_scripted_parser_http
+from tests.parsers.http_helpers import (
+    ScriptedParserHttpOutcome,
+    ScriptedParserHttpResponse,
+    ScriptedParserHttpTransport,
+    make_scripted_parser_http,
+)
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "stellen_hamburg"
 _NO_SLEEP = lambda _: None  # noqa: E731

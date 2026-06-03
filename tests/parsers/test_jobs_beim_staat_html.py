@@ -9,17 +9,17 @@ import pytest
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers import jobs_beim_staat_html as parser_module
-from application_pipeline.parsers.http import (
-    ParserHttp,
-    ScriptedParserHttpOutcome,
-    ScriptedParserHttpTransport,
-)
+from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.jobs_beim_staat_html import (
     JobsBeimStaatParser,
     _parse_posted_date,
     parser_class,
 )
-from tests.parsers.http_helpers import make_scripted_parser_http
+from tests.parsers.http_helpers import (
+    ScriptedParserHttpOutcome,
+    ScriptedParserHttpTransport,
+    make_scripted_parser_http,
+)
 from application_pipeline.parsers.types import (
     City,
     EnrichFailedError,

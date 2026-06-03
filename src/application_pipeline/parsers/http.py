@@ -18,53 +18,53 @@ from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.types import EnrichFailedError
 
-HTTP_CONNECT_TIMEOUT: float = 5.0
-HTTP_READ_TIMEOUT: float = 30.0
-MAX_RETRIES: int = 3
-BACKOFF_INITIAL: float = 1.0
-BACKOFF_MULTIPLIER: float = 2.0
-BACKOFF_MAX: float = 8.0
-RETRY_STATUSES: frozenset[int] = frozenset({429, 502, 503, 504})
-REQUEST_PACING: float = 0.5
-USER_AGENT: str = "application-pipeline/0.1 (job-discovery-bot)"
+_HTTP_CONNECT_TIMEOUT: float = 5.0
+_HTTP_READ_TIMEOUT: float = 30.0
+_MAX_RETRIES: int = 3
+_BACKOFF_INITIAL: float = 1.0
+_BACKOFF_MULTIPLIER: float = 2.0
+_BACKOFF_MAX: float = 8.0
+_RETRY_STATUSES: frozenset[int] = frozenset({429, 502, 503, 504})
+_REQUEST_PACING: float = 0.5
+_USER_AGENT: str = "application-pipeline/0.1 (job-discovery-bot)"
 
 
-class ParserHttpTransport(Protocol):
+class _ParserHttpTransport(Protocol):
     def get(self, url: str, *, timeout: float) -> httpx.Response: ...
 
     def close(self) -> None: ...
 
 
 @dataclass(frozen=True)
-class ScriptedParserHttpRequest:
+class _ScriptedParserHttpRequest:
     url: str
     timeout: float
 
 
 @dataclass(frozen=True)
-class ScriptedParserHttpResponse:
+class _ScriptedParserHttpResponse:
     status: int
     content: bytes = b""
     headers: Mapping[str, str] | None = None
 
     @classmethod
-    def redirect(cls, *, status: int, location: str) -> ScriptedParserHttpResponse:
+    def redirect(cls, *, status: int, location: str) -> _ScriptedParserHttpResponse:
         return cls(status=status, headers={"location": location})
 
 
-ScriptedParserHttpOutcome = bytes | Exception | ScriptedParserHttpResponse
+_ScriptedParserHttpOutcome = bytes | Exception | _ScriptedParserHttpResponse
 
 
-class ScriptedParserHttpTransport:
-    def __init__(self, outcomes: list[ScriptedParserHttpOutcome]) -> None:
+class _ScriptedParserHttpTransport:
+    def __init__(self, outcomes: list[_ScriptedParserHttpOutcome]) -> None:
         self._outcomes = list(outcomes)
-        self.requests: list[ScriptedParserHttpRequest] = []
+        self.requests: list[_ScriptedParserHttpRequest] = []
         self._closed = False
 
     def get(self, url: str, *, timeout: float) -> httpx.Response:
         if self._closed:
             raise RuntimeError("Cannot send a request, as the client has been closed.")
-        self.requests.append(ScriptedParserHttpRequest(url=url, timeout=timeout))
+        self.requests.append(_ScriptedParserHttpRequest(url=url, timeout=timeout))
         if not self._outcomes:
             raise AssertionError("ScriptedParserHttpTransport ran out of outcomes")
         outcome = self._outcomes.pop(0)
@@ -83,24 +83,24 @@ class ScriptedParserHttpTransport:
     def close(self) -> None:
         self._closed = True
 
-    def __enter__(self) -> ScriptedParserHttpTransport:
+    def __enter__(self) -> _ScriptedParserHttpTransport:
         return self
 
     def __exit__(self, *args: object) -> None:
         self.close()
 
 
-class HttpxParserHttpTransport:
+class _HttpxParserHttpTransport:
     def __init__(
         self,
         *,
         headers: Mapping[str, str] | None = None,
-        timeout: float = HTTP_READ_TIMEOUT,
+        timeout: float = _HTTP_READ_TIMEOUT,
     ) -> None:
-        merged_headers: dict[str, str] = {"User-Agent": USER_AGENT, **(headers or {})}
+        merged_headers: dict[str, str] = {"User-Agent": _USER_AGENT, **(headers or {})}
         self._client = httpx.Client(
             follow_redirects=False,
-            timeout=httpx.Timeout(timeout, connect=HTTP_CONNECT_TIMEOUT),
+            timeout=httpx.Timeout(timeout, connect=_HTTP_CONNECT_TIMEOUT),
             headers=merged_headers,
         )
 
@@ -111,13 +111,13 @@ class HttpxParserHttpTransport:
     def get(self, url: str, *, timeout: float) -> httpx.Response:
         return self._client.get(
             url,
-            timeout=httpx.Timeout(timeout, connect=HTTP_CONNECT_TIMEOUT),
+            timeout=httpx.Timeout(timeout, connect=_HTTP_CONNECT_TIMEOUT),
         )
 
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> HttpxParserHttpTransport:
+    def __enter__(self) -> _HttpxParserHttpTransport:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -129,7 +129,7 @@ class _Throttle:
 
     def __init__(
         self,
-        interval: float = REQUEST_PACING,
+        interval: float = _REQUEST_PACING,
         _now: Callable[[], float] = time.monotonic,
         _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -146,53 +146,46 @@ class _Throttle:
         self._last = now
 
 
-@dataclass(frozen=True)
-class ParserHttpTestSeam:
-    transport: ParserHttpTransport
-    throttle: _Throttle | None = None
-    sleep: Callable[[float], None] = time.sleep
-
-
 class ParserHttp:
     """Owns one transport, one _Throttle, the retry loop, and error wrapping."""
 
     _sleep: Callable[[float], None]
     _throttle: _Throttle
-    _transport: ParserHttpTransport
+    _transport: _ParserHttpTransport
 
     def __init__(
         self,
         *,
         run_log: RunLog,
         headers: Mapping[str, str] | None = None,
-        timeout: float = HTTP_READ_TIMEOUT,
-        retries: int = MAX_RETRIES,
+        timeout: float = _HTTP_READ_TIMEOUT,
+        retries: int = _MAX_RETRIES,
     ) -> None:
         self._run_log = run_log
         self._timeout = timeout
         self._retries = retries
         self._sleep = time.sleep
         self._throttle = _Throttle()
-        self._transport = HttpxParserHttpTransport(headers=headers, timeout=timeout)
+        self._transport = _HttpxParserHttpTransport(headers=headers, timeout=timeout)
 
     @classmethod
     def for_test(
         cls,
         *,
         run_log: RunLog,
-        seam: ParserHttpTestSeam,
-        timeout: float = HTTP_READ_TIMEOUT,
-        retries: int = MAX_RETRIES,
+        transport: _ParserHttpTransport,
+        timeout: float = _HTTP_READ_TIMEOUT,
+        retries: int = _MAX_RETRIES,
+        throttle: _Throttle | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> ParserHttp:
         parser = cls.__new__(cls)
         parser._run_log = run_log
         parser._timeout = timeout
         parser._retries = retries
-        parser._sleep = seam.sleep
-        parser._throttle = (
-            seam.throttle if seam.throttle is not None else _Throttle(_sleep=seam.sleep)
-        )
-        parser._transport = seam.transport
+        parser._sleep = sleep
+        parser._throttle = throttle if throttle is not None else _Throttle(_sleep=sleep)
+        parser._transport = transport
         return parser
 
     def _real_http_get(self, url: str, timeout: float) -> bytes:
@@ -238,9 +231,9 @@ class ParserHttp:
             return f"malformed: {url} status={status}", False
         if status in (401, 403):
             return f"auth: {url} status={status}", True
-        if 500 <= status < 600 and status not in RETRY_STATUSES:
+        if 500 <= status < 600 and status not in _RETRY_STATUSES:
             return f"upstream: {url} status={status}", True
-        if status not in RETRY_STATUSES and not (300 <= status < 400):
+        if status not in _RETRY_STATUSES and not (300 <= status < 400):
             return f"unexpected: {url} status={status}", True
         return None
 
@@ -274,7 +267,10 @@ class ParserHttp:
                         elapsed_ms=elapsed_ms,
                     )
                     self._sleep(
-                        min(BACKOFF_INITIAL * BACKOFF_MULTIPLIER**attempt, BACKOFF_MAX)
+                        min(
+                            _BACKOFF_INITIAL * _BACKOFF_MULTIPLIER**attempt,
+                            _BACKOFF_MAX,
+                        )
                     )
                 continue
             elapsed_ms = round((time.monotonic() - t_start) * 1000)

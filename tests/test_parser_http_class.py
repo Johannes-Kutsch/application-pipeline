@@ -235,6 +235,30 @@ def test_get_retries_then_returns_bytes_on_second_attempt(run_log: RunLog):
     assert len(transport.requests) == 2
 
 
+def test_get_retry_then_success_emits_start_retry_and_ok_events(run_log: RunLog):
+    parser, _ = _make_scripted_parser(
+        run_log,
+        OSError("timeout"),
+        b"ok",
+        retries=2,
+    )
+
+    with parser:
+        assert parser.get("http://example.com/", error_prefix="test") == b"ok"
+
+    events = _read_events(run_log, "parser_http")
+    assert [event["event"] for event in events] == [
+        "http_get_start",
+        "http_get_retry",
+        "http_get_ok",
+    ]
+    assert events[0]["url"] == "http://example.com/"
+    assert events[1]["url"] == "http://example.com/"
+    assert events[1]["attempt"] == 1
+    assert events[2]["url"] == "http://example.com/"
+    assert events[2]["bytes"] == 2
+
+
 def test_enrich_get_retries_then_returns_bytes_on_second_attempt(run_log: RunLog):
     parser, transport = _make_scripted_parser(
         run_log,
@@ -271,6 +295,20 @@ def test_get_parser_error_chains_to_underlying_cause(run_log: RunLog):
     parser, _ = _make_scripted_parser(run_log, cause, retries=1)
     with pytest.raises(ParserError) as exc_info:
         parser.get("http://example.com/", error_prefix="p")
+
+    assert exc_info.value.__cause__ is cause
+
+
+@pytest.mark.parametrize("method_name", ["get", "enrich_get"])
+def test_retry_exhaustion_preserves_original_cause_and_prefix(
+    run_log: RunLog, method_name: str
+):
+    cause = OSError("connection refused")
+    parser, _ = _make_scripted_parser(run_log, cause, cause, retries=2)
+
+    method = getattr(parser, method_name)
+    with pytest.raises(ParserError, match="myprefix") as exc_info:
+        method("http://example.com/", error_prefix="myprefix")
 
     assert exc_info.value.__cause__ is cause
 
@@ -449,6 +487,42 @@ def test_throttle_fires_once_per_get_across_multiple_retry_attempts(run_log: Run
     )
     parser.get("http://example.com/", error_prefix="p")
     assert len(transport.requests) == 3
+
+
+def test_throttle_fires_once_per_enrich_get_across_multiple_retry_attempts(
+    run_log: RunLog,
+):
+    now_values = iter([0.0])
+    throttle = _Throttle(interval=0.5, _now=lambda: next(now_values), _sleep=_NO_SLEEP)
+
+    parser, transport = _make_scripted_parser(
+        run_log,
+        OSError("transient"),
+        OSError("transient"),
+        b"ok",
+        retries=3,
+        throttle=throttle,
+    )
+    parser.enrich_get("http://example.com/", error_prefix="p")
+
+    assert len(transport.requests) == 3
+
+
+def test_retry_backoff_sleeps_between_attempts_without_real_waiting(run_log: RunLog):
+    sleeps: list[float] = []
+    throttle = _Throttle(interval=0.5, _now=lambda: 0.0, _sleep=_NO_SLEEP)
+    parser, _ = _make_scripted_parser(
+        run_log,
+        OSError("transient"),
+        OSError("transient"),
+        b"ok",
+        retries=3,
+        sleep=sleeps.append,
+        throttle=throttle,
+    )
+
+    assert parser.get("http://example.com/", error_prefix="p") == b"ok"
+    assert sleeps == [1.0, 2.0]
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.resources
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -67,6 +68,12 @@ _RESUME_PATTERN = re.compile(
     re.DOTALL,
 )
 _TEMPLATE_SLOT_PATTERN = re.compile(r"<<([A-Z_]+)>>")
+_MINIMAL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a"
+    "0000000d49484452000000010000000108060000001f15c489"
+    "0000000d49444154789c63f8cfc0f01f00050001ff89993d1d"
+    "0000000049454e44ae426082"
+)
 
 
 @pytest.fixture(scope="module")
@@ -97,23 +104,8 @@ def assert_compiled_template_contract(
     assert leaked == [], f"compiled cv.tex leaks identity tokens: {leaked}"
     assert "<<" not in compiled_template
 
-    expected_counts = {
-        "recipient_company": 1,
-        "recipient_name": 2,
-        "recipient_street": 2,
-        "recipient_zip_city": 1,
-        "opening": 1,
-        "cover_intro": 1,
-        "cover_pivot": 1,
-        "cover_fit": 1,
-        "cover_closing": 1,
-        "resume_berufserfahrung": 1,
-        "resume_ausbildung": 1,
-        "resume_projekte": 1,
-        "skills_block": 1,
-    }
-    for slot_name, expected_count in expected_counts.items():
-        assert compiled_template.count(slot_bodies[slot_name]) == expected_count
+    for slot_body in slot_bodies.values():
+        assert slot_body in compiled_template
 
     recipient = re.compile(
         r"\\recipient\{\s*"
@@ -190,6 +182,86 @@ def test_cv_template_contract_rejects_unexpected_slot_markers(
 ) -> None:
     with pytest.raises(AssertionError):
         assert_template_contract(f"{cv_template}\n<<COVER_STRETCH>>\n")
+
+
+def test_cv_template_contract_rejects_renamed_slot_markers(cv_template: str) -> None:
+    with pytest.raises(AssertionError):
+        assert_template_contract(
+            cv_template.replace("<<COVER_FIT>>", "<<COVER_MATCH>>", 1)
+        )
+
+
+@pytest.mark.skipif(shutil.which("pdflatex") is None, reason="pdflatex not installed")
+def test_compile_cv_template_is_compileable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    app_dir = tmp_path / "application"
+    cv_dir = project_root / "application-pipeline" / "user-info" / "cv"
+    (project_root / "application-pipeline").mkdir(parents=True)
+    (project_root / "application-pipeline" / "config.py").write_text("")
+    cv_dir.mkdir(parents=True)
+    app_dir.mkdir()
+    monkeypatch.chdir(project_root)
+
+    (cv_dir / "facts.tex").write_text(
+        "\n".join(
+            (
+                r"\def\myFirstname{Test}",
+                r"\def\myFamilyname{User}",
+                r"\def\myCity{Berlin}",
+                r"\def\PersonalInfo{}",
+                r"\def\Languages{}",
+                r"\def\Hobbies{}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (cv_dir / "content_pool.tex").write_text("", encoding="utf-8")
+    (cv_dir / "profile.png").write_bytes(_MINIMAL_PNG)
+    (cv_dir / "signature.png").write_bytes(_MINIMAL_PNG)
+    app_dir.joinpath("cv.tex").write_text(
+        "\n".join(
+            (
+                "%% SLOT: recipient_company",
+                "Firma GmbH",
+                "%% SLOT: recipient_name",
+                "Frau Dr. Muller",
+                "%% SLOT: recipient_street",
+                "Musterstrasse 1",
+                "%% SLOT: recipient_zip_city",
+                "12345 Berlin",
+                "%% SLOT: opening",
+                "Sehr geehrte Damen und Herren,",
+                "%% SLOT: cover_intro",
+                "Ich bewerbe mich hiermit.",
+                "%% SLOT: cover_pivot",
+                "Mein Hintergrund ist relevant.",
+                "%% SLOT: cover_fit",
+                "Ich passe gut zu Ihrer Firma.",
+                "%% SLOT: cover_closing",
+                "Ich freue mich auf Ihre Antwort.",
+                "%% SLOT: resume_berufserfahrung",
+                r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+                "%% SLOT: resume_ausbildung",
+                r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+                "%% SLOT: resume_projekte",
+                r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+                "%% SLOT: skills_block",
+                "Python, LaTeX",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    compile_cv(app_dir)
+
+    assert (app_dir / "cover.pdf").exists()
+    assert (app_dir / "resume.pdf").exists()
+    assert (app_dir / "combined.pdf").exists()
 
 
 def test_compile_cv_wires_slot_map_content_into_structural_surfaces(

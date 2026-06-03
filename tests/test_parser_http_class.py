@@ -7,7 +7,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-import respx
 
 from application_pipeline.http import (
     HttpParserFatalError,
@@ -17,17 +16,15 @@ from application_pipeline.http import (
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.errors import ParserError
 from application_pipeline.parsers.http import (
-    HTTP_CONNECT_TIMEOUT,
     HTTP_READ_TIMEOUT,
     REQUEST_PACING,
-    USER_AGENT,
-    HttpxParserHttpTransport,
     ParserHttp,
     ScriptedParserHttpRequest,
     ScriptedParserHttpResponse,
     ScriptedParserHttpTransport,
     _Throttle,
 )
+from application_pipeline.parsers.types import EnrichFailedError
 
 _NO_SLEEP = lambda _: None  # noqa: E731
 
@@ -38,15 +35,24 @@ def run_log(tmp_path: Path) -> RunLog:
 
 
 class _CloseTrackingTransport:
-    def __init__(self, response: httpx.Response) -> None:
-        self._response = response
+    def __init__(
+        self, *outcomes: bytes | Exception | ScriptedParserHttpResponse
+    ) -> None:
+        self._transport = ScriptedParserHttpTransport(list(outcomes))
         self.closed = False
+        self.close_calls = 0
+
+    @property
+    def requests(self) -> list[ScriptedParserHttpRequest]:
+        return self._transport.requests
 
     def get(self, url: str, *, timeout: float) -> httpx.Response:
-        return self._response
+        return self._transport.get(url, timeout=timeout)
 
     def close(self) -> None:
+        self.close_calls += 1
         self.closed = True
+        self._transport.close()
 
 
 def _make_scripted_parser(
@@ -70,58 +76,78 @@ def _make_scripted_parser(
 
 
 # ---------------------------------------------------------------------------
-# Scripted transport contract
+# Scripted transport facts stay observable through ParserHttp
 # ---------------------------------------------------------------------------
 
 
-def test_scripted_parser_http_transport_replays_ordered_outcomes_and_records_requests():
-    transport = ScriptedParserHttpTransport(
-        [
-            b"first",
-            OSError("transient"),
-            ScriptedParserHttpResponse.redirect(
-                status=302,
-                location="http://other.example/landing",
-            ),
-        ]
+def test_parser_http_replays_scripted_outcomes_and_records_requests(
+    run_log: RunLog,
+):
+    parser, transport = _make_scripted_parser(
+        run_log,
+        b"first",
+        OSError("transient"),
+        b"second",
+        ScriptedParserHttpResponse.redirect(
+            status=302,
+            location="http://other.example/landing",
+        ),
     )
 
-    first = transport.get("http://example.com/1", timeout=1.5)
-    assert first.status_code == 200
-    assert first.content == b"first"
-
-    with pytest.raises(OSError, match="transient"):
-        transport.get("http://example.com/2", timeout=2.5)
-
-    redirect = transport.get("http://example.com/3", timeout=3.5)
-    assert redirect.status_code == 302
-    assert redirect.headers["location"] == "http://other.example/landing"
+    assert parser.get("http://example.com/1", error_prefix="discover") == b"first"
+    assert parser.enrich_get("http://example.com/2", error_prefix="enrich") == b"second"
+    with pytest.raises(HttpRedirectResponse, match="302"):
+        parser.get("http://example.com/3", error_prefix="discover")
 
     assert transport.requests == [
-        ScriptedParserHttpRequest(url="http://example.com/1", timeout=1.5),
-        ScriptedParserHttpRequest(url="http://example.com/2", timeout=2.5),
-        ScriptedParserHttpRequest(url="http://example.com/3", timeout=3.5),
+        ScriptedParserHttpRequest(
+            url="http://example.com/1",
+            timeout=HTTP_READ_TIMEOUT,
+        ),
+        ScriptedParserHttpRequest(
+            url="http://example.com/2",
+            timeout=HTTP_READ_TIMEOUT,
+        ),
+        ScriptedParserHttpRequest(
+            url="http://example.com/2",
+            timeout=HTTP_READ_TIMEOUT,
+        ),
+        ScriptedParserHttpRequest(
+            url="http://example.com/3",
+            timeout=HTTP_READ_TIMEOUT,
+        ),
     ]
 
 
-def test_scripted_parser_http_transport_raises_when_outcomes_are_exhausted():
-    transport = ScriptedParserHttpTransport([b"only"])
-    transport.get("http://example.com/1", timeout=1.0)
+def test_parser_http_wraps_exhausted_scripted_outcomes(run_log: RunLog):
+    parser, transport = _make_scripted_parser(run_log, b"only", retries=1)
+    assert parser.get("http://example.com/1", error_prefix="discover") == b"only"
 
-    with pytest.raises(
-        AssertionError, match="ScriptedParserHttpTransport ran out of outcomes"
-    ):
-        transport.get("http://example.com/2", timeout=2.0)
+    with pytest.raises(ParserError, match="discover") as exc_info:
+        parser.get("http://example.com/2", error_prefix="discover")
+
+    assert isinstance(exc_info.value.__cause__, AssertionError)
+    assert "ran out of outcomes" in str(exc_info.value.__cause__)
+    assert transport.requests == [
+        ScriptedParserHttpRequest(
+            url="http://example.com/1", timeout=HTTP_READ_TIMEOUT
+        ),
+        ScriptedParserHttpRequest(
+            url="http://example.com/2", timeout=HTTP_READ_TIMEOUT
+        ),
+    ]
 
 
-def test_scripted_parser_http_transport_rejects_requests_after_close():
-    transport = ScriptedParserHttpTransport([b"unused"])
-    transport.close()
+def test_parser_http_wraps_requests_after_scripted_transport_close(run_log: RunLog):
+    parser, transport = _make_scripted_parser(run_log, b"unused", retries=1)
+    parser.close()
 
-    with pytest.raises(
-        RuntimeError, match="Cannot send a request, as the client has been closed."
-    ):
-        transport.get("http://example.com/", timeout=1.0)
+    with pytest.raises(ParserError, match="discover") as exc_info:
+        parser.get("http://example.com/", error_prefix="discover")
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert "client has been closed" in str(exc_info.value.__cause__)
+    assert transport.requests == []
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +175,18 @@ def test_get_passes_configured_timeout_to_scripted_transport(run_log: RunLog):
     ]
 
 
+def test_enrich_get_returns_bytes_on_success(run_log: RunLog):
+    parser, transport = _make_scripted_parser(run_log, b"hello")
+
+    assert parser.enrich_get("http://example.com/", error_prefix="test") == b"hello"
+    assert transport.requests == [
+        ScriptedParserHttpRequest(
+            url="http://example.com/",
+            timeout=HTTP_READ_TIMEOUT,
+        )
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Retry-then-success
 # ---------------------------------------------------------------------------
@@ -162,6 +200,18 @@ def test_get_retries_then_returns_bytes_on_second_attempt(run_log: RunLog):
         retries=2,
     )
     result = parser.get("http://example.com/", error_prefix="test")
+    assert result == b"ok"
+    assert len(transport.requests) == 2
+
+
+def test_enrich_get_retries_then_returns_bytes_on_second_attempt(run_log: RunLog):
+    parser, transport = _make_scripted_parser(
+        run_log,
+        OSError("timeout"),
+        b"ok",
+        retries=2,
+    )
+    result = parser.enrich_get("http://example.com/", error_prefix="test")
     assert result == b"ok"
     assert len(transport.requests) == 2
 
@@ -217,6 +267,15 @@ def test_get_stub_not_retryable_cause_is_original_exception(run_log: RunLog):
     assert exc_info.value.__cause__ is original
 
 
+def test_enrich_get_wraps_stub_not_retryable_as_enrich_failed_error(run_log: RunLog):
+    parser, _ = _make_scripted_parser(
+        run_log,
+        ScriptedParserHttpResponse(status=404),
+    )
+    with pytest.raises(EnrichFailedError, match="myprefix"):
+        parser.enrich_get("http://example.com/", error_prefix="myprefix")
+
+
 # ---------------------------------------------------------------------------
 # Parser-fatal HTTP errors (401/403/5xx/unknown) → HttpParserFatalError propagates
 # ---------------------------------------------------------------------------
@@ -234,6 +293,16 @@ def test_get_parser_fatal_is_not_wrapped_in_parser_error(run_log: RunLog):
     with pytest.raises(Exception) as exc_info:
         parser.get("http://example.com/", error_prefix="p")
     assert not isinstance(exc_info.value, ParserError)
+
+
+def test_enrich_get_parser_fatal_is_not_wrapped_in_enrich_failed_error(
+    run_log: RunLog,
+):
+    parser, _ = _make_scripted_parser(run_log, ScriptedParserHttpResponse(status=401))
+    with pytest.raises(Exception) as exc_info:
+        parser.enrich_get("http://example.com/", error_prefix="p")
+    assert isinstance(exc_info.value, HttpParserFatalError)
+    assert not isinstance(exc_info.value, EnrichFailedError)
 
 
 def test_get_parser_fatal_fires_on_first_attempt_without_further_tries(
@@ -352,117 +421,37 @@ def test_throttle_fires_once_per_get_across_multiple_retry_attempts(run_log: Run
 
 
 # ---------------------------------------------------------------------------
-# Real httpx adapter header + timeout behavior (via respx)
+# Explicit close/context boundary owns the transport lifetime
 # ---------------------------------------------------------------------------
 
 
-@respx.mock
-def test_real_httpx_sends_default_user_agent_header(run_log: RunLog):
-    route = respx.get("http://example.com/jobs").mock(
-        return_value=httpx.Response(200, content=b"ok")
-    )
-
-    with ParserHttp(run_log=run_log) as parser:
-        parser.get("http://example.com/jobs", error_prefix="p")
-
-    request = route.calls.last.request
-    assert request.headers.get("user-agent") == USER_AGENT
-
-
-@respx.mock
-def test_real_httpx_transport_sends_per_instance_custom_header(run_log: RunLog):
-    route = respx.get("http://example.com/jobs").mock(
-        return_value=httpx.Response(200, content=b"ok")
-    )
-
-    with HttpxParserHttpTransport(headers={"X-Custom": "value"}) as transport:
-        parser = ParserHttp(run_log=run_log, _transport=transport, _sleep=_NO_SLEEP)
-        parser.get("http://example.com/jobs", error_prefix="p")
-
-    request = route.calls.last.request
-    assert request.headers.get("x-custom") == "value"
-    assert request.headers.get("user-agent") == USER_AGENT
-
-
-@respx.mock
-def test_real_httpx_transport_custom_header_does_not_override_user_agent(
-    run_log: RunLog,
-):
-    route = respx.get("http://example.com/jobs").mock(
-        return_value=httpx.Response(200, content=b"ok")
-    )
-
-    with HttpxParserHttpTransport(headers={"X-Other": "x"}) as transport:
-        parser = ParserHttp(run_log=run_log, _transport=transport, _sleep=_NO_SLEEP)
-        parser.get("http://example.com/jobs", error_prefix="p")
-
-    request = route.calls.last.request
-    assert request.headers.get("user-agent") == USER_AGENT
-
-
-# ---------------------------------------------------------------------------
-# Real httpx adapter preserves configured timeout behavior
-# ---------------------------------------------------------------------------
-
-
-@respx.mock
-def test_real_httpx_transport_uses_call_timeout_with_fixed_connect_timeout(
-    run_log: RunLog,
-):
-    captured: dict[str, object] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured.update(request.extensions["timeout"])
-        return httpx.Response(200, content=b"ok")
-
-    respx.get("http://example.com/jobs").mock(side_effect=handler)
-
-    timeout = 7.5
-    with HttpxParserHttpTransport(timeout=HTTP_READ_TIMEOUT) as transport:
-        parser = ParserHttp(
-            run_log=run_log,
-            timeout=timeout,
-            _transport=transport,
-            _sleep=_NO_SLEEP,
-        )
-        parser.get("http://example.com/jobs", error_prefix="p")
-
-    assert captured == {
-        "connect": HTTP_CONNECT_TIMEOUT,
-        "read": timeout,
-        "write": timeout,
-        "pool": timeout,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Explicit close/context boundary owns the real client lifetime
-# ---------------------------------------------------------------------------
-
-
-@respx.mock
 def test_close_prevents_further_http_requests(run_log: RunLog):
-    route = respx.get("http://example.com/jobs").mock(
-        return_value=httpx.Response(200, content=b"ok")
+    transport = _CloseTrackingTransport(b"ok")
+    parser = ParserHttp(
+        run_log=run_log,
+        retries=1,
+        _transport=transport,
+        _sleep=_NO_SLEEP,
     )
-
-    parser = ParserHttp(run_log=run_log, retries=1, _sleep=_NO_SLEEP)
     parser.close()
 
     with pytest.raises(ParserError, match="p") as exc_info:
         parser.get("http://example.com/jobs", error_prefix="p")
 
     assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert route.call_count == 0
+    assert transport.closed is True
+    assert transport.close_calls == 1
+    assert transport.requests == []
 
 
-@respx.mock
-def test_context_manager_closes_httpx_transport_on_exit(run_log: RunLog):
-    route = respx.get("http://example.com/jobs").mock(
-        return_value=httpx.Response(200, content=b"ok")
+def test_context_manager_closes_transport_on_exit(run_log: RunLog):
+    transport = _CloseTrackingTransport(b"ok")
+    parser = ParserHttp(
+        run_log=run_log,
+        retries=1,
+        _transport=transport,
+        _sleep=_NO_SLEEP,
     )
-
-    parser = ParserHttp(run_log=run_log, retries=1, _sleep=_NO_SLEEP)
     with parser:
         pass
 
@@ -470,7 +459,9 @@ def test_context_manager_closes_httpx_transport_on_exit(run_log: RunLog):
         parser.get("http://example.com/jobs", error_prefix="p")
 
     assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert route.call_count == 0
+    assert transport.closed is True
+    assert transport.close_calls == 1
+    assert transport.requests == []
 
 
 def test_context_manager_returns_self(run_log: RunLog):
@@ -482,19 +473,19 @@ def test_context_manager_returns_self(run_log: RunLog):
 def test_context_manager_closes_custom_transport_adapter_without_httpx_client(
     run_log: RunLog,
 ):
-    transport = _CloseTrackingTransport(
-        httpx.Response(
-            200,
-            content=b"ok",
-            request=httpx.Request("GET", "http://example.com/jobs"),
-        )
-    )
+    transport = _CloseTrackingTransport(b"ok")
     parser = ParserHttp(run_log=run_log, _transport=transport, _sleep=_NO_SLEEP)
 
     with parser:
         assert parser.get("http://example.com/jobs", error_prefix="p") == b"ok"
 
     assert transport.closed is True
+    assert transport.requests == [
+        ScriptedParserHttpRequest(
+            url="http://example.com/jobs",
+            timeout=HTTP_READ_TIMEOUT,
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -654,18 +645,17 @@ def test_get_redirect_fires_on_first_attempt_without_retry(run_log: RunLog):
     assert len(transport.requests) == 1
 
 
-@respx.mock
-def test_real_httpx_does_not_follow_redirects(run_log: RunLog):
-    redirect_route = respx.get("http://example.com/job/1").mock(
-        return_value=httpx.Response(302, headers={"Location": "http://example.com/x"})
-    )
-    target_route = respx.get("http://example.com/x").mock(
-        return_value=httpx.Response(200, content=b"target")
+def test_enrich_get_raises_redirect_response_on_3xx(run_log: RunLog):
+    parser, _ = _make_scripted_parser(
+        run_log,
+        ScriptedParserHttpResponse.redirect(
+            status=302,
+            location="http://example.com/x",
+        ),
     )
 
-    with ParserHttp(run_log=run_log) as parser:
-        with pytest.raises(HttpRedirectResponse):
-            parser.get("http://example.com/job/1", error_prefix="p")
+    with pytest.raises(HttpRedirectResponse) as exc_info:
+        parser.enrich_get("http://example.com/job/1", error_prefix="p")
 
-    assert redirect_route.call_count == 1
-    assert target_route.call_count == 0
+    assert exc_info.value.status == 302
+    assert exc_info.value.location == "http://example.com/x"

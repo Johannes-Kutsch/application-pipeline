@@ -26,7 +26,10 @@ def _jobname(cmd: list[str]) -> str | None:
 def _write_fake_pdf(cmd: list[str], cwd: Path) -> None:
     jobname = _jobname(cmd)
     if jobname:
-        (cwd / f"{jobname}.pdf").write_bytes(b"%PDF-1.4 fake\n")
+        rendered_cv = (cwd / "cv.tex").read_text(encoding="utf-8")
+        (cwd / f"{jobname}.pdf").write_bytes(
+            b"%PDF-1.4 fake\n" + rendered_cv.encode("utf-8")
+        )
 
 
 def _fake_pdflatex_success(
@@ -84,6 +87,20 @@ def test_compile_cv_produces_three_pdfs(
     assert (app_dir / "combined.pdf").exists()
 
 
+def test_compile_cv_outputs_include_substituted_slot_content(
+    app_dir: Path,
+    project_root: Path,
+    patch_subprocess: Callable[[RunFn], None],
+) -> None:
+    patch_subprocess(_fake_pdflatex_success)
+
+    compile_cv(app_dir)
+
+    assert b"Ich bewerbe mich hiermit." in (app_dir / "cover.pdf").read_bytes()
+    assert b"Developer" in (app_dir / "resume.pdf").read_bytes()
+    assert b"Python, LaTeX" in (app_dir / "combined.pdf").read_bytes()
+
+
 def test_compile_cv_removes_build_dir_on_success(
     app_dir: Path,
     project_root: Path,
@@ -108,7 +125,9 @@ def test_compile_cv_overwrites_existing_pdfs(
     compile_cv(app_dir)
 
     for name in ("cover", "resume", "combined"):
-        assert (app_dir / f"{name}.pdf").read_bytes() == b"%PDF-1.4 fake\n"
+        pdf_bytes = (app_dir / f"{name}.pdf").read_bytes()
+        assert pdf_bytes != b"stale"
+        assert pdf_bytes.startswith(b"%PDF-1.4 fake\n")
 
 
 def test_compile_cv_ignores_application_pipeline_home(

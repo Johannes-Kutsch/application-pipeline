@@ -5,6 +5,7 @@ from collections.abc import Callable
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.http import (
     ParserHttp,
+    ParserHttpTestSeam,
     ScriptedParserHttpOutcome,
     ScriptedParserHttpTransport,
 )
@@ -18,11 +19,10 @@ def make_scripted_parser_http(
 ) -> tuple[ParserHttp, ScriptedParserHttpTransport]:
     transport = ScriptedParserHttpTransport(list(outcomes))
     return (
-        ParserHttp(
+        ParserHttp.for_test(
             run_log=run_log,
+            seam=ParserHttpTestSeam(transport=transport, sleep=sleep),
             retries=retries,
-            _transport=transport,
-            _sleep=sleep,
         ),
         transport,
     )

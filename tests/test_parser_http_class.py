@@ -19,6 +19,7 @@ from application_pipeline.parsers.http import (
     HTTP_READ_TIMEOUT,
     REQUEST_PACING,
     ParserHttp,
+    ParserHttpTestSeam,
     ScriptedParserHttpRequest,
     ScriptedParserHttpResponse,
     ScriptedParserHttpTransport,
@@ -64,13 +65,15 @@ def _make_scripted_parser(
     throttle: _Throttle | None = None,
 ) -> tuple[ParserHttp, ScriptedParserHttpTransport]:
     transport = ScriptedParserHttpTransport(list(outcomes))
-    parser = ParserHttp(
+    parser = ParserHttp.for_test(
         run_log=run_log,
+        seam=ParserHttpTestSeam(
+            transport=transport,
+            throttle=throttle,
+            sleep=sleep,
+        ),
         retries=retries,
         timeout=timeout,
-        _transport=transport,
-        _throttle=throttle,
-        _sleep=sleep,
     )
     return parser, transport
 
@@ -427,11 +430,10 @@ def test_throttle_fires_once_per_get_across_multiple_retry_attempts(run_log: Run
 
 def test_close_prevents_further_http_requests(run_log: RunLog):
     transport = _CloseTrackingTransport(b"ok")
-    parser = ParserHttp(
+    parser = ParserHttp.for_test(
         run_log=run_log,
+        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
         retries=1,
-        _transport=transport,
-        _sleep=_NO_SLEEP,
     )
     parser.close()
 
@@ -446,11 +448,10 @@ def test_close_prevents_further_http_requests(run_log: RunLog):
 
 def test_context_manager_closes_transport_on_exit(run_log: RunLog):
     transport = _CloseTrackingTransport(b"ok")
-    parser = ParserHttp(
+    parser = ParserHttp.for_test(
         run_log=run_log,
+        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
         retries=1,
-        _transport=transport,
-        _sleep=_NO_SLEEP,
     )
     with parser:
         pass
@@ -474,7 +475,10 @@ def test_context_manager_closes_custom_transport_adapter_without_httpx_client(
     run_log: RunLog,
 ):
     transport = _CloseTrackingTransport(b"ok")
-    parser = ParserHttp(run_log=run_log, _transport=transport, _sleep=_NO_SLEEP)
+    parser = ParserHttp.for_test(
+        run_log=run_log,
+        seam=ParserHttpTestSeam(transport=transport, sleep=_NO_SLEEP),
+    )
 
     with parser:
         assert parser.get("http://example.com/jobs", error_prefix="p") == b"ok"

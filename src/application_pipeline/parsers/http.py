@@ -146,8 +146,19 @@ class _Throttle:
         self._last = now
 
 
+@dataclass(frozen=True)
+class ParserHttpTestSeam:
+    transport: ParserHttpTransport
+    throttle: _Throttle | None = None
+    sleep: Callable[[float], None] = time.sleep
+
+
 class ParserHttp:
     """Owns one transport, one _Throttle, the retry loop, and error wrapping."""
+
+    _sleep: Callable[[float], None]
+    _throttle: _Throttle
+    _transport: ParserHttpTransport
 
     def __init__(
         self,
@@ -156,26 +167,33 @@ class ParserHttp:
         headers: Mapping[str, str] | None = None,
         timeout: float = HTTP_READ_TIMEOUT,
         retries: int = MAX_RETRIES,
-        _http_get: Callable[[str, float], bytes] | None = None,
-        _transport: ParserHttpTransport | None = None,
-        _throttle: _Throttle | None = None,
-        _sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._run_log = run_log
         self._timeout = timeout
         self._retries = retries
-        self._sleep = _sleep
-        self._throttle = (
-            _throttle if _throttle is not None else _Throttle(_sleep=_sleep)
+        self._sleep = time.sleep
+        self._throttle = _Throttle()
+        self._transport = HttpxParserHttpTransport(headers=headers, timeout=timeout)
+
+    @classmethod
+    def for_test(
+        cls,
+        *,
+        run_log: RunLog,
+        seam: ParserHttpTestSeam,
+        timeout: float = HTTP_READ_TIMEOUT,
+        retries: int = MAX_RETRIES,
+    ) -> ParserHttp:
+        parser = cls.__new__(cls)
+        parser._run_log = run_log
+        parser._timeout = timeout
+        parser._retries = retries
+        parser._sleep = seam.sleep
+        parser._throttle = (
+            seam.throttle if seam.throttle is not None else _Throttle(_sleep=seam.sleep)
         )
-        self._transport = (
-            _transport
-            if _transport is not None
-            else HttpxParserHttpTransport(headers=headers, timeout=timeout)
-        )
-        self._http_get: Callable[[str, float], bytes] = (
-            _http_get if _http_get is not None else self._real_http_get
-        )
+        parser._transport = seam.transport
+        return parser
 
     def _real_http_get(self, url: str, timeout: float) -> bytes:
         resp = self._transport.get(url, timeout=timeout)
@@ -231,7 +249,7 @@ class ParserHttp:
             )
             t_start = time.monotonic()
             try:
-                result = self._http_get(url, self._timeout)
+                result = self._real_http_get(url, self._timeout)
             except (HttpRedirectResponse, HttpNotRetryableError):
                 raise
             except Exception as exc:

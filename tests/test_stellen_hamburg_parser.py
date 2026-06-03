@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.http import ParserHttp
+from application_pipeline.parsers.http import (
+    ParserHttp,
+    ParserHttpTestSeam,
+    ScriptedParserHttpOutcome,
+    ScriptedParserHttpTransport,
+)
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
@@ -84,29 +89,27 @@ def _detail_html(
     return f"<html><head>{script}</head><body></body></html>".encode()
 
 
-def _make_search_get(responses: list[bytes]) -> Callable[[str, float], bytes]:
-    it = iter(responses)
-
-    def http_get(url: str, timeout: float) -> bytes:
-        return next(it)
-
-    return http_get
+def _make_search_get(responses: list[bytes]) -> list[bytes]:
+    return responses
 
 
-def _make_get(responses: list[bytes]) -> Callable[[str, float], bytes]:
-    it = iter(responses)
-
-    def http_get(url: str, timeout: float) -> bytes:
-        return next(it)
-
-    return http_get
+def _make_get(responses: list[bytes]) -> list[bytes]:
+    return responses
 
 
 def _http(
-    run_log: RunLog, http_get: Callable[[str, float], bytes], *, retries: int = 3
+    run_log: RunLog,
+    responses: Sequence[ScriptedParserHttpOutcome],
+    *,
+    retries: int = 3,
 ) -> ParserHttp:
-    return ParserHttp(
-        run_log=run_log, _http_get=http_get, retries=retries, _sleep=_NO_SLEEP
+    return ParserHttp.for_test(
+        run_log=run_log,
+        seam=ParserHttpTestSeam(
+            transport=ScriptedParserHttpTransport(list(responses)),
+            sleep=_NO_SLEEP,
+        ),
+        retries=retries,
     )
 
 
@@ -298,12 +301,9 @@ def test_discover_returns_all_results_without_cap(run_log: RunLog) -> None:
 def test_discover_raises_parser_error_on_http_failure(run_log: RunLog) -> None:
     from application_pipeline.parsers import ParserError
 
-    def failing_get(url: str, timeout: float) -> bytes:
-        raise OSError("refused")
-
     with StellenHamburgParser(
         run_log=run_log,
-        _http=_http(run_log, failing_get, retries=1),
+        _http=_http(run_log, [OSError("refused")], retries=1),
     ) as p:
         with pytest.raises(ParserError):
             list(p.discover(_query()))

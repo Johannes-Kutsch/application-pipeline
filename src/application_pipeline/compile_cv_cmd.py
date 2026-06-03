@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from application_pipeline.init_cmd import home_dir, missing_config_message
@@ -16,80 +17,99 @@ _LATEX_SUFFIXES = frozenset({".tex", ".cls", ".sty"})
 
 
 def compile_cv(app_dir: Path) -> None:
-    config_path = home_dir() / "config.py"
-    if not config_path.exists():
+    _CompileCvWorkflow(app_dir).run()
+
+
+@dataclass(slots=True)
+class _CompileCvWorkflow:
+    app_dir: Path
+
+    def run(self) -> None:
+        self._require_config()
+        app_dir = self.app_dir.resolve()
+        slots = self._parse_slot_map(app_dir)
+        build_dir = app_dir / ".build"
+        build_dir.mkdir(exist_ok=True)
+        self._stage_latex(build_dir, slots)
+        self._run_builds(build_dir)
+        self._publish_pdfs(build_dir, app_dir)
+        shutil.rmtree(build_dir)
+
+    def _require_config(self) -> None:
+        config_path = home_dir() / "config.py"
+        if config_path.exists():
+            return
         print(missing_config_message(Path.cwd()), file=sys.stderr)
         sys.exit(2)
 
-    app_dir = app_dir.resolve()
-    cv_tex = app_dir / "cv.tex"
-    if not cv_tex.exists():
-        print(
-            f"no cv.tex in {app_dir} — did you forget to run /write-cv?",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    def _parse_slot_map(self, app_dir: Path) -> dict[str, str]:
+        cv_tex = app_dir / "cv.tex"
+        if not cv_tex.exists():
+            print(
+                f"no cv.tex in {app_dir} — did you forget to run /write-cv?",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
-    try:
-        slots = slot_map.parse(cv_tex)
-    except slot_map.SlotMapError as exc:
-        print(str(exc), file=sys.stderr)
-        sys.exit(1)
+        try:
+            return slot_map.parse(cv_tex)
+        except slot_map.SlotMapError as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
 
-    cv_data_dir = (home_dir() / "user-info" / "cv").resolve()
-    build_dir = app_dir / ".build"
+    def _stage_latex(self, build_dir: Path, slots: dict[str, str]) -> None:
+        pkg = importlib.resources.files("application_pipeline.latex")
+        template_text: str | None = None
+        for item in pkg.iterdir():
+            if Path(item.name).suffix not in _LATEX_SUFFIXES:
+                continue
+            if item.name == "cv_template.tex":
+                template_text = item.read_text(encoding="utf-8")
+            else:
+                (build_dir / item.name).write_bytes(item.read_bytes())
 
-    build_dir.mkdir(exist_ok=True)
+        if template_text is None:
+            raise FileNotFoundError("cv_template.tex not found in package")
 
-    pkg = importlib.resources.files("application_pipeline.latex")
-    template_text: str | None = None
-    for item in pkg.iterdir():
-        if Path(item.name).suffix not in _LATEX_SUFFIXES:
-            continue
-        if item.name == "cv_template.tex":
-            template_text = item.read_text(encoding="utf-8")
-        else:
-            (build_dir / item.name).write_bytes(item.read_bytes())
+        substituted = _substitute_slots(template_text, slots)
+        (build_dir / "cv.tex").write_text(substituted, encoding="utf-8")
 
-    if template_text is None:
-        raise FileNotFoundError("cv_template.tex not found in package")
+    def _run_builds(self, build_dir: Path) -> None:
+        cv_data_dir = (home_dir() / "user-info" / "cv").resolve()
+        for build_name in _BUILDS:
+            cmd = self._pdflatex_cmd(build_name, cv_data_dir)
+            env = {**os.environ, "TEXINPUTS": f".{os.pathsep}"}
+            # Two passes: first writes \label{lastpage} to .aux; second lets
+            # moderncv.cls's AtBeginDocument hook read \pageref{lastpage} and emit
+            # page numbers in the right footer.
+            for _ in range(2):
+                result = subprocess.run(
+                    cmd, cwd=build_dir, capture_output=True, env=env
+                )
+                if result.returncode == 0:
+                    continue
+                log_file = build_dir / f"{build_name}.log"
+                if log_file.exists():
+                    _emit_error_blob(log_file)
+                sys.exit(1)
 
-    substituted = _substitute_slots(template_text, slots)
-    (build_dir / "cv.tex").write_text(substituted, encoding="utf-8")
+    def _publish_pdfs(self, build_dir: Path, app_dir: Path) -> None:
+        for build_name in _BUILDS:
+            shutil.copy2(build_dir / f"{build_name}.pdf", app_dir / f"{build_name}.pdf")
 
-    for build_name in _BUILDS:
+    def _pdflatex_cmd(self, build_name: str, cv_data_dir: Path) -> list[str]:
         tex_input = (
             rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}"
             rf"\def\BUILD{{{build_name}}}"
             r"\input{cv}"
         )
-        cmd = [
+        return [
             "pdflatex",
             "-interaction=nonstopmode",
             "-jobname",
             build_name,
             tex_input,
         ]
-        # TEXINPUTS=".<sep>" — search .build/ first, then fall back to host
-        # TEXMF. Hides the host's moderncv v2.x behind the vendored v1.2.0 tree
-        # we just copied into .build/. os.pathsep keeps this identical across
-        # Windows (";") and POSIX (":"); env= is a dict so no shell quoting.
-        env = {**os.environ, "TEXINPUTS": f".{os.pathsep}"}
-        # Two passes: first writes \label{lastpage} to .aux; second lets
-        # moderncv.cls's AtBeginDocument hook read \pageref{lastpage} and emit
-        # page numbers in the right footer.
-        for _ in range(2):
-            result = subprocess.run(cmd, cwd=build_dir, capture_output=True, env=env)
-            if result.returncode != 0:
-                log_file = build_dir / f"{build_name}.log"
-                if log_file.exists():
-                    _emit_error_blob(log_file)
-                sys.exit(1)
-
-    # All three succeeded — move PDFs to app_dir and clean up .build/
-    for build_name in _BUILDS:
-        shutil.copy2(build_dir / f"{build_name}.pdf", app_dir / f"{build_name}.pdf")
-    shutil.rmtree(build_dir)
 
 
 def _substitute_slots(template: str, slots: dict[str, str]) -> str:

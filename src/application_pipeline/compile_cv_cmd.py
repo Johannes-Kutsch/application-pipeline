@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import importlib.resources
-import os
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
+from application_pipeline.compile_cv_local import (
+    _CompileCvLocalProductionAdapter,
+    _PdflatexAdapter,
+)
 from application_pipeline.init_cmd import home_dir, missing_config_message
 from application_pipeline.latex import slot_map
 
@@ -23,6 +26,7 @@ def compile_cv(app_dir: Path) -> None:
 @dataclass(slots=True)
 class _CompileCvWorkflow:
     app_dir: Path
+    pdflatex: ClassVar[_PdflatexAdapter] = _CompileCvLocalProductionAdapter()
 
     def run(self) -> None:
         self._require_config()
@@ -77,14 +81,14 @@ class _CompileCvWorkflow:
     def _run_builds(self, build_dir: Path) -> None:
         cv_data_dir = (home_dir() / "user-info" / "cv").resolve()
         for build_name in _BUILDS:
-            cmd = self._pdflatex_cmd(build_name, cv_data_dir)
-            env = {**os.environ, "TEXINPUTS": f".{os.pathsep}"}
             # Two passes: first writes \label{lastpage} to .aux; second lets
             # moderncv.cls's AtBeginDocument hook read \pageref{lastpage} and emit
             # page numbers in the right footer.
             for _ in range(2):
-                result = subprocess.run(
-                    cmd, cwd=build_dir, capture_output=True, env=env
+                result = self.pdflatex.run_pass(
+                    build_dir=build_dir,
+                    build_name=build_name,
+                    cv_data_dir=cv_data_dir,
                 )
                 if result.returncode == 0:
                     continue
@@ -96,20 +100,6 @@ class _CompileCvWorkflow:
     def _publish_pdfs(self, build_dir: Path, app_dir: Path) -> None:
         for build_name in _BUILDS:
             shutil.copy2(build_dir / f"{build_name}.pdf", app_dir / f"{build_name}.pdf")
-
-    def _pdflatex_cmd(self, build_name: str, cv_data_dir: Path) -> list[str]:
-        tex_input = (
-            rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}"
-            rf"\def\BUILD{{{build_name}}}"
-            r"\input{cv}"
-        )
-        return [
-            "pdflatex",
-            "-interaction=nonstopmode",
-            "-jobname",
-            build_name,
-            tex_input,
-        ]
 
 
 def _substitute_slots(template: str, slots: dict[str, str]) -> str:

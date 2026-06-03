@@ -5,12 +5,12 @@ from __future__ import annotations
 import importlib.resources
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from application_pipeline.compile_cv_cmd import compile_cv
+from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
+from application_pipeline.compile_cv_local import _PdflatexRunResult
 from application_pipeline.latex import slot_map
 
 _EXPECTED_LATEX_PACKAGE_FILES = frozenset(
@@ -301,12 +301,17 @@ def test_compile_cv_wires_slot_map_content_into_structural_surfaces(
         encoding="utf-8",
     )
 
-    def failing_run(
-        cmd: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"")
+    class _FailingPdflatexAdapter:
+        def run_pass(
+            self,
+            *,
+            build_dir: Path,
+            build_name: str,
+            cv_data_dir: Path,
+        ) -> _PdflatexRunResult:
+            return _PdflatexRunResult(returncode=1)
 
-    monkeypatch.setattr("subprocess.run", failing_run)
+    monkeypatch.setattr(_CompileCvWorkflow, "pdflatex", _FailingPdflatexAdapter())
 
     with pytest.raises(SystemExit):
         compile_cv(app_dir)

@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from application_pipeline.__main__ import main
-from application_pipeline.compile_cv_cmd import compile_cv
+from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
+from application_pipeline.compile_cv_local import _PdflatexAdapter, _PdflatexRunResult
 
-RunFn = Callable[..., subprocess.CompletedProcess[bytes]]
+RunFn = Callable[[Path, str, Path], _PdflatexRunResult]
 
 
 def _jobname(cmd: list[str]) -> str | None:
@@ -32,18 +33,47 @@ def _write_fake_pdf(cmd: list[str], cwd: Path) -> None:
         )
 
 
+@dataclass(slots=True)
+class _FakePdflatexAdapter(_PdflatexAdapter):
+    run_fn: RunFn
+
+    def run_pass(
+        self,
+        *,
+        build_dir: Path,
+        build_name: str,
+        cv_data_dir: Path,
+    ) -> _PdflatexRunResult:
+        return self.run_fn(build_dir, build_name, cv_data_dir)
+
+
 def _fake_pdflatex_success(
-    cmd: list[str], **kwargs: object
-) -> subprocess.CompletedProcess[bytes]:
-    cwd = Path(str(kwargs["cwd"]))
-    _write_fake_pdf(cmd, cwd)
-    return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+    build_dir: Path, build_name: str, cv_data_dir: Path
+) -> _PdflatexRunResult:
+    cmd = _build_pdflatex_cmd(build_name, cv_data_dir)
+    _write_fake_pdf(cmd, build_dir)
+    return _PdflatexRunResult(returncode=0)
 
 
 def _fake_pdflatex_failure(
-    cmd: list[str], **kwargs: object
-) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"")
+    build_dir: Path, build_name: str, cv_data_dir: Path
+) -> _PdflatexRunResult:
+    return _PdflatexRunResult(returncode=1)
+
+
+def _build_pdflatex_cmd(build_name: str, cv_data_dir: Path) -> list[str]:
+    tex_input = (
+        rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}"
+        rf"\def\BUILD{{{build_name}}}"
+        r"\input{cv}"
+    )
+    return [
+        "pdflatex",
+        "-interaction=nonstopmode",
+        "-jobname",
+        build_name,
+        tex_input,
+    ]
 
 
 @pytest.fixture()
@@ -64,11 +94,13 @@ def project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture()
-def patch_subprocess(
+def patch_pdflatex(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Callable[[RunFn], None]:
     def patch(fn: RunFn) -> None:
-        monkeypatch.setattr("subprocess.run", fn)
+        monkeypatch.setattr(
+            _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=fn)
+        )
 
     return patch
 
@@ -76,9 +108,9 @@ def patch_subprocess(
 def test_compile_cv_produces_three_pdfs(
     app_dir: Path,
     project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
+    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_subprocess(_fake_pdflatex_success)
+    patch_pdflatex(_fake_pdflatex_success)
 
     compile_cv(app_dir)
 
@@ -90,9 +122,9 @@ def test_compile_cv_produces_three_pdfs(
 def test_compile_cv_supported_build_modes_include_slot_content(
     app_dir: Path,
     project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
+    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_subprocess(_fake_pdflatex_success)
+    patch_pdflatex(_fake_pdflatex_success)
 
     compile_cv(app_dir)
 
@@ -104,9 +136,9 @@ def test_compile_cv_supported_build_modes_include_slot_content(
 def test_compile_cv_removes_build_dir_on_success(
     app_dir: Path,
     project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
+    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_subprocess(_fake_pdflatex_success)
+    patch_pdflatex(_fake_pdflatex_success)
 
     compile_cv(app_dir)
 
@@ -116,11 +148,11 @@ def test_compile_cv_removes_build_dir_on_success(
 def test_compile_cv_overwrites_existing_pdfs(
     app_dir: Path,
     project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
+    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
     for name in ("cover", "resume", "combined"):
         (app_dir / f"{name}.pdf").write_bytes(b"stale")
-    patch_subprocess(_fake_pdflatex_success)
+    patch_pdflatex(_fake_pdflatex_success)
 
     compile_cv(app_dir)
 
@@ -142,12 +174,15 @@ def test_compile_cv_ignores_application_pipeline_home(
     captured_cmds: list[list[str]] = []
 
     def capturing_run(
-        cmd: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[bytes]:
+        build_dir: Path, build_name: str, cv_data_dir: Path
+    ) -> _PdflatexRunResult:
+        cmd = _build_pdflatex_cmd(build_name, cv_data_dir)
         captured_cmds.append(cmd)
-        return _fake_pdflatex_success(cmd, **kwargs)
+        return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
 
-    monkeypatch.setattr("subprocess.run", capturing_run)
+    monkeypatch.setattr(
+        _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=capturing_run)
+    )
 
     compile_cv(app_dir)
 
@@ -168,13 +203,15 @@ def test_compile_cv_exits_nonzero_on_first_failure(
     call_count = 0
 
     def failing_run(
-        cmd: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[bytes]:
+        build_dir: Path, build_name: str, cv_data_dir: Path
+    ) -> _PdflatexRunResult:
         nonlocal call_count
         call_count += 1
-        return _fake_pdflatex_failure(cmd, **kwargs)
+        return _fake_pdflatex_failure(build_dir, build_name, cv_data_dir)
 
-    monkeypatch.setattr("subprocess.run", failing_run)
+    monkeypatch.setattr(
+        _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=failing_run)
+    )
 
     with pytest.raises(SystemExit) as exc_info:
         compile_cv(app_dir)
@@ -186,9 +223,9 @@ def test_compile_cv_exits_nonzero_on_first_failure(
 def test_compile_cv_leaves_build_dir_on_failure(
     app_dir: Path,
     project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
+    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_subprocess(_fake_pdflatex_failure)
+    patch_pdflatex(_fake_pdflatex_failure)
 
     with pytest.raises(SystemExit):
         compile_cv(app_dir)
@@ -199,9 +236,9 @@ def test_compile_cv_leaves_build_dir_on_failure(
 def test_compile_cv_does_not_write_pdfs_to_dir_on_failure(
     app_dir: Path,
     project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
+    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
-    patch_subprocess(_fake_pdflatex_failure)
+    patch_pdflatex(_fake_pdflatex_failure)
 
     with pytest.raises(SystemExit):
         compile_cv(app_dir)
@@ -217,22 +254,23 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     def failing_run_with_log(
-        cmd: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[bytes]:
-        cwd = Path(str(kwargs["cwd"]))
-        jobname = _jobname(cmd)
-        if jobname:
-            (cwd / f"{jobname}.log").write_text(
-                "This is pdflatex\n"
-                "! Undefined control sequence.\n"
-                "l.42 \\badmacro\n"
-                "           {foo}\n"
-                "? \n",
-                encoding="utf-8",
-            )
-        return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"")
+        build_dir: Path, build_name: str, cv_data_dir: Path
+    ) -> _PdflatexRunResult:
+        (build_dir / f"{build_name}.log").write_text(
+            "This is pdflatex\n"
+            "! Undefined control sequence.\n"
+            "l.42 \\badmacro\n"
+            "           {foo}\n"
+            "? \n",
+            encoding="utf-8",
+        )
+        return _PdflatexRunResult(returncode=1)
 
-    monkeypatch.setattr("subprocess.run", failing_run_with_log)
+    monkeypatch.setattr(
+        _CompileCvWorkflow,
+        "pdflatex",
+        _FakePdflatexAdapter(run_fn=failing_run_with_log),
+    )
 
     with pytest.raises(SystemExit):
         compile_cv(app_dir)
@@ -245,10 +283,10 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
 def test_compile_cv_via_cli_dispatch(
     app_dir: Path,
     project_root: Path,
-    patch_subprocess: Callable[[RunFn], None],
+    patch_pdflatex: Callable[[RunFn], None],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    patch_subprocess(_fake_pdflatex_success)
+    patch_pdflatex(_fake_pdflatex_success)
     monkeypatch.setattr(
         sys, "argv", ["application-pipeline", "compile-cv", str(app_dir)]
     )
@@ -268,12 +306,15 @@ def test_compile_cv_uses_cwd_relative_user_info(
     captured_cmds: list[list[str]] = []
 
     def capturing_run(
-        cmd: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[bytes]:
+        build_dir: Path, build_name: str, cv_data_dir: Path
+    ) -> _PdflatexRunResult:
+        cmd = _build_pdflatex_cmd(build_name, cv_data_dir)
         captured_cmds.append(cmd)
-        return _fake_pdflatex_success(cmd, **kwargs)
+        return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
 
-    monkeypatch.setattr("subprocess.run", capturing_run)
+    monkeypatch.setattr(
+        _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=capturing_run)
+    )
 
     compile_cv(app_dir)
 
@@ -346,12 +387,15 @@ def test_compile_cv_cv_data_dir_uses_forward_slashes(
     captured_cmds: list[list[str]] = []
 
     def capturing_run(
-        cmd: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[bytes]:
+        build_dir: Path, build_name: str, cv_data_dir: Path
+    ) -> _PdflatexRunResult:
+        cmd = _build_pdflatex_cmd(build_name, cv_data_dir)
         captured_cmds.append(cmd)
-        return _fake_pdflatex_success(cmd, **kwargs)
+        return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
 
-    monkeypatch.setattr("subprocess.run", capturing_run)
+    monkeypatch.setattr(
+        _CompileCvWorkflow, "pdflatex", _FakePdflatexAdapter(run_fn=capturing_run)
+    )
     compile_cv(app_dir)
 
     cv_data_args = [arg for cmd in captured_cmds for arg in cmd if "CvDataDir" in arg]
@@ -365,7 +409,7 @@ def test_compile_cv_cv_data_dir_uses_forward_slashes(
 def test_compile_cv_three_resume_slots_independently_substituted(
     project_root: Path,
     tmp_path: Path,
-    patch_subprocess: Callable[[RunFn], None],
+    patch_pdflatex: Callable[[RunFn], None],
 ) -> None:
     app_dir = tmp_path / "app_resume"
     app_dir.mkdir()
@@ -387,7 +431,7 @@ def test_compile_cv_three_resume_slots_independently_substituted(
     (app_dir / "cv.tex").write_text(
         "".join(f"%% SLOT: {n}\n{b}\n" for n, b in slots), encoding="utf-8"
     )
-    patch_subprocess(_fake_pdflatex_success)
+    patch_pdflatex(_fake_pdflatex_success)
 
     compile_cv(app_dir)
 

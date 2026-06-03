@@ -58,6 +58,61 @@ def _make_scripted_parser(
 
 
 # ---------------------------------------------------------------------------
+# Scripted transport contract
+# ---------------------------------------------------------------------------
+
+
+def test_scripted_parser_http_transport_replays_ordered_outcomes_and_records_requests():
+    transport = ScriptedParserHttpTransport(
+        [
+            b"first",
+            OSError("transient"),
+            ScriptedParserHttpResponse.redirect(
+                status=302,
+                location="http://other.example/landing",
+            ),
+        ]
+    )
+
+    first = transport.get("http://example.com/1", timeout=1.5)
+    assert first.status_code == 200
+    assert first.content == b"first"
+
+    with pytest.raises(OSError, match="transient"):
+        transport.get("http://example.com/2", timeout=2.5)
+
+    redirect = transport.get("http://example.com/3", timeout=3.5)
+    assert redirect.status_code == 302
+    assert redirect.headers["location"] == "http://other.example/landing"
+
+    assert transport.requests == [
+        ScriptedParserHttpRequest(url="http://example.com/1", timeout=1.5),
+        ScriptedParserHttpRequest(url="http://example.com/2", timeout=2.5),
+        ScriptedParserHttpRequest(url="http://example.com/3", timeout=3.5),
+    ]
+
+
+def test_scripted_parser_http_transport_raises_when_outcomes_are_exhausted():
+    transport = ScriptedParserHttpTransport([b"only"])
+    transport.get("http://example.com/1", timeout=1.0)
+
+    with pytest.raises(
+        AssertionError, match="ScriptedParserHttpTransport ran out of outcomes"
+    ):
+        transport.get("http://example.com/2", timeout=2.0)
+
+
+def test_scripted_parser_http_transport_rejects_requests_after_close():
+    transport = ScriptedParserHttpTransport([b"unused"])
+    transport.close()
+
+    with pytest.raises(
+        RuntimeError, match="Cannot send a request, as the client has been closed."
+    ):
+        transport.get("http://example.com/", timeout=1.0)
+
+
+# ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
 
@@ -70,6 +125,15 @@ def test_get_returns_bytes_on_success(run_log: RunLog):
             url="http://example.com/",
             timeout=HTTP_READ_TIMEOUT,
         )
+    ]
+
+
+def test_get_passes_configured_timeout_to_scripted_transport(run_log: RunLog):
+    parser, transport = _make_scripted_parser(run_log, b"hello", timeout=7.5)
+
+    assert parser.get("http://example.com/", error_prefix="test") == b"hello"
+    assert transport.requests == [
+        ScriptedParserHttpRequest(url="http://example.com/", timeout=7.5)
     ]
 
 

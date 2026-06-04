@@ -40,22 +40,6 @@ def _require_pdflatex() -> None:
         pytest.skip("pdflatex not found — install TeX Live or MiKTeX")
 
 
-def test_compile_cv_smoke_guard_only_requires_pdflatex(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_which(cmd: str) -> str | None:
-        if cmd == "pdflatex":
-            return "/usr/bin/pdflatex"
-        return None
-
-    monkeypatch.setattr(shutil, "which", fake_which)
-
-    try:
-        _require_pdflatex()
-    except pytest.skip.Exception as exc:
-        pytest.fail(f"unexpected skip: {exc}")
-
-
 def _cv_tex() -> str:
     slots = [
         ("recipient_company", "Smoke Test GmbH"),

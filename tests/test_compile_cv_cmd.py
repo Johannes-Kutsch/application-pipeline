@@ -382,6 +382,24 @@ def test_compile_cv_uses_cwd_relative_user_info(
     )
 
 
+def test_compile_cv_runs_two_passes_for_each_build_mode(
+    app_dir: Path,
+    project_root: Path,
+) -> None:
+    adapter = _passing_pdflatex_adapter()
+
+    _run_compile_workflow(app_dir, adapter)
+
+    assert [call.build_name for call in adapter.calls] == [
+        "cover",
+        "cover",
+        "resume",
+        "resume",
+        "combined",
+        "combined",
+    ]
+
+
 def _valid_cv_tex() -> str:
     slots = [
         ("recipient_company", "Firma GmbH"),

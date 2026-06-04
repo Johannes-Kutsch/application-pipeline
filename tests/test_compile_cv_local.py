@@ -12,9 +12,11 @@ from application_pipeline.compile_cv_local import (
 )
 
 
+@pytest.mark.parametrize("build_name", ["cover", "resume", "combined"])
 def test_compile_cv_local_production_adapter_preserves_pdflatex_contract(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    build_name: str,
 ) -> None:
     build_dir = tmp_path / ".build"
     build_dir.mkdir()
@@ -43,7 +45,7 @@ def test_compile_cv_local_production_adapter_preserves_pdflatex_contract(
 
     result = adapter.run_pass(
         build_dir=build_dir,
-        build_name="combined",
+        build_name=build_name,
         cv_data_dir=cv_data_dir,
     )
 
@@ -52,8 +54,8 @@ def test_compile_cv_local_production_adapter_preserves_pdflatex_contract(
         "pdflatex",
         "-interaction=nonstopmode",
         "-jobname",
-        "combined",
-        rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}\def\BUILD{{combined}}\input{{cv}}",
+        build_name,
+        rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}\def\BUILD{{{build_name}}}\input{{cv}}",
     ]
     assert captured["cwd"] == build_dir
     assert captured["capture_output"] is True

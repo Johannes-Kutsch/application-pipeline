@@ -26,13 +26,11 @@ Bestaetige Company, Role und resultierenden Pfad (`application-pipeline/applicat
 
 ## 2. Grilling-Workflow
 
-Der Workflow ist inkrementell. Es gibt insgesamt 4 Turns, einen pro Absatz:
+Der Workflow ist inkrementell. Es gibt insgesamt 2 Turns, einen pro Absatz:
 
 <Absätze>
-1. **intro:** Der persönliche Einstieg: warum diese Rolle, warum jetzt, mit dem stärksten Hook.
-2. **bridge:** Die Überleitung vom Motiv zur fachlichen Passung.
-3. **evidence:** Die konkreten Belege und Anekdoten für Resonance- und Capability-Hooks.
-4. **closing:** Der Schluss: Pull-Fit, Zusammenarbeit, Motivation für den Wechsel und Gesprächseinstieg.
+1. **bridge:** warum diese Rolle, warum jetzt, die Überleitung vom Motiv zur fachlichen Passung.
+2. **evidence:** Die konkreten Belege und Anekdoten für Resonance- und Capability-Hooks.
 </Absätze>
 
 ### Absatz Loop
@@ -69,21 +67,13 @@ Pro Turn in der Grilling-Schleife, in dieser Reihenfolge. Grille unermüdlich so
 ---
 
 ```md
-## intro
-Einstieg: ...
-Begruendung: ...
-
 ## bridge
-Einstieg: ...
-Begruendung: ...
+- ...
+- ...
 
 ## evidence
-Einstieg: ...
-Begruendung: ...
-
-## closing
-Einstieg: ...
-Begruendung: ...
+- ...
+- ...
 ```
 </analysis-template>
 

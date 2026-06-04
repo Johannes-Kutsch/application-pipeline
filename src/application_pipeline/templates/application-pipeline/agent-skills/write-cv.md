@@ -25,15 +25,17 @@ Erstelle als erstes eine leere Slotmap in `<application-folder>/cv.tex`, indem d
 
 ## 2. Anschreibenstext erstellen
 
+- Ziel dieses Schrittes ist es die 4 Absatz-Slots des Anschreibens zu erstellen.
 - Lies die Datei `application-pipeline/user-info/cv/cover-patterns.md`. Für jeden Absatz im Anschreiben gibt es hier vorformulierte Texte.
-- Der Skill darf niemals direkt vom Analyse-Output zum finalen Cover-Text springen.
-- Schreibe die Umlaute ä, ü, ö und ß genau so.
-- Kein Text für cover_intro, cover_pivot, cover_fit oder cover_closing darf in cv.tex geschrieben werden, bevor der jeweilige Absatz vom User explizit freigegeben wurde.
-- pro Absatz: Vorschlag präsentieren -> auf Antwort warten -> nur bei expliziter Zustimmung schreiben -> erst dann nächster Absatz
+- Die Absätze `cover_intro` und 'cover_closing' sind generisch und können direkt angepasst aus `cover-patterns.md` nach cv.tex übernommen werden
+- Für die erstellung der Absätz `cover_pivot` und `cover_fit` gehe nacheinander in einen Grilling-Loop mit dem Nutzer. Dabei gilt:
+  - Schreibe die Umlaute ä, ü, ö und ß genau so.
+  - Kein Text für `cover_pivot` und `cover_fit` darf in cv.tex geschrieben werden, bevor der jeweilige Absatz vom User explizit freigegeben wurde.
+  - pro Absatz: Vorschlag präsentieren -> auf Antwort warten -> nur bei expliziter Zustimmung schreiben -> erst dann nächster Absatz
 
-### Absatz Loop
+### `cover_pivot` und `cover_fit` Absatz Loop
 
-Für jeden Absatz in `cover_intro`, `cover_pivot`, `cover_fit`, `cover_closing` gilt:
+Gehe nacheinander für jeden Absatz diese Grilling-Loop durch
 
 <per-absatz-flow>
 1. Analysiere `analysis.md` und bestimme Slot-Zweck und passenden `argument_type`.
@@ -42,10 +44,9 @@ Für jeden Absatz in `cover_intro`, `cover_pivot`, `cover_fit`, `cover_closing` 
    - bei klarem Match genau einen Vorschlag,
    - sonst genau drei Alternativen.
 4. Frage explizit nach Freigabe.
-5. Schreibe den Text erst dann in `cv.tex`, wenn der User den konkreten Absatz ausdrücklich freigegeben hat.
+5. Schreibe den Text erst dann in `cv.tex`, wenn der User den konkreten Absatz ausdrücklich freigegeben hat. Wenn keine explizite Freigabe vorliegt, darf kein Schreibschritt erfolgen und es dürfen keine weiteren Cover-Absätze bearbeitet werden.
 6. Wenn der User ablehnt oder umformuliert, wiederhole den Vorschlagsprozess.
-7. Wenn keine explizite Freigabe vorliegt, darf kein Schreibschritt erfolgen und es dürfen keine weiteren Cover-Absätze bearbeitet werden.
-8. Änderungen oder neue Formulierungen dürfen nur nach Freigabe in `cover-patterns.md` übernommen werden.
+7. Wenn es keinen klaren Match gab, übernehme die neue Formulierung nach `cover-patterns.md`. Änderungen oder neue Formulierungen dürfen nur nach Freigabe in `cover-patterns.md` übernommen werden.
 </per-absatz-flow>
 
 ## 4. Resume Slots füllen

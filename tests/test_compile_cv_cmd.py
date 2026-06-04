@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import application_pipeline.compile_cv_cmd as compile_cv_cmd_module
 from application_pipeline.__main__ import main
 from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import _PdflatexAdapter, _PdflatexRunResult
@@ -248,10 +249,10 @@ def test_compile_cv_via_cli_dispatch(
 ) -> None:
     captured_app_dirs: list[Path] = []
 
-    def fake_run(self: _CompileCvWorkflow) -> None:
-        captured_app_dirs.append(self.app_dir)
+    def fake_compile_cv(cli_app_dir: Path) -> None:
+        captured_app_dirs.append(cli_app_dir)
 
-    monkeypatch.setattr(_CompileCvWorkflow, "run", fake_run)
+    monkeypatch.setattr(compile_cv_cmd_module, "compile_cv", fake_compile_cv)
     monkeypatch.setattr(
         sys, "argv", ["application-pipeline", "compile-cv", str(app_dir)]
     )

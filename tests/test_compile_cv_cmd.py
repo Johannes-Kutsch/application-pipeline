@@ -287,7 +287,7 @@ def test_compile_cv_missing_cv_tex_exits_before_build_or_pdflatex(
     assert not (app_dir / ".build").exists()
 
 
-def test_compile_cv_malformed_slot_map_exits_before_build_or_pdflatex(
+def test_compile_cv_malformed_cv_slot_map_missing_slot_exits_before_build_or_pdflatex(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -325,8 +325,6 @@ def test_compile_cv_malformed_slot_map_exits_before_build_or_pdflatex(
                 r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
                 "%% SLOT: resume_ausbildung",
                 r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
-                "%% SLOT: resume_projekte_typo",
-                r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
                 "%% SLOT: skills_block",
                 "Python, LaTeX",
                 "",
@@ -342,7 +340,7 @@ def test_compile_cv_malformed_slot_map_exits_before_build_or_pdflatex(
 
     assert exc_info.value.code != 0
     err = capsys.readouterr().err
-    assert "resume_projekte" in err
+    assert "missing slots: resume_projekte" in err
     assert adapter.calls == []
     assert not (app_dir / ".build").exists()
 

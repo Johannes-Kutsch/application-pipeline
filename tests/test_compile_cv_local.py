@@ -35,7 +35,7 @@ def test_compile_cv_local_production_adapter_preserves_pdflatex_contract(
         captured["cwd"] = cwd
         captured["capture_output"] = capture_output
         captured["env"] = env
-        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+        return subprocess.CompletedProcess(cmd, 7, stdout=b"", stderr=b"")
 
     monkeypatch.setattr(
         "application_pipeline.compile_cv_local.subprocess.run", fake_run
@@ -47,7 +47,7 @@ def test_compile_cv_local_production_adapter_preserves_pdflatex_contract(
         cv_data_dir=cv_data_dir,
     )
 
-    assert result == _PdflatexRunResult(returncode=0)
+    assert result == _PdflatexRunResult(returncode=7)
     assert captured["cmd"] == [
         "pdflatex",
         "-interaction=nonstopmode",

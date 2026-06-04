@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import re
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,28 +13,45 @@ from application_pipeline.__main__ import main
 from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import _PdflatexAdapter, _PdflatexRunResult
 
-RunFn = Callable[[Path, str, Path], _PdflatexRunResult]
+
+def _write_fake_pdf(build_dir: Path, build_name: str) -> None:
+    rendered_cv = (build_dir / "cv.tex").read_text(encoding="utf-8")
+    (build_dir / f"{build_name}.pdf").write_bytes(
+        b"%PDF-1.4 fake\n" + rendered_cv.encode("utf-8")
+    )
 
 
-def _jobname(cmd: list[str]) -> str | None:
-    for i, arg in enumerate(cmd):
-        if arg == "-jobname" and i + 1 < len(cmd):
-            return cmd[i + 1]
-    return None
+@dataclass(frozen=True, slots=True)
+class _PdflatexCall:
+    build_dir: Path
+    build_name: str
+    cv_data_dir: Path
 
 
-def _write_fake_pdf(cmd: list[str], cwd: Path) -> None:
-    jobname = _jobname(cmd)
-    if jobname:
-        rendered_cv = (cwd / "cv.tex").read_text(encoding="utf-8")
-        (cwd / f"{jobname}.pdf").write_bytes(
-            b"%PDF-1.4 fake\n" + rendered_cv.encode("utf-8")
-        )
+@dataclass(frozen=True, slots=True)
+class _PassingPdflatexPass:
+    def run(self, call: _PdflatexCall) -> _PdflatexRunResult:
+        _write_fake_pdf(call.build_dir, call.build_name)
+        return _PdflatexRunResult(returncode=0)
+
+
+@dataclass(frozen=True, slots=True)
+class _FailingPdflatexPass:
+    log_text: str | None = None
+
+    def run(self, call: _PdflatexCall) -> _PdflatexRunResult:
+        if self.log_text is not None:
+            (call.build_dir / f"{call.build_name}.log").write_text(
+                self.log_text,
+                encoding="utf-8",
+            )
+        return _PdflatexRunResult(returncode=1)
 
 
 @dataclass(slots=True)
 class _FakePdflatexAdapter(_PdflatexAdapter):
-    run_fn: RunFn
+    passes: list[_PassingPdflatexPass | _FailingPdflatexPass]
+    calls: list[_PdflatexCall]
 
     def run_pass(
         self,
@@ -45,42 +60,35 @@ class _FakePdflatexAdapter(_PdflatexAdapter):
         build_name: str,
         cv_data_dir: Path,
     ) -> _PdflatexRunResult:
-        return self.run_fn(build_dir, build_name, cv_data_dir)
+        call = _PdflatexCall(
+            build_dir=build_dir,
+            build_name=build_name,
+            cv_data_dir=cv_data_dir,
+        )
+        self.calls.append(call)
+        if not self.passes:
+            raise AssertionError("unexpected pdflatex pass")
+        return self.passes.pop(0).run(call)
 
 
-def _fake_pdflatex_success(
-    build_dir: Path, build_name: str, cv_data_dir: Path
-) -> _PdflatexRunResult:
-    cmd = _build_pdflatex_cmd(build_name, cv_data_dir)
-    _write_fake_pdf(cmd, build_dir)
-    return _PdflatexRunResult(returncode=0)
-
-
-def _fake_pdflatex_failure(
-    build_dir: Path, build_name: str, cv_data_dir: Path
-) -> _PdflatexRunResult:
-    return _PdflatexRunResult(returncode=1)
-
-
-def _build_pdflatex_cmd(build_name: str, cv_data_dir: Path) -> list[str]:
-    tex_input = (
-        rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}"
-        rf"\def\BUILD{{{build_name}}}"
-        r"\input{cv}"
+def _passing_pdflatex_adapter() -> _FakePdflatexAdapter:
+    return _FakePdflatexAdapter(
+        passes=[_PassingPdflatexPass() for _ in range(6)],
+        calls=[],
     )
-    return [
-        "pdflatex",
-        "-interaction=nonstopmode",
-        "-jobname",
-        build_name,
-        tex_input,
-    ]
 
 
-def _run_compile_workflow(app_dir: Path, run_fn: RunFn) -> None:
+def _failing_pdflatex_adapter(*, log_text: str | None = None) -> _FakePdflatexAdapter:
+    return _FakePdflatexAdapter(
+        passes=[_FailingPdflatexPass(log_text=log_text)],
+        calls=[],
+    )
+
+
+def _run_compile_workflow(app_dir: Path, pdflatex: _PdflatexAdapter) -> None:
     _CompileCvWorkflow(
         app_dir=app_dir,
-        pdflatex=_FakePdflatexAdapter(run_fn=run_fn),
+        pdflatex=pdflatex,
     ).run()
 
 
@@ -105,7 +113,7 @@ def test_compile_cv_produces_three_pdfs(
     app_dir: Path,
     project_root: Path,
 ) -> None:
-    _run_compile_workflow(app_dir, _fake_pdflatex_success)
+    _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
     assert (app_dir / "cover.pdf").exists()
     assert (app_dir / "resume.pdf").exists()
@@ -116,7 +124,7 @@ def test_compile_cv_supported_build_modes_include_slot_content(
     app_dir: Path,
     project_root: Path,
 ) -> None:
-    _run_compile_workflow(app_dir, _fake_pdflatex_success)
+    _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
     assert b"Ich bewerbe mich hiermit." in (app_dir / "cover.pdf").read_bytes()
     assert b"Developer" in (app_dir / "resume.pdf").read_bytes()
@@ -127,7 +135,7 @@ def test_compile_cv_removes_build_dir_on_success(
     app_dir: Path,
     project_root: Path,
 ) -> None:
-    _run_compile_workflow(app_dir, _fake_pdflatex_success)
+    _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
     assert not (app_dir / ".build").exists()
 
@@ -138,7 +146,7 @@ def test_compile_cv_overwrites_existing_pdfs(
 ) -> None:
     for name in ("cover", "resume", "combined"):
         (app_dir / f"{name}.pdf").write_bytes(b"stale")
-    _run_compile_workflow(app_dir, _fake_pdflatex_success)
+    _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
     for name in ("cover", "resume", "combined"):
         pdf_bytes = (app_dir / f"{name}.pdf").read_bytes()
@@ -155,23 +163,20 @@ def test_compile_cv_ignores_application_pipeline_home(
     (irrelevant / "user-info").mkdir(parents=True)
     monkeypatch.setenv("APPLICATION_PIPELINE_HOME", str(irrelevant))
 
-    captured_cmds: list[list[str]] = []
+    adapter = _passing_pdflatex_adapter()
+    _run_compile_workflow(app_dir, adapter)
 
-    def capturing_run(
-        build_dir: Path, build_name: str, cv_data_dir: Path
-    ) -> _PdflatexRunResult:
-        cmd = _build_pdflatex_cmd(build_name, cv_data_dir)
-        captured_cmds.append(cmd)
-        return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
-
-    _run_compile_workflow(app_dir, capturing_run)
-
-    expected_user_info = (
-        (project_root / "application-pipeline" / "user-info").resolve().as_posix()
+    expected_cv_data_dir = (
+        (project_root / "application-pipeline" / "user-info" / "cv")
+        .resolve()
+        .as_posix()
     )
-    assert any(expected_user_info in arg for cmd in captured_cmds for arg in cmd)
+    assert any(
+        call.cv_data_dir.as_posix() == expected_cv_data_dir for call in adapter.calls
+    )
     assert not any(
-        irrelevant.resolve().as_posix() in arg for cmd in captured_cmds for arg in cmd
+        call.cv_data_dir.as_posix() == irrelevant.resolve().as_posix()
+        for call in adapter.calls
     )
 
 
@@ -179,20 +184,13 @@ def test_compile_cv_exits_nonzero_on_first_failure(
     app_dir: Path,
     project_root: Path,
 ) -> None:
-    call_count = 0
-
-    def failing_run(
-        build_dir: Path, build_name: str, cv_data_dir: Path
-    ) -> _PdflatexRunResult:
-        nonlocal call_count
-        call_count += 1
-        return _fake_pdflatex_failure(build_dir, build_name, cv_data_dir)
+    adapter = _failing_pdflatex_adapter()
 
     with pytest.raises(SystemExit) as exc_info:
-        _run_compile_workflow(app_dir, failing_run)
+        _run_compile_workflow(app_dir, adapter)
 
     assert exc_info.value.code != 0
-    assert call_count == 1, "should stop after first failure"
+    assert len(adapter.calls) == 1, "should stop after first failure"
 
 
 def test_compile_cv_leaves_build_dir_on_failure(
@@ -200,7 +198,7 @@ def test_compile_cv_leaves_build_dir_on_failure(
     project_root: Path,
 ) -> None:
     with pytest.raises(SystemExit):
-        _run_compile_workflow(app_dir, _fake_pdflatex_failure)
+        _run_compile_workflow(app_dir, _failing_pdflatex_adapter())
 
     assert (app_dir / ".build").exists()
 
@@ -210,7 +208,7 @@ def test_compile_cv_does_not_write_pdfs_to_dir_on_failure(
     project_root: Path,
 ) -> None:
     with pytest.raises(SystemExit):
-        _run_compile_workflow(app_dir, _fake_pdflatex_failure)
+        _run_compile_workflow(app_dir, _failing_pdflatex_adapter())
 
     for name in ("cover", "resume", "combined"):
         assert not (app_dir / f"{name}.pdf").exists()
@@ -221,21 +219,19 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     project_root: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def failing_run_with_log(
-        build_dir: Path, build_name: str, cv_data_dir: Path
-    ) -> _PdflatexRunResult:
-        (build_dir / f"{build_name}.log").write_text(
-            "This is pdflatex\n"
-            "! Undefined control sequence.\n"
-            "l.42 \\badmacro\n"
-            "           {foo}\n"
-            "? \n",
-            encoding="utf-8",
-        )
-        return _PdflatexRunResult(returncode=1)
-
     with pytest.raises(SystemExit):
-        _run_compile_workflow(app_dir, failing_run_with_log)
+        _run_compile_workflow(
+            app_dir,
+            _failing_pdflatex_adapter(
+                log_text=(
+                    "This is pdflatex\n"
+                    "! Undefined control sequence.\n"
+                    "l.42 \\badmacro\n"
+                    "           {foo}\n"
+                    "? \n"
+                )
+            ),
+        )
 
     err = capsys.readouterr().err
     assert "! Undefined control sequence." in err
@@ -266,21 +262,17 @@ def test_compile_cv_uses_cwd_relative_user_info(
     app_dir: Path,
     project_root: Path,
 ) -> None:
-    captured_cmds: list[list[str]] = []
+    adapter = _passing_pdflatex_adapter()
+    _run_compile_workflow(app_dir, adapter)
 
-    def capturing_run(
-        build_dir: Path, build_name: str, cv_data_dir: Path
-    ) -> _PdflatexRunResult:
-        cmd = _build_pdflatex_cmd(build_name, cv_data_dir)
-        captured_cmds.append(cmd)
-        return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
-
-    _run_compile_workflow(app_dir, capturing_run)
-
-    expected_user_info = (
-        (project_root / "application-pipeline" / "user-info").resolve().as_posix()
+    expected_cv_data_dir = (
+        (project_root / "application-pipeline" / "user-info" / "cv")
+        .resolve()
+        .as_posix()
     )
-    assert any(expected_user_info in arg for cmd in captured_cmds for arg in cmd)
+    assert any(
+        call.cv_data_dir.as_posix() == expected_cv_data_dir for call in adapter.calls
+    )
 
 
 def _valid_cv_tex() -> str:
@@ -342,23 +334,12 @@ def test_compile_cv_cv_data_dir_uses_forward_slashes(
     app_dir: Path,
     project_root: Path,
 ) -> None:
-    captured_cmds: list[list[str]] = []
+    adapter = _passing_pdflatex_adapter()
+    _run_compile_workflow(app_dir, adapter)
 
-    def capturing_run(
-        build_dir: Path, build_name: str, cv_data_dir: Path
-    ) -> _PdflatexRunResult:
-        cmd = _build_pdflatex_cmd(build_name, cv_data_dir)
-        captured_cmds.append(cmd)
-        return _fake_pdflatex_success(build_dir, build_name, cv_data_dir)
-
-    _run_compile_workflow(app_dir, capturing_run)
-
-    cv_data_args = [arg for cmd in captured_cmds for arg in cmd if "CvDataDir" in arg]
-    assert cv_data_args, "no CvDataDir arg found in pdflatex commands"
-    for arg in cv_data_args:
-        m = re.search(r"\\def\\CvDataDir\{([^}]+)\}", arg)
-        assert m is not None, f"could not parse CvDataDir from: {arg}"
-        assert "\\" not in m.group(1), "path must use forward slashes"
+    assert adapter.calls, "no pdflatex calls captured"
+    for call in adapter.calls:
+        assert call.cv_data_dir.as_posix() == str(call.cv_data_dir).replace("\\", "/")
 
 
 def test_compile_cv_three_resume_slots_independently_substituted(
@@ -385,7 +366,7 @@ def test_compile_cv_three_resume_slots_independently_substituted(
     (app_dir / "cv.tex").write_text(
         "".join(f"%% SLOT: {n}\n{b}\n" for n, b in slots), encoding="utf-8"
     )
-    _run_compile_workflow(app_dir, _fake_pdflatex_success)
+    _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
     resume_pdf = (app_dir / "resume.pdf").read_bytes()
     assert b"BERUFSINHALT" in resume_pdf

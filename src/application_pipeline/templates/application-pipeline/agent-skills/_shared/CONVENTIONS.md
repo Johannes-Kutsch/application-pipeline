@@ -6,4 +6,5 @@ Alle Pfade sind **CWD-relativ**. Claude Code läuft mit dem Repo-Root als primä
 - Sämtliche User-Ausgabe ist auf **Deutsch**. Framework-Fehlermeldungen dürfen Englisch bleiben.
 - Antworten an den User sind in eigenen Worten formuliert, nicht der Skill-File-Body verbatim.
 - Skills werden ausschließlich durch User-Invocation gestartet — andere Skills nie automatisch nachziehen.
+- immer nur die Workspace-Datei application-pipeline/* verwenden;  Template-Mirrors unter src/.../templates sind nicht die Quelle der Wahrheit.
 </hard-rules>

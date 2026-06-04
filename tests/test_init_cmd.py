@@ -738,7 +738,6 @@ def test_fresh_init_seeds_shared_agent_skill_bodies(tmp_path: Path) -> None:
         "write-cv.md",
         "_shared/CONVENTIONS.md",
         "_shared/SLOT-MAP.md",
-        "_shared/TRIAGE-ROUTING.md",
     ]
 
     assert shared_root.is_dir()

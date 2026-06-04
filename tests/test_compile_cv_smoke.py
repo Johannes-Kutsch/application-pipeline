@@ -7,10 +7,8 @@ Run explicitly with: pytest -m smoke
 
 from __future__ import annotations
 
-import re
 import shutil
 import struct
-import subprocess
 import zlib
 from pathlib import Path
 
@@ -36,36 +34,26 @@ def _minimal_png() -> bytes:
     return b"\x89PNG\r\n\x1a\n" + ihdr + idat + iend
 
 
-def _require_pdflatex_and_moderncv() -> None:
-    """Skip the test if pdflatex or a sufficiently new moderncv is absent."""
+def _require_pdflatex() -> None:
+    """Skip the test if pdflatex is absent."""
     if not shutil.which("pdflatex"):
         pytest.skip("pdflatex not found — install TeX Live or MiKTeX")
-    if not shutil.which("kpsewhich"):
-        pytest.skip("kpsewhich not found — install TeX Live or MiKTeX")
 
-    result = subprocess.run(
-        ["kpsewhich", "moderncv.cls"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
-        pytest.skip(
-            "moderncv not installed — install texlive-latex-extra or equivalent"
-        )
 
-    cls_text = Path(result.stdout.strip()).read_text(errors="replace")
-    m = re.search(
-        r"\\ProvidesClass\{moderncv\}\[(\d{4})[/-](\d{2})[/-](\d{2})", cls_text
-    )
-    if not m:
-        pytest.skip("moderncv .cls found but version date is unreadable")
+def test_compile_cv_smoke_guard_only_requires_pdflatex(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_which(cmd: str) -> str | None:
+        if cmd == "pdflatex":
+            return "/usr/bin/pdflatex"
+        return None
 
-    year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    if (year, month, day) <= (2015, 1, 1):
-        pytest.skip(
-            f"moderncv {year}/{month:02d}/{day:02d} is older than 2.0.0 "
-            "— install TeX Live 2020+ or MiKTeX rolling"
-        )
+    monkeypatch.setattr(shutil, "which", fake_which)
+
+    try:
+        _require_pdflatex()
+    except pytest.skip.Exception as exc:
+        pytest.fail(f"unexpected skip: {exc}")
 
 
 def _cv_tex() -> str:
@@ -129,7 +117,7 @@ def smoke_app_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_compile_cv_end_to_end_produces_pdfs_and_cleans_build(
     smoke_app_dir: Path,
 ) -> None:
-    _require_pdflatex_and_moderncv()
+    _require_pdflatex()
 
     compile_cv(smoke_app_dir)
 

@@ -238,6 +238,115 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     assert "\\badmacro" in err
 
 
+def test_compile_cv_missing_config_exits_2_before_build_or_pdflatex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project_root = tmp_path / "project"
+    app_dir = tmp_path / "application"
+    data_dir = project_root / "application-pipeline"
+    data_dir.mkdir(parents=True)
+    (data_dir / "config.py").write_text("", encoding="utf-8")
+    app_dir.mkdir()
+    (app_dir / "cv.tex").write_text(_valid_cv_tex(), encoding="utf-8")
+    monkeypatch.chdir(data_dir)
+
+    adapter = _passing_pdflatex_adapter()
+    with pytest.raises(SystemExit) as exc_info:
+        _run_compile_workflow(app_dir, adapter)
+
+    assert exc_info.value.code == 2
+    assert "inside the data directory" in capsys.readouterr().err
+    assert adapter.calls == []
+    assert not (app_dir / ".build").exists()
+
+
+def test_compile_cv_missing_cv_tex_exits_before_build_or_pdflatex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project_root = tmp_path / "project"
+    app_dir = tmp_path / "application"
+    (project_root / "application-pipeline").mkdir(parents=True)
+    (project_root / "application-pipeline" / "config.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+    app_dir.mkdir()
+    monkeypatch.chdir(project_root)
+
+    adapter = _passing_pdflatex_adapter()
+    with pytest.raises(SystemExit) as exc_info:
+        _run_compile_workflow(app_dir, adapter)
+
+    assert exc_info.value.code != 0
+    assert "did you forget to run /write-cv?" in capsys.readouterr().err
+    assert adapter.calls == []
+    assert not (app_dir / ".build").exists()
+
+
+def test_compile_cv_malformed_slot_map_exits_before_build_or_pdflatex(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project_root = tmp_path / "project"
+    app_dir = tmp_path / "application"
+    (project_root / "application-pipeline").mkdir(parents=True)
+    (project_root / "application-pipeline" / "config.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+    app_dir.mkdir()
+    app_dir.joinpath("cv.tex").write_text(
+        "\n".join(
+            (
+                "%% SLOT: recipient_company",
+                "Firma GmbH",
+                "%% SLOT: recipient_name",
+                "Frau Dr. Muller",
+                "%% SLOT: recipient_street",
+                "Musterstrasse 1",
+                "%% SLOT: recipient_zip_city",
+                "12345 Berlin",
+                "%% SLOT: opening",
+                "Sehr geehrte Damen und Herren,",
+                "%% SLOT: cover_intro",
+                "Ich bewerbe mich hiermit.",
+                "%% SLOT: cover_pivot",
+                "Mein Hintergrund ist relevant.",
+                "%% SLOT: cover_fit",
+                "Ich passe gut zu Ihrer Firma.",
+                "%% SLOT: cover_closing",
+                "Ich freue mich auf Ihre Antwort.",
+                "%% SLOT: resume_berufserfahrung",
+                r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+                "%% SLOT: resume_ausbildung",
+                r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+                "%% SLOT: resume_projekte_typo",
+                r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+                "%% SLOT: skills_block",
+                "Python, LaTeX",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project_root)
+
+    adapter = _passing_pdflatex_adapter()
+    with pytest.raises(SystemExit) as exc_info:
+        _run_compile_workflow(app_dir, adapter)
+
+    assert exc_info.value.code != 0
+    err = capsys.readouterr().err
+    assert "resume_projekte" in err
+    assert adapter.calls == []
+    assert not (app_dir / ".build").exists()
+
+
 def test_compile_cv_via_cli_dispatch(
     app_dir: Path,
     project_root: Path,

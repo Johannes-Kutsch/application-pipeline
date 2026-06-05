@@ -26,7 +26,7 @@ Bestaetige Company, Role und resultierenden Pfad (`application-pipeline/applicat
 
 ## 2. Grilling-Workflow
 
-Der Workflow ist inkrementell. Es gibt insgesamt 2 Turns, einen pro Absatz:
+Der Workflow ist inkrementell. Es gibt insgesamt 2 Grilling Sessions, einen pro Absatz:
 
 <Absätze>
 1. **bridge:** warum diese Rolle, warum jetzt, die Überleitung vom Motiv zur fachlichen Passung.
@@ -35,31 +35,32 @@ Der Workflow ist inkrementell. Es gibt insgesamt 2 Turns, einen pro Absatz:
 
 ### Absatz Loop
 
-Pro Absatz gibt es eine Grilling-Schleife mit mehrere Grilling Turns.
+Pro Absatz gibt es eine eigene Grilling-Schleife, anschließend wird das Ergebniss sofort in `analysis.md` übernommen und verallgemeinerbare Signale extrahiert. Gehe erst danach zum nächsten Absatz.
 
-<per-turn-flow>
-Pro Turn in der Grilling-Schleife, in dieser Reihenfolge. Grille unermüdlich so lange, bis du und der Nutzer ein gemeinsames Verständnis haben:
+<Grilling-Schleife>
+Pro Frage in der Grilling-Schleife, in dieser Reihenfolge. Grille unermüdlich so lange, bis du und der Nutzer ein gemeinsames Verständnis haben:
 
 1. **Formuliere eine Frage. Extrahiere mindestens drei verschiedene Antwortvorschläge aus `candidate-profile.md` und gib eine Empfehlung für die Antwort aus.**
 2. **Lies die User-Antwort.**
 3. **Schreibe Profil-Updates**: harte Domain-/Ausschluss-Signale nach `gate-criteria.md`, Identitäts-/Werte-/Präferenz-Signale nach `candidate-profile.md`.
-</per-turn-flow>
+</Grilling-Schleife>
 
 4. **Session-Ende:** Schritte 1-3 muessen abgeschlossen sein, bevor Schritt 4 emittiert wird.
 4.1. **Update `analysis.md`:** fuehre den aktuell fertigen Absatz direkt in `analysis.md` ein. Er gilt jetzt als final.
 4.2. **Vergleiche die Antwort mit den bestehenden Triage-Profil-Bullets** und extrahiere wenn möglich verallgemeinerbare Signale fuer `gate-criteria.md` und `candidate-profile.md` - auch wenn sie bestehende Bullets vertiefen, differenzieren oder korrigieren, nicht nur wenn sie net-new sind.
-5. **Starte eine neue Grilling schleife** für den nächsten Absatz
+5. **Starte die neue Grilling schleife** für den nächsten Absatz erst, nachdem du `analysis.md` und die Triage-Profile aktualisiert hast.
 
 ### Form von `analysis.md`
 
 `analysis.md` wird im Verlauf sofort ergaenzt, nicht erst am Ende. Pfad: `application-pipeline/applications/<today>-<Company-slug>_<Role-slug>/analysis.md`.
+Halte dich bei den Absatz Bullets extrem knapp, opfere grammatik um kompakter zu werden, solange der Inhalt sich nicht ändert
 
 <analysis-template>
 # Job-Listing
 
 ## {Company} - {Title}
 
-{neutrale Zusammenfassung relevanter Listing-Punkte - knapp, nicht wertend}
+{neutrale Zusammenfassung relevanter Listing-Punkte}
 
 ## Link
 {URL zum Listing}

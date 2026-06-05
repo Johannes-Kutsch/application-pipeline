@@ -163,7 +163,7 @@ class _ParserThread(threading.Thread):
         content_gate: ContentGate,
         dedup: DeduplicationStore,
         dedup_counters: DedupCounters,
-        pool_collector: Pool,
+        pool: Pool,
         metrics: RunMetrics,
         card_store: CardStore,
     ) -> None:
@@ -178,7 +178,6 @@ class _ParserThread(threading.Thread):
         self._prefilter = prefilter
         self._content_gate = content_gate
         self._dedup = dedup
-        self._pool_collector = pool_collector
         self._metrics = metrics
         self._parser_intake = ParserIntake(
             parser_id=parser_id,
@@ -189,7 +188,7 @@ class _ParserThread(threading.Thread):
             domain_pre_filter=prefilter,
             content_gate=content_gate,
             card_store=card_store,
-            pool_collector=pool_collector,
+            pool_collector=pool,
             classify_handoff=classify_handoff,
             run_log=run_log,
             metrics=metrics,
@@ -433,7 +432,7 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display, run_log=run_log)
-        pool_collector = Pool()
+        pool = Pool()
         _run_started_at = datetime.now(timezone.utc)
 
         locations: list[Location] = [City(loc) for loc in cfg.locations]
@@ -503,7 +502,7 @@ def run(
             classify_stage = ClassifyStage(
                 batch_size=cfg.claude_classify_batch_size,
                 parallelism=cfg.claude_classify_parallelism,
-                pool_collector=pool_collector,
+                pool_collector=pool,
                 llm_enricher=llm_enricher,
                 metrics=metrics,
                 run_state=run_state,
@@ -538,7 +537,7 @@ def run(
                     content_gate=content_gate,
                     dedup=dedup_run,
                     dedup_counters=dedup_counters,
-                    pool_collector=pool_collector,
+                    pool=pool,
                     metrics=metrics,
                     card_store=card_store,
                 )
@@ -636,8 +635,8 @@ def run(
         metrics.summarize_to_parser_log(_run_started_at)
 
         # Step 13: Single end-of-run judge_top_n call
-        candidates = pool_collector.judge_candidates(card_store)
-        pool_size = pool_collector.pool_size
+        candidates = pool.judge_candidates(card_store)
+        pool_size = pool.pool_size
 
         daily_top_5_count = 0
         if candidates and not no_judge:
@@ -687,7 +686,7 @@ def run(
 
             if verdicts is not None and judge_usage is not None:
                 try:
-                    daily_top_5_count = pool_collector.apply_match_verdicts(
+                    daily_top_5_count = pool.apply_match_verdicts(
                         verdicts,
                         card_store=card_store,
                         daily_results_file=daily_file,

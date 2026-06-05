@@ -4,7 +4,7 @@ import threading
 from typing import Protocol
 
 from application_pipeline.extracts.card_store import CardStore
-from application_pipeline.llm import JudgeCandidate
+from application_pipeline.llm import JudgeCandidate, MatchVerdict
 from application_pipeline.parsers.types import PositionStub
 
 __all__ = ["Pool"]
@@ -67,6 +67,30 @@ class Pool:
     def build_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
         return self.judge_candidates(card_store)
 
+    def apply_match_verdicts(
+        self,
+        verdicts: list[MatchVerdict],
+        *,
+        card_store: CardStore,
+        daily_results_file: "DailyResultsFileWriter",
+        dedup_store: "SelectedByJudgeRecorder",
+    ) -> int:
+        written = 0
+        for verdict in sorted(verdicts, key=lambda item: item.rank):
+            card = card_store.get(verdict.id)
+            if card is None:
+                continue
+            daily_results_file.commit(
+                rank=verdict.rank,
+                header=card.header,
+                summary=card.summary,
+                url=self.selected_listing_url(verdict.id) or "",
+                body=card.body,
+            )
+            self.mark_selected_by_judge(dedup_store, verdict.id)
+            written += 1
+        return written
+
     @property
     def pool_size(self) -> int:
         with self._lock:
@@ -80,4 +104,10 @@ class Pool:
 class SelectedByJudgeRecorder(Protocol):
     def mark_selected_by_judge(
         self, key_or_listing_id: int, stub: PositionStub | None = None
+    ) -> None: ...
+
+
+class DailyResultsFileWriter(Protocol):
+    def commit(
+        self, *, rank: int, header: str, summary: str, url: str, body: str
     ) -> None: ...

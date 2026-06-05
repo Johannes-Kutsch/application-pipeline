@@ -686,24 +686,16 @@ def run(
                     break
 
             if verdicts is not None and judge_usage is not None:
-                for verdict in sorted(verdicts, key=lambda v: v.rank):
-                    card = card_store.get(verdict.id)
-                    if card is None:
-                        continue
-                    url = pool_collector.selected_listing_url(verdict.id) or ""
-                    try:
-                        daily_file.commit(
-                            rank=verdict.rank,
-                            header=card.header,
-                            summary=card.summary,
-                            url=url,
-                            body=card.body,
-                        )
-                    except ResultsFileError as exc:
-                        _log.error("daily file append failed: %s", exc)
-                        raise
-                    pool_collector.mark_selected_by_judge(dedup_store, verdict.id)
-                    daily_top_5_count += 1
+                try:
+                    daily_top_5_count = pool_collector.apply_match_verdicts(
+                        verdicts,
+                        card_store=card_store,
+                        daily_results_file=daily_file,
+                        dedup_store=dedup_store,
+                    )
+                except ResultsFileError as exc:
+                    _log.error("daily file append failed: %s", exc)
+                    raise
                 metrics.judge_top_n_complete(judge_usage, daily_top_5_count)
                 run_log.event(
                     "pipeline_orchestrator",

@@ -4962,6 +4962,58 @@ def test_verdicts_written_to_daily_results_file(tmp_path: Path) -> None:
     assert summary.written == 4
 
 
+def test_orchestrator_applies_verdicts_through_pool(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from datetime import datetime, timezone
+
+    from application_pipeline.pool import Pool as RealPool
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+    pool_apply_calls: list[list[tuple[int, int]]] = []
+
+    class _PoolThatDropsVerdicts(RealPool):
+        def apply_match_verdicts(
+            self,
+            verdicts: list[MatchVerdict],
+            *,
+            card_store,
+            daily_results_file,
+            dedup_store,
+        ) -> int:
+            pool_apply_calls.append(
+                [(verdict.id, verdict.rank) for verdict in verdicts]
+            )
+            return 0
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.Pool", _PoolThatDropsVerdicts
+    )
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            negative_keywords='["excluded"]',
+        ),
+        llm_enricher=_FakeLLMEnricherRejectJob1(card_store),
+        extractor=_FakeExtractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert len(pool_apply_calls) == 1
+    assert [rank for _, rank in pool_apply_calls[0]] == [1, 2, 3, 4]
+    assert summary.written == 0
+    assert not (tmp_path / "results" / f"{today}.md").exists()
+
+
 def test_daily_file_written_event_logged(tmp_path: Path) -> None:
     """daily_file_written event is logged to pipeline_orchestrator.events.jsonl when cards are written."""
     import application_pipeline.parser_log as parser_log

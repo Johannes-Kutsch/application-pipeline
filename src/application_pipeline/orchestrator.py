@@ -43,6 +43,7 @@ from application_pipeline.llm import (
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.llm_enricher import LLMEnricher, LLMExtractor
+from application_pipeline.pool import Pool
 from application_pipeline.parsers import (
     NotServedQuery,
     Parser,
@@ -142,49 +143,6 @@ _QUERY_DONE = _QueryDone()
 
 
 # ---------------------------------------------------------------------------
-# Pool collector — thread-safe accumulator for judge candidates
-# ---------------------------------------------------------------------------
-
-
-class _PoolCollector:
-    """Collects PositionStubs from enrich-complete and judge-pending paths."""
-
-    def __init__(self) -> None:
-        self._stubs: dict[int, PositionStub] = {}
-        self._lock = threading.Lock()
-
-    def add_matched(self, stub: PositionStub, listing_id: int) -> None:
-        with self._lock:
-            self._stubs[listing_id] = stub
-
-    def add_judge_pending(self, stub: PositionStub, listing_id: int) -> None:
-        with self._lock:
-            self._stubs[listing_id] = stub
-
-    def get_stub(self, listing_id: int) -> PositionStub | None:
-        with self._lock:
-            return self._stubs.get(listing_id)
-
-    def build_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
-        with self._lock:
-            stubs = dict(self._stubs)
-        candidates = []
-        for listing_id in stubs:
-            card = card_store.get(listing_id)
-            if card is None:
-                continue
-            candidates.append(
-                JudgeCandidate(id=listing_id, header=card.header, summary=card.summary)
-            )
-        return candidates
-
-    @property
-    def pool_size(self) -> int:
-        with self._lock:
-            return len(self._stubs)
-
-
-# ---------------------------------------------------------------------------
 # Parser thread — runs full pre-LLM pipeline per stub inline
 # ---------------------------------------------------------------------------
 
@@ -205,7 +163,7 @@ class _ParserThread(threading.Thread):
         content_gate: ContentGate,
         dedup: DeduplicationStore,
         dedup_counters: DedupCounters,
-        pool_collector: _PoolCollector,
+        pool_collector: Pool,
         metrics: RunMetrics,
         card_store: CardStore,
     ) -> None:
@@ -475,7 +433,7 @@ def run(
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display, run_log=run_log)
-        pool_collector = _PoolCollector()
+        pool_collector = Pool()
         _run_started_at = datetime.now(timezone.utc)
 
         locations: list[Location] = [City(loc) for loc in cfg.locations]

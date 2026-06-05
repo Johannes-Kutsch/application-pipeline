@@ -97,8 +97,13 @@ class _CompileCvWorkflow:
                 sys.exit(1)
 
     def _publish_pdfs(self, build_dir: Path, app_dir: Path) -> None:
+        app_suffix = app_dir.name
         for build_name in _BUILDS:
-            shutil.copy2(build_dir / f"{build_name}.pdf", app_dir / f"{build_name}.pdf")
+            suffixed_pdf = app_dir / f"{build_name}_{app_suffix}.pdf"
+            shutil.copy2(build_dir / f"{build_name}.pdf", suffixed_pdf)
+            generic_pdf = app_dir / f"{build_name}.pdf"
+            if generic_pdf.exists():
+                generic_pdf.unlink()
 
 
 def _substitute_slots(template: str, slots: dict[str, str]) -> str:

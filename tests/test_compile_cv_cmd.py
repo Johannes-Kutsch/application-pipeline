@@ -92,6 +92,10 @@ def _run_compile_workflow(app_dir: Path, pdflatex: _PdflatexAdapter) -> None:
     ).run()
 
 
+def _published_pdf(app_dir: Path, build_name: str) -> Path:
+    return app_dir / f"{build_name}_{app_dir.name}.pdf"
+
+
 @pytest.fixture()
 def app_dir(tmp_path: Path) -> Path:
     d = tmp_path / "application"
@@ -115,9 +119,12 @@ def test_compile_cv_produces_three_pdfs(
 ) -> None:
     _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
-    assert (app_dir / "cover.pdf").exists()
-    assert (app_dir / "resume.pdf").exists()
-    assert (app_dir / "combined.pdf").exists()
+    assert (app_dir / "cover_application.pdf").exists()
+    assert (app_dir / "resume_application.pdf").exists()
+    assert (app_dir / "combined_application.pdf").exists()
+    assert not (app_dir / "cover.pdf").exists()
+    assert not (app_dir / "resume.pdf").exists()
+    assert not (app_dir / "combined.pdf").exists()
 
 
 def test_compile_cv_supported_build_modes_include_slot_content(
@@ -126,9 +133,9 @@ def test_compile_cv_supported_build_modes_include_slot_content(
 ) -> None:
     _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
-    assert b"Ich bewerbe mich hiermit." in (app_dir / "cover.pdf").read_bytes()
-    assert b"Developer" in (app_dir / "resume.pdf").read_bytes()
-    assert b"Python, LaTeX" in (app_dir / "combined.pdf").read_bytes()
+    assert b"Ich bewerbe mich hiermit." in _published_pdf(app_dir, "cover").read_bytes()
+    assert b"Developer" in _published_pdf(app_dir, "resume").read_bytes()
+    assert b"Python, LaTeX" in _published_pdf(app_dir, "combined").read_bytes()
 
 
 def test_compile_cv_removes_build_dir_on_success(
@@ -145,13 +152,15 @@ def test_compile_cv_overwrites_existing_pdfs(
     project_root: Path,
 ) -> None:
     for name in ("cover", "resume", "combined"):
-        (app_dir / f"{name}.pdf").write_bytes(b"stale")
+        _published_pdf(app_dir, name).write_bytes(b"stale")
+        (app_dir / f"{name}.pdf").write_bytes(b"stale-generic")
     _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
     for name in ("cover", "resume", "combined"):
-        pdf_bytes = (app_dir / f"{name}.pdf").read_bytes()
+        pdf_bytes = _published_pdf(app_dir, name).read_bytes()
         assert pdf_bytes != b"stale"
         assert pdf_bytes.startswith(b"%PDF-1.4 fake\n")
+        assert not (app_dir / f"{name}.pdf").exists()
 
 
 def test_compile_cv_ignores_application_pipeline_home(
@@ -212,6 +221,7 @@ def test_compile_cv_does_not_write_pdfs_to_dir_on_failure(
 
     for name in ("cover", "resume", "combined"):
         assert not (app_dir / f"{name}.pdf").exists()
+        assert not _published_pdf(app_dir, name).exists()
 
 
 def test_compile_cv_emits_error_blob_to_stderr_on_failure(
@@ -493,7 +503,7 @@ def test_compile_cv_three_resume_slots_independently_substituted(
     )
     _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 
-    resume_pdf = (app_dir / "resume.pdf").read_bytes()
+    resume_pdf = _published_pdf(app_dir, "resume").read_bytes()
     assert b"BERUFSINHALT" in resume_pdf
     assert b"AUSBILDUNGSINHALT" in resume_pdf
     assert b"PROJEKTINHALT" in resume_pdf

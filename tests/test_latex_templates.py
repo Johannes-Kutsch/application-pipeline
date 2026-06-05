@@ -259,9 +259,12 @@ def test_compile_cv_template_is_compileable(
 
     compile_cv(app_dir)
 
-    assert (app_dir / "cover.pdf").exists()
-    assert (app_dir / "resume.pdf").exists()
-    assert (app_dir / "combined.pdf").exists()
+    assert (app_dir / "cover_application.pdf").exists()
+    assert (app_dir / "resume_application.pdf").exists()
+    assert (app_dir / "combined_application.pdf").exists()
+    assert not (app_dir / "cover.pdf").exists()
+    assert not (app_dir / "resume.pdf").exists()
+    assert not (app_dir / "combined.pdf").exists()
 
 
 def test_compile_cv_wires_slot_map_content_into_structural_surfaces(

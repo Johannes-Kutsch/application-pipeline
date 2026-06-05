@@ -105,7 +105,10 @@ def test_compile_cv_end_to_end_produces_pdfs_and_cleans_build(
 
     compile_cv(smoke_app_dir)
 
-    assert (smoke_app_dir / "cover.pdf").exists()
-    assert (smoke_app_dir / "resume.pdf").exists()
-    assert (smoke_app_dir / "combined.pdf").exists()
+    assert (smoke_app_dir / "cover_application.pdf").exists()
+    assert (smoke_app_dir / "resume_application.pdf").exists()
+    assert (smoke_app_dir / "combined_application.pdf").exists()
+    assert not (smoke_app_dir / "cover.pdf").exists()
+    assert not (smoke_app_dir / "resume.pdf").exists()
+    assert not (smoke_app_dir / "combined.pdf").exists()
     assert not (smoke_app_dir / ".build").exists()

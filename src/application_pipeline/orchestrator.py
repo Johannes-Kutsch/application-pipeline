@@ -636,7 +636,7 @@ def run(
         metrics.summarize_to_parser_log(_run_started_at)
 
         # Step 13: Single end-of-run judge_top_n call
-        candidates = pool_collector.build_candidates(card_store)
+        candidates = pool_collector.judge_candidates(card_store)
         pool_size = pool_collector.pool_size
 
         daily_top_5_count = 0
@@ -690,8 +690,7 @@ def run(
                     card = card_store.get(verdict.id)
                     if card is None:
                         continue
-                    stub = pool_collector.get_stub(verdict.id)
-                    url = stub.url if stub is not None else ""
+                    url = pool_collector.selected_listing_url(verdict.id) or ""
                     try:
                         daily_file.commit(
                             rank=verdict.rank,
@@ -703,8 +702,7 @@ def run(
                     except ResultsFileError as exc:
                         _log.error("daily file append failed: %s", exc)
                         raise
-                    if stub is not None:
-                        dedup_store.mark_selected_by_judge(verdict.id, stub)
+                    pool_collector.mark_selected_by_judge(dedup_store, verdict.id)
                     daily_top_5_count += 1
                 metrics.judge_top_n_complete(judge_usage, daily_top_5_count)
                 run_log.event(

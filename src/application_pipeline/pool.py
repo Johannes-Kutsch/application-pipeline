@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Protocol
 
 from application_pipeline.extracts.card_store import CardStore
 from application_pipeline.llm import JudgeCandidate
@@ -34,12 +35,23 @@ class Pool:
         """Admit a Classify Stage match without exposing storage details."""
         self._store_stub(listing_id=listing_id, stub=stub)
 
-    def get_stub(self, listing_id: int) -> PositionStub | None:
-        """Return the current stub for a listing id for temporary legacy callers."""
+    def selected_listing_url(self, listing_id: int) -> str | None:
         with self._lock:
-            return self._stubs.get(listing_id)
+            stub = self._stubs.get(listing_id)
+        if stub is None:
+            return None
+        return stub.url
 
-    def build_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
+    def mark_selected_by_judge(
+        self, dedup_store: "SelectedByJudgeRecorder", listing_id: int
+    ) -> None:
+        with self._lock:
+            stub = self._stubs.get(listing_id)
+        if stub is None:
+            return
+        dedup_store.mark_selected_by_judge(listing_id, stub)
+
+    def judge_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
         with self._lock:
             stubs = dict(self._stubs)
         candidates = []
@@ -52,6 +64,9 @@ class Pool:
             )
         return candidates
 
+    def build_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
+        return self.judge_candidates(card_store)
+
     @property
     def pool_size(self) -> int:
         with self._lock:
@@ -60,3 +75,9 @@ class Pool:
     def _store_stub(self, *, listing_id: int, stub: PositionStub) -> None:
         with self._lock:
             self._stubs[listing_id] = stub
+
+
+class SelectedByJudgeRecorder(Protocol):
+    def mark_selected_by_judge(
+        self, key_or_listing_id: int, stub: PositionStub | None = None
+    ) -> None: ...

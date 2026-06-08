@@ -17,7 +17,11 @@ from application_pipeline.llm.types import CallUsage
 from application_pipeline.orchestrator import RunSummary
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter_gate import PreFilterSnapshot
-from application_pipeline.run_metrics import RunMetrics
+from application_pipeline.run_metrics import (
+    ClassifyBatchOutcomeObservation,
+    ClassifyBatchFailureObservation,
+    RunMetrics,
+)
 
 ParserDropOutcome = Literal[
     "dedup_url_hit",
@@ -155,6 +159,79 @@ def test_classify_body_all_forwarded(run_log: RunLog) -> None:
     assert "queued" not in body
 
 
+def test_classify_outcome_observation_updates_display_summary_divider_and_log(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    usage = _make_usage(
+        input_tokens=500,
+        output_tokens=200,
+        cache_read_tokens=100,
+        cost_usd=0.002,
+        duration_s=2.5,
+    )
+    metrics.observe_classify_submission(5)
+    metrics.observe_classify_batch_start(5)
+    metrics.observe_classify_batch_outcome(
+        ClassifyBatchOutcomeObservation(
+            usage=usage,
+            item_states=(
+                "matched",
+                "matched",
+                "rejected",
+                "retryable",
+                "expired",
+            ),
+        )
+    )
+
+    assert _last_body(display, "llm classify relevance") == (
+        "1 malformed · 2 dropped · 2 forwarded"
+    )
+
+    summary = metrics.to_run_summary(
+        duration_s=1.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+    assert summary.classify_items == 5
+    assert summary.classifier_dropped == 2
+    assert summary.errored == 1
+    assert summary.claude_input_tokens == 500
+    assert summary.claude_output_tokens == 200
+    assert summary.claude_cache_read_tokens == 100
+    assert abs(summary.claude_cost_usd - 0.002) < 1e-9
+
+    divider = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
+    )
+    assert "classify_calls=1" in divider
+    assert "classify_items=5" in divider
+    assert "classify_total_s=2.5" in divider
+    assert "classify_input_tokens=500" in divider
+    assert "classify_output_tokens=200" in divider
+    assert "classify_cache_read_tokens=100" in divider
+    assert "classify_cost_usd=0.002000" in divider
+    assert "errors=1" in divider
+    assert "classify_items_abandoned=1" in divider
+
+    started_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    metrics.summarize_to_parser_log(started_at)
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "batches_sent=1" in run_log_text
+    assert "items_classified=5" in run_log_text
+    assert "matched=2" in run_log_text
+    assert "off_domain=2" in run_log_text
+    assert "batches_failed=0" in run_log_text
+    assert "input_tokens=500" in run_log_text
+
+
 def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
@@ -170,6 +247,47 @@ def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     assert "forwarded" not in body
     assert "queued" not in body
     assert "dropped" not in body
+
+
+def test_classify_failure_observation_updates_display_summary_divider_and_log(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    metrics.observe_classify_submission(3)
+    metrics.observe_classify_batch_start(3)
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=3))
+
+    assert _last_body(display, "llm classify relevance") == "3 malformed"
+
+    summary = metrics.to_run_summary(
+        duration_s=1.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+    assert summary.classify_items == 0
+    assert summary.errored == 3
+
+    divider = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
+    )
+    assert "errors=3" in divider
+    assert "classify_batches_failed=1" in divider
+    assert "classify_items_abandoned=3" in divider
+
+    started_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    metrics.summarize_to_parser_log(started_at)
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "batches_sent=0" in run_log_text
+    assert "items_classified=0" in run_log_text
+    assert "matched=0" in run_log_text
+    assert "off_domain=0" in run_log_text
+    assert "batches_failed=1" in run_log_text
 
 
 def test_classify_body_retryable_items_count_as_malformed_not_forwarded(

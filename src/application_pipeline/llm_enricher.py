@@ -89,7 +89,7 @@ class LLMEnricher:
         ]
 
         try:
-            raw_verdicts, _ = self._extractor.classify_relevance(classify_items)
+            raw_verdicts, usage = self._extractor.classify_relevance(classify_items)
         except (
             ExtractorBatchMalformedError,
             ExtractorMalformedError,
@@ -163,7 +163,7 @@ class LLMEnricher:
                     )
                 )
 
-        return AppliedClassifyOutcome(items=outcome_items)
+        return AppliedClassifyOutcome(items=outcome_items, usage=usage)
 
     def _stash_failure(
         self, kind: str, stub: PositionStub, content: str, *, ext: str = "html"

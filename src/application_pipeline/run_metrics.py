@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -64,6 +64,20 @@ class RunSummary:
     claude_cache_read_tokens: int = 0
     claude_cost_usd: float = 0.0
     duration_seconds: float = 0.0
+
+
+ClassifyItemState = Literal["matched", "rejected", "retryable", "expired"]
+
+
+@dataclass(frozen=True)
+class ClassifyBatchOutcomeObservation:
+    usage: CallUsage
+    item_states: tuple[ClassifyItemState, ...]
+
+
+@dataclass(frozen=True)
+class ClassifyBatchFailureObservation:
+    items: int
 
 
 class RunMetrics:
@@ -375,9 +389,12 @@ class RunMetrics:
     # -----------------------------------------------------------------------
 
     def classify_buffered(self, n: int) -> None:
+        self.observe_classify_submission(n)
+
+    def observe_classify_submission(self, count: int) -> None:
         with self._classify_lock:
-            self._pending_classify += n
-            self._classify_queued += n
+            self._pending_classify += count
+            self._classify_queued += count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
@@ -387,10 +404,13 @@ class RunMetrics:
         self._display.update_body("llm classify relevance", body=body)
 
     def classify_batch_dequeued(self, n: int) -> None:
+        self.observe_classify_batch_start(n)
+
+    def observe_classify_batch_start(self, count: int) -> None:
         with self._classify_lock:
             self._total_batches += 1
-            self._pending_classify -= n
-            self._classifying += n
+            self._pending_classify -= count
+            self._classifying += count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
@@ -401,14 +421,38 @@ class RunMetrics:
         classifier_dropped: int,
         retryable_items: int = 0,
     ) -> None:
+        forwarded = items - classifier_dropped - retryable_items
+        item_states = cast(
+            tuple[ClassifyItemState, ...],
+            ("matched",) * forwarded
+            + ("rejected",) * classifier_dropped
+            + ("retryable",) * retryable_items,
+        )
+        self.observe_classify_batch_outcome(
+            ClassifyBatchOutcomeObservation(
+                usage=usage,
+                item_states=item_states,
+            )
+        )
+
+    def observe_classify_batch_outcome(
+        self, observation: ClassifyBatchOutcomeObservation
+    ) -> None:
+        items = len(observation.item_states)
+        classifier_dropped = sum(
+            1 for state in observation.item_states if state in ("rejected", "expired")
+        )
+        retryable_items = sum(
+            1 for state in observation.item_states if state == "retryable"
+        )
         with self._classify_lock:
             self._classify_calls += 1
             self._classify_items += items
-            self._classify_input_tokens += usage.input_tokens
-            self._classify_output_tokens += usage.output_tokens
-            self._classify_cache_read_tokens += usage.cache_read_tokens
-            self._classify_cost_usd += usage.cost_usd
-            self._classify_total_s += usage.duration_s
+            self._classify_input_tokens += observation.usage.input_tokens
+            self._classify_output_tokens += observation.usage.output_tokens
+            self._classify_cache_read_tokens += observation.usage.cache_read_tokens
+            self._classify_cost_usd += observation.usage.cost_usd
+            self._classify_total_s += observation.usage.duration_s
             self._classifier_dropped += classifier_dropped
             self._classify_items_retryable += retryable_items
             self._classifying -= items
@@ -416,10 +460,17 @@ class RunMetrics:
         self._display.update_body("llm classify relevance", body=body)
 
     def classify_batch_failed(self, items: int) -> None:
+        self.observe_classify_batch_failure(
+            ClassifyBatchFailureObservation(items=items)
+        )
+
+    def observe_classify_batch_failure(
+        self, observation: ClassifyBatchFailureObservation
+    ) -> None:
         with self._classify_lock:
             self._classify_failed += 1
-            self._classify_items_errored += items
-            self._classifying -= items
+            self._classify_items_errored += observation.items
+            self._classifying -= observation.items
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
@@ -537,7 +588,9 @@ class RunMetrics:
             classify_cache_read_tokens = self._classify_cache_read_tokens
             classify_cost_usd = self._classify_cost_usd
             classify_batches_failed = self._classify_failed
-            classify_items_abandoned = self._classify_items_errored
+            classify_items_abandoned = (
+                self._classify_items_errored + self._classify_items_retryable
+            )
 
         with self._lock:
             sources = dict(self._written_per_source)
@@ -619,6 +672,7 @@ class RunMetrics:
             classify_items = self._classify_items
             classifier_dropped = self._classifier_dropped
             classify_items_errored = self._classify_items_errored
+            classify_items_retryable = self._classify_items_retryable
 
         with self._lock:
             return RunSummary(
@@ -641,7 +695,9 @@ class RunMetrics:
                 classifier_dropped=classifier_dropped,
                 written=self._written,
                 enrich_failed=self._enrich_failed,
-                errored=self._judge_errored + classify_items_errored,
+                errored=self._judge_errored
+                + classify_items_errored
+                + classify_items_retryable,
                 parsers_dead=self._parsers_dead,
                 classify_items=classify_items,
                 claude_input_tokens=classify_input_tokens + self._judge_input_tokens,
@@ -657,6 +713,7 @@ class RunMetrics:
             classify_items = self._classify_items
             classifier_dropped = self._classifier_dropped
             classify_failed = self._classify_failed
+            classify_retryable = self._classify_items_retryable
             classify_input_tokens = self._classify_input_tokens
             classify_output_tokens = self._classify_output_tokens
             classify_cache_read_tokens = self._classify_cache_read_tokens
@@ -677,7 +734,7 @@ class RunMetrics:
             {
                 "batches_sent": classify_calls,
                 "items_classified": classify_items,
-                "matched": classify_items - classifier_dropped,
+                "matched": classify_items - classifier_dropped - classify_retryable,
                 "off_domain": classifier_dropped,
                 "batches_failed": classify_failed,
                 "input_tokens": classify_input_tokens,

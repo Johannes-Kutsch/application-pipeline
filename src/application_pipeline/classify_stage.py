@@ -13,6 +13,10 @@ from application_pipeline.llm import ExtractorBatchMalformedError, ExtractorErro
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import AppliedClassifyOutcome, CallUsage
+from application_pipeline.run_metrics import (
+    ClassifyBatchFailureObservation,
+    ClassifyBatchOutcomeObservation,
+)
 from application_pipeline.parser_log import RunLog
 
 from application_pipeline.parsers.types import PositionStub
@@ -96,6 +100,14 @@ class ClassifyWorkerRunState(Protocol):
 
 @runtime_checkable
 class ClassifyWorkerMetrics(Protocol):
+    def observe_classify_batch_failure(
+        self, observation: ClassifyBatchFailureObservation
+    ) -> None: ...
+
+    def observe_classify_batch_outcome(
+        self, observation: ClassifyBatchOutcomeObservation
+    ) -> None: ...
+
     def classify_batch_complete(
         self,
         usage: CallUsage,
@@ -119,15 +131,6 @@ class BatchLLMEnricher(Protocol):
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
     ) -> AppliedClassifyOutcome: ...
-
-
-_ZERO_USAGE = CallUsage(
-    input_tokens=0,
-    output_tokens=0,
-    cache_read_tokens=0,
-    cost_usd=0.0,
-    duration_s=0.0,
-)
 
 
 class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
@@ -444,7 +447,9 @@ class _ClassifyWorker(threading.Thread):
         if from_retry:
             self._dispatch.finish_retry()
         _log.warning("llm_enricher.enrich failed: %s", exc)
-        self._metrics.classify_batch_failed(len(batch))
+        self._metrics.observe_classify_batch_failure(
+            ClassifyBatchFailureObservation(items=len(batch))
+        )
         self._run_log.event(
             "llm_classify_relevance",
             "classify_relevance",
@@ -471,8 +476,6 @@ class _ClassifyWorker(threading.Thread):
     def _apply_outcome(
         self, batch: list[_ClassifyRequest], outcome: AppliedClassifyOutcome
     ) -> None:
-        dropped = 0
-        retryable = 0
         matched_submissions: list[tuple[int, PositionStub]] = []
         for req, item_outcome in zip(batch, outcome.items):
             self._run_log.event(
@@ -481,14 +484,9 @@ class _ClassifyWorker(threading.Thread):
                 matches=item_outcome.event_matches,
             )
             if item_outcome.state == "retryable":
-                retryable += 1
                 self._metrics.enrich_failed(req.parser_id)
                 continue
-            if item_outcome.state == "expired":
-                dropped += 1
-                continue
-            if item_outcome.state == "rejected":
-                dropped += 1
+            if item_outcome.state in ("expired", "rejected"):
                 continue
             if item_outcome.state == "matched":
                 matched_submissions.append(
@@ -498,11 +496,11 @@ class _ClassifyWorker(threading.Thread):
         for listing_id, stub in matched_submissions:
             self._pool_collector.add_matched(stub, listing_id)
 
-        self._metrics.classify_batch_complete(
-            _ZERO_USAGE,
-            len(batch),
-            dropped,
-            retryable_items=retryable,
+        self._metrics.observe_classify_batch_outcome(
+            ClassifyBatchOutcomeObservation(
+                usage=outcome.usage,
+                item_states=tuple(item.state for item in outcome.items),
+            )
         )
 
 

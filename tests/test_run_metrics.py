@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from datetime import datetime, timezone
@@ -1175,6 +1176,54 @@ def test_format_run_divider_zero_callsite_tokens_when_no_calls(run_log: RunLog) 
     assert "judge_output_tokens=0" in result
     assert "judge_cache_read_tokens=0" in result
     assert "judge_cost_usd=0.000000" in result
+
+
+def test_emit_run_complete_writes_pipeline_orchestrator_row_from_metrics(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    display = FakeStatusDisplay()
+    metrics = _build_populated_metrics(display, run_log)
+    dedup = DedupSnapshot(
+        dedup_url_hits=2,
+        dedup_tuple_hits=3,
+        dedup_run_hits=4,
+        dedup_misses=5,
+    )
+
+    metrics.emit_run_complete(
+        dedup=dedup,
+        pool_size=6,
+        daily_top_5_count=1,
+        elapsed_s=12.34,
+    )
+
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "pipeline" / "orchestrator.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    run_complete_rows = [row for row in rows if row.get("event") == "run_complete"]
+    assert run_complete_rows == [
+        {
+            "ts": run_complete_rows[0]["ts"],
+            "event": "run_complete",
+            "classify_calls": 1,
+            "classify_input_tokens": 500,
+            "classify_output_tokens": 200,
+            "judge_input_tokens": 300,
+            "judge_output_tokens": 150,
+            "dedup_url_hits": 2,
+            "dedup_tuple_hits": 3,
+            "dedup_run_hits": 4,
+            "dedup_misses": 5,
+            "pool_size": 6,
+            "daily_top_5_count": 1,
+            "elapsed_s": 12.3,
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------

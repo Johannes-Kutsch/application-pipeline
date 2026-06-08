@@ -720,21 +720,11 @@ def run(
         if run_state.degraded_reason is not None:
             metrics.set_degraded_reason(run_state.degraded_reason)
 
-        run_log.event(
-            "pipeline_orchestrator",
-            "run_complete",
-            classify_calls=metrics.classify_calls,
-            classify_input_tokens=metrics.classify_input_tokens,
-            classify_output_tokens=metrics.classify_output_tokens,
-            judge_input_tokens=metrics.judge_input_tokens,
-            judge_output_tokens=metrics.judge_output_tokens,
-            dedup_url_hits=dedup_snapshot.dedup_url_hits,
-            dedup_tuple_hits=dedup_snapshot.dedup_tuple_hits,
-            dedup_run_hits=dedup_snapshot.dedup_run_hits,
-            dedup_misses=dedup_snapshot.dedup_misses,
+        metrics.emit_run_complete(
+            dedup=dedup_snapshot,
             pool_size=pool_size,
             daily_top_5_count=daily_top_5_count,
-            elapsed_s=round(elapsed_s, 1),
+            elapsed_s=elapsed_s,
         )
 
         summary = metrics.to_run_summary(

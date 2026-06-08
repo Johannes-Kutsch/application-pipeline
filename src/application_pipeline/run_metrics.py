@@ -729,6 +729,31 @@ class RunMetrics:
                 claude_cost_usd=classify_cost_usd + self._judge_cost_usd,
             )
 
+    def emit_run_complete(
+        self,
+        *,
+        dedup: DedupSnapshot,
+        pool_size: int,
+        daily_top_5_count: int,
+        elapsed_s: float,
+    ) -> None:
+        self._run_log.event(
+            "pipeline_orchestrator",
+            "run_complete",
+            classify_calls=self.classify_calls,
+            classify_input_tokens=self.classify_input_tokens,
+            classify_output_tokens=self.classify_output_tokens,
+            judge_input_tokens=self.judge_input_tokens,
+            judge_output_tokens=self.judge_output_tokens,
+            dedup_url_hits=dedup.dedup_url_hits,
+            dedup_tuple_hits=dedup.dedup_tuple_hits,
+            dedup_run_hits=dedup.dedup_run_hits,
+            dedup_misses=dedup.dedup_misses,
+            pool_size=pool_size,
+            daily_top_5_count=daily_top_5_count,
+            elapsed_s=round(elapsed_s, 1),
+        )
+
     def summarize_to_parser_log(self, started_at: datetime) -> None:
         with self._classify_lock:
             classify_calls = self._classify_calls

@@ -12,10 +12,46 @@ import application_pipeline.compile_cv_cmd as compile_cv_cmd_module
 from application_pipeline.__main__ import main
 from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import _PdflatexAdapter, _PdflatexRunResult
+from application_pipeline.latex import slot_map
 
 
 def _write_fake_pdf(build_dir: Path, build_name: str) -> None:
-    rendered_cv = (build_dir / "cv.tex").read_text(encoding="utf-8")
+    slots = slot_map.parse(build_dir.parent / "cv.tex")
+    if build_name == "cover":
+        rendered_cv = "\n".join(
+            [
+                slots["opening"],
+                slots["cover_intro"],
+                slots["cover_pivot"],
+                slots["cover_fit"],
+                slots["cover_closing"],
+            ]
+        )
+    elif build_name == "resume":
+        rendered_cv = "\n".join(
+            [
+                slots["resume_berufserfahrung"],
+                slots["resume_ausbildung"],
+                slots["resume_projekte"],
+                slots["skills_block"],
+            ]
+        )
+    elif build_name == "combined":
+        rendered_cv = "\n".join(
+            [
+                slots["opening"],
+                slots["cover_intro"],
+                slots["cover_pivot"],
+                slots["cover_fit"],
+                slots["cover_closing"],
+                slots["resume_berufserfahrung"],
+                slots["resume_ausbildung"],
+                slots["resume_projekte"],
+                slots["skills_block"],
+            ]
+        )
+    else:
+        raise AssertionError(f"unexpected build name: {build_name}")
     (build_dir / f"{build_name}.pdf").write_bytes(
         b"%PDF-1.4 fake\n" + rendered_cv.encode("utf-8")
     )
@@ -136,6 +172,26 @@ def test_compile_cv_supported_build_modes_include_slot_content(
     assert b"Ich bewerbe mich hiermit." in _published_pdf(app_dir, "cover").read_bytes()
     assert b"Developer" in _published_pdf(app_dir, "resume").read_bytes()
     assert b"Python, LaTeX" in _published_pdf(app_dir, "combined").read_bytes()
+
+
+def test_compile_cv_publishes_distinct_cover_resume_and_combined_outputs(
+    app_dir: Path,
+    project_root: Path,
+) -> None:
+    _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
+
+    cover_pdf = _published_pdf(app_dir, "cover").read_bytes()
+    resume_pdf = _published_pdf(app_dir, "resume").read_bytes()
+    combined_pdf = _published_pdf(app_dir, "combined").read_bytes()
+
+    assert b"Ich bewerbe mich hiermit." in cover_pdf
+    assert b"Developer" not in cover_pdf
+
+    assert b"Developer" in resume_pdf
+    assert b"Ich bewerbe mich hiermit." not in resume_pdf
+
+    assert b"Ich bewerbe mich hiermit." in combined_pdf
+    assert b"Developer" in combined_pdf
 
 
 def test_compile_cv_removes_build_dir_on_success(

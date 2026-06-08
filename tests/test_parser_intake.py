@@ -39,18 +39,6 @@ class _ObservingMetrics:
     def observe_parser_forwarded(self, parser_id: str, mode: str) -> None:
         self.parser_forwarded.append((parser_id, mode))
 
-    def enrich_failed(self, parser_id: str = "") -> None:
-        pass
-
-    def enriched(self, parser_id: str, mode: str) -> None:
-        pass
-
-    def increment_enrich_failed_count(self, parser_id: str) -> None:
-        pass
-
-    def increment_forwarded(self, parser_id: str) -> None:
-        pass
-
 
 @pytest.mark.parametrize(
     ("dedup_kind", "seed_listing"),
@@ -227,6 +215,33 @@ def test_accepted_listing_reports_single_parser_forwarded_observation(
         parser_intake.process_position_stub(harness.default_position_stub)
 
     assert metrics.parser_forwarded == [("test", "native")]
+
+
+def test_enrich_failed_listing_reports_single_parser_enrich_failure_observation(
+    tmp_path: Path,
+) -> None:
+    harness = ParserIntakeHarness.create(tmp_path, parser_id="test")
+    harness.set_parser_enrich_failed_error()
+    metrics = _ObservingMetrics()
+    parser_intake = ParserIntake(
+        parser_id="test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=harness.classify_handoff,
+        run_log=harness.run_log,
+        metrics=metrics,
+    )
+
+    with harness.run_scope():
+        parser_intake.process_position_stub(harness.default_position_stub)
+
+    assert metrics.parser_enrich_failures == ["test"]
 
 
 def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_steps(

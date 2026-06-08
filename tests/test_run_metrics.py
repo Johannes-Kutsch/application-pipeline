@@ -1368,6 +1368,30 @@ def test_parser_enrich_failure_observation_updates_pipeline_and_native_parser_on
     assert "parser native parser gates" not in display.registered_names()
 
 
+def test_parser_enrich_failure_observation_keeps_counter_hidden_without_native_enrich(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+    metrics.register_parser("fallback_parser", order=1, total_queries=1)
+
+    metrics.observe_parser_enrich_failure("fallback_parser")
+
+    summary = metrics.to_run_summary(
+        1.0,
+        PreFilterSnapshot(),
+        FreshnessSnapshot(),
+        ContentSnapshot(),
+        DedupSnapshot(),
+    )
+
+    assert summary.enrich_failed == 1
+    assert _last_body(display, "pipeline") == "discovered=0 written=0 errors=1"
+    assert _last_body(display, "parser fallback parser") == "0 discovered · 0 forwarded"
+    assert "parser fallback parser gates" not in display.registered_names()
+
+
 def test_parser_body_forwarded_updates_display_immediately(run_log: RunLog) -> None:
     """increment_forwarded triggers a body update on the parser row immediately."""
     display = FakeStatusDisplay()
@@ -1382,6 +1406,20 @@ def test_parser_body_forwarded_updates_display_immediately(run_log: RunLog) -> N
     assert after == before + 1
     body = _last_body(display, "parser p")
     assert "1 forwarded" in body
+
+
+def test_parser_forwarded_observation_updates_parser_row_without_registering_gates(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=1, total_queries=2, has_native_enrich=True)
+
+    metrics.observe_parser_forwarded("p", "native")
+    metrics.observe_parser_forwarded("p", "fallback")
+
+    assert _last_body(display, "parser p") == "0 discovered · 2 forwarded"
+    assert "parser p gates" not in display.registered_names()
 
 
 def test_parser_done_sets_phase_column_to_done(run_log: RunLog) -> None:

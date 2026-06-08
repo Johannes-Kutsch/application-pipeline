@@ -505,6 +505,19 @@ class RunMetrics:
     _JUDGE_ROW = "llm judge match"
     _JUDGE_ROW_ORDER = 1002
 
+    def _record_judge_usage(self, usage: CallUsage) -> None:
+        self._judge_calls += 1
+        self._judge_input_tokens += usage.input_tokens
+        self._judge_output_tokens += usage.output_tokens
+        self._judge_cache_read_tokens += usage.cache_read_tokens
+        self._judge_cost_usd += usage.cost_usd
+        self._judge_total_s += usage.duration_s
+
+    def _record_judge_failure(self) -> str:
+        self._judge_failed += 1
+        self._judge_errored += 1
+        return self._pipeline_body()
+
     def observe_judge_start(self, observation: JudgeLifecycleStartObservation) -> None:
         with self._lock:
             self._judge_started += 1
@@ -519,12 +532,7 @@ class RunMetrics:
         self, observation: JudgeLifecycleOutcomeObservation
     ) -> None:
         with self._lock:
-            self._judge_calls += 1
-            self._judge_input_tokens += observation.usage.input_tokens
-            self._judge_output_tokens += observation.usage.output_tokens
-            self._judge_cache_read_tokens += observation.usage.cache_read_tokens
-            self._judge_cost_usd += observation.usage.cost_usd
-            self._judge_total_s += observation.usage.duration_s
+            self._record_judge_usage(observation.usage)
             self._written += observation.card_count
         self._display.update_body(
             self._JUDGE_ROW, body=f"wrote {observation.card_count} cards"
@@ -540,9 +548,7 @@ class RunMetrics:
     ) -> None:
         del observation
         with self._lock:
-            self._judge_failed += 1
-            self._judge_errored += 1
-            pipeline_body = self._pipeline_body()
+            pipeline_body = self._record_judge_failure()
         self._display.update_body("pipeline", body=pipeline_body)
         self._display.update_phase(self._JUDGE_ROW, phase="error")
 

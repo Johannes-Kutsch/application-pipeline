@@ -5052,57 +5052,14 @@ def test_daily_file_written_event_logged(tmp_path: Path) -> None:
     assert daily_written[0]["card_count"] == 4
 
 
-def test_run_reports_judge_success_through_lifecycle_observations(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_run_reports_match_judge_completion_through_run_metrics(
+    tmp_path: Path,
 ) -> None:
-    import application_pipeline.run_metrics as run_metrics_module
-
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
-    starts: list[run_metrics_module.JudgeLifecycleStartObservation] = []
-    outcomes: list[run_metrics_module.JudgeLifecycleOutcomeObservation] = []
-
-    original_observe_judge_start = run_metrics_module.RunMetrics.observe_judge_start
-    original_observe_judge_outcome = run_metrics_module.RunMetrics.observe_judge_outcome
-
-    def _observe_judge_start(
-        self: run_metrics_module.RunMetrics,
-        observation: run_metrics_module.JudgeLifecycleStartObservation,
-    ) -> None:
-        starts.append(observation)
-        original_observe_judge_start(self, observation)
-
-    def _observe_judge_outcome(
-        self: run_metrics_module.RunMetrics,
-        observation: run_metrics_module.JudgeLifecycleOutcomeObservation,
-    ) -> None:
-        outcomes.append(observation)
-        original_observe_judge_outcome(self, observation)
-
-    def _legacy_judge_started(
-        self: run_metrics_module.RunMetrics, candidate_count: int
-    ) -> None:
-        raise AssertionError(f"legacy judge_started called with {candidate_count}")
-
-    def _legacy_judge_top_n_complete(
-        self: run_metrics_module.RunMetrics, usage: CallUsage, card_count: int
-    ) -> None:
-        raise AssertionError(f"legacy judge_top_n_complete called with {card_count}")
-
-    monkeypatch.setattr(
-        run_metrics_module.RunMetrics, "observe_judge_start", _observe_judge_start
-    )
-    monkeypatch.setattr(
-        run_metrics_module.RunMetrics, "observe_judge_outcome", _observe_judge_outcome
-    )
-    monkeypatch.setattr(
-        run_metrics_module.RunMetrics, "judge_started", _legacy_judge_started
-    )
-    monkeypatch.setattr(
-        run_metrics_module.RunMetrics,
-        "judge_top_n_complete",
-        _legacy_judge_top_n_complete,
-    )
+    display = FakeStatusDisplay()
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -5111,50 +5068,48 @@ def test_run_reports_judge_success_through_lifecycle_observations(
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
+        status_display=display,
+        run_log=run_log,
     )
 
     assert summary.written == 2
-    assert starts == [
-        run_metrics_module.JudgeLifecycleStartObservation(candidate_count=2)
+    judge_registers = [
+        c
+        for c in display.calls
+        if c.method == "register" and c.name == "llm judge match"
     ]
-    assert len(outcomes) == 1
-    assert outcomes[0].card_count == 2
-    assert outcomes[0].usage == _ZERO_USAGE
+    assert len(judge_registers) == 1
+    assert judge_registers[0].kwargs["body"] == "2 candidates"
+
+    judge_prints = [c for c in display.calls if c.method == "print"]
+    assert any(
+        c.name == "llm_judge_match"
+        and str(c.kwargs["message"]) == "judge_top_n complete: wrote 2 cards"
+        for c in judge_prints
+    )
+
+    run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "judges_sent=1" in run_log_text
+    assert "judges_failed=0" in run_log_text
+    assert "input_tokens=0" in run_log_text
+    assert "output_tokens=0" in run_log_text
 
 
-def test_run_reports_judge_failure_through_lifecycle_observation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_run_reports_match_judge_failure_through_run_metrics(
+    tmp_path: Path,
 ) -> None:
-    import application_pipeline.run_metrics as run_metrics_module
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+    display = FakeStatusDisplay()
 
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
-    failures: list[run_metrics_module.JudgeLifecycleFailureObservation] = []
-
-    original_observe_judge_failure = run_metrics_module.RunMetrics.observe_judge_failure
 
     class _FailingJudge:
         def judge_top_n(
             self, candidates: list[JudgeCandidate]
         ) -> tuple[list[MatchVerdict], CallUsage]:
             raise ExtractorError("judge failed")
-
-    def _observe_judge_failure(
-        self: run_metrics_module.RunMetrics,
-        observation: run_metrics_module.JudgeLifecycleFailureObservation,
-    ) -> None:
-        failures.append(observation)
-        original_observe_judge_failure(self, observation)
-
-    def _legacy_judge_top_n_failed(self: run_metrics_module.RunMetrics) -> None:
-        raise AssertionError("legacy judge_top_n_failed called")
-
-    monkeypatch.setattr(
-        run_metrics_module.RunMetrics, "observe_judge_failure", _observe_judge_failure
-    )
-    monkeypatch.setattr(
-        run_metrics_module.RunMetrics, "judge_top_n_failed", _legacy_judge_top_n_failed
-    )
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -5163,11 +5118,24 @@ def test_run_reports_judge_failure_through_lifecycle_observation(
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
+        status_display=display,
+        run_log=run_log,
     )
 
     assert summary.written == 0
     assert summary.errored == 1
-    assert len(failures) == 1
+    pipeline_updates = display.body_updates_for("pipeline")
+    assert pipeline_updates[-1] == "discovered=2 written=0 errors=1"
+    judge_phases = [
+        c
+        for c in display.calls
+        if c.method == "update_phase" and c.name == "llm judge match"
+    ]
+    assert judge_phases[-1].kwargs["phase"] == "error"
+
+    run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "judges_sent=0" in run_log_text
+    assert "judges_failed=1" in run_log_text
 
 
 def test_second_run_skips_all_urls_and_seen_json_unchanged(tmp_path: Path) -> None:

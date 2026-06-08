@@ -637,9 +637,6 @@ def run(
         if classify_completion.first_failure is not None:
             raise classify_completion.first_failure
 
-        # Emit per-call-site SUMMARY OF SESSION trailers
-        metrics.summarize_to_parser_log(_run_started_at)
-
         # Step 13: Single end-of-run judge_top_n call
         candidates = pool.judge_candidates(card_store)
         pool_size = pool.pool_size
@@ -715,6 +712,9 @@ def run(
                     path=str(daily_file_path),
                     card_count=daily_top_5_count,
                 )
+
+        # Emit per-call-site SUMMARY OF SESSION trailers after judge metrics settle.
+        metrics.summarize_to_parser_log(_run_started_at)
 
         elapsed_s = time.monotonic() - _start
         if run_state.degraded_reason is not None:

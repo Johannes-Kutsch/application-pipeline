@@ -12,10 +12,13 @@ from application_pipeline._context import current_stage
 from application_pipeline.llm import ExtractorBatchMalformedError, ExtractorError
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm import quota as _quota
-from application_pipeline.llm.types import AppliedClassifyOutcome, CallUsage
+from application_pipeline.llm.types import AppliedClassifyOutcome
 from application_pipeline.run_metrics import (
     ClassifyBatchFailureObservation,
     ClassifyBatchOutcomeObservation,
+    ClassifyBatchStartObservation,
+    ClassifyStageCompletionObservation,
+    ClassifySubmissionObservation,
 )
 from application_pipeline.parser_log import RunLog
 
@@ -82,7 +85,9 @@ class _ClaimedDispatchItem:
 
 @runtime_checkable
 class ClassifyAccumulatorMetrics(Protocol):
-    def classify_batch_dequeued(self, size: int) -> None: ...
+    def observe_classify_batch_start(
+        self, observation: ClassifyBatchStartObservation
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -107,16 +112,6 @@ class ClassifyWorkerMetrics(Protocol):
     def observe_classify_batch_outcome(
         self, observation: ClassifyBatchOutcomeObservation
     ) -> None: ...
-
-    def classify_batch_complete(
-        self,
-        usage: CallUsage,
-        items: int,
-        classifier_dropped: int,
-        retryable_items: int = 0,
-    ) -> None: ...
-
-    def classify_batch_failed(self, items: int) -> None: ...
 
     def enrich_failed(self, parser_id: str = "") -> None: ...
 
@@ -148,7 +143,7 @@ class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
     def _submit_request(self, request: _ClassifyRequest) -> None:
         assert request.parser_id == self._parser_id
         self._classify_queue.put(request)
-        self._metrics.classify_buffered(1)
+        self._metrics.observe_classify_submission(ClassifySubmissionObservation(1))
 
     def submit_ready(
         self,
@@ -172,9 +167,13 @@ class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
 
 @runtime_checkable
 class ClassifyStageMetrics(ClassifyAccumulatorMetrics, ClassifyWorkerMetrics, Protocol):
-    def classify_buffered(self, count: int) -> None: ...
+    def observe_classify_submission(
+        self, observation: ClassifySubmissionObservation
+    ) -> None: ...
 
-    def classify_done(self) -> None: ...
+    def observe_classify_stage_completion(
+        self, observation: ClassifyStageCompletionObservation
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -254,7 +253,9 @@ class ClassifyStage:
             worker.join()
             if first_failure is None and worker.exc is not None:
                 first_failure = worker.exc
-        self._metrics.classify_done()
+        self._metrics.observe_classify_stage_completion(
+            ClassifyStageCompletionObservation()
+        )
         return ClassifyStageCompletion(first_failure=first_failure)
 
 
@@ -288,7 +289,9 @@ class _ClassifyAccumulator(threading.Thread):
                 item = self._classify_queue.get()
                 if item is _CLASSIFY_SHUTDOWN:
                     if batch:
-                        self._metrics.classify_batch_dequeued(len(batch))
+                        self._metrics.observe_classify_batch_start(
+                            ClassifyBatchStartObservation(len(batch))
+                        )
                         self._dispatch.submit(batch)
                     for _ in range(self._num_workers):
                         self._dispatch.submit(_CLASSIFY_SHUTDOWN)
@@ -296,7 +299,9 @@ class _ClassifyAccumulator(threading.Thread):
                 assert isinstance(item, _ClassifyRequest)
                 batch.append(item)
                 if len(batch) >= self._batch_size:
-                    self._metrics.classify_batch_dequeued(len(batch))
+                    self._metrics.observe_classify_batch_start(
+                        ClassifyBatchStartObservation(len(batch))
+                    )
                     self._dispatch.submit(batch)
                     batch = []
         except BaseException as exc:

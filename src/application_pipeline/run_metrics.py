@@ -81,6 +81,21 @@ class ClassifyBatchFailureObservation:
 
 
 @dataclass(frozen=True)
+class ClassifySubmissionObservation:
+    count: int
+
+
+@dataclass(frozen=True)
+class ClassifyBatchStartObservation:
+    count: int
+
+
+@dataclass(frozen=True)
+class ClassifyStageCompletionObservation:
+    pass
+
+
+@dataclass(frozen=True)
 class JudgeLifecycleStartObservation:
     candidate_count: int
 
@@ -383,10 +398,14 @@ class RunMetrics:
     def classify_buffered(self, n: int) -> None:
         self.observe_classify_submission(n)
 
-    def observe_classify_submission(self, count: int) -> None:
+    def observe_classify_submission(
+        self, observation: ClassifySubmissionObservation | int
+    ) -> None:
+        if isinstance(observation, int):
+            observation = ClassifySubmissionObservation(count=observation)
         with self._classify_lock:
-            self._pending_classify += count
-            self._classify_queued += count
+            self._pending_classify += observation.count
+            self._classify_queued += observation.count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
@@ -398,11 +417,15 @@ class RunMetrics:
     def classify_batch_dequeued(self, n: int) -> None:
         self.observe_classify_batch_start(n)
 
-    def observe_classify_batch_start(self, count: int) -> None:
+    def observe_classify_batch_start(
+        self, observation: ClassifyBatchStartObservation | int
+    ) -> None:
+        if isinstance(observation, int):
+            observation = ClassifyBatchStartObservation(count=observation)
         with self._classify_lock:
             self._total_batches += 1
-            self._pending_classify -= count
-            self._classifying += count
+            self._pending_classify -= observation.count
+            self._classifying += observation.count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
@@ -467,6 +490,12 @@ class RunMetrics:
         self._display.update_body("llm classify relevance", body=body)
 
     def classify_done(self) -> None:
+        self.observe_classify_stage_completion(ClassifyStageCompletionObservation())
+
+    def observe_classify_stage_completion(
+        self, observation: ClassifyStageCompletionObservation
+    ) -> None:
+        del observation
         self._display.update_phase("llm classify relevance", phase="done")
 
     # -----------------------------------------------------------------------

@@ -9,6 +9,9 @@ from application_pipeline.run_metrics import RunMetrics, RunSummary
 from application_pipeline.run_metrics import (
     ClassifyBatchFailureObservation,
     ClassifyBatchOutcomeObservation,
+    ClassifyBatchStartObservation,
+    ClassifyStageCompletionObservation,
+    ClassifySubmissionObservation,
 )
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -142,38 +145,33 @@ class _FakeMetrics:
         self.buffered = 0
         self.done = 0
 
-    def classify_buffered(self, count: int) -> None:
-        self.buffered += count
-
-    def classify_batch_dequeued(self, size: int) -> None:
-        pass
-
-    def classify_batch_complete(
-        self,
-        usage: CallUsage,
-        items: int,
-        classifier_dropped: int,
-        retryable_items: int = 0,
+    def observe_classify_submission(
+        self, observation: ClassifySubmissionObservation
     ) -> None:
-        pass
+        self.buffered += observation.count
+
+    def observe_classify_batch_start(
+        self, observation: ClassifyBatchStartObservation
+    ) -> None:
+        del observation
 
     def observe_classify_batch_outcome(
         self, observation: ClassifyBatchOutcomeObservation
     ) -> None:
-        pass
+        del observation
 
     def observe_classify_batch_failure(
         self, observation: ClassifyBatchFailureObservation
     ) -> None:
-        pass
-
-    def classify_batch_failed(self, items: int) -> None:
-        pass
+        del observation
 
     def enrich_failed(self, parser_id: str = "") -> None:
-        pass
+        del parser_id
 
-    def classify_done(self) -> None:
+    def observe_classify_stage_completion(
+        self, observation: ClassifyStageCompletionObservation
+    ) -> None:
+        del observation
         self.done += 1
 
 

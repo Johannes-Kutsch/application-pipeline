@@ -27,6 +27,7 @@ from application_pipeline.run_metrics import (
     JudgeLifecycleFailureObservation,
     JudgeLifecycleOutcomeObservation,
     JudgeLifecycleStartObservation,
+    RunCompleteObservation,
     RunMetrics,
 )
 
@@ -762,50 +763,31 @@ def test_judge_top_n_complete_prints_card_count_as_terminal_message(
 
 
 # ---------------------------------------------------------------------------
-# Judge row — lazily registered when candidates exist (issue #640)
+# Judge lifecycle display ownership
 # ---------------------------------------------------------------------------
 
 
-def test_judge_row_registered_when_judge_started_with_candidates(
+def test_judge_start_registers_no_persistent_status_display_row(
     run_log: RunLog,
 ) -> None:
-    """judge_started(n) registers a judge row with phase 'running' and candidate count body."""
+    """Judge lifecycle start only updates metrics; ADR-0043 retires the judge row."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
     metrics.judge_started(14)
 
-    register_calls = [
-        c
-        for c in display.calls
-        if c.method == "register" and c.name == "llm judge match"
-    ]
-    assert len(register_calls) == 1
-    assert register_calls[0].kwargs["phase"] == "running"
-    assert "14" in str(register_calls[0].kwargs["body"])
-    assert "candidates" in str(register_calls[0].kwargs["body"])
+    assert "llm judge match" not in display.registered_names()
 
 
-def test_judge_row_ordered_after_classify_row(run_log: RunLog) -> None:
-    """Judge row order is greater than classify row order."""
+def test_judge_start_keeps_only_classify_row_registered(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
     metrics.judge_started(5)
 
-    classify_reg = next(
-        c
-        for c in display.calls
-        if c.method == "register" and c.name == "llm classify relevance"
-    )
-    judge_reg = next(
-        c
-        for c in display.calls
-        if c.method == "register" and c.name == "llm judge match"
-    )
-    assert judge_reg.kwargs["order"] > classify_reg.kwargs["order"]
+    assert _registers(display) == [("llm classify relevance", 1001, "running")]
 
 
 def test_judge_row_absent_when_judge_never_started(run_log: RunLog) -> None:
@@ -817,8 +799,10 @@ def test_judge_row_absent_when_judge_never_started(run_log: RunLog) -> None:
     assert "llm judge match" not in display.registered_names()
 
 
-def test_judge_row_shows_card_count_and_done_on_completion(run_log: RunLog) -> None:
-    """judge_top_n_complete updates body to show card count and transitions phase to done."""
+def test_judge_outcome_produces_no_persistent_status_display_updates(
+    run_log: RunLog,
+) -> None:
+    """Judge lifecycle outcome logs a terminal message without row body/phase churn."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
@@ -827,23 +811,18 @@ def test_judge_row_shows_card_count_and_done_on_completion(run_log: RunLog) -> N
     metrics.judge_started(5)
     metrics.judge_top_n_complete(usage, card_count=3)
 
-    body = _last_body(display, "llm judge match")
-    assert "3" in body
-    assert "cards" in body
-
-    phase_calls = [
+    assert display.body_updates_for("llm judge match") == []
+    assert [
         c
         for c in display.calls
         if c.method == "update_phase" and c.name == "llm judge match"
-    ]
-    assert phase_calls, "expected phase update for judge row on completion"
-    assert phase_calls[-1].kwargs["phase"] == "done"
+    ] == []
 
 
-def test_judge_row_transitions_out_of_running_on_extractor_error(
+def test_judge_failure_produces_no_persistent_status_display_updates(
     run_log: RunLog,
 ) -> None:
-    """judge_top_n_failed transitions the judge row out of 'running'."""
+    """Judge lifecycle failure only updates pipeline totals; no judge row remains."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
@@ -851,13 +830,12 @@ def test_judge_row_transitions_out_of_running_on_extractor_error(
     metrics.judge_started(5)
     metrics.judge_top_n_failed()
 
-    phase_calls = [
+    assert display.body_updates_for("llm judge match") == []
+    assert [
         c
         for c in display.calls
         if c.method == "update_phase" and c.name == "llm judge match"
-    ]
-    assert phase_calls, "expected phase update for judge row on failure"
-    assert phase_calls[-1].kwargs["phase"] != "running"
+    ] == []
 
 
 # ---------------------------------------------------------------------------
@@ -1220,10 +1198,12 @@ def test_emit_run_complete_writes_pipeline_orchestrator_row_from_metrics(
     )
 
     metrics.emit_run_complete(
-        dedup=dedup,
-        pool_size=6,
-        daily_top_5_count=1,
-        elapsed_s=12.34,
+        RunCompleteObservation(
+            dedup=dedup,
+            pool_size=6,
+            daily_top_5_count=1,
+            elapsed_s=12.34,
+        )
     )
 
     rows = [

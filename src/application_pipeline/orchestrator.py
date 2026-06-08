@@ -29,6 +29,7 @@ from application_pipeline.run_metrics import (
     JudgeLifecycleFailureObservation,
     JudgeLifecycleOutcomeObservation,
     JudgeLifecycleStartObservation,
+    RunCompleteObservation,
     RunMetrics,
     RunSummary,
 )
@@ -721,10 +722,12 @@ def run(
             metrics.set_degraded_reason(run_state.degraded_reason)
 
         metrics.emit_run_complete(
-            dedup=dedup_snapshot,
-            pool_size=pool_size,
-            daily_top_5_count=daily_top_5_count,
-            elapsed_s=elapsed_s,
+            RunCompleteObservation(
+                dedup=dedup_snapshot,
+                pool_size=pool_size,
+                daily_top_5_count=daily_top_5_count,
+                elapsed_s=elapsed_s,
+            )
         )
 
         summary = metrics.to_run_summary(

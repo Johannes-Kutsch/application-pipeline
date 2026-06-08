@@ -47,7 +47,9 @@ application-pipeline run
 
 ### `compile-cv`
 
-Compile a per-listing `cv.tex` CV Slot-Map into `cover.pdf`, `resume.pdf`, and `combined.pdf`.
+Compile a per-listing `cv.tex` CV Slot-Map into application-specific PDFs named
+`cover_<application-folder>.pdf`, `resume_<application-folder>.pdf`, and
+`combined_<application-folder>.pdf`.
 
 ```bash
 application-pipeline compile-cv application-pipeline/applications/<folder>/

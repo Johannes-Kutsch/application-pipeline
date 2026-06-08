@@ -8,9 +8,12 @@ Via the CLI (recommended):
 application-pipeline compile-cv <DIR>
 ```
 
-`<DIR>` is the path to your settings directory. The CLI compiles all three jobnames in sequence.
+`<DIR>` is the path to your application directory. The CLI compiles all three jobnames in sequence
+and publishes them as `cover_<application-folder>.pdf`, `resume_<application-folder>.pdf`, and
+`combined_<application-folder>.pdf` in that directory.
 
-Raw `pdflatex` invocations — `-jobname` sets the output PDF filename (`cover.pdf`, `resume.pdf`, `combined.pdf`):
+Raw `pdflatex` invocations inside `.build/` — `-jobname` sets the intermediate PDF filename before
+`compile-cv` copies it to the suffixed application-level filename:
 
 ```
 pdflatex -jobname=cover    "\def\CvDataDir{/abs/path/to/user-info/cv}\def\BUILD{cover}\input{cv_template}"

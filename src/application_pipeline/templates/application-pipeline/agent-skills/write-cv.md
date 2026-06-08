@@ -87,18 +87,18 @@ Der `skills_block`-Slot wird mechanisch aus dem Skills-Pool zusammengesetzt. Die
 ## 5. Build-Aufruf
 
 Build erst nach vollständig freigegebenen Cover-Absätzen und finaler Slot-Map.
-Rufe das Build-Skript `application-pipeline compile-cv <application-folder>` auf. Erfolg: `cover.pdf`, `resume.pdf` und `combined.pdf` landen im Application-Ordner. Bei Non-Zero-Exit: dem User sagen, dass der Compile fehlgeschlagen ist, mit dem `stderr` verbatim als Anhang. Dann stoppen.
+Rufe das Build-Skript `application-pipeline compile-cv <application-folder>` auf. Erfolg: `cover_<application-folder>.pdf`, `resume_<application-folder>.pdf` und `combined_<application-folder>.pdf` landen im Application-Ordner. Bei Non-Zero-Exit: dem User sagen, dass der Compile fehlgeschlagen ist, mit dem `stderr` verbatim als Anhang. Dann stoppen.
 
 ## 6. Seiten-Overflow-Loop
 
-Nach erfolgreichem Build: Seitenzahlen von `cover.pdf` und `resume.pdf` lesen. `cover.pdf` darf nur eine Seite, `resume.pdf` maximal zwei Seiten lang sein.
+Nach erfolgreichem Build: Seitenzahlen von `cover_<application-folder>.pdf` und `resume_<application-folder>.pdf` lesen. `cover_<application-folder>.pdf` darf nur eine Seite, `resume_<application-folder>.pdf` maximal zwei Seiten lang sein.
 
 - Resume-Overflow bleibt automatisch und läuft nach dem untenstehenden Strip-Down-Loop.
 - Cover-Overflow geht in Interactive Cover Shortening statt in einen rein automatischen Strip-Down.
 
 ### 6.1. Interactive Cover Shortening
 
-Wenn `cover.pdf` zu lang ist:
+Wenn `cover_<application-folder>.pdf` zu lang ist:
 
 <cover-shortening-loop>
 1. Erzeuge für jeden Absatz eine verkürzte Variante.
@@ -113,7 +113,7 @@ Wichtig: Dieser Post-Build-Shortening-Loop schreibt nie nach `cover-patterns.md`
 
 ### 6.2. Automatic Resume Shortening
 
-Wenn `resume.pdf` zu lang ist:
+Wenn `resume_<application-folder>.pdf` zu lang ist:
 
 <resume-shortening-loop>
 1. Erzeuge für jeden Resume-Slot eine verkürzte Variante.
@@ -136,4 +136,4 @@ Dieser Skill schreibt ausschließlich in:
 - `<application-folder>/analysis.md`
 - `application-pipeline/user-info/triage-profile/*.md`
 
-`cover.pdf`, `resume.pdf`, `combined.pdf` werden vom `compile-cv`-Command geschrieben, nicht vom Skill. Alles andere im Repo ist read-only.
+`cover_<application-folder>.pdf`, `resume_<application-folder>.pdf`, `combined_<application-folder>.pdf` werden vom `compile-cv`-Command geschrieben, nicht vom Skill. Alles andere im Repo ist read-only.

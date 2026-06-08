@@ -31,6 +31,18 @@ class _ObservingMetrics:
     def observe_parser_drop(self, parser_id: str, *, outcome: str) -> None:
         self.parser_drops.append((parser_id, outcome))
 
+    def enrich_failed(self, parser_id: str = "") -> None:
+        pass
+
+    def enriched(self, parser_id: str, mode: str) -> None:
+        pass
+
+    def increment_enrich_failed_count(self, parser_id: str) -> None:
+        pass
+
+    def increment_forwarded(self, parser_id: str) -> None:
+        pass
+
 
 @pytest.mark.parametrize(
     ("dedup_kind", "seed_listing"),
@@ -174,7 +186,7 @@ def test_prefilter_drop_reports_parser_outcome_via_metrics_observation(
         pool_collector=harness.pool_collector,
         classify_handoff=harness.classify_handoff,
         run_log=harness.run_log,
-        metrics=metrics,  # type: ignore[arg-type]
+        metrics=metrics,
     )
 
     with harness.run_scope():

@@ -4,6 +4,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -17,6 +18,16 @@ from application_pipeline.orchestrator import RunSummary
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.run_metrics import RunMetrics
+
+ParserDropOutcome = Literal[
+    "dedup_url_hit",
+    "dedup_tuple_hit",
+    "dedup_fuzzy_hit",
+    "dedup_run_hit",
+    "prefilter",
+    "content_empty_body",
+    "content_too_short",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -1426,6 +1437,32 @@ def test_parser_drop_observation_maps_discover_and_post_enrich_freshness_to_one_
     metrics.observe_parser_drop("jobs_beim_staat", outcome="freshness_post_enrich")
 
     assert _last_body(display, "parser jobs beim staat gates") == "2 freshness"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_body"),
+    [
+        ("dedup_url_hit", "1 dedup"),
+        ("dedup_tuple_hit", "1 dedup"),
+        ("dedup_fuzzy_hit", "1 dedup"),
+        ("dedup_run_hit", "1 dedup"),
+        ("prefilter", "1 pre-filter"),
+        ("content_empty_body", "1 content"),
+        ("content_too_short", "1 content"),
+    ],
+)
+def test_parser_drop_observation_maps_each_outcome_to_its_gate_counter(
+    run_log: RunLog,
+    outcome: ParserDropOutcome,
+    expected_body: str,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("jobs_beim_staat", order=4, total_queries=5)
+
+    metrics.observe_parser_drop("jobs_beim_staat", outcome=outcome)
+
+    assert _last_body(display, "parser jobs beim staat gates") == expected_body
 
 
 def test_gates_row_pinned_at_parser_order_plus_one(run_log: RunLog) -> None:

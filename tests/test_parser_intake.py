@@ -27,9 +27,17 @@ from tests.parser_intake_harness import (
 class _ObservingMetrics:
     def __init__(self) -> None:
         self.parser_drops: list[tuple[str, str]] = []
+        self.parser_enrich_failures: list[str] = []
+        self.parser_forwarded: list[tuple[str, str]] = []
 
     def observe_parser_drop(self, parser_id: str, *, outcome: str) -> None:
         self.parser_drops.append((parser_id, outcome))
+
+    def observe_parser_enrich_failure(self, parser_id: str) -> None:
+        self.parser_enrich_failures.append(parser_id)
+
+    def observe_parser_forwarded(self, parser_id: str, mode: str) -> None:
+        self.parser_forwarded.append((parser_id, mode))
 
     def enrich_failed(self, parser_id: str = "") -> None:
         pass
@@ -193,6 +201,32 @@ def test_prefilter_drop_reports_parser_outcome_via_metrics_observation(
         parser_intake.process_position_stub(harness.default_position_stub)
 
     assert metrics.parser_drops == [("test", "prefilter")]
+
+
+def test_accepted_listing_reports_single_parser_forwarded_observation(
+    tmp_path: Path,
+) -> None:
+    harness = ParserIntakeHarness.create(tmp_path, parser_id="test")
+    metrics = _ObservingMetrics()
+    parser_intake = ParserIntake(
+        parser_id="test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=harness.classify_handoff,
+        run_log=harness.run_log,
+        metrics=metrics,
+    )
+
+    with harness.run_scope():
+        parser_intake.process_position_stub(harness.default_position_stub)
+
+    assert metrics.parser_forwarded == [("test", "native")]
 
 
 def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_steps(

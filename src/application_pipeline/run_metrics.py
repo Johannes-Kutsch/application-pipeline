@@ -295,6 +295,17 @@ class RunMetrics:
     def increment_content_dropped(self, parser_id: str) -> None:
         self._apply_gate_drop(parser_id, "content_dropped")
 
+    def observe_parser_enrich_failure(self, parser_id: str) -> None:
+        with self._lock:
+            self._enrich_failed += 1
+            entry = self._parser_entry(parser_id)
+            entry.enrich_failed += 1
+            entry.enrich_failed_count += 1
+            pipeline_body = self._pipeline_body()
+            parser_body = self._parser_body(parser_id)
+        self._display.update_body("pipeline", body=pipeline_body)
+        self._display.update_body(self._parser_row(parser_id), body=parser_body)
+
     def observe_parser_drop(
         self,
         parser_id: str,
@@ -330,6 +341,18 @@ class RunMetrics:
     def increment_forwarded(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).forwarded += 1
+            body = self._parser_body(parser_id)
+        self._display.update_body(self._parser_row(parser_id), body=body)
+
+    def observe_parser_forwarded(
+        self, parser_id: str, mode: Literal["native", "fallback"]
+    ) -> None:
+        with self._lock:
+            entry = self._parser_entry(parser_id)
+            entry.enriched += 1
+            if mode == "native":
+                entry.native_enriched += 1
+            entry.forwarded += 1
             body = self._parser_body(parser_id)
         self._display.update_body(self._parser_row(parser_id), body=body)
 

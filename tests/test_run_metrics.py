@@ -1340,6 +1340,34 @@ def test_parser_body_enrich_failed_hidden_without_native_enrich(
     assert "enrich_failed" not in body
 
 
+def test_parser_enrich_failure_observation_updates_pipeline_and_native_parser_once(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+    metrics.register_parser(
+        "native_parser", order=1, total_queries=1, has_native_enrich=True
+    )
+
+    metrics.observe_parser_enrich_failure("native_parser")
+
+    summary = metrics.to_run_summary(
+        1.0,
+        PreFilterSnapshot(),
+        FreshnessSnapshot(),
+        ContentSnapshot(),
+        DedupSnapshot(),
+    )
+
+    assert summary.enrich_failed == 1
+    assert _last_body(display, "pipeline") == "discovered=0 written=0 errors=1"
+    assert _last_body(display, "parser native parser") == (
+        "0 discovered · 1 enrich_failed · 0 forwarded"
+    )
+    assert "parser native parser gates" not in display.registered_names()
+
+
 def test_parser_body_forwarded_updates_display_immediately(run_log: RunLog) -> None:
     """increment_forwarded triggers a body update on the parser row immediately."""
     display = FakeStatusDisplay()

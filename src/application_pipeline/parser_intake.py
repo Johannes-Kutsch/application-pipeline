@@ -56,6 +56,12 @@ class _NullClassifyStageHandoff:
 class ParserMetrics(Protocol):
     def observe_parser_drop(self, parser_id: str, *, outcome: "DropReason") -> None: ...
 
+    def observe_parser_enrich_failure(self, parser_id: str) -> None: ...
+
+    def observe_parser_forwarded(
+        self, parser_id: str, mode: Literal["native", "fallback"]
+    ) -> None: ...
+
     def enrich_failed(self, parser_id: str = "") -> None: ...
 
     def enriched(self, parser_id: str, mode: str) -> None: ...
@@ -233,14 +239,12 @@ class ParserIntake:
     def _increment_enrich_failed_metric(self) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        self._metrics.enrich_failed(self._parser_id)
-        self._metrics.increment_enrich_failed_count(self._parser_id)
+        self._metrics.observe_parser_enrich_failure(self._parser_id)
 
     def _increment_forwarded_metrics(self, mode: Literal["native", "fallback"]) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        self._metrics.enriched(self._parser_id, mode)
-        self._metrics.increment_forwarded(self._parser_id)
+        self._metrics.observe_parser_forwarded(self._parser_id, mode)
 
 
 def _drop_reason_for_dedup(kind: RunScopedSeenKind) -> DropReason:

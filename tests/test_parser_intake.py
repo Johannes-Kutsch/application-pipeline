@@ -191,6 +191,113 @@ def test_prefilter_drop_reports_parser_outcome_via_metrics_observation(
     assert metrics.parser_drops == [("test", "prefilter")]
 
 
+def test_discover_freshness_drop_reports_parser_outcome_via_metrics_observation(
+    tmp_path: Path,
+) -> None:
+    stale_stub = PositionStub(
+        url="https://example.com/stale",
+        title="Platform Engineer",
+        source="test",
+        posted_date=date(2026, 4, 1),
+    )
+    harness = ParserIntakeHarness.create(
+        tmp_path,
+        parser_id="test",
+        discovered_stub=stale_stub,
+        enriched_stub=stale_stub,
+        parser=UnexpectedEnrichParser(),
+    )
+    metrics = _ObservingMetrics()
+    parser_intake = ParserIntake(
+        parser_id="test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=harness.classify_handoff,
+        run_log=harness.run_log,
+        metrics=metrics,
+    )
+
+    with harness.run_scope():
+        parser_intake.process_position_stub(stale_stub)
+
+    assert metrics.parser_drops == [("test", "freshness_discover")]
+
+
+@pytest.mark.parametrize(
+    ("dedup_kind", "seed_listing", "expected_outcome"),
+    [
+        (
+            "url_hit",
+            ParserIntakeHarness.seed_post_discover_url_hit_listing,
+            "dedup_url_hit",
+        ),
+        (
+            "tuple_hit",
+            ParserIntakeHarness.seed_post_discover_tuple_hit_listing,
+            "dedup_tuple_hit",
+        ),
+        (
+            "fuzzy_hit",
+            ParserIntakeHarness.seed_post_discover_fuzzy_hit_listing,
+            "dedup_fuzzy_hit",
+        ),
+        (
+            "run_hit",
+            ParserIntakeHarness.seed_post_discover_run_hit_listing,
+            "dedup_run_hit",
+        ),
+    ],
+)
+def test_post_discover_dedup_drop_reports_parser_outcome_via_metrics_observation(
+    tmp_path: Path,
+    dedup_kind: str,
+    seed_listing: HarnessSeedHelper,
+    expected_outcome: str,
+) -> None:
+    stub = PositionStub(
+        url="https://example.com/alias",
+        title="Lead Platform Backend Engineer",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+        posted_date=date(2026, 5, 29),
+    )
+    harness = ParserIntakeHarness.create(
+        tmp_path,
+        parser_id="test",
+        discovered_stub=stub,
+        enriched_stub=stub,
+        parser=UnexpectedEnrichParser(),
+    )
+    metrics = _ObservingMetrics()
+    parser_intake = ParserIntake(
+        parser_id="test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=harness.classify_handoff,
+        run_log=harness.run_log,
+        metrics=metrics,
+    )
+
+    with harness.run_scope():
+        seed_listing(harness)
+        parser_intake.process_position_stub(stub)
+
+    assert metrics.parser_drops == [("test", expected_outcome)]
+
+
 def test_accepted_listing_reports_single_parser_forwarded_observation(
     tmp_path: Path,
 ) -> None:
@@ -242,6 +349,92 @@ def test_enrich_failed_listing_reports_single_parser_enrich_failure_observation(
         parser_intake.process_position_stub(harness.default_position_stub)
 
     assert metrics.parser_enrich_failures == ["test"]
+
+
+def test_post_enrich_freshness_drop_reports_parser_outcome_via_metrics_observation(
+    tmp_path: Path,
+) -> None:
+    harness = ParserIntakeHarness.create_post_enrich_alias(
+        tmp_path,
+        parser_id="test",
+        content_gate=UnexpectedContentGate(),
+        discovered_posted_date=None,
+    )
+    harness.set_post_enrich_alias_result(
+        body="Fresh raw description " + "x" * 120,
+        posted_date=date(2026, 4, 1),
+    )
+    harness.seed_post_enrich_judge_pending_listing()
+    metrics = _ObservingMetrics()
+    parser_intake = ParserIntake(
+        parser_id="test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=harness.classify_handoff,
+        run_log=harness.run_log,
+        metrics=metrics,
+    )
+
+    with harness.run_scope():
+        parser_intake.process_position_stub(harness.default_position_stub)
+
+    assert metrics.parser_drops == [("test", "freshness_post_enrich")]
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_outcome"),
+    [
+        ("   \n\t  ", "content_empty_body"),
+        ("x" * 99, "content_too_short"),
+    ],
+)
+def test_post_enrich_content_drop_reports_parser_outcome_via_metrics_observation(
+    tmp_path: Path,
+    body: str,
+    expected_outcome: str,
+) -> None:
+    harness = ParserIntakeHarness.create(
+        tmp_path,
+        parser_id="test",
+        domain_pre_filter=PassThroughPreFilter(),
+    )
+    harness.set_parser_enrich_result(
+        stub=PositionStub(
+            url=harness.default_position_stub.url,
+            title=harness.default_position_stub.title,
+            source=harness.default_position_stub.source,
+            company="Acme",
+            location="Hamburg",
+            posted_date=harness.default_position_stub.posted_date,
+        ),
+        body=body,
+    )
+    metrics = _ObservingMetrics()
+    parser_intake = ParserIntake(
+        parser_id="test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=harness.classify_handoff,
+        run_log=harness.run_log,
+        metrics=metrics,
+    )
+
+    with harness.run_scope():
+        parser_intake.process_position_stub(harness.default_position_stub)
+
+    assert metrics.parser_drops == [("test", expected_outcome)]
 
 
 def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_steps(

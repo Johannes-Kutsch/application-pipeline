@@ -25,7 +25,13 @@ from application_pipeline.llm import quota as _quota
 from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
 from application_pipeline.dedup_counters import DedupCounters
-from application_pipeline.run_metrics import RunMetrics, RunSummary
+from application_pipeline.run_metrics import (
+    JudgeLifecycleFailureObservation,
+    JudgeLifecycleOutcomeObservation,
+    JudgeLifecycleStartObservation,
+    RunMetrics,
+    RunSummary,
+)
 from application_pipeline.status_display import PlainStatusDisplay, StatusDisplay
 from application_pipeline.config import ConfigError, SourceEntry
 from application_pipeline.dedup import (
@@ -640,7 +646,9 @@ def run(
 
         daily_top_5_count = 0
         if candidates and not no_judge:
-            metrics.judge_started(len(candidates))
+            metrics.observe_judge_start(
+                JudgeLifecycleStartObservation(candidate_count=len(candidates))
+            )
             verdicts: list[MatchVerdict] | None = None
             judge_usage = None
             assert isinstance(extractor, _LLMJudge), (
@@ -681,7 +689,7 @@ def run(
                         log_tail="",
                         failures_dir=cfg.failures_path,
                     )
-                    metrics.judge_top_n_failed()
+                    metrics.observe_judge_failure(JudgeLifecycleFailureObservation())
                     break
 
             if verdicts is not None and judge_usage is not None:
@@ -695,7 +703,12 @@ def run(
                 except ResultsFileError as exc:
                     _log.error("daily file append failed: %s", exc)
                     raise
-                metrics.judge_top_n_complete(judge_usage, daily_top_5_count)
+                metrics.observe_judge_outcome(
+                    JudgeLifecycleOutcomeObservation(
+                        usage=judge_usage,
+                        card_count=daily_top_5_count,
+                    )
+                )
                 run_log.event(
                     "pipeline_orchestrator",
                     "daily_file_written",

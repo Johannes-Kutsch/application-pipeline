@@ -80,6 +80,22 @@ class ClassifyBatchFailureObservation:
     items: int
 
 
+@dataclass(frozen=True)
+class JudgeLifecycleStartObservation:
+    candidate_count: int
+
+
+@dataclass(frozen=True)
+class JudgeLifecycleOutcomeObservation:
+    usage: CallUsage
+    card_count: int
+
+
+@dataclass(frozen=True)
+class JudgeLifecycleFailureObservation:
+    pass
+
+
 class RunMetrics:
     """Owns all run-level counters and produces Run Divider / RunSummary output."""
 
@@ -489,35 +505,59 @@ class RunMetrics:
     _JUDGE_ROW = "llm judge match"
     _JUDGE_ROW_ORDER = 1002
 
-    def judge_started(self, candidate_count: int) -> None:
-        """Lazily register the judge row when the judge step is about to begin."""
+    def observe_judge_start(self, observation: JudgeLifecycleStartObservation) -> None:
+        with self._lock:
+            self._judge_started += 1
         self._display.register(
             self._JUDGE_ROW,
             order=self._JUDGE_ROW_ORDER,
             phase="running",
-            body=f"{candidate_count} candidates",
+            body=f"{observation.candidate_count} candidates",
         )
 
-    def judge_top_n_complete(self, usage: CallUsage, card_count: int) -> None:
+    def observe_judge_outcome(
+        self, observation: JudgeLifecycleOutcomeObservation
+    ) -> None:
         with self._lock:
             self._judge_calls += 1
-            self._judge_started += 1
-            self._judge_input_tokens += usage.input_tokens
-            self._judge_output_tokens += usage.output_tokens
-            self._judge_cache_read_tokens += usage.cache_read_tokens
-            self._judge_cost_usd += usage.cost_usd
-            self._judge_total_s += usage.duration_s
-            self._written += card_count
-        self._display.update_body(self._JUDGE_ROW, body=f"wrote {card_count} cards")
+            self._judge_input_tokens += observation.usage.input_tokens
+            self._judge_output_tokens += observation.usage.output_tokens
+            self._judge_cache_read_tokens += observation.usage.cache_read_tokens
+            self._judge_cost_usd += observation.usage.cost_usd
+            self._judge_total_s += observation.usage.duration_s
+            self._written += observation.card_count
+        self._display.update_body(
+            self._JUDGE_ROW, body=f"wrote {observation.card_count} cards"
+        )
         self._display.update_phase(self._JUDGE_ROW, phase="done")
         self._display.print(
             caller="llm_judge_match",
-            message=f"judge_top_n complete: wrote {card_count} cards",
+            message=f"judge_top_n complete: wrote {observation.card_count} cards",
+        )
+
+    def observe_judge_failure(
+        self, observation: JudgeLifecycleFailureObservation
+    ) -> None:
+        del observation
+        with self._lock:
+            self._judge_failed += 1
+            self._judge_errored += 1
+            pipeline_body = self._pipeline_body()
+        self._display.update_body("pipeline", body=pipeline_body)
+        self._display.update_phase(self._JUDGE_ROW, phase="error")
+
+    def judge_started(self, candidate_count: int) -> None:
+        self.observe_judge_start(
+            JudgeLifecycleStartObservation(candidate_count=candidate_count)
+        )
+
+    def judge_top_n_complete(self, usage: CallUsage, card_count: int) -> None:
+        self.observe_judge_outcome(
+            JudgeLifecycleOutcomeObservation(usage=usage, card_count=card_count)
         )
 
     def judge_top_n_failed(self) -> None:
-        """Transition the judge row out of 'running' when judge_top_n fails."""
-        self._display.update_phase(self._JUDGE_ROW, phase="error")
+        self.observe_judge_failure(JudgeLifecycleFailureObservation())
 
     # -----------------------------------------------------------------------
     # Read-only accessors for run_complete event

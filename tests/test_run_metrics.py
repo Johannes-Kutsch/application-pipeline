@@ -20,6 +20,9 @@ from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.run_metrics import (
     ClassifyBatchOutcomeObservation,
     ClassifyBatchFailureObservation,
+    JudgeLifecycleFailureObservation,
+    JudgeLifecycleOutcomeObservation,
+    JudgeLifecycleStartObservation,
     RunMetrics,
 )
 
@@ -580,6 +583,107 @@ def test_classifying_reflects_partial_completions(run_log: RunLog) -> None:
 # ---------------------------------------------------------------------------
 # Judge-stage events — no persistent status row
 # ---------------------------------------------------------------------------
+
+
+def test_judge_lifecycle_outcome_updates_summary_divider_log_and_terminal_message(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    usage = _make_usage(
+        input_tokens=300,
+        output_tokens=150,
+        cache_read_tokens=50,
+        cost_usd=0.003,
+        duration_s=1.5,
+    )
+
+    metrics.observe_judge_start(JudgeLifecycleStartObservation(candidate_count=5))
+    metrics.observe_judge_outcome(
+        JudgeLifecycleOutcomeObservation(
+            usage=usage,
+            card_count=3,
+        )
+    )
+
+    summary = metrics.to_run_summary(
+        duration_s=1.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+    assert summary.written == 3
+    assert summary.errored == 0
+    assert summary.claude_input_tokens == 300
+    assert summary.claude_output_tokens == 150
+    assert summary.claude_cache_read_tokens == 50
+    assert abs(summary.claude_cost_usd - 0.003) < 1e-9
+
+    divider = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
+    )
+    assert "kept=3" in divider
+    assert "judge_calls=1" in divider
+    assert "judge_total_s=1.5" in divider
+    assert "judge_input_tokens=300" in divider
+    assert "judge_output_tokens=150" in divider
+    assert "judge_cache_read_tokens=50" in divider
+    assert "judge_cost_usd=0.003000" in divider
+
+    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "judges_sent=1" in run_log_text
+    assert "judges_failed=0" in run_log_text
+    assert "input_tokens=300" in run_log_text
+    assert "output_tokens=150" in run_log_text
+    assert "cache_read_tokens=50" in run_log_text
+    assert "cost_usd=0.003" in run_log_text
+    assert "duration_s=1.5" in run_log_text
+
+    print_calls = [c for c in display.calls if c.method == "print"]
+    assert len(print_calls) == 1
+    assert print_calls[0].name == "llm_judge_match"
+    assert "wrote 3 cards" in str(print_calls[0].kwargs["message"])
+
+
+def test_judge_lifecycle_failure_updates_pipeline_summary_divider_and_log(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    metrics.observe_judge_start(JudgeLifecycleStartObservation(candidate_count=5))
+    metrics.observe_judge_failure(JudgeLifecycleFailureObservation())
+
+    assert _last_body(display, "pipeline") == "discovered=0 written=0 errors=1"
+
+    summary = metrics.to_run_summary(
+        duration_s=1.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+    assert summary.written == 0
+    assert summary.errored == 1
+
+    divider = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
+    )
+    assert "errors=1" in divider
+    assert "judge_items_abandoned=1" in divider
+    assert "judge_calls=0" in divider
+
+    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "judges_sent=0" in run_log_text
+    assert "judges_failed=1" in run_log_text
 
 
 def test_judge_failed_increments_pipeline_error_count(run_log: RunLog) -> None:

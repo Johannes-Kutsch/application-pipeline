@@ -21,6 +21,7 @@ from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.run_metrics import (
     ClassifyBatchOutcomeObservation,
     ClassifyBatchFailureObservation,
+    ClassifyRetryableObservation,
     ClassifyBatchStartObservation,
     ClassifyStageCompletionObservation,
     ClassifySubmissionObservation,
@@ -876,65 +877,6 @@ def test_judge_failure_produces_no_persistent_status_display_updates(
 # ---------------------------------------------------------------------------
 
 
-def _format_run_divider(
-    *,
-    timestamp: str,
-    tag: str | None,
-    sources: dict[str, int],
-    kept: int,
-    errors: int,
-    dedup_url_hits: int,
-    dedup_tuple_hits: int,
-    dedup_run_hits: int,
-    dedup_misses: int,
-    classify_calls: int,
-    classify_items: int,
-    classify_total_s: float,
-    judge_calls: int,
-    judge_total_s: float,
-    classify_input_tokens: int,
-    classify_output_tokens: int,
-    classify_cache_read_tokens: int,
-    classify_cost_usd: float,
-    judge_input_tokens: int,
-    judge_output_tokens: int,
-    judge_cache_read_tokens: int,
-    judge_cost_usd: float,
-    elapsed_s: float,
-) -> str:
-    parts = [f"run {timestamp}"]
-    if tag is not None:
-        parts.append(f"tag={tag}")
-    if sources:
-        sources_str = ",".join(f"{k}:{v}" for k, v in sources.items())
-        parts.append(f"sources={sources_str}")
-    parts.extend(
-        [
-            f"kept={kept}",
-            f"errors={errors}",
-            f"dedup_url_hits={dedup_url_hits}",
-            f"dedup_tuple_hits={dedup_tuple_hits}",
-            f"dedup_run_hits={dedup_run_hits}",
-            f"dedup_misses={dedup_misses}",
-            f"classify_calls={classify_calls}",
-            f"classify_items={classify_items}",
-            f"classify_total_s={classify_total_s:.1f}",
-            f"judge_calls={judge_calls}",
-            f"judge_total_s={judge_total_s:.1f}",
-            f"classify_input_tokens={classify_input_tokens}",
-            f"classify_output_tokens={classify_output_tokens}",
-            f"classify_cache_read_tokens={classify_cache_read_tokens}",
-            f"classify_cost_usd={classify_cost_usd:.6f}",
-            f"judge_input_tokens={judge_input_tokens}",
-            f"judge_output_tokens={judge_output_tokens}",
-            f"judge_cache_read_tokens={judge_cache_read_tokens}",
-            f"judge_cost_usd={judge_cost_usd:.6f}",
-            f"elapsed_s={elapsed_s:.1f}",
-        ]
-    )
-    return f"<!-- {' '.join(parts)} -->\n"
-
-
 def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> RunMetrics:
     """Returns a RunMetrics with representative events covering all counter types."""
     metrics = RunMetrics(display, run_log=run_log)
@@ -986,32 +928,16 @@ def test_format_run_divider_no_degraded_no_failures(run_log: RunLog) -> None:
 
     result = metrics.format_run_divider(timestamp, tag, elapsed_s, dedup=dedup)
 
-    expected = _format_run_divider(
-        timestamp=timestamp,
-        tag=tag,
-        sources={"linkedin": 1},
-        kept=1,
-        errors=0,  # divider errors = judge_errored; enrich/parser dead don't appear here
-        dedup_url_hits=1,
-        dedup_tuple_hits=1,
-        dedup_run_hits=1,
-        dedup_misses=2,
-        classify_calls=1,
-        classify_items=2,
-        classify_total_s=2.5,
-        judge_calls=1,
-        judge_total_s=1.5,
-        classify_input_tokens=500,
-        classify_output_tokens=200,
-        classify_cache_read_tokens=100,
-        classify_cost_usd=0.002,
-        judge_input_tokens=300,
-        judge_output_tokens=150,
-        judge_cache_read_tokens=50,
-        judge_cost_usd=0.003,
-        elapsed_s=elapsed_s,
+    assert result == (
+        "<!-- run 2026-01-01T12:00:00Z tag=v1.2.3 sources=linkedin:1"
+        " kept=1 errors=0 dedup_url_hits=1 dedup_tuple_hits=1 dedup_run_hits=1"
+        " dedup_misses=2 classify_calls=1 classify_items=2 classify_total_s=2.5"
+        " judge_calls=1 judge_total_s=1.5 classify_input_tokens=500"
+        " classify_output_tokens=200 classify_cache_read_tokens=100"
+        " classify_cost_usd=0.002000 judge_input_tokens=300"
+        " judge_output_tokens=150 judge_cache_read_tokens=50"
+        " judge_cost_usd=0.003000 elapsed_s=42.7 -->\n"
     )
-    assert result == expected
 
 
 def test_format_run_divider_no_tag(run_log: RunLog) -> None:
@@ -1766,22 +1692,56 @@ def test_parser_enrich_failure_observation_keeps_counter_hidden_without_native_e
     assert "parser fallback parser gates" not in display.registered_names()
 
 
-def test_parser_body_forwarded_observation_updates_display_immediately(
+def test_parser_forwarded_observation_updates_parser_row_body(
     run_log: RunLog,
 ) -> None:
-    """observe_parser_forwarded triggers a body update on the parser row immediately."""
+    """Forwarded parser intake observations change only the parser row body."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=1, total_queries=2)
 
     metrics.discovered("p")
-    before = len(display.body_updates_for("parser p"))
     _observe_parser_forwarded(metrics, "p", "fallback")
-    after = len(display.body_updates_for("parser p"))
 
-    assert after == before + 1
-    body = _last_body(display, "parser p")
-    assert "1 forwarded" in body
+    assert _last_body(display, "parser p") == "1 discovered · 1 forwarded"
+    assert "parser p gates" not in display.registered_names()
+
+
+def test_classify_retryable_observation_updates_pipeline_summary_without_parser_enrich_text(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+    metrics.register_parser(
+        "parser.test", order=1, total_queries=1, has_native_enrich=True
+    )
+
+    metrics.observe_classify_submission(1)
+    metrics.observe_classify_batch_start(1)
+    metrics.observe_classify_batch_outcome(
+        ClassifyBatchOutcomeObservation(
+            usage=_make_usage(),
+            item_states=("retryable",),
+        )
+    )
+    metrics.observe_classify_retryable(
+        ClassifyRetryableObservation(parser_id="parser.test")
+    )
+
+    assert _last_body(display, "llm classify relevance") == "1 malformed"
+    assert _last_body(display, "pipeline") == "discovered=0 written=0 errors=1"
+    assert _last_body(display, "parser parser.test") == "0 discovered · 0 forwarded"
+
+    summary = metrics.to_run_summary(
+        1.0,
+        PreFilterSnapshot(),
+        FreshnessSnapshot(),
+        ContentSnapshot(),
+        DedupSnapshot(),
+    )
+    assert summary.enrich_failed == 1
+    assert summary.errored == 1
 
 
 def test_parser_forwarded_observation_updates_parser_row_without_registering_gates(

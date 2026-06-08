@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -293,6 +294,38 @@ class RunMetrics:
 
     def increment_content_dropped(self, parser_id: str) -> None:
         self._apply_gate_drop(parser_id, "content_dropped")
+
+    def observe_parser_drop(
+        self,
+        parser_id: str,
+        *,
+        outcome: Literal[
+            "freshness_discover",
+            "freshness_post_enrich",
+            "dedup_url_hit",
+            "dedup_tuple_hit",
+            "dedup_fuzzy_hit",
+            "dedup_run_hit",
+            "prefilter",
+            "content_empty_body",
+            "content_too_short",
+        ],
+    ) -> None:
+        if outcome in ("freshness_discover", "freshness_post_enrich"):
+            self.increment_freshness_dropped(parser_id)
+            return
+        if outcome in (
+            "dedup_url_hit",
+            "dedup_tuple_hit",
+            "dedup_fuzzy_hit",
+            "dedup_run_hit",
+        ):
+            self.increment_dedup_dropped(parser_id)
+            return
+        if outcome == "prefilter":
+            self.increment_prefilter_dropped(parser_id)
+            return
+        self.increment_content_dropped(parser_id)
 
     def increment_forwarded(self, parser_id: str) -> None:
         with self._lock:

@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from application_pipeline.content_gate import ContentGate
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.extracts.card_store import CardExtract
+from application_pipeline.freshness_gate import FreshnessGate
+from application_pipeline.parser_intake import ParserIntake
 from application_pipeline.parsers import PositionStub
+from application_pipeline.prefilter_gate import PreFilterGate
 from tests.parser_intake_harness import (
     CountingPreFilter,
     FailOnPostEnrichFreshnessGate,
@@ -17,6 +22,14 @@ from tests.parser_intake_harness import (
     UnexpectedContentGate,
     UnexpectedEnrichParser,
 )
+
+
+class _ObservingMetrics:
+    def __init__(self) -> None:
+        self.parser_drops: list[tuple[str, str]] = []
+
+    def observe_parser_drop(self, parser_id: str, *, outcome: str) -> None:
+        self.parser_drops.append((parser_id, outcome))
 
 
 @pytest.mark.parametrize(
@@ -121,6 +134,53 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
             "title_len": len(stub.title or ""),
         }
     ]
+
+
+def test_prefilter_drop_reports_parser_outcome_via_metrics_observation(
+    tmp_path: Path,
+) -> None:
+    harness = ParserIntakeHarness.create(
+        tmp_path,
+        parser_id="test",
+        discovered_stub=PositionStub(
+            url="https://example.com/blacklisted",
+            title="Senior Python Developer",
+            source="test",
+            company="Acme",
+            location="Hamburg",
+            posted_date=date(2026, 5, 29),
+        ),
+        enriched_stub=PositionStub(
+            url="https://example.com/blacklisted",
+            title="Senior Python Developer",
+            source="test",
+            company="Acme",
+            location="Hamburg",
+            posted_date=date(2026, 5, 29),
+        ),
+        parser=UnexpectedEnrichParser(),
+        negative_keywords=["python"],
+    )
+    metrics = _ObservingMetrics()
+    parser_intake = ParserIntake(
+        parser_id="test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=harness.classify_handoff,
+        run_log=harness.run_log,
+        metrics=metrics,  # type: ignore[arg-type]
+    )
+
+    with harness.run_scope():
+        parser_intake.process_position_stub(harness.default_position_stub)
+
+    assert metrics.parser_drops == [("test", "prefilter")]
 
 
 def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_steps(

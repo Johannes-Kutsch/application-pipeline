@@ -54,21 +54,15 @@ class _NullClassifyStageHandoff:
 
 @runtime_checkable
 class ParserMetrics(Protocol):
+    def observe_parser_drop(self, parser_id: str, *, outcome: "DropReason") -> None: ...
+
     def enrich_failed(self, parser_id: str = "") -> None: ...
 
     def enriched(self, parser_id: str, mode: str) -> None: ...
 
-    def increment_content_dropped(self, parser_id: str) -> None: ...
-
-    def increment_dedup_dropped(self, parser_id: str) -> None: ...
-
     def increment_enrich_failed_count(self, parser_id: str) -> None: ...
 
     def increment_forwarded(self, parser_id: str) -> None: ...
-
-    def increment_freshness_dropped(self, parser_id: str) -> None: ...
-
-    def increment_prefilter_dropped(self, parser_id: str) -> None: ...
 
 
 DropReason = Literal[
@@ -234,16 +228,7 @@ class ParserIntake:
     def _increment_drop_metric(self, reason: DropReason) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        if reason.startswith("freshness_"):
-            self._metrics.increment_freshness_dropped(self._parser_id)
-            return
-        if reason.startswith("dedup_"):
-            self._metrics.increment_dedup_dropped(self._parser_id)
-            return
-        if reason == "prefilter":
-            self._metrics.increment_prefilter_dropped(self._parser_id)
-            return
-        self._metrics.increment_content_dropped(self._parser_id)
+        self._metrics.observe_parser_drop(self._parser_id, outcome=reason)
 
     def _increment_enrich_failed_metric(self) -> None:
         if self._metrics is None or not self._parser_id:

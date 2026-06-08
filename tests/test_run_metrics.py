@@ -1415,6 +1415,19 @@ def test_gates_row_appears_on_first_gate_drop(run_log: RunLog) -> None:
     assert "parser p gates" in display.registered_names()
 
 
+def test_parser_drop_observation_maps_discover_and_post_enrich_freshness_to_one_gate_counter(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("jobs_beim_staat", order=4, total_queries=5)
+
+    metrics.observe_parser_drop("jobs_beim_staat", outcome="freshness_discover")
+    metrics.observe_parser_drop("jobs_beim_staat", outcome="freshness_post_enrich")
+
+    assert _last_body(display, "parser jobs beim staat gates") == "2 freshness"
+
+
 def test_gates_row_pinned_at_parser_order_plus_one(run_log: RunLog) -> None:
     """Gates row order = parser order + 1."""
     display = FakeStatusDisplay()

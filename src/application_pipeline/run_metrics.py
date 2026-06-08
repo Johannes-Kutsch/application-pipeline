@@ -96,6 +96,14 @@ class JudgeLifecycleFailureObservation:
     pass
 
 
+@dataclass(frozen=True)
+class RunCompleteObservation:
+    dedup: DedupSnapshot
+    pool_size: int
+    daily_top_5_count: int
+    elapsed_s: float
+
+
 class RunMetrics:
     """Owns all run-level counters and produces Run Divider / RunSummary output."""
 
@@ -566,7 +574,7 @@ class RunMetrics:
         self.observe_judge_failure(JudgeLifecycleFailureObservation())
 
     # -----------------------------------------------------------------------
-    # Read-only accessors for run_complete event
+    # Read-only compatibility accessors
     # -----------------------------------------------------------------------
 
     @property
@@ -731,27 +739,49 @@ class RunMetrics:
 
     def emit_run_complete(
         self,
+        observation: RunCompleteObservation | None = None,
         *,
-        dedup: DedupSnapshot,
-        pool_size: int,
-        daily_top_5_count: int,
-        elapsed_s: float,
+        dedup: DedupSnapshot | None = None,
+        pool_size: int | None = None,
+        daily_top_5_count: int | None = None,
+        elapsed_s: float | None = None,
     ) -> None:
+        if observation is None:
+            assert dedup is not None
+            assert pool_size is not None
+            assert daily_top_5_count is not None
+            assert elapsed_s is not None
+            observation = RunCompleteObservation(
+                dedup=dedup,
+                pool_size=pool_size,
+                daily_top_5_count=daily_top_5_count,
+                elapsed_s=elapsed_s,
+            )
+
+        with self._classify_lock:
+            classify_calls = self._classify_calls
+            classify_input_tokens = self._classify_input_tokens
+            classify_output_tokens = self._classify_output_tokens
+
+        with self._lock:
+            judge_input_tokens = self._judge_input_tokens
+            judge_output_tokens = self._judge_output_tokens
+
         self._run_log.event(
             "pipeline_orchestrator",
             "run_complete",
-            classify_calls=self.classify_calls,
-            classify_input_tokens=self.classify_input_tokens,
-            classify_output_tokens=self.classify_output_tokens,
-            judge_input_tokens=self.judge_input_tokens,
-            judge_output_tokens=self.judge_output_tokens,
-            dedup_url_hits=dedup.dedup_url_hits,
-            dedup_tuple_hits=dedup.dedup_tuple_hits,
-            dedup_run_hits=dedup.dedup_run_hits,
-            dedup_misses=dedup.dedup_misses,
-            pool_size=pool_size,
-            daily_top_5_count=daily_top_5_count,
-            elapsed_s=round(elapsed_s, 1),
+            classify_calls=classify_calls,
+            classify_input_tokens=classify_input_tokens,
+            classify_output_tokens=classify_output_tokens,
+            judge_input_tokens=judge_input_tokens,
+            judge_output_tokens=judge_output_tokens,
+            dedup_url_hits=observation.dedup.dedup_url_hits,
+            dedup_tuple_hits=observation.dedup.dedup_tuple_hits,
+            dedup_run_hits=observation.dedup.dedup_run_hits,
+            dedup_misses=observation.dedup.dedup_misses,
+            pool_size=observation.pool_size,
+            daily_top_5_count=observation.daily_top_5_count,
+            elapsed_s=round(observation.elapsed_s, 1),
         )
 
     def summarize_to_parser_log(self, started_at: datetime) -> None:

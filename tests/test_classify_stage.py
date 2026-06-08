@@ -143,6 +143,7 @@ def _run_summary(metrics: RunMetrics) -> RunSummary:
 class _FakeMetrics:
     def __init__(self) -> None:
         self.buffered = 0
+        self.batch_starts: list[int] = []
         self.done = 0
 
     def observe_classify_submission(
@@ -153,7 +154,7 @@ class _FakeMetrics:
     def observe_classify_batch_start(
         self, observation: ClassifyBatchStartObservation
     ) -> None:
-        del observation
+        self.batch_starts.append(observation.count)
 
     def observe_classify_batch_outcome(
         self, observation: ClassifyBatchOutcomeObservation
@@ -793,6 +794,7 @@ def test_classify_stage_batches_exactly_10_items_into_one_llm_call(
 
     assert completion.first_failure is None
     assert llm_enricher.batch_sizes == [10]
+    assert metrics.batch_starts == [10]
     assert [listing_id for listing_id, _ in pool_collector.matched] == list(
         range(1, 11)
     )

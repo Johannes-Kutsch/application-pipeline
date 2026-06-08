@@ -21,6 +21,9 @@ from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.run_metrics import (
     ClassifyBatchOutcomeObservation,
     ClassifyBatchFailureObservation,
+    ClassifyBatchStartObservation,
+    ClassifyStageCompletionObservation,
+    ClassifySubmissionObservation,
     JudgeLifecycleFailureObservation,
     JudgeLifecycleOutcomeObservation,
     JudgeLifecycleStartObservation,
@@ -234,6 +237,31 @@ def test_classify_outcome_observation_updates_display_summary_divider_and_log(
     assert "off_domain=2" in run_log_text
     assert "batches_failed=0" in run_log_text
     assert "input_tokens=500" in run_log_text
+
+
+def test_classify_observation_objects_preserve_status_display_semantics(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    metrics.observe_classify_submission(ClassifySubmissionObservation(count=2))
+    assert _last_body(display, "llm classify relevance") == "2 queued"
+
+    metrics.observe_classify_batch_start(ClassifyBatchStartObservation(count=2))
+    assert _last_body(display, "llm classify relevance") == "2 classifying"
+
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=2))
+    assert _last_body(display, "llm classify relevance") == "2 malformed"
+
+    metrics.observe_classify_stage_completion(ClassifyStageCompletionObservation())
+    phase_updates = [
+        call
+        for call in display.calls
+        if call.method == "update_phase" and call.name == "llm classify relevance"
+    ]
+    assert phase_updates[-1].kwargs["phase"] == "done"
 
 
 def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:

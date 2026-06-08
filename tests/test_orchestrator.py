@@ -5073,13 +5073,7 @@ def test_run_reports_match_judge_completion_through_run_metrics(
     )
 
     assert summary.written == 2
-    judge_registers = [
-        c
-        for c in display.calls
-        if c.method == "register" and c.name == "llm judge match"
-    ]
-    assert len(judge_registers) == 1
-    assert judge_registers[0].kwargs["body"] == "2 candidates"
+    assert "llm judge match" not in display.registered_names()
 
     judge_prints = [c for c in display.calls if c.method == "print"]
     assert any(
@@ -5126,12 +5120,12 @@ def test_run_reports_match_judge_failure_through_run_metrics(
     assert summary.errored == 1
     pipeline_updates = display.body_updates_for("pipeline")
     assert pipeline_updates[-1] == "discovered=2 written=0 errors=1"
-    judge_phases = [
+    judge_phase_updates = [
         c
         for c in display.calls
         if c.method == "update_phase" and c.name == "llm judge match"
     ]
-    assert judge_phases[-1].kwargs["phase"] == "error"
+    assert judge_phase_updates == []
 
     run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
     assert "judges_sent=0" in run_log_text

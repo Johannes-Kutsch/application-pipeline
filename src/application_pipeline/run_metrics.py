@@ -510,9 +510,6 @@ class RunMetrics:
             pipeline_body = self._pipeline_body()
         self._display.update_body("pipeline", body=pipeline_body)
 
-    _JUDGE_ROW = "llm judge match"
-    _JUDGE_ROW_ORDER = 1002
-
     def _record_judge_usage(self, usage: CallUsage) -> None:
         self._judge_calls += 1
         self._judge_input_tokens += usage.input_tokens
@@ -527,14 +524,9 @@ class RunMetrics:
         return self._pipeline_body()
 
     def observe_judge_start(self, observation: JudgeLifecycleStartObservation) -> None:
+        del observation
         with self._lock:
             self._judge_started += 1
-        self._display.register(
-            self._JUDGE_ROW,
-            order=self._JUDGE_ROW_ORDER,
-            phase="running",
-            body=f"{observation.candidate_count} candidates",
-        )
 
     def observe_judge_outcome(
         self, observation: JudgeLifecycleOutcomeObservation
@@ -542,10 +534,6 @@ class RunMetrics:
         with self._lock:
             self._record_judge_usage(observation.usage)
             self._written += observation.card_count
-        self._display.update_body(
-            self._JUDGE_ROW, body=f"wrote {observation.card_count} cards"
-        )
-        self._display.update_phase(self._JUDGE_ROW, phase="done")
         self._display.print(
             caller="llm_judge_match",
             message=f"judge_top_n complete: wrote {observation.card_count} cards",
@@ -558,7 +546,6 @@ class RunMetrics:
         with self._lock:
             pipeline_body = self._record_judge_failure()
         self._display.update_body("pipeline", body=pipeline_body)
-        self._display.update_phase(self._JUDGE_ROW, phase="error")
 
     def judge_started(self, candidate_count: int) -> None:
         self.observe_judge_start(

@@ -1298,14 +1298,14 @@ def test_parser_body_nonzero_drop_counters_go_to_gates_row(run_log: RunLog) -> N
     metrics.register_parser("p", order=2, total_queries=5, has_native_enrich=True)
 
     metrics.discovered("p")
-    metrics.increment_freshness_dropped("p")
-    metrics.increment_freshness_dropped("p")
-    metrics.increment_freshness_dropped("p")
-    metrics.increment_dedup_dropped("p")
-    metrics.increment_prefilter_dropped("p")
-    metrics.increment_enrich_failed_count("p")
-    metrics.increment_content_dropped("p")
-    metrics.increment_forwarded("p")
+    metrics.observe_parser_drop("p", outcome="freshness_discover")
+    metrics.observe_parser_drop("p", outcome="freshness_discover")
+    metrics.observe_parser_drop("p", outcome="freshness_post_enrich")
+    metrics.observe_parser_drop("p", outcome="dedup_url_hit")
+    metrics.observe_parser_enrich_failure("p")
+    metrics.observe_parser_drop("p", outcome="prefilter")
+    metrics.observe_parser_drop("p", outcome="content_empty_body")
+    metrics.observe_parser_forwarded("p", "fallback")
     metrics.parser_done("p")
 
     parser_body = _last_body(display, "parser p")
@@ -1333,7 +1333,7 @@ def test_parser_body_enrich_failed_hidden_without_native_enrich(
     metrics.register_parser("p", order=1, total_queries=5, has_native_enrich=False)
 
     metrics.discovered("p")
-    metrics.increment_enrich_failed_count("p")
+    metrics.observe_parser_enrich_failure("p")
     metrics.parser_done("p")
 
     body = _last_body(display, "parser p")
@@ -1392,15 +1392,17 @@ def test_parser_enrich_failure_observation_keeps_counter_hidden_without_native_e
     assert "parser fallback parser gates" not in display.registered_names()
 
 
-def test_parser_body_forwarded_updates_display_immediately(run_log: RunLog) -> None:
-    """increment_forwarded triggers a body update on the parser row immediately."""
+def test_parser_body_forwarded_observation_updates_display_immediately(
+    run_log: RunLog,
+) -> None:
+    """observe_parser_forwarded triggers a body update on the parser row immediately."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=1, total_queries=2)
 
     metrics.discovered("p")
     before = len(display.body_updates_for("parser p"))
-    metrics.increment_forwarded("p")
+    metrics.observe_parser_forwarded("p", "fallback")
     after = len(display.body_updates_for("parser p"))
 
     assert after == before + 1
@@ -1472,7 +1474,7 @@ def test_gates_row_absent_when_all_drop_counters_zero(run_log: RunLog) -> None:
     metrics.register_parser("p", order=2, total_queries=5)
 
     metrics.discovered("p")
-    metrics.increment_forwarded("p")
+    metrics.observe_parser_forwarded("p", "fallback")
     metrics.parser_done("p")
 
     registered = display.registered_names()
@@ -1488,7 +1490,7 @@ def test_gates_row_appears_on_first_gate_drop(run_log: RunLog) -> None:
     metrics.discovered("p")
     assert "parser p gates" not in display.registered_names()
 
-    metrics.increment_freshness_dropped("p")
+    metrics.observe_parser_drop("p", outcome="freshness_discover")
     assert "parser p gates" in display.registered_names()
 
 
@@ -1537,7 +1539,7 @@ def test_gates_row_pinned_at_parser_order_plus_one(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=4, total_queries=5)
 
-    metrics.increment_dedup_dropped("p")
+    metrics.observe_parser_drop("p", outcome="dedup_url_hit")
 
     register_calls = [
         c
@@ -1554,7 +1556,7 @@ def test_gates_row_named_parser_type_gates(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("bundesagentur", order=2, total_queries=5)
 
-    metrics.increment_freshness_dropped("bundesagentur")
+    metrics.observe_parser_drop("bundesagentur", outcome="freshness_discover")
 
     assert "parser bundesagentur gates" in display.registered_names()
 
@@ -1565,7 +1567,7 @@ def test_gates_row_name_uses_spaces_not_underscores(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("jobs_beim_staat", order=2, total_queries=5)
 
-    metrics.increment_content_dropped("jobs_beim_staat")
+    metrics.observe_parser_drop("jobs_beim_staat", outcome="content_empty_body")
 
     assert "parser jobs beim staat gates" in display.registered_names()
     assert "parser jobs_beim_staat gates" not in display.registered_names()
@@ -1577,7 +1579,7 @@ def test_parser_done_mirrors_phase_to_gates_row(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=2, total_queries=5)
 
-    metrics.increment_freshness_dropped("p")
+    metrics.observe_parser_drop("p", outcome="freshness_discover")
     metrics.parser_done("p")
 
     phase_calls = [
@@ -1595,7 +1597,7 @@ def test_parser_dead_mirrors_phase_to_gates_row(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=2, total_queries=5)
 
-    metrics.increment_dedup_dropped("p")
+    metrics.observe_parser_drop("p", outcome="dedup_url_hit")
     metrics.parser_dead("p")
 
     phase_calls = [
@@ -1629,11 +1631,11 @@ def test_gates_row_body_updates_on_each_drop(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=2, total_queries=5)
 
-    metrics.increment_freshness_dropped("p")
+    metrics.observe_parser_drop("p", outcome="freshness_discover")
     first_body = _last_body(display, "parser p gates")
     assert "1 freshness" in first_body
 
-    metrics.increment_freshness_dropped("p")
+    metrics.observe_parser_drop("p", outcome="freshness_post_enrich")
     second_body = _last_body(display, "parser p gates")
     assert "2 freshness" in second_body
 
@@ -1645,11 +1647,11 @@ def test_parser_row_body_excludes_gate_drop_counters(run_log: RunLog) -> None:
     metrics.register_parser("p", order=2, total_queries=5, has_native_enrich=True)
 
     metrics.discovered("p")
-    metrics.increment_freshness_dropped("p")
-    metrics.increment_dedup_dropped("p")
-    metrics.increment_prefilter_dropped("p")
-    metrics.increment_content_dropped("p")
-    metrics.increment_forwarded("p")
+    metrics.observe_parser_drop("p", outcome="freshness_discover")
+    metrics.observe_parser_drop("p", outcome="dedup_url_hit")
+    metrics.observe_parser_drop("p", outcome="prefilter")
+    metrics.observe_parser_drop("p", outcome="content_empty_body")
+    metrics.observe_parser_forwarded("p", "fallback")
 
     body = _last_body(display, "parser p")
     assert "1 discovered" in body

@@ -263,7 +263,7 @@ class RunMetrics:
             body = self._parser_body(parser_id)
         self._display.update_body(self._parser_row(parser_id), body=body)
 
-    def _apply_gate_drop(self, parser_id: str, field: str) -> None:
+    def _observe_gate_drop(self, parser_id: str, field: str) -> None:
         with self._lock:
             entry = self._parser_entry(parser_id)
             setattr(entry, field, getattr(entry, field) + 1)
@@ -276,24 +276,6 @@ class RunMetrics:
             self._register_gates_row(parser_id, order, gates_body)
         else:
             self._display.update_body(self._gates_row(parser_id), body=gates_body)
-
-    def increment_freshness_dropped(self, parser_id: str) -> None:
-        self._apply_gate_drop(parser_id, "freshness_dropped")
-
-    def increment_dedup_dropped(self, parser_id: str) -> None:
-        self._apply_gate_drop(parser_id, "dedup_dropped")
-
-    def increment_prefilter_dropped(self, parser_id: str) -> None:
-        self._apply_gate_drop(parser_id, "prefilter_dropped")
-
-    def increment_enrich_failed_count(self, parser_id: str) -> None:
-        with self._lock:
-            self._parser_entry(parser_id).enrich_failed_count += 1
-            body = self._parser_body(parser_id)
-        self._display.update_body(self._parser_row(parser_id), body=body)
-
-    def increment_content_dropped(self, parser_id: str) -> None:
-        self._apply_gate_drop(parser_id, "content_dropped")
 
     def observe_parser_enrich_failure(self, parser_id: str) -> None:
         with self._lock:
@@ -323,7 +305,7 @@ class RunMetrics:
         ],
     ) -> None:
         if outcome in ("freshness_discover", "freshness_post_enrich"):
-            self.increment_freshness_dropped(parser_id)
+            self._observe_gate_drop(parser_id, "freshness_dropped")
             return
         if outcome in (
             "dedup_url_hit",
@@ -331,18 +313,12 @@ class RunMetrics:
             "dedup_fuzzy_hit",
             "dedup_run_hit",
         ):
-            self.increment_dedup_dropped(parser_id)
+            self._observe_gate_drop(parser_id, "dedup_dropped")
             return
         if outcome == "prefilter":
-            self.increment_prefilter_dropped(parser_id)
+            self._observe_gate_drop(parser_id, "prefilter_dropped")
             return
-        self.increment_content_dropped(parser_id)
-
-    def increment_forwarded(self, parser_id: str) -> None:
-        with self._lock:
-            self._parser_entry(parser_id).forwarded += 1
-            body = self._parser_body(parser_id)
-        self._display.update_body(self._parser_row(parser_id), body=body)
+        self._observe_gate_drop(parser_id, "content_dropped")
 
     def observe_parser_forwarded(
         self, parser_id: str, mode: Literal["native", "fallback"]

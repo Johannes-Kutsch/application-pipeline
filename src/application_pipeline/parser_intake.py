@@ -112,7 +112,7 @@ class ParserIntake:
             gate_arm="discover",
             deadline=position_stub.deadline,
         ):
-            self._increment_drop_metric("freshness_discover")
+            self._observe_drop_metric("freshness_discover")
             return
 
         discover_dedup = self._deduplication.is_seen(position_stub)
@@ -125,12 +125,12 @@ class ParserIntake:
             return
         if discover_dedup.kind != "miss":
             self._record_dedup(discover_dedup.kind)
-            self._increment_drop_metric(_drop_reason_for_dedup(discover_dedup.kind))
+            self._observe_drop_metric(_drop_reason_for_dedup(discover_dedup.kind))
             return
 
         if not self._domain_pre_filter.admit(position_stub):
             self._record_dedup("miss")
-            self._increment_drop_metric("prefilter")
+            self._observe_drop_metric("prefilter")
             return
 
         try:
@@ -143,7 +143,7 @@ class ParserIntake:
                 url=position_stub.url,
                 source=position_stub.source,
             )
-            self._increment_enrich_failed_metric()
+            self._observe_enrich_failed_metric()
             return
         except OversizedBodyError as exc:
             self._record_dedup("miss")
@@ -172,7 +172,7 @@ class ParserIntake:
         post_enrich_dedup = self._deduplication.is_seen(stub)
         if post_enrich_dedup.kind not in ("miss", "run_hit", "judge_pending"):
             self._record_dedup(post_enrich_dedup.kind)
-            self._increment_drop_metric(_drop_reason_for_dedup(post_enrich_dedup.kind))
+            self._observe_drop_metric(_drop_reason_for_dedup(post_enrich_dedup.kind))
             return
 
         if not self._freshness_gate.admit(
@@ -181,15 +181,13 @@ class ParserIntake:
             deadline=stub.deadline,
         ):
             self._record_dedup(post_enrich_dedup.kind)
-            self._increment_drop_metric("freshness_post_enrich")
+            self._observe_drop_metric("freshness_post_enrich")
             return
 
         content_decision = self._content_gate.inspect(body, stub)
         if not content_decision.passes:
             self._record_dedup(post_enrich_dedup.kind)
-            self._increment_drop_metric(
-                _drop_reason_for_content(content_decision.reason)
-            )
+            self._observe_drop_metric(_drop_reason_for_content(content_decision.reason))
             return
 
         if post_enrich_dedup.kind == "judge_pending":
@@ -205,7 +203,7 @@ class ParserIntake:
             return
 
         self._record_dedup(post_enrich_dedup.kind)
-        self._increment_forwarded_metrics(enrich_result.mode)
+        self._observe_forwarded_metric(enrich_result.mode)
         self._classify_handoff.submit_ready(
             listing_id=post_enrich_dedup.listing_id,
             stub=stub,
@@ -223,17 +221,17 @@ class ParserIntake:
     def _record_dedup(self, kind: RunScopedSeenKind) -> None:
         self._dedup_counters.record(kind)
 
-    def _increment_drop_metric(self, reason: DropReason) -> None:
+    def _observe_drop_metric(self, reason: DropReason) -> None:
         if self._metrics is None or not self._parser_id:
             return
         self._metrics.observe_parser_drop(self._parser_id, outcome=reason)
 
-    def _increment_enrich_failed_metric(self) -> None:
+    def _observe_enrich_failed_metric(self) -> None:
         if self._metrics is None or not self._parser_id:
             return
         self._metrics.observe_parser_enrich_failure(self._parser_id)
 
-    def _increment_forwarded_metrics(self, mode: Literal["native", "fallback"]) -> None:
+    def _observe_forwarded_metric(self, mode: Literal["native", "fallback"]) -> None:
         if self._metrics is None or not self._parser_id:
             return
         self._metrics.observe_parser_forwarded(self._parser_id, mode)

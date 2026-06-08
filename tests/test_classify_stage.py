@@ -9,6 +9,7 @@ from application_pipeline.run_metrics import RunMetrics, RunSummary
 from application_pipeline.run_metrics import (
     ClassifyBatchFailureObservation,
     ClassifyBatchOutcomeObservation,
+    ClassifyRetryableObservation,
     ClassifyBatchStartObservation,
     ClassifyStageCompletionObservation,
     ClassifySubmissionObservation,
@@ -166,8 +167,10 @@ class _FakeMetrics:
     ) -> None:
         del observation
 
-    def enrich_failed(self, parser_id: str = "") -> None:
-        del parser_id
+    def observe_classify_retryable(
+        self, observation: ClassifyRetryableObservation
+    ) -> None:
+        del observation
 
     def observe_classify_stage_completion(
         self, observation: ClassifyStageCompletionObservation

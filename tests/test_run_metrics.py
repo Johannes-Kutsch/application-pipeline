@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
 
@@ -27,6 +27,10 @@ from application_pipeline.run_metrics import (
     JudgeLifecycleFailureObservation,
     JudgeLifecycleOutcomeObservation,
     JudgeLifecycleStartObservation,
+    ParserIntakeDropOutcome,
+    ParserIntakeDropObservation,
+    ParserIntakeEnrichFailureObservation,
+    ParserIntakeForwardedObservation,
     RunCompleteObservation,
     RunMetrics,
 )
@@ -81,6 +85,48 @@ def _last_body(display: FakeStatusDisplay, row: str) -> str:
     updates = display.body_updates_for(row)
     assert updates, f"no body updates for row {row!r}"
     return updates[-1]
+
+
+def _observe_parser_drop(
+    metrics: RunMetrics, parser_id: str, outcome: ParserIntakeDropOutcome
+) -> None:
+    metrics.observe_parser_intake_drop(
+        ParserIntakeDropObservation(parser_id=parser_id, outcome=outcome)
+    )
+
+
+def _observe_parser_enrich_failure(metrics: RunMetrics, parser_id: str) -> None:
+    metrics.observe_parser_intake_enrich_failure(
+        ParserIntakeEnrichFailureObservation(parser_id=parser_id)
+    )
+
+
+def _observe_parser_forwarded(
+    metrics: RunMetrics, parser_id: str, mode: Literal["native", "fallback"]
+) -> None:
+    metrics.observe_parser_intake_forwarded(
+        ParserIntakeForwardedObservation(parser_id=parser_id, mode=mode)
+    )
+
+
+def _observe_classify_outcome(
+    metrics: RunMetrics,
+    usage: CallUsage,
+    *,
+    items: int,
+    classifier_dropped: int,
+    retryable_items: int = 0,
+) -> None:
+    forwarded = items - classifier_dropped - retryable_items
+    item_states = cast(
+        tuple[Literal["matched", "rejected", "retryable", "expired"], ...],
+        ("matched",) * forwarded
+        + ("rejected",) * classifier_dropped
+        + ("retryable",) * retryable_items,
+    )
+    metrics.observe_classify_batch_outcome(
+        ClassifyBatchOutcomeObservation(usage=usage, item_states=item_states)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,10 +202,9 @@ def test_classify_body_all_forwarded(run_log: RunLog) -> None:
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.classify_buffered(5)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
-    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+    metrics.observe_classify_submission(5)
+    metrics.observe_classify_batch_start(5)
+    _observe_classify_outcome(metrics, usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm classify relevance")
     assert body == "5 forwarded"
@@ -270,10 +315,9 @@ def test_classify_body_all_dropped_by_error(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.classify_buffered(3)
-    metrics.classify_batch_enqueued(3)
-    metrics.classify_batch_dequeued(3)
-    metrics.classify_batch_failed(items=3)
+    metrics.observe_classify_submission(3)
+    metrics.observe_classify_batch_start(3)
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=3))
 
     body = _last_body(display, "llm classify relevance")
     assert body == "3 malformed"
@@ -331,10 +375,10 @@ def test_classify_body_retryable_items_count_as_malformed_not_forwarded(
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.classify_buffered(2)
-    metrics.classify_batch_enqueued(2)
-    metrics.classify_batch_dequeued(2)
-    metrics.classify_batch_complete(
+    metrics.observe_classify_submission(2)
+    metrics.observe_classify_batch_start(2)
+    _observe_classify_outcome(
+        metrics,
         usage,
         items=2,
         classifier_dropped=0,
@@ -350,8 +394,8 @@ def test_classify_body_queued_only_while_in_flight(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.classify_buffered(4)
-    metrics.classify_buffered(2)
+    metrics.observe_classify_submission(4)
+    metrics.observe_classify_submission(2)
 
     body = _last_body(display, "llm classify relevance")
     assert body == "6 queued"
@@ -364,10 +408,9 @@ def test_classify_body_forwarded_cumulates_across_batches(run_log: RunLog) -> No
 
     usage = _make_usage()
     for _ in range(2):
-        metrics.classify_buffered(5)
-        metrics.classify_batch_enqueued(5)
-        metrics.classify_batch_dequeued(5)
-        metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+        metrics.observe_classify_submission(5)
+        metrics.observe_classify_batch_start(5)
+        _observe_classify_outcome(metrics, usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm classify relevance")
     assert body == "10 forwarded"
@@ -379,11 +422,11 @@ def test_classify_body_updates_per_buffered_call(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.classify_buffered(1)
+    metrics.observe_classify_submission(1)
     body_after_first = _last_body(display, "llm classify relevance")
     assert body_after_first == "1 queued"
 
-    metrics.classify_buffered(1)
+    metrics.observe_classify_submission(1)
     body_after_second = _last_body(display, "llm classify relevance")
     assert body_after_second == "2 queued"
 
@@ -399,10 +442,9 @@ def test_classify_queued_hidden_when_all_items_complete(run_log: RunLog) -> None
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.classify_buffered(5)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
-    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+    metrics.observe_classify_submission(5)
+    metrics.observe_classify_batch_start(5)
+    _observe_classify_outcome(metrics, usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm classify relevance")
     assert "queued" not in body
@@ -413,10 +455,9 @@ def test_classify_queued_hidden_when_all_items_errored(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.classify_buffered(3)
-    metrics.classify_batch_enqueued(3)
-    metrics.classify_batch_dequeued(3)
-    metrics.classify_batch_failed(items=3)
+    metrics.observe_classify_submission(3)
+    metrics.observe_classify_batch_start(3)
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=3))
 
     body = _last_body(display, "llm classify relevance")
     assert "queued" not in body
@@ -428,14 +469,13 @@ def test_classify_queued_decreases_as_batches_complete(run_log: RunLog) -> None:
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.classify_buffered(10)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
+    metrics.observe_classify_submission(10)
+    metrics.observe_classify_batch_start(5)
 
     body_mid = _last_body(display, "llm classify relevance")
     assert "5 queued" in body_mid
 
-    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+    _observe_classify_outcome(metrics, usage, items=5, classifier_dropped=0)
 
     body_after = _last_body(display, "llm classify relevance")
     assert body_after == "5 queued · 5 forwarded"
@@ -452,10 +492,9 @@ def test_classify_body_queued_dropped_forwarded_format(run_log: RunLog) -> None:
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.classify_buffered(5)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
-    metrics.classify_batch_complete(usage, items=5, classifier_dropped=2)
+    metrics.observe_classify_submission(5)
+    metrics.observe_classify_batch_start(5)
+    _observe_classify_outcome(metrics, usage, items=5, classifier_dropped=2)
 
     body = _last_body(display, "llm classify relevance")
     assert body == "2 dropped · 3 forwarded"
@@ -469,10 +508,9 @@ def test_classify_body_malformed_hidden_when_zero(run_log: RunLog) -> None:
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.classify_buffered(5)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
-    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+    metrics.observe_classify_submission(5)
+    metrics.observe_classify_batch_start(5)
+    _observe_classify_outcome(metrics, usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm classify relevance")
     assert "malformed" not in body
@@ -485,15 +523,13 @@ def test_classify_body_malformed_and_dropped_both_present(run_log: RunLog) -> No
 
     usage = _make_usage()
     # First batch: 2 items succeed, 1 classifier-dropped
-    metrics.classify_buffered(3)
-    metrics.classify_batch_enqueued(3)
-    metrics.classify_batch_dequeued(3)
-    metrics.classify_batch_complete(usage, items=3, classifier_dropped=1)
+    metrics.observe_classify_submission(3)
+    metrics.observe_classify_batch_start(3)
+    _observe_classify_outcome(metrics, usage, items=3, classifier_dropped=1)
     # Second batch: 2 items fail with LLM error
-    metrics.classify_buffered(2)
-    metrics.classify_batch_enqueued(2)
-    metrics.classify_batch_dequeued(2)
-    metrics.classify_batch_failed(items=2)
+    metrics.observe_classify_submission(2)
+    metrics.observe_classify_batch_start(2)
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=2))
 
     body = _last_body(display, "llm classify relevance")
     assert body == "2 malformed · 1 dropped · 2 forwarded"
@@ -508,16 +544,14 @@ def test_classify_body_malformed_ordering_between_queued_and_dropped(
     metrics.register_rows()
 
     # Queue some items that aren't yet dequeued
-    metrics.classify_buffered(10)
+    metrics.observe_classify_submission(10)
     # Fail one batch that was already dequeued
-    metrics.classify_batch_enqueued(3)
-    metrics.classify_batch_dequeued(3)
-    metrics.classify_batch_failed(items=3)
+    metrics.observe_classify_batch_start(3)
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=3))
     # Complete one batch with a classifier drop
     usage = _make_usage()
-    metrics.classify_batch_enqueued(3)
-    metrics.classify_batch_dequeued(3)
-    metrics.classify_batch_complete(usage, items=3, classifier_dropped=1)
+    metrics.observe_classify_batch_start(3)
+    _observe_classify_outcome(metrics, usage, items=3, classifier_dropped=1)
 
     body = _last_body(display, "llm classify relevance")
     # queued shows remaining depth; malformed before dropped; forwarded last
@@ -542,9 +576,8 @@ def test_classifying_segment_present_after_dequeue_before_complete(
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.classify_buffered(5)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
+    metrics.observe_classify_submission(5)
+    metrics.observe_classify_batch_start(5)
 
     body = _last_body(display, "llm classify relevance")
     assert "5 classifying" in body
@@ -556,10 +589,9 @@ def test_classifying_segment_absent_after_complete(run_log: RunLog) -> None:
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.classify_buffered(5)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
-    metrics.classify_batch_complete(usage, items=5, classifier_dropped=0)
+    metrics.observe_classify_submission(5)
+    metrics.observe_classify_batch_start(5)
+    _observe_classify_outcome(metrics, usage, items=5, classifier_dropped=0)
 
     body = _last_body(display, "llm classify relevance")
     assert "classifying" not in body
@@ -570,10 +602,9 @@ def test_classifying_segment_absent_after_failed(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.classify_buffered(3)
-    metrics.classify_batch_enqueued(3)
-    metrics.classify_batch_dequeued(3)
-    metrics.classify_batch_failed(items=3)
+    metrics.observe_classify_submission(3)
+    metrics.observe_classify_batch_start(3)
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=3))
 
     body = _last_body(display, "llm classify relevance")
     assert "classifying" not in body
@@ -586,9 +617,8 @@ def test_classifying_segment_position_between_queued_and_dropped(
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.classify_buffered(10)
-    metrics.classify_batch_enqueued(5)
-    metrics.classify_batch_dequeued(5)
+    metrics.observe_classify_submission(10)
+    metrics.observe_classify_batch_start(5)
     # 5 more still buffered but not yet dequeued — only the 5 dequeued are classifying
 
     body = _last_body(display, "llm classify relevance")
@@ -601,10 +631,9 @@ def test_classifying_reflects_partial_completions(run_log: RunLog) -> None:
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.classify_buffered(6)
-    metrics.classify_batch_enqueued(6)
-    metrics.classify_batch_dequeued(6)
-    metrics.classify_batch_complete(usage, items=3, classifier_dropped=0)
+    metrics.observe_classify_submission(6)
+    metrics.observe_classify_batch_start(6)
+    _observe_classify_outcome(metrics, usage, items=3, classifier_dropped=0)
 
     body = _last_body(display, "llm classify relevance")
     assert "3 classifying" in body
@@ -755,7 +784,9 @@ def test_judge_top_n_complete_prints_card_count_as_terminal_message(
     metrics = RunMetrics(display, run_log=run_log)
 
     usage = _make_usage()
-    metrics.judge_top_n_complete(usage, card_count=3)
+    metrics.observe_judge_outcome(
+        JudgeLifecycleOutcomeObservation(usage=usage, card_count=3)
+    )
 
     print_calls = [c for c in display.calls if c.method == "print"]
     assert len(print_calls) == 1
@@ -775,7 +806,7 @@ def test_judge_start_registers_no_persistent_status_display_row(
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.judge_started(14)
+    metrics.observe_judge_start(JudgeLifecycleStartObservation(candidate_count=14))
 
     assert "llm judge match" not in display.registered_names()
 
@@ -785,7 +816,7 @@ def test_judge_start_keeps_only_classify_row_registered(run_log: RunLog) -> None
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.judge_started(5)
+    metrics.observe_judge_start(JudgeLifecycleStartObservation(candidate_count=5))
 
     assert _registers(display) == [("llm classify relevance", 1001, "running")]
 
@@ -808,8 +839,10 @@ def test_judge_outcome_produces_no_persistent_status_display_updates(
     metrics.register_rows()
 
     usage = _make_usage()
-    metrics.judge_started(5)
-    metrics.judge_top_n_complete(usage, card_count=3)
+    metrics.observe_judge_start(JudgeLifecycleStartObservation(candidate_count=5))
+    metrics.observe_judge_outcome(
+        JudgeLifecycleOutcomeObservation(usage=usage, card_count=3)
+    )
 
     assert display.body_updates_for("llm judge match") == []
     assert [
@@ -827,8 +860,8 @@ def test_judge_failure_produces_no_persistent_status_display_updates(
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_rows()
 
-    metrics.judge_started(5)
-    metrics.judge_top_n_failed()
+    metrics.observe_judge_start(JudgeLifecycleStartObservation(candidate_count=5))
+    metrics.observe_judge_failure(JudgeLifecycleFailureObservation())
 
     assert display.body_updates_for("llm judge match") == []
     assert [
@@ -919,10 +952,9 @@ def _build_populated_metrics(display: FakeStatusDisplay, run_log: RunLog) -> Run
         cost_usd=0.002,
         duration_s=2.5,
     )
-    metrics.classify_buffered(2)
-    metrics.classify_batch_enqueued(2)
-    metrics.classify_batch_dequeued(2)
-    metrics.classify_batch_complete(classify_usage, items=2, classifier_dropped=1)
+    metrics.observe_classify_submission(2)
+    metrics.observe_classify_batch_start(2)
+    _observe_classify_outcome(metrics, classify_usage, items=2, classifier_dropped=1)
 
     judge_usage = _make_usage(
         input_tokens=300,
@@ -1056,10 +1088,9 @@ def test_classify_batches_failed_absent_when_zero(run_log: RunLog) -> None:
 def test_classify_batches_failed_present_when_nonzero(run_log: RunLog) -> None:
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.classify_buffered(2)
-    metrics.classify_batch_enqueued(2)
-    metrics.classify_batch_dequeued(2)
-    metrics.classify_batch_failed(items=2)
+    metrics.observe_classify_submission(2)
+    metrics.observe_classify_batch_start(2)
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=2))
 
     result = metrics.format_run_divider(
         "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
@@ -1076,10 +1107,9 @@ def test_classify_abandoned_items_roll_up_into_errors_and_judge_abandoned(
     and toward judge_items_abandoned. The module must preserve that roll-up."""
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=run_log)
-    metrics.classify_buffered(3)
-    metrics.classify_batch_enqueued(3)
-    metrics.classify_batch_dequeued(3)
-    metrics.classify_batch_failed(items=3)
+    metrics.observe_classify_submission(3)
+    metrics.observe_classify_batch_start(3)
+    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=3))
     metrics.judge_enqueued()
     metrics.judge_dequeued()
     metrics.judge_failed()
@@ -1350,10 +1380,9 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
         for _ in range(iters):
             metrics.discovered()
             metrics.enrich_failed()
-            metrics.classify_buffered(1)
-            metrics.classify_batch_enqueued(1)
-            metrics.classify_batch_dequeued(1)
-            metrics.classify_batch_complete(usage, items=1, classifier_dropped=0)
+            metrics.observe_classify_submission(1)
+            metrics.observe_classify_batch_start(1)
+            _observe_classify_outcome(metrics, usage, items=1, classifier_dropped=0)
             metrics.judge_enqueued()
             metrics.judge_dequeued()
             metrics.judge_complete(usage, "src")
@@ -1643,14 +1672,14 @@ def test_parser_body_nonzero_drop_counters_go_to_gates_row(run_log: RunLog) -> N
     metrics.register_parser("p", order=2, total_queries=5, has_native_enrich=True)
 
     metrics.discovered("p")
-    metrics.observe_parser_drop("p", outcome="freshness_discover")
-    metrics.observe_parser_drop("p", outcome="freshness_discover")
-    metrics.observe_parser_drop("p", outcome="freshness_post_enrich")
-    metrics.observe_parser_drop("p", outcome="dedup_url_hit")
-    metrics.observe_parser_enrich_failure("p")
-    metrics.observe_parser_drop("p", outcome="prefilter")
-    metrics.observe_parser_drop("p", outcome="content_empty_body")
-    metrics.observe_parser_forwarded("p", "fallback")
+    _observe_parser_drop(metrics, "p", "freshness_discover")
+    _observe_parser_drop(metrics, "p", "freshness_discover")
+    _observe_parser_drop(metrics, "p", "freshness_post_enrich")
+    _observe_parser_drop(metrics, "p", "dedup_url_hit")
+    _observe_parser_enrich_failure(metrics, "p")
+    _observe_parser_drop(metrics, "p", "prefilter")
+    _observe_parser_drop(metrics, "p", "content_empty_body")
+    _observe_parser_forwarded(metrics, "p", "fallback")
     metrics.parser_done("p")
 
     parser_body = _last_body(display, "parser p")
@@ -1678,7 +1707,7 @@ def test_parser_body_enrich_failed_hidden_without_native_enrich(
     metrics.register_parser("p", order=1, total_queries=5, has_native_enrich=False)
 
     metrics.discovered("p")
-    metrics.observe_parser_enrich_failure("p")
+    _observe_parser_enrich_failure(metrics, "p")
     metrics.parser_done("p")
 
     body = _last_body(display, "parser p")
@@ -1695,7 +1724,7 @@ def test_parser_enrich_failure_observation_updates_pipeline_and_native_parser_on
         "native_parser", order=1, total_queries=1, has_native_enrich=True
     )
 
-    metrics.observe_parser_enrich_failure("native_parser")
+    _observe_parser_enrich_failure(metrics, "native_parser")
 
     summary = metrics.to_run_summary(
         1.0,
@@ -1721,7 +1750,7 @@ def test_parser_enrich_failure_observation_keeps_counter_hidden_without_native_e
     metrics.register_rows()
     metrics.register_parser("fallback_parser", order=1, total_queries=1)
 
-    metrics.observe_parser_enrich_failure("fallback_parser")
+    _observe_parser_enrich_failure(metrics, "fallback_parser")
 
     summary = metrics.to_run_summary(
         1.0,
@@ -1747,7 +1776,7 @@ def test_parser_body_forwarded_observation_updates_display_immediately(
 
     metrics.discovered("p")
     before = len(display.body_updates_for("parser p"))
-    metrics.observe_parser_forwarded("p", "fallback")
+    _observe_parser_forwarded(metrics, "p", "fallback")
     after = len(display.body_updates_for("parser p"))
 
     assert after == before + 1
@@ -1762,8 +1791,8 @@ def test_parser_forwarded_observation_updates_parser_row_without_registering_gat
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=1, total_queries=2, has_native_enrich=True)
 
-    metrics.observe_parser_forwarded("p", "native")
-    metrics.observe_parser_forwarded("p", "fallback")
+    _observe_parser_forwarded(metrics, "p", "native")
+    _observe_parser_forwarded(metrics, "p", "fallback")
 
     assert _last_body(display, "parser p") == "0 discovered · 2 forwarded"
     assert "parser p gates" not in display.registered_names()
@@ -1819,7 +1848,7 @@ def test_gates_row_absent_when_all_drop_counters_zero(run_log: RunLog) -> None:
     metrics.register_parser("p", order=2, total_queries=5)
 
     metrics.discovered("p")
-    metrics.observe_parser_forwarded("p", "fallback")
+    _observe_parser_forwarded(metrics, "p", "fallback")
     metrics.parser_done("p")
 
     registered = display.registered_names()
@@ -1835,7 +1864,7 @@ def test_gates_row_appears_on_first_gate_drop(run_log: RunLog) -> None:
     metrics.discovered("p")
     assert "parser p gates" not in display.registered_names()
 
-    metrics.observe_parser_drop("p", outcome="freshness_discover")
+    _observe_parser_drop(metrics, "p", "freshness_discover")
     assert "parser p gates" in display.registered_names()
 
 
@@ -1846,8 +1875,8 @@ def test_parser_drop_observation_maps_discover_and_post_enrich_freshness_to_one_
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("jobs_beim_staat", order=4, total_queries=5)
 
-    metrics.observe_parser_drop("jobs_beim_staat", outcome="freshness_discover")
-    metrics.observe_parser_drop("jobs_beim_staat", outcome="freshness_post_enrich")
+    _observe_parser_drop(metrics, "jobs_beim_staat", "freshness_discover")
+    _observe_parser_drop(metrics, "jobs_beim_staat", "freshness_post_enrich")
 
     assert _last_body(display, "parser jobs beim staat gates") == "2 freshness"
 
@@ -1873,7 +1902,7 @@ def test_parser_drop_observation_maps_each_outcome_to_its_gate_counter(
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("jobs_beim_staat", order=4, total_queries=5)
 
-    metrics.observe_parser_drop("jobs_beim_staat", outcome=outcome)
+    _observe_parser_drop(metrics, "jobs_beim_staat", outcome)
 
     assert _last_body(display, "parser jobs beim staat gates") == expected_body
 
@@ -1884,7 +1913,7 @@ def test_gates_row_pinned_at_parser_order_plus_one(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=4, total_queries=5)
 
-    metrics.observe_parser_drop("p", outcome="dedup_url_hit")
+    _observe_parser_drop(metrics, "p", "dedup_url_hit")
 
     register_calls = [
         c
@@ -1901,7 +1930,7 @@ def test_gates_row_named_parser_type_gates(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("bundesagentur", order=2, total_queries=5)
 
-    metrics.observe_parser_drop("bundesagentur", outcome="freshness_discover")
+    _observe_parser_drop(metrics, "bundesagentur", "freshness_discover")
 
     assert "parser bundesagentur gates" in display.registered_names()
 
@@ -1912,7 +1941,7 @@ def test_gates_row_name_uses_spaces_not_underscores(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("jobs_beim_staat", order=2, total_queries=5)
 
-    metrics.observe_parser_drop("jobs_beim_staat", outcome="content_empty_body")
+    _observe_parser_drop(metrics, "jobs_beim_staat", "content_empty_body")
 
     assert "parser jobs beim staat gates" in display.registered_names()
     assert "parser jobs_beim_staat gates" not in display.registered_names()
@@ -1924,7 +1953,7 @@ def test_parser_done_mirrors_phase_to_gates_row(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=2, total_queries=5)
 
-    metrics.observe_parser_drop("p", outcome="freshness_discover")
+    _observe_parser_drop(metrics, "p", "freshness_discover")
     metrics.parser_done("p")
 
     phase_calls = [
@@ -1942,7 +1971,7 @@ def test_parser_dead_mirrors_phase_to_gates_row(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=2, total_queries=5)
 
-    metrics.observe_parser_drop("p", outcome="dedup_url_hit")
+    _observe_parser_drop(metrics, "p", "dedup_url_hit")
     metrics.parser_dead("p")
 
     phase_calls = [
@@ -1976,11 +2005,11 @@ def test_gates_row_body_updates_on_each_drop(run_log: RunLog) -> None:
     metrics = RunMetrics(display, run_log=run_log)
     metrics.register_parser("p", order=2, total_queries=5)
 
-    metrics.observe_parser_drop("p", outcome="freshness_discover")
+    _observe_parser_drop(metrics, "p", "freshness_discover")
     first_body = _last_body(display, "parser p gates")
     assert "1 freshness" in first_body
 
-    metrics.observe_parser_drop("p", outcome="freshness_post_enrich")
+    _observe_parser_drop(metrics, "p", "freshness_post_enrich")
     second_body = _last_body(display, "parser p gates")
     assert "2 freshness" in second_body
 
@@ -1992,11 +2021,11 @@ def test_parser_row_body_excludes_gate_drop_counters(run_log: RunLog) -> None:
     metrics.register_parser("p", order=2, total_queries=5, has_native_enrich=True)
 
     metrics.discovered("p")
-    metrics.observe_parser_drop("p", outcome="freshness_discover")
-    metrics.observe_parser_drop("p", outcome="dedup_url_hit")
-    metrics.observe_parser_drop("p", outcome="prefilter")
-    metrics.observe_parser_drop("p", outcome="content_empty_body")
-    metrics.observe_parser_forwarded("p", "fallback")
+    _observe_parser_drop(metrics, "p", "freshness_discover")
+    _observe_parser_drop(metrics, "p", "dedup_url_hit")
+    _observe_parser_drop(metrics, "p", "prefilter")
+    _observe_parser_drop(metrics, "p", "content_empty_body")
+    _observe_parser_forwarded(metrics, "p", "fallback")
 
     body = _last_body(display, "parser p")
     assert "1 discovered" in body

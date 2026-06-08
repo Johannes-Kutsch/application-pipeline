@@ -13,6 +13,11 @@ from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, PositionStub
 from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError
+from application_pipeline.run_metrics import (
+    ParserIntakeDropObservation,
+    ParserIntakeEnrichFailureObservation,
+    ParserIntakeForwardedObservation,
+)
 
 
 @runtime_checkable
@@ -54,12 +59,16 @@ class _NullClassifyStageHandoff:
 
 @runtime_checkable
 class ParserMetrics(Protocol):
-    def observe_parser_drop(self, parser_id: str, *, outcome: "DropReason") -> None: ...
+    def observe_parser_intake_drop(
+        self, observation: ParserIntakeDropObservation
+    ) -> None: ...
 
-    def observe_parser_enrich_failure(self, parser_id: str) -> None: ...
+    def observe_parser_intake_enrich_failure(
+        self, observation: ParserIntakeEnrichFailureObservation
+    ) -> None: ...
 
-    def observe_parser_forwarded(
-        self, parser_id: str, mode: Literal["native", "fallback"]
+    def observe_parser_intake_forwarded(
+        self, observation: ParserIntakeForwardedObservation
     ) -> None: ...
 
 
@@ -224,17 +233,23 @@ class ParserIntake:
     def _observe_drop_metric(self, reason: DropReason) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        self._metrics.observe_parser_drop(self._parser_id, outcome=reason)
+        self._metrics.observe_parser_intake_drop(
+            ParserIntakeDropObservation(parser_id=self._parser_id, outcome=reason)
+        )
 
     def _observe_enrich_failed_metric(self) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        self._metrics.observe_parser_enrich_failure(self._parser_id)
+        self._metrics.observe_parser_intake_enrich_failure(
+            ParserIntakeEnrichFailureObservation(parser_id=self._parser_id)
+        )
 
     def _observe_forwarded_metric(self, mode: Literal["native", "fallback"]) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        self._metrics.observe_parser_forwarded(self._parser_id, mode)
+        self._metrics.observe_parser_intake_forwarded(
+            ParserIntakeForwardedObservation(parser_id=self._parser_id, mode=mode)
+        )
 
 
 def _drop_reason_for_dedup(kind: RunScopedSeenKind) -> DropReason:

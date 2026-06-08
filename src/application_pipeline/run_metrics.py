@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, cast
+from typing import Literal
 
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -67,6 +67,17 @@ class RunSummary:
 
 
 ClassifyItemState = Literal["matched", "rejected", "retryable", "expired"]
+ParserIntakeDropOutcome = Literal[
+    "freshness_discover",
+    "freshness_post_enrich",
+    "dedup_url_hit",
+    "dedup_tuple_hit",
+    "dedup_fuzzy_hit",
+    "dedup_run_hit",
+    "prefilter",
+    "content_empty_body",
+    "content_too_short",
+]
 
 
 @dataclass(frozen=True)
@@ -93,6 +104,28 @@ class ClassifyBatchStartObservation:
 @dataclass(frozen=True)
 class ClassifyStageCompletionObservation:
     pass
+
+
+@dataclass(frozen=True)
+class ParserIntakeDropObservation:
+    parser_id: str
+    outcome: ParserIntakeDropOutcome
+
+
+@dataclass(frozen=True)
+class ParserIntakeEnrichFailureObservation:
+    parser_id: str
+
+
+@dataclass(frozen=True)
+class ParserIntakeForwardedObservation:
+    parser_id: str
+    mode: Literal["native", "fallback"]
+
+
+@dataclass(frozen=True)
+class ClassifyRetryableObservation:
+    parser_id: str
 
 
 @dataclass(frozen=True)
@@ -307,15 +340,6 @@ class RunMetrics:
             body = self._parser_body(parser_id)
         self._display.update_body(self._parser_row(parser_id), body=body)
 
-    def enriched(self, parser_id: str, mode: str) -> None:
-        with self._lock:
-            entry = self._parser_entry(parser_id)
-            entry.enriched += 1
-            if mode == "native":
-                entry.native_enriched += 1
-            body = self._parser_body(parser_id)
-        self._display.update_body(self._parser_row(parser_id), body=body)
-
     def _observe_gate_drop(self, parser_id: str, field: str) -> None:
         with self._lock:
             entry = self._parser_entry(parser_id)
@@ -330,60 +354,51 @@ class RunMetrics:
         else:
             self._display.update_body(self._gates_row(parser_id), body=gates_body)
 
-    def observe_parser_enrich_failure(self, parser_id: str) -> None:
+    def observe_parser_intake_enrich_failure(
+        self, observation: ParserIntakeEnrichFailureObservation
+    ) -> None:
         with self._lock:
             self._enrich_failed += 1
-            entry = self._parser_entry(parser_id)
+            entry = self._parser_entry(observation.parser_id)
             entry.enrich_failed += 1
             entry.enrich_failed_count += 1
             pipeline_body = self._pipeline_body()
-            parser_body = self._parser_body(parser_id)
+            parser_body = self._parser_body(observation.parser_id)
         self._display.update_body("pipeline", body=pipeline_body)
-        self._display.update_body(self._parser_row(parser_id), body=parser_body)
+        self._display.update_body(
+            self._parser_row(observation.parser_id), body=parser_body
+        )
 
-    def observe_parser_drop(
-        self,
-        parser_id: str,
-        *,
-        outcome: Literal[
-            "freshness_discover",
-            "freshness_post_enrich",
-            "dedup_url_hit",
-            "dedup_tuple_hit",
-            "dedup_fuzzy_hit",
-            "dedup_run_hit",
-            "prefilter",
-            "content_empty_body",
-            "content_too_short",
-        ],
+    def observe_parser_intake_drop(
+        self, observation: ParserIntakeDropObservation
     ) -> None:
-        if outcome in ("freshness_discover", "freshness_post_enrich"):
-            self._observe_gate_drop(parser_id, "freshness_dropped")
+        if observation.outcome in ("freshness_discover", "freshness_post_enrich"):
+            self._observe_gate_drop(observation.parser_id, "freshness_dropped")
             return
-        if outcome in (
+        if observation.outcome in (
             "dedup_url_hit",
             "dedup_tuple_hit",
             "dedup_fuzzy_hit",
             "dedup_run_hit",
         ):
-            self._observe_gate_drop(parser_id, "dedup_dropped")
+            self._observe_gate_drop(observation.parser_id, "dedup_dropped")
             return
-        if outcome == "prefilter":
-            self._observe_gate_drop(parser_id, "prefilter_dropped")
+        if observation.outcome == "prefilter":
+            self._observe_gate_drop(observation.parser_id, "prefilter_dropped")
             return
-        self._observe_gate_drop(parser_id, "content_dropped")
+        self._observe_gate_drop(observation.parser_id, "content_dropped")
 
-    def observe_parser_forwarded(
-        self, parser_id: str, mode: Literal["native", "fallback"]
+    def observe_parser_intake_forwarded(
+        self, observation: ParserIntakeForwardedObservation
     ) -> None:
         with self._lock:
-            entry = self._parser_entry(parser_id)
+            entry = self._parser_entry(observation.parser_id)
             entry.enriched += 1
-            if mode == "native":
+            if observation.mode == "native":
                 entry.native_enriched += 1
             entry.forwarded += 1
-            body = self._parser_body(parser_id)
-        self._display.update_body(self._parser_row(parser_id), body=body)
+            body = self._parser_body(observation.parser_id)
+        self._display.update_body(self._parser_row(observation.parser_id), body=body)
 
     def parser_summary(
         self, parser_id: str, end_monotonic: float, started_monotonic: float
@@ -403,9 +418,6 @@ class RunMetrics:
     # Classify-stage events
     # -----------------------------------------------------------------------
 
-    def classify_buffered(self, n: int) -> None:
-        self.observe_classify_submission(n)
-
     def observe_classify_submission(
         self, observation: ClassifySubmissionObservation | int
     ) -> None:
@@ -416,14 +428,6 @@ class RunMetrics:
             self._classify_queued += observation.count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
-
-    def classify_batch_enqueued(self, n: int) -> None:
-        with self._classify_lock:
-            body = self._classify_body()
-        self._display.update_body("llm classify relevance", body=body)
-
-    def classify_batch_dequeued(self, n: int) -> None:
-        self.observe_classify_batch_start(n)
 
     def observe_classify_batch_start(
         self, observation: ClassifyBatchStartObservation | int
@@ -436,27 +440,6 @@ class RunMetrics:
             self._classifying += observation.count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
-
-    def classify_batch_complete(
-        self,
-        usage: CallUsage,
-        items: int,
-        classifier_dropped: int,
-        retryable_items: int = 0,
-    ) -> None:
-        forwarded = items - classifier_dropped - retryable_items
-        item_states = cast(
-            tuple[ClassifyItemState, ...],
-            ("matched",) * forwarded
-            + ("rejected",) * classifier_dropped
-            + ("retryable",) * retryable_items,
-        )
-        self.observe_classify_batch_outcome(
-            ClassifyBatchOutcomeObservation(
-                usage=usage,
-                item_states=item_states,
-            )
-        )
 
     def observe_classify_batch_outcome(
         self, observation: ClassifyBatchOutcomeObservation
@@ -482,11 +465,6 @@ class RunMetrics:
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
-    def classify_batch_failed(self, items: int) -> None:
-        self.observe_classify_batch_failure(
-            ClassifyBatchFailureObservation(items=items)
-        )
-
     def observe_classify_batch_failure(
         self, observation: ClassifyBatchFailureObservation
     ) -> None:
@@ -497,14 +475,28 @@ class RunMetrics:
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
-    def classify_done(self) -> None:
-        self.observe_classify_stage_completion(ClassifyStageCompletionObservation())
-
     def observe_classify_stage_completion(
         self, observation: ClassifyStageCompletionObservation
     ) -> None:
         del observation
         self._display.update_phase("llm classify relevance", phase="done")
+
+    def observe_classify_retryable(
+        self, observation: ClassifyRetryableObservation
+    ) -> None:
+        with self._lock:
+            self._enrich_failed += 1
+            if observation.parser_id:
+                self._parser_entry(observation.parser_id).enrich_failed += 1
+                parser_body = self._parser_body(observation.parser_id)
+            else:
+                parser_body = None
+            pipeline_body = self._pipeline_body()
+        self._display.update_body("pipeline", body=pipeline_body)
+        if parser_body is not None:
+            self._display.update_body(
+                self._parser_row(observation.parser_id), body=parser_body
+            )
 
     # -----------------------------------------------------------------------
     # Judge-stage events
@@ -575,19 +567,6 @@ class RunMetrics:
         with self._lock:
             pipeline_body = self._record_judge_failure()
         self._display.update_body("pipeline", body=pipeline_body)
-
-    def judge_started(self, candidate_count: int) -> None:
-        self.observe_judge_start(
-            JudgeLifecycleStartObservation(candidate_count=candidate_count)
-        )
-
-    def judge_top_n_complete(self, usage: CallUsage, card_count: int) -> None:
-        self.observe_judge_outcome(
-            JudgeLifecycleOutcomeObservation(usage=usage, card_count=card_count)
-        )
-
-    def judge_top_n_failed(self) -> None:
-        self.observe_judge_failure(JudgeLifecycleFailureObservation())
 
     # -----------------------------------------------------------------------
     # Read-only compatibility accessors

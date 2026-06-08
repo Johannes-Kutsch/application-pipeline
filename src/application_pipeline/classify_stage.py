@@ -16,6 +16,7 @@ from application_pipeline.llm.types import AppliedClassifyOutcome
 from application_pipeline.run_metrics import (
     ClassifyBatchFailureObservation,
     ClassifyBatchOutcomeObservation,
+    ClassifyRetryableObservation,
     ClassifyBatchStartObservation,
     ClassifyStageCompletionObservation,
     ClassifySubmissionObservation,
@@ -113,7 +114,9 @@ class ClassifyWorkerMetrics(Protocol):
         self, observation: ClassifyBatchOutcomeObservation
     ) -> None: ...
 
-    def enrich_failed(self, parser_id: str = "") -> None: ...
+    def observe_classify_retryable(
+        self, observation: ClassifyRetryableObservation
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -489,7 +492,9 @@ class _ClassifyWorker(threading.Thread):
                 matches=item_outcome.event_matches,
             )
             if item_outcome.state == "retryable":
-                self._metrics.enrich_failed(req.parser_id)
+                self._metrics.observe_classify_retryable(
+                    ClassifyRetryableObservation(parser_id=req.parser_id)
+                )
                 continue
             if item_outcome.state in ("expired", "rejected"):
                 continue

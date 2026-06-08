@@ -1223,6 +1223,72 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
     assert f"judge_calls={total}" in result
 
 
+def test_concurrent_classify_observations_produce_correct_final_counts(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    n_threads = 6
+    iters = 40
+    usage = _make_usage(
+        input_tokens=10,
+        output_tokens=5,
+        cache_read_tokens=2,
+        cost_usd=0.001,
+        duration_s=0.1,
+    )
+
+    def worker() -> None:
+        for _ in range(iters):
+            metrics.observe_classify_submission(3)
+            metrics.observe_classify_batch_start(3)
+            metrics.observe_classify_batch_outcome(
+                ClassifyBatchOutcomeObservation(
+                    usage=usage,
+                    item_states=("matched", "rejected", "retryable"),
+                )
+            )
+            metrics.observe_classify_submission(2)
+            metrics.observe_classify_batch_start(2)
+            metrics.observe_classify_batch_failure(
+                ClassifyBatchFailureObservation(items=2)
+            )
+
+    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    batches = n_threads * iters
+    summary = metrics.to_run_summary(
+        duration_s=1.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+    assert summary.classify_items == batches * 3
+    assert summary.classifier_dropped == batches
+    assert summary.errored == batches * 3
+    assert summary.claude_input_tokens == batches * usage.input_tokens
+    assert summary.claude_output_tokens == batches * usage.output_tokens
+
+    body = _last_body(display, "llm classify relevance")
+    assert body == f"{batches * 3} malformed · {batches} dropped · {batches} forwarded"
+
+    result = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
+    )
+    assert f"errors={batches * 3}" in result
+    assert f"classify_calls={batches}" in result
+    assert f"classify_items={batches * 3}" in result
+    assert f"classify_batches_failed={batches}" in result
+    assert f"classify_items_abandoned={batches * 3}" in result
+
+
 # ---------------------------------------------------------------------------
 # Per-parser counters in RunMetrics (new for issue #267)
 # ---------------------------------------------------------------------------

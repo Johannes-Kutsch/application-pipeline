@@ -4,7 +4,7 @@ import string
 from dataclasses import dataclass
 
 from .config import Config
-from .triage_skills import load_document
+from .triage_skills import load_judge_text
 
 
 class PromptError(Exception):
@@ -86,7 +86,7 @@ def load_prompts(config: Config) -> Prompts:
 
 
 def _load_skills(path: pathlib.Path) -> str:
-    return load_document(path).judge_text
+    return load_judge_text(path)
 
 
 def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:

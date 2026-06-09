@@ -176,6 +176,25 @@ def test_load_prompts_skills_h2_headings_ignored_bullets_kept_in_order(
     assert "## MLE" not in rendered
 
 
+def test_load_prompts_skills_keep_tolerant_malformed_attribute_handling(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    (config.user_info_dir / "triage-profile" / "skills.md").write_text(
+        "- Pandas {always\n"
+        "- NumPy {weird}\n"
+        "## Backend {always, mle=low}\n"
+        "- Go {always, weird}\n"
+    )
+
+    prompts = load_prompts(config)
+    rendered = prompts.judge_top_n.render(CANDIDATES="x")
+
+    assert "- Pandas {always\n- NumPy\n- Go" in rendered
+    assert "{weird}" not in rendered
+    assert "## Backend" not in rendered
+
+
 def test_load_prompts_skills_missing_file_renders_empty_slot(
     tmp_path: pathlib.Path,
 ) -> None:

@@ -328,6 +328,22 @@ def test_triage_skills_load_document_matches_text_parse(
     assert result == triage_skills.parse_document(text)
 
 
+def test_triage_skills_load_matches_text_parse(tmp_path: pathlib.Path) -> None:
+    text = textwrap.dedent("""\
+        ## MLE {always, backend=high}
+        - Pandas {always}
+        - TensorFlow
+        ## Backend
+        - Go
+    """)
+    skills_path = tmp_path / "skills.md"
+    skills_path.write_text(text, encoding="utf-8")
+
+    result = triage_skills.load(skills_path)
+
+    assert result == triage_skills.parse(text)
+
+
 def test_triage_skills_load_document_matches_text_parse_for_utf8_bom_file(
     tmp_path: pathlib.Path,
 ) -> None:

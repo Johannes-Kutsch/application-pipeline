@@ -225,6 +225,24 @@ def test_triage_skills_load_document_matches_text_parse_for_utf8_bom_file(
     assert result == triage_skills.parse_document(text)
 
 
+def test_triage_skills_load_judge_text_flattens_grouped_skills_in_file_order(
+    tmp_path: pathlib.Path,
+) -> None:
+    text = textwrap.dedent("""\
+        ## MLE
+        - Pandas {always}
+        - TensorFlow
+        ## Backend
+        - Go
+    """)
+    skills_path = tmp_path / "skills.md"
+    skills_path.write_text(text, encoding="utf-8")
+
+    result = triage_skills.load_judge_text(skills_path)
+
+    assert result == "- Pandas\n- TensorFlow\n- Go"
+
+
 def test_triage_skills_missing_file_yields_empty_views(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -234,6 +252,14 @@ def test_triage_skills_missing_file_yields_empty_views(
 
     assert document.judge_text == ""
     assert triage_skills.load(missing_path) == []
+
+
+def test_triage_skills_load_judge_text_missing_file_yields_empty_text(
+    tmp_path: pathlib.Path,
+) -> None:
+    missing_path = tmp_path / "skills.md"
+
+    assert triage_skills.load_judge_text(missing_path) == ""
 
 
 def test_skills_pool_imports_are_thin_aliases_of_triage_skills() -> None:

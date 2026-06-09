@@ -256,6 +256,23 @@ def test_triage_skills_judge_text_matches_prompt_loader_attribute_tolerance() ->
     assert result.judge_text == "- Pandas {always\n- NumPy\n- Go"
 
 
+def test_triage_skills_skill_groups_ignore_invalid_always_assignment_but_keep_valid_relevance() -> (
+    None
+):
+    text = "## Backend {always=high, weird-flag, mle=low}\n- Go\n"
+
+    result = triage_skills.parse_document(text)
+
+    assert result.skill_groups == [
+        SkillGroup(
+            name="Backend",
+            always=False,
+            relevance={"mle": "low"},
+            items=[SkillItem(name="Go", always=False)],
+        )
+    ]
+
+
 def test_triage_skills_load_document_matches_text_parse(
     tmp_path: pathlib.Path,
 ) -> None:

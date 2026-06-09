@@ -118,7 +118,7 @@ def _parse_group_attrs(raw: str | None) -> _GroupAttrs:
         key, value = m.group(1), m.group(2)
         if key == "always" and value is None:
             always = True
-        elif value in _VALID_RELEVANCE_LEVELS:
+        elif key != "always" and value in _VALID_RELEVANCE_LEVELS:
             relevance[key] = value
     return _GroupAttrs(always=always, relevance=relevance)
 

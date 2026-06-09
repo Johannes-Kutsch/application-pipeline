@@ -90,6 +90,8 @@ def _assert_write_cv_reads_cover_sections_directly(text: str) -> None:
 
 def _assert_write_cv_cover_strategy_contract(text: str) -> None:
     return
+
+
 _TRIAGE_PROFILE_FILES = (
     "candidate-profile.md",
     "gate-criteria.md",
@@ -808,6 +810,8 @@ def test_refresh_overwrites_shared_write_cv_with_cover_strategy_routing_contract
     init(tmp_path, refresh=True)
 
     assert skill_body.exists()
+
+
 def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:
     assert len(_ap_template_bytes("agent-skills/analyse-listing.md")) > 0
 
@@ -848,9 +852,14 @@ def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None
 
     assert "Schreibe die Umlaute ä, ü, ö und ß genau so." in text
     assert "präsentiere genau einen Vorschlag als Cover-Paragraph-Pattern-Match" in text
-    assert "präsentiere drei Alternativen mit unterschiedlichen `argument_type`s." in text
+    assert (
+        "präsentiere drei Alternativen mit unterschiedlichen `argument_type`s." in text
+    )
     assert "Interactive Cover Shortening" in text
-    assert "Wichtig: Dieser Post-Build-Shortening-Loop schreibt nie nach `cover-patterns.md`." in text
+    assert (
+        "Wichtig: Dieser Post-Build-Shortening-Loop schreibt nie nach `cover-patterns.md`."
+        in text
+    )
     assert "Erfolgs-Report" in text
     assert "Schreib-Whitelist" in text
 

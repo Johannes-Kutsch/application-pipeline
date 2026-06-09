@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from application_pipeline.failure_report import write_failure
+from application_pipeline.failure_report import FailureReportWriter, write_failure
 
 
 @pytest.fixture
@@ -24,6 +24,18 @@ def _write_at(timestamp: datetime, *args, **kwargs) -> Path:
     with patch("application_pipeline.failure_report.datetime") as mock_dt:
         mock_dt.now.return_value = timestamp
         return write_failure(*args, **kwargs)
+
+
+def _write_with_writer_at(
+    timestamp: datetime,
+    writer: FailureReportWriter,
+    stage: str,
+    error: BaseException,
+    log_tail: str,
+) -> Path:
+    with patch("application_pipeline.failure_report.datetime") as mock_dt:
+        mock_dt.now.return_value = timestamp
+        return writer.write_failure(stage, error, log_tail)
 
 
 class TestFileCreation:
@@ -44,6 +56,18 @@ class TestFileCreation:
     def test_no_tmp_file_left_after_write(self, failures_dir: Path) -> None:
         path = _write_at(_FIXED_TIME, "stage", RuntimeError("e"), "tail", failures_dir)
         assert not Path(str(path) + ".tmp").exists()
+
+    def test_path_bound_writer_writes_inside_bound_failures_dir(
+        self, failures_dir: Path
+    ) -> None:
+        writer = FailureReportWriter(failures_dir)
+
+        path = _write_with_writer_at(
+            _FIXED_TIME, writer, "parser:test", ValueError("boom"), "log"
+        )
+
+        assert path == failures_dir / f"{_FIXED_FILENAME}.md"
+        assert path.exists()
 
 
 class TestMarkdownBody:
@@ -88,6 +112,32 @@ class TestMarkdownBody:
         body = path.read_text(encoding="utf-8")
         assert body.startswith("# Run failed at")
         assert "(tag" not in body
+
+    def test_path_bound_writer_matches_wrapper_contract(self, tmp_path: Path) -> None:
+        writer_dir = tmp_path / "writer"
+        wrapper_dir = tmp_path / "wrapper"
+        writer = FailureReportWriter(writer_dir)
+
+        with patch.object(importlib.metadata, "version", return_value="v1.2.3"):
+            writer_path = _write_with_writer_at(
+                _FIXED_TIME,
+                writer,
+                "orchestrator:init",
+                RuntimeError("oops"),
+                "line A\nline B",
+            )
+            wrapper_path = _write_at(
+                _FIXED_TIME,
+                "orchestrator:init",
+                RuntimeError("oops"),
+                "line A\nline B",
+                wrapper_dir,
+            )
+
+        assert writer_path.name == wrapper_path.name
+        assert writer_path.read_text(encoding="utf-8") == wrapper_path.read_text(
+            encoding="utf-8"
+        )
 
 
 class TestNoClobber:

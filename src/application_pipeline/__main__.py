@@ -62,22 +62,24 @@ def main() -> None:
             sys.exit(2)
         no_judge = "--no-judge" in cron_flags
         config_path = _require_config_path()
+        failure_report_writer = _bind_failure_report_writer(config_path.parent)
 
         from application_pipeline.init_cmd import init as _init
-        from application_pipeline.config import resolve_data_paths
-        from application_pipeline.failure_report import write_failure
 
-        failures_path = resolve_data_paths(config_path.parent).failures_path
         try:
             _init(Path.cwd(), refresh=True)
         except Exception as exc:
             try:
-                write_failure("init --refresh", exc, _tail.tail(), failures_path)
+                failure_report_writer.write_failure("init --refresh", exc, _tail.tail())
             except Exception:
                 pass
             sys.exit(1)
 
-        _execute_run(config_path, no_judge=no_judge)
+        _execute_run(
+            config_path,
+            no_judge=no_judge,
+            failure_report_writer=failure_report_writer,
+        )
         return
 
     if args and args[0] == "run":
@@ -88,7 +90,11 @@ def main() -> None:
             sys.exit(2)
         no_judge = "--no-judge" in run_flags
         config_path = _require_config_path()
-        _execute_run(config_path, no_judge=no_judge)
+        _execute_run(
+            config_path,
+            no_judge=no_judge,
+            failure_report_writer=_bind_failure_report_writer(config_path.parent),
+        )
         return
 
     _print_usage()
@@ -113,10 +119,16 @@ def _require_config_path() -> Path:
     return config_path
 
 
-def _execute_run(config_path: Path, *, no_judge: bool) -> None:
+def _bind_failure_report_writer(home: Path):
+    from application_pipeline.config import resolve_data_paths
+    from application_pipeline.failure_report import FailureReportWriter
+
+    return FailureReportWriter(resolve_data_paths(home).failures_path)
+
+
+def _execute_run(config_path: Path, *, no_judge: bool, failure_report_writer) -> None:
     from application_pipeline.parser_log import RunLog
     from application_pipeline.config import resolve_data_paths
-    from application_pipeline.failure_report import write_failure
     from application_pipeline.maintenance import run_maintenance
     from application_pipeline.orchestrator import current_stage, run
     from application_pipeline.status_display import (
@@ -137,12 +149,7 @@ def _execute_run(config_path: Path, *, no_judge: bool) -> None:
         )
     except Exception as exc:
         try:
-            write_failure(
-                current_stage.get(),
-                exc,
-                _tail.tail(),
-                resolve_data_paths(home).failures_path,
-            )
+            failure_report_writer.write_failure(current_stage.get(), exc, _tail.tail())
         except Exception:
             pass
         sys.exit(1)

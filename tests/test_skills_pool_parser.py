@@ -212,6 +212,26 @@ def test_triage_skills_skill_groups_preserve_authored_group_and_item_order() -> 
     ]
 
 
+def test_triage_skills_skill_groups_preserve_group_attrs_without_promoting_item_always() -> (
+    None
+):
+    text = "## Backend {always, mle=high}\n- Go {always}\n- Python\n"
+
+    result = triage_skills.parse_document(text)
+
+    assert result.skill_groups == [
+        SkillGroup(
+            name="Backend",
+            always=True,
+            relevance={"mle": "high"},
+            items=[
+                SkillItem(name="Go", always=True),
+                SkillItem(name="Python", always=False),
+            ],
+        )
+    ]
+
+
 def test_triage_skills_skill_groups_degenerate_for_flat_legacy_bullets() -> None:
     result = triage_skills.parse_document("- Python\n- SQL {always}\n")
 
@@ -269,6 +289,23 @@ def test_triage_skills_skill_groups_ignore_invalid_always_assignment_but_keep_va
             always=False,
             relevance={"mle": "low"},
             items=[SkillItem(name="Go", always=False)],
+        )
+    ]
+
+
+def test_triage_skills_skill_groups_fall_back_to_defaults_for_unclosed_group_attrs() -> (
+    None
+):
+    text = "## Backend {always, mle=high\n- Go {always}\n"
+
+    result = triage_skills.parse_document(text)
+
+    assert result.skill_groups == [
+        SkillGroup(
+            name="Backend",
+            always=False,
+            relevance={},
+            items=[SkillItem(name="Go", always=True)],
         )
     ]
 

@@ -209,6 +209,22 @@ def test_triage_skills_load_document_matches_text_parse(
     assert result == triage_skills.parse_document(text)
 
 
+def test_triage_skills_load_document_matches_text_parse_for_utf8_bom_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    text = textwrap.dedent("""\
+        - Python
+        ## Backend
+        - Go {always}
+    """)
+    skills_path = tmp_path / "skills.md"
+    skills_path.write_text(text, encoding="utf-8-sig")
+
+    result = triage_skills.load_document(skills_path)
+
+    assert result == triage_skills.parse_document(text)
+
+
 def test_triage_skills_missing_file_yields_empty_views(
     tmp_path: pathlib.Path,
 ) -> None:

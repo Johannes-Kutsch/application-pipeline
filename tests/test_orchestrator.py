@@ -6,9 +6,9 @@ import re
 import textwrap
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -6691,8 +6691,10 @@ def test_classify_workers_sized_by_claude_classify_parallelism(tmp_path: Path) -
 # ---------------------------------------------------------------------------
 
 
-def test_parser_dead_writes_failure_report(tmp_path: Path) -> None:
-    """When a parser thread dies, a Failure Report .md file is written to failures_dir."""
+def test_parser_dead_writes_one_failure_report_even_with_distinct_timestamps(
+    tmp_path: Path,
+) -> None:
+    """When a parser thread dies, the orchestrator records exactly one Failure Report."""
     card_store = _make_card_store(tmp_path)
 
     class _DyingParser(_StubParserBase):
@@ -6706,20 +6708,26 @@ def test_parser_dead_writes_failure_report(tmp_path: Path) -> None:
             raise RuntimeError("fatal error in parser")
             yield  # pragma: no cover
 
-    run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-        ),
-        llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=_stub_extractor(),
-        card_store=card_store,
-        parser_registry=lambda _: _DyingParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-    )
+    report_times = [
+        datetime(2026, 5, 11, 16, 4, 0, tzinfo=UTC),
+        datetime(2026, 5, 11, 16, 4, 1, tzinfo=UTC),
+    ]
+    with patch("application_pipeline.failure_report.datetime") as mock_dt:
+        mock_dt.now.side_effect = report_times
+        run(
+            _write_config(
+                tmp_path,
+                sources='[SourceEntry(parser_type="bundesagentur_api")]',
+                keywords='["python"]',
+                locations='["Hamburg"]',
+                include_remote=False,
+            ),
+            llm_enricher=_make_fake_llm_enricher(card_store),
+            extractor=_stub_extractor(),
+            card_store=card_store,
+            parser_registry=lambda _: _DyingParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        )
 
     failures_dir = tmp_path / ".runtime-data" / "failures"
     assert failures_dir.is_dir(), "failures dir must be created when parser dies"

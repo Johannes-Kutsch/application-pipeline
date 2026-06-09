@@ -45,6 +45,10 @@ def load(path: Path) -> list[SkillGroup]:
     return load_document(path).groups
 
 
+def load_judge_text(path: Path) -> str:
+    return load_document(path).judge_text
+
+
 def load_document(path: Path) -> TriageSkillsDocument:
     try:
         text = path.read_text(encoding="utf-8-sig")
@@ -133,6 +137,7 @@ __all__ = [
     "SkillItem",
     "TriageSkillsDocument",
     "load",
+    "load_judge_text",
     "load_document",
     "parse",
     "parse_document",

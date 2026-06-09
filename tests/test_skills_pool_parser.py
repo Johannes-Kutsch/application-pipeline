@@ -2,12 +2,12 @@ import pathlib
 import textwrap
 
 from application_pipeline import triage_skills
-from application_pipeline.skills_pool import parse
+from application_pipeline.skills_pool import parse as compat_parse
 from application_pipeline.skills_pool import parser as legacy_parser
 from application_pipeline.triage_skills import SkillGroup, SkillItem
 
 
-def test_two_groups_returned_in_file_order() -> None:
+def test_triage_skills_parse_returns_two_groups_in_file_order() -> None:
     text = textwrap.dedent("""\
         ## Machine Learning
         - Python
@@ -18,7 +18,7 @@ def test_two_groups_returned_in_file_order() -> None:
         - TypeScript
     """)
 
-    result = parse(text)
+    result = triage_skills.parse(text)
 
     assert len(result) == 2
     assert result[0].name == "Machine Learning"
@@ -27,10 +27,10 @@ def test_two_groups_returned_in_file_order() -> None:
     assert [item.name for item in result[1].items] == ["JavaScript", "TypeScript"]
 
 
-def test_group_heading_attrs_parsed() -> None:
+def test_triage_skills_parse_parses_group_heading_attrs() -> None:
     text = "## MLE {always, games=high, mle=low}\n- Python\n"
 
-    result = parse(text)
+    result = triage_skills.parse(text)
 
     assert len(result) == 1
     group = result[0]
@@ -39,27 +39,27 @@ def test_group_heading_attrs_parsed() -> None:
     assert group.relevance == {"games": "high", "mle": "low"}
 
 
-def test_item_with_always_attr() -> None:
+def test_triage_skills_parse_parses_item_always_attr() -> None:
     text = "## Skills\n- Pandas {always}\n"
 
-    result = parse(text)
+    result = triage_skills.parse(text)
 
     item = result[0].items[0]
     assert item.name == "Pandas"
     assert item.always is True
 
 
-def test_item_without_attrs_defaults() -> None:
+def test_triage_skills_parse_defaults_item_without_attrs() -> None:
     text = "## Skills\n- TensorFlow\n"
 
-    result = parse(text)
+    result = triage_skills.parse(text)
 
     item = result[0].items[0]
     assert item.name == "TensorFlow"
     assert item.always is False
 
 
-def test_whitespace_variants_are_equivalent() -> None:
+def test_triage_skills_parse_treats_whitespace_variants_equivalently() -> None:
     variants = [
         "## G {always}\n- S {always}\n",
         "## G { always }\n- S { always }\n",
@@ -67,7 +67,7 @@ def test_whitespace_variants_are_equivalent() -> None:
         "## G {always, games=high}\n- S {always}\n",
     ]
 
-    results = [parse(v) for v in variants]
+    results = [triage_skills.parse(v) for v in variants]
 
     for result in results:
         assert result[0].always is True
@@ -77,50 +77,50 @@ def test_whitespace_variants_are_equivalent() -> None:
     assert results[3][0].relevance == {"games": "high"}
 
 
-def test_empty_file_yields_empty_list() -> None:
-    assert parse("") == []
+def test_triage_skills_parse_returns_empty_list_for_empty_file() -> None:
+    assert triage_skills.parse("") == []
 
 
-def test_file_with_no_h2_yields_empty_list() -> None:
+def test_triage_skills_parse_returns_empty_list_without_groups() -> None:
     text = "- Python\n- SQL\n"
 
-    assert parse(text) == []
+    assert triage_skills.parse(text) == []
 
 
-def test_bullets_before_first_h2_are_dropped() -> None:
+def test_triage_skills_parse_drops_bullets_before_first_h2() -> None:
     text = textwrap.dedent("""\
         - orphan
         ## Group
         - member
     """)
 
-    result = parse(text)
+    result = triage_skills.parse(text)
 
     assert len(result) == 1
     assert [item.name for item in result[0].items] == ["member"]
 
 
-def test_unknown_group_attrs_ignored() -> None:
+def test_triage_skills_parse_ignores_unknown_group_attrs() -> None:
     text = "## G {always, weird-flag, games=medium-high, mle=low}\n"
 
-    result = parse(text)
+    result = triage_skills.parse(text)
 
     group = result[0]
     assert group.always is True
     assert group.relevance == {"mle": "low"}
 
 
-def test_unclosed_brace_yields_defaults_no_exception() -> None:
+def test_triage_skills_parse_tolerates_unclosed_item_attrs() -> None:
     text = "## Skills\n- Pandas {always\n"
 
-    result = parse(text)
+    result = triage_skills.parse(text)
 
     item = result[0].items[0]
     assert item.name == "Pandas"
     assert item.always is False
 
 
-def test_file_order_preserved_across_groups_and_items() -> None:
+def test_triage_skills_parse_preserves_group_and_item_order() -> None:
     text = textwrap.dedent("""\
         ## A
         - a1
@@ -133,7 +133,7 @@ def test_file_order_preserved_across_groups_and_items() -> None:
         - c3
     """)
 
-    result = parse(text)
+    result = triage_skills.parse(text)
 
     assert [g.name for g in result] == ["A", "B", "C"]
     assert [item.name for item in result[0].items] == ["a1", "a2"]
@@ -141,7 +141,7 @@ def test_file_order_preserved_across_groups_and_items() -> None:
     assert [item.name for item in result[2].items] == ["c1", "c2", "c3"]
 
 
-def test_triage_skills_is_canonical_skill_group_parser_surface() -> None:
+def test_triage_skills_parse_is_canonical_skill_group_parser_surface() -> None:
     text = "## Backend {always, mle=low}\n- Python {always}\n"
 
     result = triage_skills.parse(text)
@@ -382,7 +382,7 @@ def test_triage_skills_load_judge_text_missing_file_yields_empty_text(
 
 
 def test_skills_pool_imports_are_thin_aliases_of_triage_skills() -> None:
-    assert parse is triage_skills.parse
+    assert compat_parse is triage_skills.parse
     assert legacy_parser.parse is triage_skills.parse
     assert legacy_parser.SkillGroup is triage_skills.SkillGroup
     assert legacy_parser.SkillItem is triage_skills.SkillItem

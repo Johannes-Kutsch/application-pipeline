@@ -178,6 +178,71 @@ def test_triage_skills_judge_text_flattens_grouped_skills_in_file_order() -> Non
     assert result.judge_text == "- Pandas\n- TensorFlow\n- Go"
 
 
+def test_triage_skills_skill_groups_preserve_authored_group_and_item_order() -> None:
+    text = textwrap.dedent("""\
+        ## MLE
+        - Pandas {always}
+        - TensorFlow
+        ## Backend
+        - Go
+        - Python
+    """)
+
+    result = triage_skills.parse_document(text)
+
+    assert result.skill_groups == [
+        SkillGroup(
+            name="MLE",
+            always=False,
+            relevance={},
+            items=[
+                SkillItem(name="Pandas", always=True),
+                SkillItem(name="TensorFlow", always=False),
+            ],
+        ),
+        SkillGroup(
+            name="Backend",
+            always=False,
+            relevance={},
+            items=[
+                SkillItem(name="Go", always=False),
+                SkillItem(name="Python", always=False),
+            ],
+        ),
+    ]
+
+
+def test_triage_skills_skill_groups_degenerate_for_flat_legacy_bullets() -> None:
+    result = triage_skills.parse_document("- Python\n- SQL {always}\n")
+
+    assert result.skill_groups == []
+
+
+def test_triage_skills_skill_groups_drop_bullets_before_first_h2() -> None:
+    text = textwrap.dedent("""\
+        - orphan
+        ## Backend
+        - Go
+    """)
+
+    result = triage_skills.parse_document(text)
+
+    assert result.skill_groups == [
+        SkillGroup(
+            name="Backend",
+            always=False,
+            relevance={},
+            items=[SkillItem(name="Go", always=False)],
+        )
+    ]
+
+
+def test_triage_skills_skill_groups_are_empty_for_empty_input() -> None:
+    result = triage_skills.parse_document("")
+
+    assert result.skill_groups == []
+
+
 def test_triage_skills_judge_text_matches_prompt_loader_attribute_tolerance() -> None:
     text = textwrap.dedent("""\
         - Pandas {always

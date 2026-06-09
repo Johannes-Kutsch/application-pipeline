@@ -31,6 +31,10 @@ class TriageSkillsDocument:
     judge_text: str
     groups: list[SkillGroup]
 
+    @property
+    def skill_groups(self) -> list[SkillGroup]:
+        return self.groups
+
 
 class _GroupAttrs(NamedTuple):
     always: bool

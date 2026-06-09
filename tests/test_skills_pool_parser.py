@@ -1,6 +1,9 @@
 import textwrap
 
+from application_pipeline import triage_skills
 from application_pipeline.skills_pool import parse
+from application_pipeline.skills_pool import parser as legacy_parser
+from application_pipeline.triage_skills import SkillGroup, SkillItem
 
 
 def test_two_groups_returned_in_file_order() -> None:
@@ -135,3 +138,25 @@ def test_file_order_preserved_across_groups_and_items() -> None:
     assert [item.name for item in result[0].items] == ["a1", "a2"]
     assert [item.name for item in result[1].items] == ["b1"]
     assert [item.name for item in result[2].items] == ["c1", "c2", "c3"]
+
+
+def test_triage_skills_is_canonical_skill_group_parser_surface() -> None:
+    text = "## Backend {always, mle=low}\n- Python {always}\n"
+
+    result = triage_skills.parse(text)
+
+    assert result == [
+        SkillGroup(
+            name="Backend",
+            always=True,
+            relevance={"mle": "low"},
+            items=[SkillItem(name="Python", always=True)],
+        )
+    ]
+
+
+def test_skills_pool_imports_are_thin_aliases_of_triage_skills() -> None:
+    assert parse is triage_skills.parse
+    assert legacy_parser.parse is triage_skills.parse
+    assert legacy_parser.SkillGroup is triage_skills.SkillGroup
+    assert legacy_parser.SkillItem is triage_skills.SkillItem

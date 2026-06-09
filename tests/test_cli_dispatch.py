@@ -333,6 +333,9 @@ def test_cron_run_failure_writes_failure_report(
     def fake_run(
         config_path: Path, *, status_display: object, run_log: object, no_judge: bool
     ) -> object:
+        from application_pipeline._context import current_stage
+
+        current_stage.set("cron-run-stage")
         raise RuntimeError("run blew up")
 
     monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
@@ -345,3 +348,88 @@ def test_cron_run_failure_writes_failure_report(
     failures_dir = home / ".runtime-data" / "failures"
     reports = list(failures_dir.glob("*.md"))
     assert len(reports) == 1
+    content = reports[0].read_text()
+    assert "**Stage:** cron-run-stage" in content
+
+
+def test_run_failure_writes_failure_report_for_current_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "application-pipeline"
+    _make_config(home)
+    monkeypatch.chdir(tmp_path)
+
+    def fake_run(
+        config_path: Path, *, status_display: object, run_log: object, no_judge: bool
+    ) -> object:
+        from application_pipeline._context import current_stage
+
+        current_stage.set("run-stage")
+        raise RuntimeError("run blew up")
+
+    monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(["run"])
+
+    assert exc_info.value.code != 0
+    reports = list((home / ".runtime-data" / "failures").glob("*.md"))
+    assert len(reports) == 1
+    assert "**Stage:** run-stage" in reports[0].read_text()
+
+
+def test_cron_init_failure_ignores_failure_report_write_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "application-pipeline"
+    _make_config(home)
+    monkeypatch.chdir(tmp_path)
+
+    def fake_init(cwd: Path, *, refresh: bool) -> None:
+        raise RuntimeError("init blew up")
+
+    def fail_to_write(self, stage: str, error: BaseException, log_tail: str) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
+    monkeypatch.setattr(
+        "application_pipeline.failure_report.FailureReportWriter.write_failure",
+        fail_to_write,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(["cron"])
+
+    assert exc_info.value.code == 1
+    assert list((home / ".runtime-data" / "failures").glob("*.md")) == []
+
+
+def test_run_failure_ignores_failure_report_write_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "application-pipeline"
+    _make_config(home)
+    monkeypatch.chdir(tmp_path)
+
+    def fake_run(
+        config_path: Path, *, status_display: object, run_log: object, no_judge: bool
+    ) -> object:
+        raise RuntimeError("run blew up")
+
+    def fail_to_write(self, stage: str, error: BaseException, log_tail: str) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
+    monkeypatch.setattr(
+        "application_pipeline.failure_report.FailureReportWriter.write_failure",
+        fail_to_write,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(["run"])
+
+    assert exc_info.value.code == 1
+    assert list((home / ".runtime-data" / "failures").glob("*.md")) == []

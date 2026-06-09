@@ -1548,6 +1548,34 @@ def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
     )
 
 
+def test_match_judge_failure_writes_one_failure_report(tmp_path: Path) -> None:
+    """A non-quota Match Judge failure writes one Failure Report at stage judge_top_n."""
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+
+    ext = MagicMock()
+    ext.judge_top_n.side_effect = ExtractorError("judge boom")
+
+    run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(
+            card_store, dedup_store=dedup_module.load(seen_path)
+        ),
+        extractor=ext,
+        card_store=card_store,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    reports = sorted((tmp_path / ".runtime-data" / "failures").glob("*.md"))
+    assert len(reports) == 1
+
+    body = reports[0].read_text(encoding="utf-8")
+    assert "**Stage:** judge_top_n" in body
+    assert "ExtractorError" in body
+    assert "judge boom" in body
+
+
 def test_parser_error_on_enrich_skips_stub_and_increments_metric(
     tmp_path: Path,
 ) -> None:
@@ -5260,6 +5288,7 @@ def test_quota_judge_retries_and_completes(
 
     assert summary.written == 2
     assert len(slept) >= 1
+    assert list((tmp_path / ".runtime-data" / "failures").glob("*.md")) == []
 
 
 # ---------------------------------------------------------------------------

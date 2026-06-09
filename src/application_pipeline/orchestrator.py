@@ -40,7 +40,10 @@ from application_pipeline.dedup import (
     DeduplicationStore,
 )
 from application_pipeline.extracts.card_store import CardStore, load_card_store
-from application_pipeline.failure_report import write_failure as _write_failure
+from application_pipeline.failure_report import (
+    FailureReportWriter,
+    write_failure as _write_failure,
+)
 from application_pipeline.llm import (
     ClaudeExtractor,
     ExtractorError,
@@ -272,12 +275,12 @@ class _OutboundDispatcher:
         parser_states: dict[str, "_ParserState"],
         metrics: "RunMetrics",
         run_log: RunLog,
-        failures_dir: Path,
+        failure_report_writer: FailureReportWriter,
     ) -> None:
         self._parser_states = parser_states
         self._metrics = metrics
         self._run_log = run_log
-        self._failures_dir = failures_dir
+        self._failure_report_writer = failure_report_writer
 
     def dispatch(self, pid: str, payload: object) -> bool:
         """Dispatch a control payload; returns True if the parser has finished."""
@@ -305,17 +308,10 @@ class _OutboundDispatcher:
     def _handle_parser_dead(self, pid: str, payload: _ParserDead) -> None:
         self._run_log.traceback("parser_" + pid, payload.traceback_str)
         self._metrics.parser_dead(pid)
-        _write_failure(
-            stage=f"parser:{pid}",
+        self._failure_report_writer.record_parser_dead(
+            parser_id=pid,
             error=payload.exc,
-            log_tail=payload.traceback_str,
-            failures_dir=self._failures_dir,
-        )
-        _write_failure(
-            stage=f"parser:{pid}",
-            error=payload.exc,
-            log_tail=payload.traceback_str,
-            failures_dir=self._failures_dir,
+            traceback_str=payload.traceback_str,
         )
 
 
@@ -564,7 +560,7 @@ def run(
                 parser_states=parser_states,
                 metrics=metrics,
                 run_log=run_log,
-                failures_dir=cfg.failures_path,
+                failure_report_writer=FailureReportWriter(cfg.failures_path),
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())

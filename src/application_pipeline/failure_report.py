@@ -39,6 +39,18 @@ def _render(
 class FailureReportWriter:
     failures_dir: Path
 
+    def record_parser_dead(
+        self,
+        parser_id: str,
+        error: BaseException,
+        traceback_str: str,
+    ) -> Path:
+        return self.write_failure(
+            stage=f"parser:{parser_id}",
+            error=error,
+            log_tail=traceback_str,
+        )
+
     def write_failure(
         self,
         stage: str,

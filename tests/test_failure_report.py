@@ -69,6 +69,22 @@ class TestFileCreation:
         assert path == failures_dir / f"{_FIXED_FILENAME}.md"
         assert path.exists()
 
+    def test_path_bound_writer_records_parser_dead_inside_bound_failures_dir(
+        self, failures_dir: Path
+    ) -> None:
+        writer = FailureReportWriter(failures_dir)
+
+        with patch("application_pipeline.failure_report.datetime") as mock_dt:
+            mock_dt.now.return_value = _FIXED_TIME
+            path = writer.record_parser_dead(
+                "bundesagentur_api",
+                ValueError("boom"),
+                "Traceback\nValueError: boom",
+            )
+
+        assert path == failures_dir / f"{_FIXED_FILENAME}.md"
+        assert path.exists()
+
 
 class TestMarkdownBody:
     def test_body_contains_stage(self, failures_dir: Path) -> None:
@@ -131,6 +147,34 @@ class TestMarkdownBody:
                 "orchestrator:init",
                 RuntimeError("oops"),
                 "line A\nline B",
+                wrapper_dir,
+            )
+
+        assert writer_path.name == wrapper_path.name
+        assert writer_path.read_text(encoding="utf-8") == wrapper_path.read_text(
+            encoding="utf-8"
+        )
+
+    def test_path_bound_writer_parser_dead_body_matches_wrapper_contract(
+        self, tmp_path: Path
+    ) -> None:
+        writer_dir = tmp_path / "writer"
+        wrapper_dir = tmp_path / "wrapper"
+        writer = FailureReportWriter(writer_dir)
+
+        with patch.object(importlib.metadata, "version", return_value="v1.2.3"):
+            with patch("application_pipeline.failure_report.datetime") as mock_dt:
+                mock_dt.now.return_value = _FIXED_TIME
+                writer_path = writer.record_parser_dead(
+                    "bundesagentur_api",
+                    RuntimeError("oops"),
+                    "Traceback\nRuntimeError: oops",
+                )
+            wrapper_path = _write_at(
+                _FIXED_TIME,
+                "parser:bundesagentur_api",
+                RuntimeError("oops"),
+                "Traceback\nRuntimeError: oops",
                 wrapper_dir,
             )
 

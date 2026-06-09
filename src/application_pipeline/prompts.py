@@ -4,7 +4,7 @@ import string
 from dataclasses import dataclass
 
 from .config import Config
-from .triage_skills import parse_document
+from .triage_skills import load_document
 
 
 class PromptError(Exception):
@@ -86,10 +86,7 @@ def load_prompts(config: Config) -> Prompts:
 
 
 def _load_skills(path: pathlib.Path) -> str:
-    if not path.exists():
-        return ""
-    text = path.read_text(encoding="utf-8-sig")
-    return parse_document(text).judge_text
+    return load_document(path).judge_text
 
 
 def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:

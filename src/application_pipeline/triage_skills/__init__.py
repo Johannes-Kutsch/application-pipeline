@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import NamedTuple
 
 _H2_START_RE = re.compile(r"^## (.+)$")
@@ -38,6 +39,18 @@ class _GroupAttrs(NamedTuple):
 
 def parse(text: str) -> list[SkillGroup]:
     return parse_document(text).groups
+
+
+def load(path: Path) -> list[SkillGroup]:
+    return load_document(path).groups
+
+
+def load_document(path: Path) -> TriageSkillsDocument:
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return TriageSkillsDocument(judge_text="", groups=[])
+    return parse_document(text)
 
 
 def parse_document(text: str) -> TriageSkillsDocument:
@@ -119,6 +132,8 @@ __all__ = [
     "SkillGroup",
     "SkillItem",
     "TriageSkillsDocument",
+    "load",
+    "load_document",
     "parse",
     "parse_document",
 ]

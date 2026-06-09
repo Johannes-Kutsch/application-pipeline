@@ -1,3 +1,4 @@
+import pathlib
 import textwrap
 
 from application_pipeline import triage_skills
@@ -188,6 +189,35 @@ def test_triage_skills_judge_text_matches_prompt_loader_attribute_tolerance() ->
     result = triage_skills.parse_document(text)
 
     assert result.judge_text == "- Pandas {always\n- NumPy\n- Go"
+
+
+def test_triage_skills_load_document_matches_text_parse(
+    tmp_path: pathlib.Path,
+) -> None:
+    text = textwrap.dedent("""\
+        ## MLE {always, backend=high}
+        - Pandas {always}
+        - TensorFlow
+        ## Backend
+        - Go
+    """)
+    skills_path = tmp_path / "skills.md"
+    skills_path.write_text(text, encoding="utf-8")
+
+    result = triage_skills.load_document(skills_path)
+
+    assert result == triage_skills.parse_document(text)
+
+
+def test_triage_skills_missing_file_yields_empty_views(
+    tmp_path: pathlib.Path,
+) -> None:
+    missing_path = tmp_path / "skills.md"
+
+    document = triage_skills.load_document(missing_path)
+
+    assert document.judge_text == ""
+    assert triage_skills.load(missing_path) == []
 
 
 def test_skills_pool_imports_are_thin_aliases_of_triage_skills() -> None:

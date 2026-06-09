@@ -25,14 +25,25 @@ class SkillGroup:
     items: list[SkillItem] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class TriageSkillsDocument:
+    judge_text: str
+    groups: list[SkillGroup]
+
+
 class _GroupAttrs(NamedTuple):
     always: bool
     relevance: dict[str, str]
 
 
 def parse(text: str) -> list[SkillGroup]:
+    return parse_document(text).groups
+
+
+def parse_document(text: str) -> TriageSkillsDocument:
     groups: list[SkillGroup] = []
     current_group: SkillGroup | None = None
+    judge_items: list[str] = []
 
     for line in text.splitlines():
         if m := _H2_START_RE.match(line):
@@ -45,13 +56,24 @@ def parse(text: str) -> list[SkillGroup]:
             )
             groups.append(current_group)
         elif m := _BULLET_START_RE.match(line):
+            body = m.group(1).strip()
+            name, raw_attrs = _split_attrs(body)
+            judge_items.append(f"- {_judge_name(body)}")
             if current_group is None:
                 continue
-            name, raw_attrs = _split_attrs(m.group(1))
             always = _parse_item_always(raw_attrs)
             current_group.items.append(SkillItem(name=name, always=always))
 
-    return groups
+    return TriageSkillsDocument(
+        judge_text="\n".join(judge_items),
+        groups=groups,
+    )
+
+
+def _judge_name(body: str) -> str:
+    if m := _ATTR_BLOCK_RE.match(body):
+        return m.group(1).strip()
+    return body.strip()
 
 
 def _split_attrs(body: str) -> tuple[str, str | None]:
@@ -96,5 +118,7 @@ def _parse_item_always(raw: str | None) -> bool:
 __all__ = [
     "SkillGroup",
     "SkillItem",
+    "TriageSkillsDocument",
     "parse",
+    "parse_document",
 ]

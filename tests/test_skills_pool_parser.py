@@ -155,6 +155,41 @@ def test_triage_skills_is_canonical_skill_group_parser_surface() -> None:
     ]
 
 
+def test_triage_skills_judge_text_preserves_flat_file_order() -> None:
+    text = "- Python\n- SQL {always}\n- Go\n"
+
+    result = triage_skills.parse_document(text)
+
+    assert result.judge_text == "- Python\n- SQL\n- Go"
+
+
+def test_triage_skills_judge_text_flattens_grouped_skills_in_file_order() -> None:
+    text = textwrap.dedent("""\
+        ## MLE
+        - Pandas {always}
+        - TensorFlow
+        ## Backend
+        - Go
+    """)
+
+    result = triage_skills.parse_document(text)
+
+    assert result.judge_text == "- Pandas\n- TensorFlow\n- Go"
+
+
+def test_triage_skills_judge_text_matches_prompt_loader_attribute_tolerance() -> None:
+    text = textwrap.dedent("""\
+        - Pandas {always
+        - NumPy {weird}
+        ## Backend {always, mle=low}
+        - Go {always, weird}
+    """)
+
+    result = triage_skills.parse_document(text)
+
+    assert result.judge_text == "- Pandas {always\n- NumPy\n- Go"
+
+
 def test_skills_pool_imports_are_thin_aliases_of_triage_skills() -> None:
     assert parse is triage_skills.parse
     assert legacy_parser.parse is triage_skills.parse

@@ -1,13 +1,10 @@
 import importlib.resources
 import pathlib
-import re
 import string
 from dataclasses import dataclass
 
 from .config import Config
-
-_BULLET_RE = re.compile(r"^-\s+(.+)$")
-_TRAILING_ATTR_RE = re.compile(r"\s*\{[^}]*\}$")
+from .triage_skills import parse_document
 
 
 class PromptError(Exception):
@@ -92,12 +89,7 @@ def _load_skills(path: pathlib.Path) -> str:
     if not path.exists():
         return ""
     text = path.read_text(encoding="utf-8-sig")
-    items = []
-    for line in text.splitlines():
-        m = _BULLET_RE.match(line)
-        if m:
-            items.append(_TRAILING_ATTR_RE.sub("", m.group(1).strip()))
-    return "\n".join(f"- {s}" for s in items)
+    return parse_document(text).judge_text
 
 
 def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:

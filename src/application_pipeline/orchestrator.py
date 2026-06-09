@@ -42,7 +42,6 @@ from application_pipeline.dedup import (
 from application_pipeline.extracts.card_store import CardStore, load_card_store
 from application_pipeline.failure_report import (
     FailureReportWriter,
-    write_failure as _write_failure,
 )
 from application_pipeline.llm import (
     ClaudeExtractor,
@@ -432,6 +431,7 @@ def run(
         except ResultsFileError as exc:
             _log.error("startup failed — results file: %s", exc)
             raise
+        failure_report_writer = FailureReportWriter(cfg.failures_path)
 
         # Step 9: Enter parsers via ExitStack, start parser threads, consume outbound queue
         metrics = RunMetrics(status_display, run_log=run_log)
@@ -560,7 +560,7 @@ def run(
                 parser_states=parser_states,
                 metrics=metrics,
                 run_log=run_log,
-                failure_report_writer=FailureReportWriter(cfg.failures_path),
+                failure_report_writer=failure_report_writer,
             )
 
             parsers_remaining: set[str] = set(parser_states.keys())
@@ -677,11 +677,10 @@ def run(
                         stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
                         error=str(exc),
                     )
-                    _write_failure(
+                    failure_report_writer.write_failure(
                         stage="judge_top_n",
                         error=exc,
                         log_tail="",
-                        failures_dir=cfg.failures_path,
                     )
                     metrics.observe_judge_failure(JudgeLifecycleFailureObservation())
                     break

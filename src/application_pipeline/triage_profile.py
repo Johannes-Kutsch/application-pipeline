@@ -27,16 +27,16 @@ class TriageProfilePromptSlots:
 LEGACY_TRIAGE_PROFILE_FILES: tuple[tuple[str, str], ...] = (
     (
         "domain-fit.md",
-        "legacy filename retired; move its in-scope / out-of-scope content into "
-        "gate-criteria.md and delete the file.",
+        "legacy file retired per ADR-0043; merge its in-scope / out-of-scope "
+        "content into gate-criteria.md and delete the file.",
     ),
     (
         "self-description.md",
-        "legacy filename retired; rename the file to candidate-profile.md.",
+        "legacy filename retired; rename it to candidate-profile.md.",
     ),
     (
         "match-criteria.md",
-        "legacy filename retired; rename the file to gate-criteria.md.",
+        "legacy filename retired; rename it to gate-criteria.md.",
     ),
 )
 

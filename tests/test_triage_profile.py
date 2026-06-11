@@ -53,8 +53,9 @@ def test_triage_profile_load_prompt_slots_raises_for_legacy_domain_fit_file(
     with pytest.raises(
         PromptError,
         match=(
-            rf"{legacy_file}: legacy filename retired; move its in-scope / "
-            r"out-of-scope content into gate-criteria\.md and delete the file\."
+            rf"{legacy_file}: legacy file retired per ADR-0043; merge its "
+            r"in-scope / out-of-scope content into gate-criteria\.md and "
+            r"delete the file\."
         ),
     ):
         triage_profile.load_prompt_slots(triage_profile_dir)
@@ -69,7 +70,7 @@ def test_triage_profile_load_prompt_slots_raises_for_legacy_self_description_fil
     with pytest.raises(
         PromptError,
         match=(
-            rf"{legacy_file}: legacy filename retired; rename the file to "
+            rf"{legacy_file}: legacy filename retired; rename it to "
             r"candidate-profile\.md\."
         ),
     ):
@@ -85,11 +86,32 @@ def test_triage_profile_load_prompt_slots_raises_for_legacy_match_criteria_file(
     with pytest.raises(
         PromptError,
         match=(
-            rf"{legacy_file}: legacy filename retired; rename the file to "
+            rf"{legacy_file}: legacy filename retired; rename it to "
             r"gate-criteria\.md\."
         ),
     ):
         triage_profile.load_prompt_slots(triage_profile_dir)
+
+
+@pytest.mark.parametrize(
+    ("legacy_filename", "required_filename"),
+    [
+        ("domain-fit.md", "gate-criteria.md"),
+        ("self-description.md", "candidate-profile.md"),
+        ("match-criteria.md", "gate-criteria.md"),
+    ],
+)
+def test_triage_profile_load_prompt_slots_prioritizes_legacy_filename_failure(
+    triage_profile_dir: pathlib.Path, legacy_filename: str, required_filename: str
+) -> None:
+    (triage_profile_dir / required_filename).unlink()
+    (triage_profile_dir / legacy_filename).write_text("legacy\n")
+
+    with pytest.raises(PromptError) as exc_info:
+        triage_profile.load_prompt_slots(triage_profile_dir)
+
+    assert legacy_filename in str(exc_info.value)
+    assert required_filename in str(exc_info.value)
 
 
 @pytest.mark.parametrize(

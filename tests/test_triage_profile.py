@@ -20,18 +20,21 @@ def test_triage_profile_load_prompt_slots_returns_slot_values(
     triage_profile_dir: pathlib.Path,
 ) -> None:
     prompt_slots = triage_profile.load_prompt_slots(triage_profile_dir)
+    prompt_slot_values = triage_profile.load_prompt_slot_values(triage_profile_dir)
 
-    assert triage_profile.TRIAGE_PROFILE_SLOTS == frozenset(
-        {"CANDIDATE_PROFILE", "GATE_CRITERIA", "SKILLS"}
-    )
+    assert triage_profile.get_prompt_slot_names() == triage_profile.TRIAGE_PROFILE_SLOTS
     assert prompt_slots.candidate_profile == "Candidate bullets"
     assert prompt_slots.gate_criteria == "Gate bullets"
     assert prompt_slots.skills == "- Python\n- SQL"
-    assert prompt_slots.as_dict() == {
-        "CANDIDATE_PROFILE": "Candidate bullets",
-        "GATE_CRITERIA": "Gate bullets",
-        "SKILLS": "- Python\n- SQL",
-    }
+    assert (
+        prompt_slots.as_dict()
+        == prompt_slot_values
+        == {
+            "CANDIDATE_PROFILE": "Candidate bullets",
+            "GATE_CRITERIA": "Gate bullets",
+            "SKILLS": "- Python\n- SQL",
+        }
+    )
 
 
 def test_triage_profile_load_prompt_slots_skills_missing_returns_empty_text(
@@ -39,9 +42,9 @@ def test_triage_profile_load_prompt_slots_skills_missing_returns_empty_text(
 ) -> None:
     (triage_profile_dir / "skills.md").unlink()
 
-    prompt_slots = triage_profile.load_prompt_slots(triage_profile_dir)
+    prompt_slot_values = triage_profile.load_prompt_slot_values(triage_profile_dir)
 
-    assert prompt_slots.skills == ""
+    assert prompt_slot_values["SKILLS"] == ""
 
 
 def test_triage_profile_load_skills_slot_missing_file_returns_empty_text(

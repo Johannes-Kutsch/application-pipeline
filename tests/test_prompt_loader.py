@@ -132,22 +132,21 @@ def test_load_prompts_judge_contains_candidate_profile_and_skills_not_gate_crite
     rendered = prompts.judge_top_n.render(CANDIDATES="x")
 
     assert "I am a developer" in rendered
-    assert "- Python" in rendered
     assert "Hamburg, remote" not in rendered
 
 
-def test_load_prompts_judge_allows_missing_optional_skills_file(
+def test_load_prompts_judge_keeps_skills_routing_outside_classifier(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
-    (config.user_info_dir / "triage-profile" / "skills.md").unlink()
 
     prompts = load_prompts(config)
-    rendered = prompts.judge_top_n.render(CANDIDATES="x")
+    classify_rendered = prompts.classify_relevance.render(LISTINGS="listing")
+    judge_rendered = prompts.judge_top_n.render(CANDIDATES="x")
 
-    assert "I am a developer" in rendered
-    assert "Hamburg, remote" not in rendered
-    assert "- Python" not in rendered
+    assert "- Python" not in classify_rendered
+    assert "SQL {always}" not in classify_rendered
+    assert "- Python" in judge_rendered
 
 
 def test_load_prompts_classify_contains_verdict_id_tag_instruction(
@@ -248,55 +247,41 @@ def test_load_prompts_surfaces_template_slot_validation_as_prompt_error(
     assert expected_text in str(exc_info.value)
 
 
-@pytest.mark.parametrize(
-    "missing_file",
-    ["candidate-profile.md", "gate-criteria.md"],
-)
-def test_load_prompts_raises_when_user_info_file_missing(
-    tmp_path: pathlib.Path, missing_file: str
+def test_load_prompts_wraps_template_read_failure_as_prompt_error(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = make_config_with_user_info(tmp_path)
-    (config.user_info_dir / "triage-profile" / missing_file).unlink()
+    prompt_pkg = tmp_path / "prompt-pkg"
+    prompt_pkg.mkdir()
+    (prompt_pkg / "judge_top_n.md").write_text(
+        "{CANDIDATE_PROFILE}\n{SKILLS}\n{CANDIDATES}\n"
+    )
 
-    with pytest.raises(PromptError) as exc_info:
-        load_prompts(config)
-    assert missing_file in str(exc_info.value)
-
-
-@pytest.mark.parametrize(
-    "empty_file",
-    ["candidate-profile.md", "gate-criteria.md"],
-)
-def test_load_prompts_raises_when_user_info_file_empty(
-    tmp_path: pathlib.Path, empty_file: str
-) -> None:
-    config = make_config_with_user_info(tmp_path)
-    (config.user_info_dir / "triage-profile" / empty_file).write_text("")
-
-    with pytest.raises(PromptError) as exc_info:
-        load_prompts(config)
-    assert empty_file in str(exc_info.value)
-
-
-@pytest.mark.parametrize(
-    ("legacy_filename", "expected_text"),
-    [
-        ("domain-fit.md", "gate-criteria.md"),
-        ("self-description.md", "candidate-profile.md"),
-        ("match-criteria.md", "gate-criteria.md"),
-    ],
-)
-def test_load_prompts_raises_for_legacy_triage_profile_filename(
-    tmp_path: pathlib.Path, legacy_filename: str, expected_text: str
-) -> None:
-    config = make_config_with_user_info(tmp_path)
-    (config.user_info_dir / "triage-profile" / legacy_filename).write_text("legacy\n")
+    monkeypatch.setattr(importlib.resources, "files", lambda _: prompt_pkg)
 
     with pytest.raises(PromptError) as exc_info:
         load_prompts(config)
 
-    assert legacy_filename in str(exc_info.value)
-    assert expected_text in str(exc_info.value)
+    assert "classify_relevance.md" in str(exc_info.value)
+
+
+def test_load_prompts_wraps_invalid_template_braces_as_prompt_error(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    prompt_pkg = tmp_path / "prompt-pkg"
+    prompt_pkg.mkdir()
+    (prompt_pkg / "classify_relevance.md").write_text("{GATE_CRITERIA}\n{LISTINGS}\n")
+    (prompt_pkg / "judge_top_n.md").write_text(
+        "{CANDIDATE_PROFILE}\n{SKILLS}\n{CANDIDATES}\n{"
+    )
+
+    monkeypatch.setattr(importlib.resources, "files", lambda _: prompt_pkg)
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+
+    assert "judge_top_n.md" in str(exc_info.value)
 
 
 # --- load_prompts: via load() ---

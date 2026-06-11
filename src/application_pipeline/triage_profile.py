@@ -48,8 +48,12 @@ def load_prompt_slots(triage_profile_dir: Path) -> TriageProfilePromptSlots:
             triage_profile_dir / "candidate-profile.md"
         ),
         gate_criteria=_read_required_file(triage_profile_dir / "gate-criteria.md"),
-        skills=load_judge_text(triage_profile_dir / "skills.md"),
+        skills=load_skills_slot(triage_profile_dir),
     )
+
+
+def load_skills_slot(triage_profile_dir: Path) -> str:
+    return load_judge_text(triage_profile_dir / "skills.md")
 
 
 def _check_legacy_files(triage_profile_dir: Path) -> None:
@@ -78,5 +82,6 @@ def _prompt_error(*args: object) -> Exception:
 __all__ = [
     "TRIAGE_PROFILE_SLOTS",
     "TriageProfilePromptSlots",
+    "load_skills_slot",
     "load_prompt_slots",
 ]

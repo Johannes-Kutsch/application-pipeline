@@ -24,6 +24,23 @@ class TriageProfilePromptSlots:
         }
 
 
+LEGACY_TRIAGE_PROFILE_FILES: tuple[tuple[str, str], ...] = (
+    (
+        "domain-fit.md",
+        "legacy filename retired; move its in-scope / out-of-scope content into "
+        "gate-criteria.md and delete the file.",
+    ),
+    (
+        "self-description.md",
+        "legacy filename retired; rename the file to candidate-profile.md.",
+    ),
+    (
+        "match-criteria.md",
+        "legacy filename retired; rename the file to gate-criteria.md.",
+    ),
+)
+
+
 def load_prompt_slots(triage_profile_dir: Path) -> TriageProfilePromptSlots:
     _check_legacy_files(triage_profile_dir)
     return TriageProfilePromptSlots(
@@ -36,26 +53,10 @@ def load_prompt_slots(triage_profile_dir: Path) -> TriageProfilePromptSlots:
 
 
 def _check_legacy_files(triage_profile_dir: Path) -> None:
-    legacy_domain_fit = triage_profile_dir / "domain-fit.md"
-    if legacy_domain_fit.exists():
-        raise _prompt_error(
-            f"{legacy_domain_fit}: legacy file retired per ADR-0043; merge its "
-            "in-scope / out-of-scope content into gate-criteria.md and delete the file."
-        )
-
-    legacy_self_description = triage_profile_dir / "self-description.md"
-    if legacy_self_description.exists():
-        raise _prompt_error(
-            f"{legacy_self_description}: legacy filename retired; rename it to "
-            "candidate-profile.md."
-        )
-
-    legacy_match_criteria = triage_profile_dir / "match-criteria.md"
-    if legacy_match_criteria.exists():
-        raise _prompt_error(
-            f"{legacy_match_criteria}: legacy filename retired; rename it to "
-            "gate-criteria.md."
-        )
+    for filename, message in LEGACY_TRIAGE_PROFILE_FILES:
+        legacy_path = triage_profile_dir / filename
+        if legacy_path.exists():
+            raise _prompt_error(f"{legacy_path}: {message}")
 
 
 def _read_required_file(path: Path) -> str:

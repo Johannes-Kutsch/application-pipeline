@@ -44,6 +44,54 @@ def test_triage_profile_load_prompt_slots_skills_missing_returns_empty_text(
     assert prompt_slots.skills == ""
 
 
+def test_triage_profile_load_prompt_slots_raises_for_legacy_domain_fit_file(
+    triage_profile_dir: pathlib.Path,
+) -> None:
+    legacy_file = triage_profile_dir / "domain-fit.md"
+    legacy_file.write_text("legacy\n")
+
+    with pytest.raises(
+        PromptError,
+        match=(
+            rf"{legacy_file}: legacy filename retired; move its in-scope / "
+            r"out-of-scope content into gate-criteria\.md and delete the file\."
+        ),
+    ):
+        triage_profile.load_prompt_slots(triage_profile_dir)
+
+
+def test_triage_profile_load_prompt_slots_raises_for_legacy_self_description_file(
+    triage_profile_dir: pathlib.Path,
+) -> None:
+    legacy_file = triage_profile_dir / "self-description.md"
+    legacy_file.write_text("legacy\n")
+
+    with pytest.raises(
+        PromptError,
+        match=(
+            rf"{legacy_file}: legacy filename retired; rename the file to "
+            r"candidate-profile\.md\."
+        ),
+    ):
+        triage_profile.load_prompt_slots(triage_profile_dir)
+
+
+def test_triage_profile_load_prompt_slots_raises_for_legacy_match_criteria_file(
+    triage_profile_dir: pathlib.Path,
+) -> None:
+    legacy_file = triage_profile_dir / "match-criteria.md"
+    legacy_file.write_text("legacy\n")
+
+    with pytest.raises(
+        PromptError,
+        match=(
+            rf"{legacy_file}: legacy filename retired; rename the file to "
+            r"gate-criteria\.md\."
+        ),
+    ):
+        triage_profile.load_prompt_slots(triage_profile_dir)
+
+
 @pytest.mark.parametrize(
     ("filename", "expected_text"),
     [

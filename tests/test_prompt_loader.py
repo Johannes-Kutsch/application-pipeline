@@ -1,4 +1,5 @@
 import dataclasses
+import importlib.resources
 import pathlib
 
 import pytest
@@ -160,6 +161,91 @@ def test_load_prompts_classify_contains_verdict_id_tag_instruction(
     )
 
     assert '<verdict id="N">' in rendered
+
+
+@pytest.mark.parametrize(
+    ("call_site", "template_text", "expected_slot"),
+    [
+        (
+            "classify_relevance",
+            "{CANDIDATE_PROFILE}\n{LISTINGS}\n",
+            "CANDIDATE_PROFILE",
+        ),
+        ("classify_relevance", "{SKILLS}\n{LISTINGS}\n", "SKILLS"),
+        ("judge_top_n", "{GATE_CRITERIA}\n{CANDIDATES}\n", "GATE_CRITERIA"),
+    ],
+)
+def test_load_prompts_rejects_triage_profile_slots_routed_to_wrong_call_site(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    call_site: str,
+    template_text: str,
+    expected_slot: str,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    prompt_pkg = tmp_path / "prompt-pkg"
+    prompt_pkg.mkdir()
+    (prompt_pkg / "classify_relevance.md").write_text("{GATE_CRITERIA}\n{LISTINGS}\n")
+    (prompt_pkg / "judge_top_n.md").write_text(
+        "{CANDIDATE_PROFILE}\n{SKILLS}\n{CANDIDATES}\n"
+    )
+    (prompt_pkg / f"{call_site}.md").write_text(template_text)
+
+    monkeypatch.setattr(importlib.resources, "files", lambda _: prompt_pkg)
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+
+    assert expected_slot in str(exc_info.value)
+
+
+def test_load_prompts_renders_triage_profile_braces_literally(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    triage_dir = config.user_info_dir / "triage-profile"
+    (triage_dir / "gate-criteria.md").write_text("Gate {python} {{remote}} }\n")
+    (triage_dir / "candidate-profile.md").write_text("Candidate {ml} {{ranking}} }\n")
+    (triage_dir / "skills.md").write_text("- Skill {sql} text\n- Skill {{etl}} text\n")
+
+    prompts = load_prompts(config)
+    classify_rendered = prompts.classify_relevance.render(LISTINGS="listing")
+    judge_rendered = prompts.judge_top_n.render(CANDIDATES="candidate")
+
+    assert "Gate {python} {{remote}} }" in classify_rendered
+    assert "Candidate {ml} {{ranking}} }" in judge_rendered
+    assert "- Skill {sql} text\n- Skill {{etl}} text" in judge_rendered
+
+
+@pytest.mark.parametrize(
+    ("call_site", "template_text", "expected_text"),
+    [
+        ("classify_relevance", "No listing slot here\n", "missing required data slots"),
+        ("judge_top_n", "{CANDIDATES}\n{EXTRA}\n", "unknown slots"),
+    ],
+)
+def test_load_prompts_surfaces_template_slot_validation_as_prompt_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    call_site: str,
+    template_text: str,
+    expected_text: str,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    prompt_pkg = tmp_path / "prompt-pkg"
+    prompt_pkg.mkdir()
+    (prompt_pkg / "classify_relevance.md").write_text("{GATE_CRITERIA}\n{LISTINGS}\n")
+    (prompt_pkg / "judge_top_n.md").write_text(
+        "{CANDIDATE_PROFILE}\n{SKILLS}\n{CANDIDATES}\n"
+    )
+    (prompt_pkg / f"{call_site}.md").write_text(template_text)
+
+    monkeypatch.setattr(importlib.resources, "files", lambda _: prompt_pkg)
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+
+    assert expected_text in str(exc_info.value)
 
 
 @pytest.mark.parametrize(

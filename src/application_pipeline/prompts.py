@@ -12,6 +12,8 @@ class PromptError(Exception):
 
 CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"LISTINGS"})
 JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"CANDIDATES"})
+CLASSIFY_RELEVANCE_PROFILE_SLOTS: frozenset[str] = frozenset({"GATE_CRITERIA"})
+JUDGE_TOP_N_PROFILE_SLOTS: frozenset[str] = frozenset({"CANDIDATE_PROFILE", "SKILLS"})
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,6 @@ class Prompts:
 def load_prompts(config: Config) -> Prompts:
     triage_dir = config.user_info_dir / "triage-profile"
     profile_values = triage_profile.load_prompt_slot_values(triage_dir)
-    triage_profile_slots = triage_profile.get_prompt_slot_names()
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
     classify = _load_template(
@@ -47,14 +48,14 @@ def load_prompts(config: Config) -> Prompts:
         "classify_relevance",
         CLASSIFY_RELEVANCE_SLOTS,
         profile_values,
-        triage_profile_slots,
+        CLASSIFY_RELEVANCE_PROFILE_SLOTS,
     )
     judge_top_n = _load_template(
         pkg,
         "judge_top_n",
         JUDGE_TOP_N_SLOTS,
         profile_values,
-        triage_profile_slots,
+        JUDGE_TOP_N_PROFILE_SLOTS,
     )
     return Prompts(
         classify_relevance=classify,
@@ -67,7 +68,7 @@ def _load_template(
     call_site: str,
     required_data_slots: frozenset[str],
     profile_values: dict[str, str],
-    triage_profile_slots: frozenset[str],
+    allowed_profile_slots: frozenset[str],
 ) -> PromptTemplate:
     filename = f"{call_site}.md"
     resource = pkg / filename
@@ -77,7 +78,7 @@ def _load_template(
         raise PromptError(f"{filename}: {exc}") from exc
 
     found = _parse_slots(filename, raw)
-    allowed = required_data_slots | triage_profile_slots
+    allowed = required_data_slots | allowed_profile_slots
     missing = required_data_slots - found
     unknown = found - allowed
     if missing:
@@ -86,7 +87,7 @@ def _load_template(
         raise PromptError(f"{filename}: unknown slots: {unknown!r}")
 
     text = raw
-    for slot in triage_profile_slots & found:
+    for slot in allowed_profile_slots & found:
         escaped = profile_values[slot].replace("{", "{{").replace("}", "}}")
         text = text.replace("{" + slot + "}", escaped)
     return PromptTemplate(template=text, expected_slots=required_data_slots)

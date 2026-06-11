@@ -36,7 +36,7 @@ def make_config_with_user_info(tmp_path: pathlib.Path) -> Config:
     triage.mkdir()
     (triage / "candidate-profile.md").write_text("I am a developer\n")
     (triage / "gate-criteria.md").write_text("Hamburg, remote\n")
-    (triage / "skills.md").write_text("- Python\n- SQL {always}\n")
+    (triage / "skills.md").write_text("- Judge-only skill\n")
     return Config(
         sources=[SourceEntry(parser_type="bundesagentur")],
         locations=["Hamburg"],
@@ -144,9 +144,8 @@ def test_load_prompts_judge_keeps_skills_routing_outside_classifier(
     classify_rendered = prompts.classify_relevance.render(LISTINGS="listing")
     judge_rendered = prompts.judge_top_n.render(CANDIDATES="x")
 
-    assert "- Python" not in classify_rendered
-    assert "SQL {always}" not in classify_rendered
-    assert "- Python" in judge_rendered
+    assert "Judge-only skill" not in classify_rendered
+    assert "Judge-only skill" in judge_rendered
 
 
 def test_load_prompts_classify_contains_verdict_id_tag_instruction(

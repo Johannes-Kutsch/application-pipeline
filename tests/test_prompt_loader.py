@@ -114,24 +114,17 @@ def test_load_prompts_uses_triage_profile_module_for_profile_slot_loading(
 
     prompts = load_prompts(config)
 
-    assert (
-        prompts.classify_relevance.render(LISTINGS="x")
-        != prompts.classify_relevance.render(LISTINGS="x").replace(
-            "gate from triage module", ""
-        )
+    assert prompts.classify_relevance.render(
+        LISTINGS="x"
+    ) != prompts.classify_relevance.render(LISTINGS="x").replace(
+        "gate from triage module", ""
     )
-    assert (
-        prompts.judge_top_n.render(CANDIDATES="x")
-        != prompts.judge_top_n.render(CANDIDATES="x").replace(
-            "candidate from triage module", ""
-        )
-    )
-    assert (
-        prompts.judge_top_n.render(CANDIDATES="x")
-        != prompts.judge_top_n.render(CANDIDATES="x").replace(
-            "- skills from triage module", ""
-        )
-    )
+    assert prompts.judge_top_n.render(CANDIDATES="x") != prompts.judge_top_n.render(
+        CANDIDATES="x"
+    ).replace("candidate from triage module", "")
+    assert prompts.judge_top_n.render(CANDIDATES="x") != prompts.judge_top_n.render(
+        CANDIDATES="x"
+    ).replace("- skills from triage module", "")
 
 
 def test_load_prompts_classify_contains_gate_criteria_not_candidate_profile(

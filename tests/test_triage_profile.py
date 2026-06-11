@@ -67,3 +67,15 @@ def test_triage_profile_load_prompt_slots_raises_for_invalid_local_files(
 
     assert filename in str(exc_info.value)
     assert expected_text in str(exc_info.value)
+
+
+@pytest.mark.parametrize("filename", ["candidate-profile.md", "gate-criteria.md"])
+def test_triage_profile_load_prompt_slots_raises_for_empty_required_local_files(
+    triage_profile_dir: pathlib.Path, filename: str
+) -> None:
+    (triage_profile_dir / filename).write_text("")
+
+    with pytest.raises(PromptError) as exc_info:
+        triage_profile.load_prompt_slots(triage_profile_dir)
+
+    assert filename in str(exc_info.value)

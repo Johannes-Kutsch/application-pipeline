@@ -1,10 +1,9 @@
 import importlib.resources
-import pathlib
 import string
 from dataclasses import dataclass
 
 from .config import Config
-from .triage_skills import load_judge_text
+from . import triage_profile
 
 
 class PromptError(Exception):
@@ -13,10 +12,6 @@ class PromptError(Exception):
 
 CLASSIFY_RELEVANCE_SLOTS: frozenset[str] = frozenset({"LISTINGS"})
 JUDGE_TOP_N_SLOTS: frozenset[str] = frozenset({"CANDIDATES"})
-
-_PROFILE_SLOTS: frozenset[str] = frozenset(
-    {"CANDIDATE_PROFILE", "GATE_CRITERIA", "SKILLS"}
-)
 
 
 @dataclass(frozen=True)
@@ -43,28 +38,7 @@ class Prompts:
 
 def load_prompts(config: Config) -> Prompts:
     triage_dir = config.user_info_dir / "triage-profile"
-    legacy_domain_fit = triage_dir / "domain-fit.md"
-    if legacy_domain_fit.exists():
-        raise PromptError(
-            f"{legacy_domain_fit}: legacy file retired per ADR-0043; merge its "
-            "in-scope / out-of-scope content into gate-criteria.md and delete the file."
-        )
-    legacy_self_description = triage_dir / "self-description.md"
-    if legacy_self_description.exists():
-        raise PromptError(
-            f"{legacy_self_description}: legacy filename retired; rename it to candidate-profile.md."
-        )
-    legacy_match_criteria = triage_dir / "match-criteria.md"
-    if legacy_match_criteria.exists():
-        raise PromptError(
-            f"{legacy_match_criteria}: legacy filename retired; rename it to gate-criteria.md."
-        )
-
-    profile_values: dict[str, str] = {
-        "CANDIDATE_PROFILE": _read_user_info(triage_dir, "candidate-profile.md"),
-        "GATE_CRITERIA": _read_user_info(triage_dir, "gate-criteria.md"),
-        "SKILLS": _load_skills(triage_dir / "skills.md"),
-    }
+    profile_values = triage_profile.load_prompt_slots(triage_dir).as_dict()
 
     pkg = importlib.resources.files("application_pipeline.templates.prompts")
     classify = _load_template(
@@ -85,21 +59,6 @@ def load_prompts(config: Config) -> Prompts:
     )
 
 
-def _load_skills(path: pathlib.Path) -> str:
-    return load_judge_text(path)
-
-
-def _read_user_info(user_info_dir: pathlib.Path, filename: str) -> str:
-    path = user_info_dir / filename
-    try:
-        text = path.read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise PromptError(f"{path}: {exc}") from exc
-    if not text.strip():
-        raise PromptError(f"{path}: file is empty")
-    return text.rstrip("\n")
-
-
 def _load_template(
     pkg: importlib.resources.abc.Traversable,
     call_site: str,
@@ -114,7 +73,7 @@ def _load_template(
         raise PromptError(f"{filename}: {exc}") from exc
 
     found = _parse_slots(filename, raw)
-    allowed = required_data_slots | _PROFILE_SLOTS
+    allowed = required_data_slots | triage_profile.TRIAGE_PROFILE_SLOTS
     missing = required_data_slots - found
     unknown = found - allowed
     if missing:
@@ -123,7 +82,7 @@ def _load_template(
         raise PromptError(f"{filename}: unknown slots: {unknown!r}")
 
     text = raw
-    for slot in _PROFILE_SLOTS & found:
+    for slot in triage_profile.TRIAGE_PROFILE_SLOTS & found:
         escaped = profile_values[slot].replace("{", "{{").replace("}", "}}")
         text = text.replace("{" + slot + "}", escaped)
     return PromptTemplate(template=text, expected_slots=required_data_slots)

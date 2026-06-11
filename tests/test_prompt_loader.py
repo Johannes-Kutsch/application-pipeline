@@ -12,6 +12,7 @@ from application_pipeline import (
     load,
     load_prompts,
 )
+from application_pipeline import triage_profile
 from application_pipeline.prompts import (
     CLASSIFY_RELEVANCE_SLOTS,
     JUDGE_TOP_N_SLOTS,
@@ -92,6 +93,45 @@ def test_load_prompts_returns_prompt_template_per_call_site(
 
     assert isinstance(prompts.classify_relevance, PromptTemplate)
     assert isinstance(prompts.judge_top_n, PromptTemplate)
+
+
+def test_load_prompts_uses_triage_profile_module_for_profile_slot_loading(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+
+    def fake_load_prompt_slots(
+        triage_profile_dir: pathlib.Path,
+    ) -> triage_profile.TriageProfilePromptSlots:
+        assert triage_profile_dir == config.user_info_dir / "triage-profile"
+        return triage_profile.TriageProfilePromptSlots(
+            candidate_profile="candidate from triage module",
+            gate_criteria="gate from triage module",
+            skills="- skills from triage module",
+        )
+
+    monkeypatch.setattr(triage_profile, "load_prompt_slots", fake_load_prompt_slots)
+
+    prompts = load_prompts(config)
+
+    assert (
+        prompts.classify_relevance.render(LISTINGS="x")
+        != prompts.classify_relevance.render(LISTINGS="x").replace(
+            "gate from triage module", ""
+        )
+    )
+    assert (
+        prompts.judge_top_n.render(CANDIDATES="x")
+        != prompts.judge_top_n.render(CANDIDATES="x").replace(
+            "candidate from triage module", ""
+        )
+    )
+    assert (
+        prompts.judge_top_n.render(CANDIDATES="x")
+        != prompts.judge_top_n.render(CANDIDATES="x").replace(
+            "- skills from triage module", ""
+        )
+    )
 
 
 def test_load_prompts_classify_contains_gate_criteria_not_candidate_profile(

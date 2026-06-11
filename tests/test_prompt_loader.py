@@ -12,7 +12,6 @@ from application_pipeline import (
     load,
     load_prompts,
 )
-from application_pipeline import triage_profile
 from application_pipeline.prompts import (
     CLASSIFY_RELEVANCE_SLOTS,
     JUDGE_TOP_N_SLOTS,
@@ -95,40 +94,6 @@ def test_load_prompts_returns_prompt_template_per_call_site(
     assert isinstance(prompts.judge_top_n, PromptTemplate)
 
 
-def test_load_prompts_uses_triage_profile_module_for_profile_slot_loading(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config = make_config_with_user_info(tmp_path)
-
-    def fake_load_prompt_slot_values(
-        triage_profile_dir: pathlib.Path,
-    ) -> dict[str, str]:
-        assert triage_profile_dir == config.user_info_dir / "triage-profile"
-        return {
-            "CANDIDATE_PROFILE": "candidate from triage module",
-            "GATE_CRITERIA": "gate from triage module",
-            "SKILLS": "- skills from triage module",
-        }
-
-    monkeypatch.setattr(
-        triage_profile, "load_prompt_slot_values", fake_load_prompt_slot_values
-    )
-
-    prompts = load_prompts(config)
-
-    assert prompts.classify_relevance.render(
-        LISTINGS="x"
-    ) != prompts.classify_relevance.render(LISTINGS="x").replace(
-        "gate from triage module", ""
-    )
-    assert prompts.judge_top_n.render(CANDIDATES="x") != prompts.judge_top_n.render(
-        CANDIDATES="x"
-    ).replace("candidate from triage module", "")
-    assert prompts.judge_top_n.render(CANDIDATES="x") != prompts.judge_top_n.render(
-        CANDIDATES="x"
-    ).replace("- skills from triage module", "")
-
-
 def test_load_prompts_classify_contains_gate_criteria_not_candidate_profile(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -168,6 +133,20 @@ def test_load_prompts_judge_contains_candidate_profile_and_skills_not_gate_crite
     assert "I am a developer" in rendered
     assert "- Python" in rendered
     assert "Hamburg, remote" not in rendered
+
+
+def test_load_prompts_judge_allows_missing_optional_skills_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    (config.user_info_dir / "triage-profile" / "skills.md").unlink()
+
+    prompts = load_prompts(config)
+    rendered = prompts.judge_top_n.render(CANDIDATES="x")
+
+    assert "I am a developer" in rendered
+    assert "Hamburg, remote" not in rendered
+    assert "- Python" not in rendered
 
 
 def test_load_prompts_classify_contains_verdict_id_tag_instruction(
@@ -211,6 +190,27 @@ def test_load_prompts_raises_when_user_info_file_empty(
     with pytest.raises(PromptError) as exc_info:
         load_prompts(config)
     assert empty_file in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("legacy_filename", "expected_text"),
+    [
+        ("domain-fit.md", "gate-criteria.md"),
+        ("self-description.md", "candidate-profile.md"),
+        ("match-criteria.md", "gate-criteria.md"),
+    ],
+)
+def test_load_prompts_raises_for_legacy_triage_profile_filename(
+    tmp_path: pathlib.Path, legacy_filename: str, expected_text: str
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    (config.user_info_dir / "triage-profile" / legacy_filename).write_text("legacy\n")
+
+    with pytest.raises(PromptError) as exc_info:
+        load_prompts(config)
+
+    assert legacy_filename in str(exc_info.value)
+    assert expected_text in str(exc_info.value)
 
 
 # --- load_prompts: via load() ---

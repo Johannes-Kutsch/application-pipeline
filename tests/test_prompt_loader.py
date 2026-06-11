@@ -100,17 +100,19 @@ def test_load_prompts_uses_triage_profile_module_for_profile_slot_loading(
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
-    def fake_load_prompt_slots(
+    def fake_load_prompt_slot_values(
         triage_profile_dir: pathlib.Path,
-    ) -> triage_profile.TriageProfilePromptSlots:
+    ) -> dict[str, str]:
         assert triage_profile_dir == config.user_info_dir / "triage-profile"
-        return triage_profile.TriageProfilePromptSlots(
-            candidate_profile="candidate from triage module",
-            gate_criteria="gate from triage module",
-            skills="- skills from triage module",
-        )
+        return {
+            "CANDIDATE_PROFILE": "candidate from triage module",
+            "GATE_CRITERIA": "gate from triage module",
+            "SKILLS": "- skills from triage module",
+        }
 
-    monkeypatch.setattr(triage_profile, "load_prompt_slots", fake_load_prompt_slots)
+    monkeypatch.setattr(
+        triage_profile, "load_prompt_slot_values", fake_load_prompt_slot_values
+    )
 
     prompts = load_prompts(config)
 

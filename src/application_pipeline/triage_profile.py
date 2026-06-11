@@ -52,6 +52,14 @@ def load_prompt_slots(triage_profile_dir: Path) -> TriageProfilePromptSlots:
     )
 
 
+def load_prompt_slot_values(triage_profile_dir: Path) -> dict[str, str]:
+    return load_prompt_slots(triage_profile_dir).as_dict()
+
+
+def get_prompt_slot_names() -> frozenset[str]:
+    return TRIAGE_PROFILE_SLOTS
+
+
 def load_skills_slot(triage_profile_dir: Path) -> str:
     return load_judge_text(triage_profile_dir / "skills.md")
 
@@ -82,6 +90,8 @@ def _prompt_error(*args: object) -> Exception:
 __all__ = [
     "TRIAGE_PROFILE_SLOTS",
     "TriageProfilePromptSlots",
+    "get_prompt_slot_names",
     "load_skills_slot",
+    "load_prompt_slot_values",
     "load_prompt_slots",
 ]

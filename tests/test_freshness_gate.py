@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from fake_status_display import FakeStatusDisplay
-
 from application_pipeline.dedup import load as dedup_load
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parser_log import RunLog
@@ -40,11 +38,6 @@ def run_log(logs_dir: Path) -> RunLog:
 
 
 @pytest.fixture
-def display() -> FakeStatusDisplay:
-    return FakeStatusDisplay()
-
-
-@pytest.fixture
 def dedup(tmp_path: Path):
     return dedup_load(tmp_path / ".seen.json")
 
@@ -56,7 +49,6 @@ MAX_AGE = 30
 def _make_gate(
     tmp_path: Path,
     run_log: RunLog,
-    display: FakeStatusDisplay,
     dedup,
     anchored_today: date = ANCHORED_TODAY,
     max_listing_age_days: int = MAX_AGE,
@@ -65,7 +57,6 @@ def _make_gate(
         anchored_today=anchored_today,
         max_listing_age_days=max_listing_age_days,
         dedup=dedup,
-        display=display,
         run_log=run_log,
     )
 
@@ -89,18 +80,16 @@ def _read_events(logs_dir: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def test_admit_no_dates_returns_true(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
-) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+def test_admit_no_dates_returns_true(tmp_path: Path, run_log: RunLog, dedup) -> None:
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/1")
     assert gate.admit(stub, gate_arm="post_llm") is True
 
 
 def test_admit_writes_transcript_row_for_passing_position(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(
         url="https://example.com/job1",
         title="Engineer",
@@ -123,10 +112,10 @@ def test_admit_writes_transcript_row_for_passing_position(
 
 
 def test_admit_at_threshold_posted_date_passes(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
     # posted_date exactly max_listing_age_days ago should pass (age == 30, not > 30)
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(
         url="https://example.com/1", posted_date=date(2025, 12, 16)
     )  # 30 days before 2026-01-15
@@ -134,9 +123,9 @@ def test_admit_at_threshold_posted_date_passes(
 
 
 def test_admit_one_day_over_threshold_returns_false_with_too_old_reason(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(
         url="https://example.com/old", posted_date=date(2025, 12, 15)
     )  # 31 days before 2026-01-15
@@ -149,9 +138,9 @@ def test_admit_one_day_over_threshold_returns_false_with_too_old_reason(
 
 
 def test_admit_future_posted_date_passes_with_negative_age_days(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(
         url="https://example.com/1", posted_date=date(2026, 1, 20)
     )  # 5 days in the future
@@ -161,35 +150,33 @@ def test_admit_future_posted_date_passes_with_negative_age_days(
 
 
 def test_admit_deadline_today_returns_false_with_deadline_passed_reason(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/deadline-today")
     assert gate.admit(stub, gate_arm="post_llm", deadline=ANCHORED_TODAY) is False
     rows = _read_transcripts(logs_dir)
     assert rows[0]["reason"] == "deadline_passed"
 
 
-def test_admit_deadline_tomorrow_passes(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
-) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+def test_admit_deadline_tomorrow_passes(tmp_path: Path, run_log: RunLog, dedup) -> None:
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/1")
     assert gate.admit(stub, gate_arm="post_llm", deadline=date(2026, 1, 16)) is True
 
 
 def test_admit_deadline_yesterday_returns_false(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/1")
     assert gate.admit(stub, gate_arm="post_llm", deadline=date(2026, 1, 14)) is False
 
 
 def test_admit_combined_too_old_and_deadline_passed(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(
         url="https://example.com/both", posted_date=date(2025, 12, 15)
     )  # 31 days ago
@@ -199,9 +186,9 @@ def test_admit_combined_too_old_and_deadline_passed(
 
 
 def test_admit_both_none_is_silent_noop_no_transcript(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/1")
     result = gate.admit(stub, gate_arm="post_llm")
     assert result is True
@@ -209,9 +196,9 @@ def test_admit_both_none_is_silent_noop_no_transcript(
 
 
 def test_admit_both_none_does_not_increment_passed_counter(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/1")
     gate.admit(stub, gate_arm="post_llm")
     gate.emit_run_complete()
@@ -221,23 +208,23 @@ def test_admit_both_none_does_not_increment_passed_counter(
 
 
 def test_admit_both_none_does_not_mark_expired(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/noop")
     gate.admit(stub, gate_arm="post_llm")
     assert dedup.is_seen(stub).kind == "miss"
 
 
 # ---------------------------------------------------------------------------
-# admit() drop side-effects: dedup + display
+# admit() drop side-effects: dedup
 # ---------------------------------------------------------------------------
 
 
 def test_admit_drop_marks_expired_in_dedup_store(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/old", posted_date=date(2025, 12, 15))
     gate.admit(stub, gate_arm="post_llm")
     assert dedup.is_seen(stub).kind == "url_hit"
@@ -250,40 +237,15 @@ def test_admit_drop_marks_expired_in_dedup_store(
     assert record["status"] == "expired"
 
 
-def test_admit_drop_does_not_publish_to_pipeline_freshness_row(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
-) -> None:
-    """pipeline_freshness status row is retired; drops no longer publish to it."""
-    display = FakeStatusDisplay()
-
-    gate = FreshnessGate(
-        anchored_today=ANCHORED_TODAY,
-        max_listing_age_days=MAX_AGE,
-        dedup=dedup,
-        display=display,
-        run_log=run_log,
-    )
-
-    gate.admit(
-        _Stub(url="https://example.com/a", posted_date=date(2025, 12, 15)),
-        gate_arm="post_llm",
-    )
-    gate.admit(
-        _Stub(url="https://example.com/c"), gate_arm="post_llm"
-    )  # passes (both None)
-
-    assert display.body_updates_for("pipeline_freshness") == []
-
-
 # ---------------------------------------------------------------------------
 # emit_run_complete()
 # ---------------------------------------------------------------------------
 
 
 def test_emit_run_complete_writes_event_row_with_per_reason_counts(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
 
     # passed (fresh posted_date within threshold)
     gate.admit(
@@ -330,9 +292,9 @@ def test_emit_run_complete_writes_event_row_with_per_reason_counts(
 
 
 def test_admit_stub_with_stale_posted_date_returns_false(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(
         url="https://example.com/old", posted_date=date(2025, 12, 15)
     )  # 31 days ago
@@ -340,17 +302,17 @@ def test_admit_stub_with_stale_posted_date_returns_false(
 
 
 def test_admit_stub_with_null_posted_date_returns_true(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/no-date", posted_date=None)
     assert gate.admit(stub, gate_arm="discover") is True
 
 
 def test_admit_stub_with_fresh_posted_date_returns_true(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(
         url="https://example.com/fresh", posted_date=date(2026, 1, 10)
     )  # 5 days ago
@@ -358,9 +320,9 @@ def test_admit_stub_with_fresh_posted_date_returns_true(
 
 
 def test_admit_stub_at_age_cutoff_returns_true(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(
         url="https://example.com/cutoff", posted_date=date(2025, 12, 16)
     )  # exactly 30 days ago
@@ -368,9 +330,9 @@ def test_admit_stub_at_age_cutoff_returns_true(
 
 
 def test_admit_stub_stale_writes_transcript_with_discover_arm(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/old", posted_date=date(2025, 12, 15))
     gate.admit(stub, gate_arm="discover")
     rows = _read_transcripts(logs_dir)
@@ -384,9 +346,9 @@ def test_admit_stub_stale_writes_transcript_with_discover_arm(
 
 
 def test_admit_stub_null_posted_date_writes_no_transcript(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/no-date", posted_date=None)
     gate.admit(stub, gate_arm="discover")
     rows = _read_transcripts(logs_dir)
@@ -394,27 +356,27 @@ def test_admit_stub_null_posted_date_writes_no_transcript(
 
 
 def test_admit_stub_stale_marks_expired_in_dedup(
-    tmp_path: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/old", posted_date=date(2025, 12, 15))
     gate.admit(stub, gate_arm="discover")
     assert dedup.is_seen(stub).kind == "url_hit"
 
 
 def test_admit_post_enrich_null_posted_date_is_silent_noop(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/no-date", posted_date=None)
     assert gate.admit(stub, gate_arm="post_enrich") is True
     assert _read_transcripts(logs_dir) == []
 
 
 def test_admit_writes_transcript_with_post_llm_arm(
-    tmp_path: Path, logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup
+    tmp_path: Path, logs_dir: Path, run_log: RunLog, dedup
 ) -> None:
-    gate = _make_gate(tmp_path, run_log, display, dedup)
+    gate = _make_gate(tmp_path, run_log, dedup)
     stub = _Stub(url="https://example.com/job1", posted_date=date(2026, 1, 10))
     gate.admit(stub, gate_arm="post_llm")
     rows = _read_transcripts(logs_dir)

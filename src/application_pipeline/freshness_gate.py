@@ -6,7 +6,6 @@ from datetime import date
 from typing import Literal, Protocol
 
 from application_pipeline.parser_log import RunLog
-from application_pipeline.status_display import StatusDisplay
 
 
 class _Stub(Protocol):
@@ -91,14 +90,12 @@ class FreshnessGate:
         anchored_today: date,
         max_listing_age_days: int,
         dedup: _DedupStore,
-        display: StatusDisplay,
         run_log: RunLog,
         card_store: _CardStore | None = None,
     ) -> None:
         self._anchored_today = anchored_today
         self._max_listing_age_days = max_listing_age_days
         self._dedup = dedup
-        self._display = display
         self._run_log = run_log
         self._card_store = card_store
         self._lock = threading.Lock()

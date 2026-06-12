@@ -51,6 +51,45 @@ def _read_events(logs_dir: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# inspect() — decision surface
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("body", "passes", "reason"),
+    [
+        ("x" * 100, True, "passed"),
+        ("x" * 99, False, "too_short"),
+        ("   \n\t  ", False, "empty_body"),
+    ],
+)
+def test_inspect_returns_content_decision_and_writes_matching_transcript(
+    logs_dir: Path,
+    run_log: RunLog,
+    body: str,
+    passes: bool,
+    reason: str,
+) -> None:
+    gate = _make_gate(run_log)
+
+    decision = gate.inspect(body, _Stub(url="https://example.com/inspect"))
+    rows = _read_transcripts(logs_dir)
+
+    assert decision.passes is passes
+    assert decision.reason == reason
+    assert rows == [
+        {
+            "url": "https://example.com/inspect",
+            "title": "Test Job",
+            "source": "test-source",
+            "passes": passes,
+            "reason": reason,
+            "body_len": len(body),
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
 # admit() return value — pass/drop behavior
 # ---------------------------------------------------------------------------
 

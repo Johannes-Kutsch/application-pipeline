@@ -9,8 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fake_status_display import FakeStatusDisplay
-
 from application_pipeline.dedup import load as dedup_load
 from application_pipeline.dedup.store import DeduplicationStore
 from application_pipeline.extracts.card_store import load_card_store
@@ -46,6 +44,8 @@ def run_log(tmp_path: Path) -> RunLog:
 
 @pytest.fixture
 def run_metrics(tmp_path: Path, run_log: RunLog) -> RunMetrics:
+    from fake_status_display import FakeStatusDisplay
+
     return RunMetrics(FakeStatusDisplay(), run_log=run_log)
 
 
@@ -420,7 +420,6 @@ def _make_freshness_gate(tmp_path: Path, run_log: RunLog) -> FreshnessGate:
         anchored_today=_ANCHORED_TODAY,
         max_listing_age_days=_MAX_AGE,
         dedup=dedup,
-        display=FakeStatusDisplay(),
         run_log=run_log,
     )
 

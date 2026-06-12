@@ -278,7 +278,6 @@ class ParserIntakeHarness:
                 anchored_today=anchored_today,
                 max_listing_age_days=max_listing_age_days,
                 dedup=dedup_store,
-                display=status_display,
                 run_log=run_log,
                 card_store=card_store,
             )

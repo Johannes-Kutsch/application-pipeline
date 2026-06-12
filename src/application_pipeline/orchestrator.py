@@ -477,7 +477,6 @@ def run(
                 anchored_today=anchored_today,
                 max_listing_age_days=cfg.max_listing_age_days,
                 dedup=dedup_run,
-                display=status_display,
                 run_log=run_log,
                 card_store=card_store,
             )

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from application_pipeline.dedup import load as dedup_load
+from application_pipeline.extracts.card_store import CardExtract, load_card_store
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parser_log import RunLog
 
@@ -235,6 +236,50 @@ def test_admit_drop_marks_expired_in_dedup_store(
         r for r in data.values() if "https://example.com/old" in r.get("urls", [])
     )
     assert record["status"] == "expired"
+
+
+def test_admit_drop_deletes_card_when_matched_listing_becomes_expired(
+    tmp_path: Path, run_log: RunLog
+) -> None:
+    extracts_path = tmp_path / "extracts.json"
+    card_store = load_card_store(extracts_path)
+    dedup = dedup_load(tmp_path / ".seen.json", card_store=card_store, run_log=run_log)
+    matched_stub = _Stub(
+        url="https://example.com/matched",
+        company="Acme",
+        title="Platform Engineer",
+        location="Hamburg",
+        posted_date=date(2026, 1, 10),
+    )
+    dedup.mark_matched(7, matched_stub)
+    card_store.put(
+        7,
+        CardExtract(
+            header="Platform Engineer\nAcme · Hamburg\n2026-01-10 · Senior",
+            summary="Persisted summary",
+            body="Persisted body",
+        ),
+    )
+    gate = FreshnessGate(
+        anchored_today=ANCHORED_TODAY,
+        max_listing_age_days=MAX_AGE,
+        dedup=dedup,
+        run_log=run_log,
+        card_store=card_store,
+    )
+
+    gate.admit(
+        _Stub(
+            url="https://example.com/matched",
+            company="Acme",
+            title="Platform Engineer",
+            location="Hamburg",
+            posted_date=date(2025, 12, 15),
+        ),
+        gate_arm="discover",
+    )
+
+    assert card_store.get(7) is None
 
 
 # ---------------------------------------------------------------------------

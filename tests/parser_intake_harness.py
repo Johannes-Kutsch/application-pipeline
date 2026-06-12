@@ -285,10 +285,7 @@ class ParserIntakeHarness:
         else:
             configured_freshness_gate = freshness_gate
         if content_gate is None:
-            configured_content_gate: ContentGateLike = ContentGate(
-                display=status_display,
-                run_log=run_log,
-            )
+            configured_content_gate: ContentGateLike = ContentGate(run_log=run_log)
         else:
             configured_content_gate = content_gate
         if domain_pre_filter is None:

@@ -6,8 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from fake_status_display import FakeStatusDisplay
-
 from application_pipeline.content_gate import ContentGate, ContentSnapshot
 from application_pipeline.parser_log import RunLog
 
@@ -34,13 +32,8 @@ def run_log(logs_dir: Path) -> RunLog:
     return RunLog(logs_dir)
 
 
-@pytest.fixture
-def display() -> FakeStatusDisplay:
-    return FakeStatusDisplay()
-
-
-def _make_gate(run_log: RunLog, display: FakeStatusDisplay) -> ContentGate:
-    return ContentGate(display=display, run_log=run_log)
+def _make_gate(run_log: RunLog) -> ContentGate:
+    return ContentGate(run_log=run_log)
 
 
 def _read_transcripts(logs_dir: Path) -> list[dict]:
@@ -62,24 +55,18 @@ def _read_events(logs_dir: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def test_admit_non_empty_body_returns_true(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_admit_non_empty_body_returns_true(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     assert gate.admit("x" * 100, _Stub()) is True
 
 
-def test_admit_empty_body_returns_false(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_admit_empty_body_returns_false(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     assert gate.admit("", _Stub()) is False
 
 
-def test_admit_whitespace_only_body_returns_false(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_admit_whitespace_only_body_returns_false(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     assert gate.admit("   \n\t  ", _Stub()) is False
 
 
@@ -89,9 +76,9 @@ def test_admit_whitespace_only_body_returns_false(
 
 
 def test_admit_writes_transcript_for_passing_position(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
+    logs_dir: Path, run_log: RunLog
 ) -> None:
-    gate = _make_gate(run_log, display)
+    gate = _make_gate(run_log)
     stub = _Stub(url="https://example.com/job1", title="Engineer", source="my-source")
     body = "We are looking for an engineer to join our team. " + "x" * 60
     gate.admit(body, stub)
@@ -107,9 +94,9 @@ def test_admit_writes_transcript_for_passing_position(
 
 
 def test_admit_writes_transcript_for_dropped_position(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
+    logs_dir: Path, run_log: RunLog
 ) -> None:
-    gate = _make_gate(run_log, display)
+    gate = _make_gate(run_log)
     stub = _Stub(
         url="https://example.com/empty", title="Empty Job", source="some-source"
     )
@@ -123,10 +110,8 @@ def test_admit_writes_transcript_for_dropped_position(
     assert row["body_len"] == 0
 
 
-def test_admit_body_len_is_pre_strip_length(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_admit_body_len_is_pre_strip_length(logs_dir: Path, run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     gate.admit("   ", _Stub())
     rows = _read_transcripts(logs_dir)
     assert rows[0]["body_len"] == 3  # pre-strip length
@@ -138,9 +123,9 @@ def test_admit_body_len_is_pre_strip_length(
 
 
 def test_emit_run_complete_writes_event_with_counters(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
+    logs_dir: Path, run_log: RunLog
 ) -> None:
-    gate = _make_gate(run_log, display)
+    gate = _make_gate(run_log)
     gate.admit("x" * 100, _Stub(url="https://example.com/1"))
     gate.admit("x" * 100, _Stub(url="https://example.com/2"))
     gate.admit("", _Stub(url="https://example.com/3"))
@@ -156,9 +141,9 @@ def test_emit_run_complete_writes_event_with_counters(
 
 
 def test_emit_run_complete_counters_reconcile_with_transcripts(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
+    logs_dir: Path, run_log: RunLog
 ) -> None:
-    gate = _make_gate(run_log, display)
+    gate = _make_gate(run_log)
     gate.admit("x" * 100, _Stub(url="https://example.com/1"))
     gate.admit("  ", _Stub(url="https://example.com/2"))
     gate.emit_run_complete()
@@ -182,10 +167,8 @@ def test_emit_run_complete_counters_reconcile_with_transcripts(
 # ---------------------------------------------------------------------------
 
 
-def test_snapshot_counters_updated_on_pass(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_snapshot_counters_updated_on_pass(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     gate.admit("x" * 100, _Stub())
     snap = gate.snapshot()
     assert snap.content_considered == 1
@@ -193,10 +176,8 @@ def test_snapshot_counters_updated_on_pass(
     assert snap.content_dropped_empty_body == 0
 
 
-def test_snapshot_counters_updated_on_drop(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_snapshot_counters_updated_on_drop(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     gate.admit("", _Stub())
     snap = gate.snapshot()
     assert snap.content_considered == 1
@@ -204,10 +185,8 @@ def test_snapshot_counters_updated_on_drop(
     assert snap.content_dropped_empty_body == 1
 
 
-def test_snapshot_is_frozen_dataclass(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_snapshot_is_frozen_dataclass(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     snap = gate.snapshot()
     assert isinstance(snap, ContentSnapshot)
     with pytest.raises((AttributeError, TypeError)):
@@ -215,39 +194,19 @@ def test_snapshot_is_frozen_dataclass(
 
 
 # ---------------------------------------------------------------------------
-# Status Display row — body published after each admit()
-# ---------------------------------------------------------------------------
-
-
-def test_admit_does_not_publish_to_pipeline_content_row(
-    run_log: RunLog,
-    display: FakeStatusDisplay,
-) -> None:
-    """pipeline_content status row is retired; admit() no longer publishes to it."""
-    gate = ContentGate(display=display, run_log=run_log)
-    gate.admit("x" * 100, _Stub(url="https://example.com/1"))
-    gate.admit("", _Stub(url="https://example.com/2"))
-    assert display.body_updates_for("pipeline_content") == []
-
-
-# ---------------------------------------------------------------------------
 # too_short: admit() return value
 # ---------------------------------------------------------------------------
 
 
-def test_admit_short_body_returns_false(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_admit_short_body_returns_false(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     # 99 chars: non-empty but below 100-char floor
     short_body = "x" * 99
     assert gate.admit(short_body, _Stub()) is False
 
 
-def test_admit_body_of_exactly_100_chars_returns_true(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_admit_body_of_exactly_100_chars_returns_true(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     assert gate.admit("x" * 100, _Stub()) is True
 
 
@@ -257,9 +216,9 @@ def test_admit_body_of_exactly_100_chars_returns_true(
 
 
 def test_admit_short_body_writes_transcript_with_too_short_reason(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
+    logs_dir: Path, run_log: RunLog
 ) -> None:
-    gate = _make_gate(run_log, display)
+    gate = _make_gate(run_log)
     short_body = "x" * 99
     gate.admit(short_body, _Stub())
     rows = _read_transcripts(logs_dir)
@@ -271,9 +230,9 @@ def test_admit_short_body_writes_transcript_with_too_short_reason(
 
 
 def test_admit_empty_body_transcript_still_has_empty_body_reason(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
+    logs_dir: Path, run_log: RunLog
 ) -> None:
-    gate = _make_gate(run_log, display)
+    gate = _make_gate(run_log)
     gate.admit("   ", _Stub())
     rows = _read_transcripts(logs_dir)
     assert rows[0]["reason"] == "empty_body"
@@ -285,9 +244,9 @@ def test_admit_empty_body_transcript_still_has_empty_body_reason(
 
 
 def test_snapshot_content_dropped_too_short_increments_on_short_body(
-    run_log: RunLog, display: FakeStatusDisplay
+    run_log: RunLog,
 ) -> None:
-    gate = _make_gate(run_log, display)
+    gate = _make_gate(run_log)
     gate.admit("x" * 99, _Stub())
     snap = gate.snapshot()
     assert snap.content_dropped_too_short == 1
@@ -300,9 +259,9 @@ def test_snapshot_content_dropped_too_short_increments_on_short_body(
 
 
 def test_emit_run_complete_includes_content_dropped_too_short(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay
+    logs_dir: Path, run_log: RunLog
 ) -> None:
-    gate = _make_gate(run_log, display)
+    gate = _make_gate(run_log)
     gate.admit("x" * 100, _Stub(url="https://example.com/1"))
     gate.admit("x" * 99, _Stub(url="https://example.com/2"))
     gate.admit("", _Stub(url="https://example.com/3"))
@@ -320,10 +279,8 @@ def test_emit_run_complete_includes_content_dropped_too_short(
 # ---------------------------------------------------------------------------
 
 
-def test_empty_body_counter_not_incremented_by_short_body(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    gate = _make_gate(run_log, display)
+def test_empty_body_counter_not_incremented_by_short_body(run_log: RunLog) -> None:
+    gate = _make_gate(run_log)
     gate.admit("x" * 99, _Stub())
     snap = gate.snapshot()
     assert snap.content_dropped_empty_body == 0

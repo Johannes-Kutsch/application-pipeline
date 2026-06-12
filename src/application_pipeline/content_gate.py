@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from application_pipeline.parser_log import RunLog
-from application_pipeline.status_display import StatusDisplay
 
 
 class _Stub(Protocol):
@@ -48,8 +47,7 @@ def _evaluate(stripped_body: str) -> tuple[bool, _Reason]:
 
 
 class ContentGate:
-    def __init__(self, *, display: StatusDisplay, run_log: RunLog) -> None:
-        self._display = display
+    def __init__(self, *, run_log: RunLog) -> None:
         self._run_log = run_log
         self._lock = threading.Lock()
         self._content_considered = 0

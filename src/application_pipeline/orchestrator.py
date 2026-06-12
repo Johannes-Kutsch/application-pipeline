@@ -500,7 +500,7 @@ def run(
                 display=status_display,
                 run_log=run_log,
             )
-            content_gate = ContentGate(display=status_display, run_log=run_log)
+            content_gate = ContentGate(run_log=run_log)
             assert isinstance(llm_enricher, BatchLLMEnricher)
             classify_stage = ClassifyStage(
                 batch_size=cfg.claude_classify_batch_size,

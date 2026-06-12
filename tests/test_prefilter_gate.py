@@ -7,8 +7,6 @@ from typing import Any
 
 import pytest
 
-from fake_status_display import FakeStatusDisplay
-
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter_gate import PreFilterGate
 
@@ -54,25 +52,18 @@ def run_log(logs_dir: Path) -> RunLog:
 
 
 @pytest.fixture
-def display() -> FakeStatusDisplay:
-    return FakeStatusDisplay()
-
-
-@pytest.fixture
 def dedup() -> _FakeDedupStore:
     return _FakeDedupStore()
 
 
 def _make_gate(
     run_log: RunLog,
-    display: FakeStatusDisplay,
     dedup: _FakeDedupStore,
     blacklist: list[str] | None = None,
 ) -> PreFilterGate:
     return PreFilterGate(
         blacklist=blacklist if blacklist is not None else ["python", "senior"],
         dedup=dedup,
-        display=display,
         run_log=run_log,
     )
 
@@ -97,17 +88,17 @@ def _read_events(logs_dir: Path) -> list[dict]:
 
 
 def test_admit_clean_title_returns_true(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup)
+    gate = _make_gate(run_log, dedup)
     result = gate.admit(_make_stub(title="Java Developer"))
     assert result is True
 
 
 def test_admit_clean_title_writes_transcript(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    logs_dir: Path, run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup)
+    gate = _make_gate(run_log, dedup)
     gate.admit(
         _make_stub(
             url="https://example.com/job1",
@@ -128,17 +119,15 @@ def test_admit_clean_title_writes_transcript(
 
 
 def test_admit_clean_title_no_mark_out_of_domain(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup)
+    gate = _make_gate(run_log, dedup)
     gate.admit(_make_stub(title="Java Developer"))
     assert dedup.out_of_domain_calls == []
 
 
-def test_admit_clean_title_snapshot(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
-) -> None:
-    gate = _make_gate(run_log, display, dedup)
+def test_admit_clean_title_snapshot(run_log: RunLog, dedup: _FakeDedupStore) -> None:
+    gate = _make_gate(run_log, dedup)
     gate.admit(_make_stub(title="Java Developer"))
     snap = gate.snapshot()
     assert snap.prefilter_passed == 1
@@ -153,17 +142,17 @@ def test_admit_clean_title_snapshot(
 
 
 def test_admit_blacklist_title_returns_false(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup)
+    gate = _make_gate(run_log, dedup)
     result = gate.admit(_make_stub(title="Senior Python Developer"))
     assert result is False
 
 
 def test_admit_blacklist_title_writes_transcript(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    logs_dir: Path, run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup, blacklist=["python"])
+    gate = _make_gate(run_log, dedup, blacklist=["python"])
     gate.admit(
         _make_stub(
             url="https://example.com/job2",
@@ -184,9 +173,9 @@ def test_admit_blacklist_title_writes_transcript(
 
 
 def test_admit_blacklist_title_calls_mark_out_of_domain(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup, blacklist=["python"])
+    gate = _make_gate(run_log, dedup, blacklist=["python"])
     position = _make_stub(title="Python Developer")
     gate.admit(position)
     assert len(dedup.out_of_domain_calls) == 1
@@ -194,9 +183,9 @@ def test_admit_blacklist_title_calls_mark_out_of_domain(
 
 
 def test_admit_blacklist_title_snapshot(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup, blacklist=["python"])
+    gate = _make_gate(run_log, dedup, blacklist=["python"])
     gate.admit(_make_stub(title="Python Developer"))
     snap = gate.snapshot()
     assert snap.prefilter_dropped == 1
@@ -206,9 +195,9 @@ def test_admit_blacklist_title_snapshot(
 
 
 def test_admit_multiple_blacklist_matches_in_transcript(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    logs_dir: Path, run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup, blacklist=["python", "senior"])
+    gate = _make_gate(run_log, dedup, blacklist=["python", "senior"])
     gate.admit(_make_stub(title="Senior Python Developer"))
     rows = _read_transcripts(logs_dir)
     row = rows[0]
@@ -219,32 +208,20 @@ def test_admit_multiple_blacklist_matches_in_transcript(
 
 
 # ---------------------------------------------------------------------------
-# pipeline_prefilter row retired (issue #588)
+# admit() null-title handling
 # ---------------------------------------------------------------------------
 
 
 def test_admit_null_title_treated_as_empty_passes(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    logs_dir: Path, run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
     """A stub with title=None is admitted (empty haystack matches no blacklist term)."""
-    gate = _make_gate(run_log, display, dedup, blacklist=["python"])
+    gate = _make_gate(run_log, dedup, blacklist=["python"])
     result = gate.admit(_make_stub(title=None))
     assert result is True
     rows = _read_transcripts(logs_dir)
     assert rows[0]["title"] == ""
     assert rows[0]["title_len"] == 0
-
-
-def test_admit_does_not_publish_to_pipeline_prefilter_row(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
-) -> None:
-    """pipeline_prefilter status row is retired; admit() no longer publishes to it."""
-    gate = _make_gate(run_log, display, dedup, blacklist=["python"])
-
-    gate.admit(_make_stub(title="Python Developer"))
-    gate.admit(_make_stub(title="Java Developer"))
-
-    assert display.body_updates_for("pipeline_prefilter") == []
 
 
 # ---------------------------------------------------------------------------
@@ -253,9 +230,9 @@ def test_admit_does_not_publish_to_pipeline_prefilter_row(
 
 
 def test_emit_run_complete_writes_event_row(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    logs_dir: Path, run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup, blacklist=["python", "senior"])
+    gate = _make_gate(run_log, dedup, blacklist=["python", "senior"])
 
     gate.admit(_make_stub(url="https://example.com/p1", title="Java Developer"))
     gate.admit(_make_stub(url="https://example.com/p2", title="Python Developer"))
@@ -272,17 +249,17 @@ def test_emit_run_complete_writes_event_row(
 
 
 def test_strasse_normalizes_to_straße_match(
-    run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup, blacklist=["straße"])
+    gate = _make_gate(run_log, dedup, blacklist=["straße"])
     result = gate.admit(_make_stub(title="Job in der Hauptstrasse"))
     assert result is False
 
 
 def test_emit_run_complete_dead_keywords_listed(
-    logs_dir: Path, run_log: RunLog, display: FakeStatusDisplay, dedup: _FakeDedupStore
+    logs_dir: Path, run_log: RunLog, dedup: _FakeDedupStore
 ) -> None:
-    gate = _make_gate(run_log, display, dedup, blacklist=["python", "senior", "rust"])
+    gate = _make_gate(run_log, dedup, blacklist=["python", "senior", "rust"])
 
     gate.admit(_make_stub(title="Python Developer"))  # hits python
 

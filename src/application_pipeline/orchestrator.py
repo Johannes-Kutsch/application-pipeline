@@ -497,7 +497,6 @@ def run(
             prefilter = PreFilterGate(
                 blacklist=list(search_terms.negative_keywords),
                 dedup=dedup_run,
-                display=status_display,
                 run_log=run_log,
             )
             content_gate = ContentGate(run_log=run_log)

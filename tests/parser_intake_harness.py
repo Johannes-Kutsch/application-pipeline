@@ -292,7 +292,6 @@ class ParserIntakeHarness:
             configured_pre_filter: PreFilterGateLike = PreFilterGate(
                 blacklist=[] if negative_keywords is None else negative_keywords,
                 dedup=dedup_store,
-                display=status_display,
                 run_log=run_log,
             )
         else:

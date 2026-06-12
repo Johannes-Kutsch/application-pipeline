@@ -4196,29 +4196,6 @@ def test_dedup_and_prefilter_rows_not_registered(tmp_path: Path) -> None:
     assert "pipeline_content" not in registered
 
 
-def test_prefilter_row_not_published_to_display(tmp_path: Path) -> None:
-    """Retired pipeline_prefilter row receives no body updates."""
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-    display = FakeStatusDisplay()
-
-    run(
-        config_path,
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
-    )
-
-    assert display.body_updates_for("pipeline_prefilter") == []
-    assert display.body_updates_for("pipeline_dedup") == []
-
-
 # ---------------------------------------------------------------------------
 # Status Display: classify_relevance and judge_match rows (issue #199)
 # ---------------------------------------------------------------------------

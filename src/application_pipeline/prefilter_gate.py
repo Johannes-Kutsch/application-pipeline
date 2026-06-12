@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from application_pipeline.parser_log import RunLog
-from application_pipeline.status_display import StatusDisplay
 from application_pipeline.text import normalize
 
 
@@ -76,13 +75,11 @@ class PreFilterGate:
         *,
         blacklist: list[str],
         dedup: _DedupStore,
-        display: StatusDisplay,
         run_log: RunLog,
     ) -> None:
         self._blacklist = _precompute_blacklist(blacklist)
         self._bl_counts: dict[str, int] = {t: 0 for t in self._blacklist}
         self._dedup = dedup
-        self._display = display
         self._run_log = run_log
         self._lock = threading.Lock()
         self._considered = 0

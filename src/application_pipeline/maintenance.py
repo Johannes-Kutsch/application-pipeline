@@ -16,7 +16,7 @@ def run_maintenance(logs_dir: Path, failures_dir: Path) -> None:
 def _truncate_logs(logs_dir: Path) -> None:
     if not logs_dir.is_dir():
         return
-    for path in logs_dir.iterdir():
+    for path in logs_dir.rglob("*"):
         if not path.is_file():
             continue
         try:

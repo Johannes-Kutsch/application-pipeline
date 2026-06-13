@@ -1398,6 +1398,39 @@ def test_refresh_unchanged_file_preserves_mtime(tmp_path: Path) -> None:
     assert cron.stat().st_mtime_ns == mtime_before
 
 
+def test_rerun_skips_existing_package_owned_file_without_reading_bytes(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    cron = _ap(tmp_path) / "setup" / "cron.sh"
+    original_mode = cron.stat().st_mode
+
+    try:
+        cron.chmod(0)
+        init(tmp_path)
+    finally:
+        cron.chmod(original_mode)
+
+    assert cron.read_text() == _setup_template_bytes("cron.sh").decode()
+
+
+def test_refresh_preserves_operator_owned_file_without_reading_bytes(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    config = _ap(tmp_path) / "config.py"
+    original_mode = config.stat().st_mode
+    original = config.read_text()
+
+    try:
+        config.chmod(0)
+        init(tmp_path, refresh=True)
+    finally:
+        config.chmod(original_mode)
+
+    assert config.read_text() == original
+
+
 def test_refresh_removed_lines_still_appear(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

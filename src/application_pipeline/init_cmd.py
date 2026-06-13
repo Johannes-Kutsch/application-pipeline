@@ -3,24 +3,45 @@ from __future__ import annotations
 import importlib.resources
 import importlib.resources.abc
 from pathlib import Path
+from typing import NamedTuple
 
 # Top-level files never seeded (retired; kept as user-space only if operator placed them there).
 _EXCLUDE_FILES = frozenset({"layout.py"})
-# Directories whose contents are user-authored and never overwritten on refresh.
-# (Applied within the `application-pipeline` bucket only.)
-_PRESERVE_DIRS = frozenset({"user-info"})
-# Top-level files that are user-authored and never overwritten on refresh.
-# (Applied within the `application-pipeline` bucket only.)
-_PRESERVE_FILES = frozenset({"config.py", ".gitignore"})
-
-# Templates subdirectories that are NOT routing buckets — package-internal,
-# never seeded onto the host.
-_NON_BUCKET_DIRS = frozenset({"prompts"})
 _RETIRED_REFRESH_PATHS: dict[str, tuple[Path, ...]] = {
     "application-pipeline": (Path("agent-skills/iterate-cv.md"),),
     "claude": (Path("skills/iterate-cv/SKILL.md"),),
     "codex": (Path("skills/iterate-cv/SKILL.md"),),
 }
+
+
+class _SeedPolicy(NamedTuple):
+    bucket: str
+    dest_root: Path
+    operator_owned_roots: frozenset[str]
+    operator_owned_top_level_files: frozenset[str]
+
+
+def _seed_policies(cwd: Path) -> dict[str, _SeedPolicy]:
+    return {
+        "application-pipeline": _SeedPolicy(
+            bucket="application-pipeline",
+            dest_root=cwd / "application-pipeline",
+            operator_owned_roots=frozenset({"user-info"}),
+            operator_owned_top_level_files=frozenset({"config.py", ".gitignore"}),
+        ),
+        "claude": _SeedPolicy(
+            bucket="claude",
+            dest_root=cwd / ".claude",
+            operator_owned_roots=frozenset(),
+            operator_owned_top_level_files=frozenset(),
+        ),
+        "codex": _SeedPolicy(
+            bucket="codex",
+            dest_root=cwd / ".codex",
+            operator_owned_roots=frozenset(),
+            operator_owned_top_level_files=frozenset(),
+        ),
+    }
 
 
 def home_dir() -> Path:
@@ -42,40 +63,29 @@ def missing_config_message(cwd: Path) -> str:
     )
 
 
-def _bucket_roots(cwd: Path) -> dict[str, Path]:
-    return {
-        "application-pipeline": cwd / "application-pipeline",
-        "claude": cwd / ".claude",
-        "codex": cwd / ".codex",
-    }
-
-
 def init(cwd: Path, *, refresh: bool = False) -> None:
     pkg = importlib.resources.files("application_pipeline.templates")
-    roots = _bucket_roots(cwd)
+    policies = _seed_policies(cwd)
     reports: list[tuple[str, str]] = []
     for bucket in pkg.iterdir():
         if bucket.name.startswith("__"):
             continue
         if not bucket.is_dir():
             continue
-        if bucket.name in _NON_BUCKET_DIRS:
-            continue
-        if bucket.name not in roots:
+        policy = policies.get(bucket.name)
+        if policy is None:
             continue
         reports.extend(
-            _seed(
-                bucket, roots[bucket.name], Path(), refresh=refresh, bucket=bucket.name
-            )
+            _seed(bucket, policy.dest_root, Path(), refresh=refresh, policy=policy)
         )
 
     if refresh:
-        ap_root = roots["application-pipeline"]
+        ap_root = policies["application-pipeline"].dest_root
         layout_path = ap_root / "layout.py"
         if layout_path.exists():
             layout_path.unlink()
             reports.append(("removed", "layout.py"))
-        reports.extend(_cleanup_retired_refresh_paths(roots))
+        reports.extend(_cleanup_retired_refresh_paths(policies))
         reports.extend(_cleanup_legacy_skills_dir(ap_root))
 
         visible = [(v, d) for v, d in reports if v in ("overwrote", "removed")]
@@ -114,11 +124,11 @@ def _cleanup_legacy_skills_dir(ap_root: Path) -> list[tuple[str, str]]:
 
 
 def _cleanup_retired_refresh_paths(
-    roots: dict[str, Path],
+    policies: dict[str, _SeedPolicy],
 ) -> list[tuple[str, str]]:
     actions: list[tuple[str, str]] = []
     for bucket, rel_paths in _RETIRED_REFRESH_PATHS.items():
-        root = roots[bucket]
+        root = policies[bucket].dest_root
         for rel in rel_paths:
             dest = root / rel
             if not dest.exists():
@@ -144,7 +154,7 @@ def _seed(
     rel: Path,
     *,
     refresh: bool,
-    bucket: str,
+    policy: _SeedPolicy,
 ) -> list[tuple[str, str]]:
     actions: list[tuple[str, str]] = []
     for item in node.iterdir():
@@ -153,14 +163,14 @@ def _seed(
         item_rel = rel / item.name
         if item.is_dir():
             actions.extend(
-                _seed(item, target_dir, item_rel, refresh=refresh, bucket=bucket)
+                _seed(item, target_dir, item_rel, refresh=refresh, policy=policy)
             )
         else:
             if len(rel.parts) == 0 and item.name in _EXCLUDE_FILES:
                 continue
             dest = target_dir / item_rel
             display = item_rel.as_posix()
-            overwrite = refresh and _is_global(item_rel, bucket=bucket)
+            overwrite = refresh and _is_package_owned(item_rel, policy=policy)
             if dest.exists():
                 if overwrite:
                     template_bytes = item.read_bytes()
@@ -180,16 +190,11 @@ def _seed(
     return actions
 
 
-def _is_global(rel: Path, *, bucket: str) -> bool:
-    """Return True for files that --refresh should overwrite."""
-    if bucket == "application-pipeline":
-        parts = rel.parts
-        if len(parts) == 1 and parts[0] in _PRESERVE_FILES:
-            return False
-        if parts[0] in _PRESERVE_DIRS:
-            return False
-        return True
-    # `claude` and `codex` buckets: every package-shipped file is package-owned
-    # and overwritten on refresh. Files in user-added skill dirs are not
-    # touched because they don't appear in the templates tree at all.
+def _is_package_owned(rel: Path, *, policy: _SeedPolicy) -> bool:
+    """Return True for package-owned refresh artefacts; False for operator-owned ones."""
+    parts = rel.parts
+    if len(parts) == 1 and parts[0] in policy.operator_owned_top_level_files:
+        return False
+    if parts and parts[0] in policy.operator_owned_roots:
+        return False
     return True

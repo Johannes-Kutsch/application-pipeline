@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.resources
 import importlib.resources.abc
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 # Top-level files never seeded (retired; kept as user-space only if operator placed them there).
 _EXCLUDE_FILES = frozenset({"layout.py"})
@@ -19,6 +19,20 @@ class _SeedPolicy(NamedTuple):
     dest_root: Path
     operator_owned_roots: frozenset[str]
     operator_owned_top_level_files: frozenset[str]
+
+
+class _SeedEntry(NamedTuple):
+    template: importlib.resources.abc.Traversable
+    dest_root: Path
+    rel: Path
+    policy: _SeedPolicy
+
+
+class _PlannedSeedAction(NamedTuple):
+    verb: Literal["wrote", "overwrote", "preserved", "skipped", "unchanged"]
+    dest: Path
+    display: str
+    template_bytes: bytes | None
 
 
 def _seed_policies(cwd: Path) -> dict[str, _SeedPolicy]:
@@ -66,7 +80,7 @@ def missing_config_message(cwd: Path) -> str:
 def init(cwd: Path, *, refresh: bool = False) -> None:
     pkg = importlib.resources.files("application_pipeline.templates")
     policies = _seed_policies(cwd)
-    reports: list[tuple[str, str]] = []
+    seed_entries: list[_SeedEntry] = []
     for bucket in pkg.iterdir():
         if bucket.name.startswith("__"):
             continue
@@ -75,9 +89,11 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
         policy = policies.get(bucket.name)
         if policy is None:
             continue
-        reports.extend(
-            _seed(bucket, policy.dest_root, Path(), refresh=refresh, policy=policy)
+        seed_entries.extend(
+            _collect_seed_entries(bucket, policy.dest_root, Path(), policy)
         )
+
+    reports = _apply_seed_actions(_plan_seed_actions(seed_entries, refresh=refresh))
 
     if refresh:
         ap_root = policies["application-pipeline"].dest_root
@@ -148,46 +164,65 @@ def _prune_empty_parents(root: Path, node: Path) -> None:
         node = node.parent
 
 
-def _seed(
+def _collect_seed_entries(
     node: importlib.resources.abc.Traversable,
     target_dir: Path,
     rel: Path,
-    *,
-    refresh: bool,
     policy: _SeedPolicy,
-) -> list[tuple[str, str]]:
-    actions: list[tuple[str, str]] = []
+) -> list[_SeedEntry]:
+    entries: list[_SeedEntry] = []
     for item in node.iterdir():
         if item.name.startswith("__"):
             continue
         item_rel = rel / item.name
         if item.is_dir():
-            actions.extend(
-                _seed(item, target_dir, item_rel, refresh=refresh, policy=policy)
-            )
-        else:
-            if len(rel.parts) == 0 and item.name in _EXCLUDE_FILES:
-                continue
-            dest = target_dir / item_rel
-            display = item_rel.as_posix()
-            overwrite = refresh and _is_package_owned(item_rel, policy=policy)
-            if dest.exists():
-                if overwrite:
-                    template_bytes = item.read_bytes()
-                    if dest.read_bytes() != template_bytes:
-                        dest.write_bytes(template_bytes)
-                        actions.append(("overwrote", display))
-                    else:
-                        actions.append(("unchanged", display))
-                elif refresh:
-                    actions.append(("preserved", display))
+            entries.extend(_collect_seed_entries(item, target_dir, item_rel, policy))
+            continue
+        if len(rel.parts) == 0 and item.name in _EXCLUDE_FILES:
+            continue
+        entries.append(
+            _SeedEntry(template=item, dest_root=target_dir, rel=item_rel, policy=policy)
+        )
+    return entries
+
+
+def _plan_seed_actions(
+    entries: list[_SeedEntry], *, refresh: bool
+) -> list[_PlannedSeedAction]:
+    actions: list[_PlannedSeedAction] = []
+    for entry in entries:
+        dest = entry.dest_root / entry.rel
+        display = entry.rel.as_posix()
+        overwrite = refresh and _is_package_owned(entry.rel, policy=entry.policy)
+        if dest.exists():
+            if overwrite:
+                template_bytes = entry.template.read_bytes()
+                if dest.read_bytes() != template_bytes:
+                    actions.append(
+                        _PlannedSeedAction("overwrote", dest, display, template_bytes)
+                    )
                 else:
-                    actions.append(("skipped", display))
+                    actions.append(_PlannedSeedAction("unchanged", dest, display, None))
+            elif refresh:
+                actions.append(_PlannedSeedAction("preserved", dest, display, None))
             else:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(item.read_bytes())
-                actions.append(("wrote", display))
+                actions.append(_PlannedSeedAction("skipped", dest, display, None))
+            continue
+        actions.append(
+            _PlannedSeedAction("wrote", dest, display, entry.template.read_bytes())
+        )
     return actions
+
+
+def _apply_seed_actions(actions: list[_PlannedSeedAction]) -> list[tuple[str, str]]:
+    reports: list[tuple[str, str]] = []
+    for action in actions:
+        if action.verb in ("wrote", "overwrote"):
+            action.dest.parent.mkdir(parents=True, exist_ok=True)
+            assert action.template_bytes is not None
+            action.dest.write_bytes(action.template_bytes)
+        reports.append((action.verb, action.display))
+    return reports
 
 
 def _is_package_owned(rel: Path, *, policy: _SeedPolicy) -> bool:

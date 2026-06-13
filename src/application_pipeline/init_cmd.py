@@ -28,11 +28,13 @@ class _SeedEntry(NamedTuple):
     policy: _SeedPolicy
 
 
-class _PlannedSeedAction(NamedTuple):
-    verb: Literal["wrote", "overwrote", "preserved", "skipped", "unchanged"]
+class _PlannedAction(NamedTuple):
+    verb: Literal["wrote", "overwrote", "preserved", "skipped", "unchanged", "removed"]
+    kind: Literal["write", "remove_file", "remove_dir", "noop"]
     dest: Path
     display: str
     template_bytes: bytes | None
+    report: bool = True
 
 
 def _seed_policies(cwd: Path) -> dict[str, _SeedPolicy]:
@@ -93,17 +95,14 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
             _collect_seed_entries(bucket, policy.dest_root, Path(), policy)
         )
 
-    reports = _apply_seed_actions(_plan_seed_actions(seed_entries, refresh=refresh))
+    actions = _plan_seed_actions(seed_entries, refresh=refresh)
 
     if refresh:
-        ap_root = policies["application-pipeline"].dest_root
-        layout_path = ap_root / "layout.py"
-        if layout_path.exists():
-            layout_path.unlink()
-            reports.append(("removed", "layout.py"))
-        reports.extend(_cleanup_retired_refresh_paths(policies))
-        reports.extend(_cleanup_legacy_skills_dir(ap_root))
+        actions.extend(_plan_refresh_cleanup_actions(policies))
 
+    reports = _apply_actions(actions)
+
+    if refresh:
         visible = [(v, d) for v, d in reports if v in ("overwrote", "removed")]
         if visible:
             for verb, display in visible:
@@ -121,47 +120,92 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
             print(f"skipped {skipped} files")
 
 
-def _cleanup_legacy_skills_dir(ap_root: Path) -> list[tuple[str, str]]:
-    actions: list[tuple[str, str]] = []
+def _plan_refresh_cleanup_actions(
+    policies: dict[str, _SeedPolicy],
+) -> list[_PlannedAction]:
+    actions: list[_PlannedAction] = []
+    ap_root = policies["application-pipeline"].dest_root
+    layout_path = ap_root / "layout.py"
+    if layout_path.exists():
+        actions.append(
+            _PlannedAction("removed", "remove_file", layout_path, "layout.py", None)
+        )
+    actions.extend(_plan_retired_refresh_actions(policies))
+    actions.extend(_plan_legacy_skills_cleanup_actions(ap_root))
+    return actions
+
+
+def _plan_legacy_skills_cleanup_actions(ap_root: Path) -> list[_PlannedAction]:
+    actions: list[_PlannedAction] = []
     legacy_skills = ap_root / "skills"
     if not legacy_skills.is_dir():
         return actions
     legacy_skeleton = legacy_skills / "cv_skeleton.tex"
     if legacy_skeleton.exists():
-        legacy_skeleton.unlink()
-        actions.append(("removed", "skills/cv_skeleton.tex"))
-    try:
-        legacy_skills.rmdir()
-    except OSError:
+        actions.append(
+            _PlannedAction(
+                "removed",
+                "remove_file",
+                legacy_skeleton,
+                "skills/cv_skeleton.tex",
+                None,
+            )
+        )
+
+    remaining = [
+        child.name
+        for child in legacy_skills.iterdir()
+        if child.name != legacy_skeleton.name or not legacy_skeleton.exists()
+    ]
+    if remaining:
         # User left other files inside — do not delete their content.
         return actions
-    actions.append(("removed", "skills/"))
+
+    actions.append(
+        _PlannedAction("removed", "remove_dir", legacy_skills, "skills/", None)
+    )
     return actions
 
 
-def _cleanup_retired_refresh_paths(
+def _plan_retired_refresh_actions(
     policies: dict[str, _SeedPolicy],
-) -> list[tuple[str, str]]:
-    actions: list[tuple[str, str]] = []
+) -> list[_PlannedAction]:
+    actions: list[_PlannedAction] = []
     for bucket, rel_paths in _RETIRED_REFRESH_PATHS.items():
         root = policies[bucket].dest_root
         for rel in rel_paths:
             dest = root / rel
             if not dest.exists():
                 continue
-            dest.unlink()
-            actions.append(("removed", rel.as_posix()))
-            _prune_empty_parents(root, dest.parent)
+            actions.append(
+                _PlannedAction("removed", "remove_file", dest, rel.as_posix(), None)
+            )
+            actions.extend(_plan_empty_parent_prune_actions(root, dest))
     return actions
 
 
-def _prune_empty_parents(root: Path, node: Path) -> None:
+def _plan_empty_parent_prune_actions(
+    root: Path, removed_path: Path
+) -> list[_PlannedAction]:
+    actions: list[_PlannedAction] = []
+    removed_child = removed_path.name
+    node = removed_path.parent
     while node != root:
-        try:
-            node.rmdir()
-        except OSError:
-            return
+        if any(child.name != removed_child for child in node.iterdir()):
+            return actions
+        actions.append(
+            _PlannedAction(
+                "removed",
+                "remove_dir",
+                node,
+                node.relative_to(root).as_posix(),
+                None,
+                False,
+            )
+        )
+        removed_child = node.name
         node = node.parent
+    return actions
 
 
 def _collect_seed_entries(
@@ -188,8 +232,8 @@ def _collect_seed_entries(
 
 def _plan_seed_actions(
     entries: list[_SeedEntry], *, refresh: bool
-) -> list[_PlannedSeedAction]:
-    actions: list[_PlannedSeedAction] = []
+) -> list[_PlannedAction]:
+    actions: list[_PlannedAction] = []
     for entry in entries:
         dest = entry.dest_root / entry.rel
         display = entry.rel.as_posix()
@@ -199,29 +243,38 @@ def _plan_seed_actions(
                 template_bytes = entry.template.read_bytes()
                 if dest.read_bytes() != template_bytes:
                     actions.append(
-                        _PlannedSeedAction("overwrote", dest, display, template_bytes)
+                        _PlannedAction(
+                            "overwrote", "write", dest, display, template_bytes
+                        )
                     )
                 else:
-                    actions.append(_PlannedSeedAction("unchanged", dest, display, None))
+                    actions.append(
+                        _PlannedAction("unchanged", "noop", dest, display, None)
+                    )
             elif refresh:
-                actions.append(_PlannedSeedAction("preserved", dest, display, None))
+                actions.append(_PlannedAction("preserved", "noop", dest, display, None))
             else:
-                actions.append(_PlannedSeedAction("skipped", dest, display, None))
+                actions.append(_PlannedAction("skipped", "noop", dest, display, None))
             continue
         actions.append(
-            _PlannedSeedAction("wrote", dest, display, entry.template.read_bytes())
+            _PlannedAction("wrote", "write", dest, display, entry.template.read_bytes())
         )
     return actions
 
 
-def _apply_seed_actions(actions: list[_PlannedSeedAction]) -> list[tuple[str, str]]:
+def _apply_actions(actions: list[_PlannedAction]) -> list[tuple[str, str]]:
     reports: list[tuple[str, str]] = []
     for action in actions:
-        if action.verb in ("wrote", "overwrote"):
+        if action.kind == "write":
             action.dest.parent.mkdir(parents=True, exist_ok=True)
             assert action.template_bytes is not None
             action.dest.write_bytes(action.template_bytes)
-        reports.append((action.verb, action.display))
+        elif action.kind == "remove_file":
+            action.dest.unlink()
+        elif action.kind == "remove_dir":
+            action.dest.rmdir()
+        if action.report:
+            reports.append((action.verb, action.display))
     return reports
 
 

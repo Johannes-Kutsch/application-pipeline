@@ -20,7 +20,7 @@ def dirs(tmp_path: Path) -> tuple[Path, Path]:
     return logs_dir, failures_dir
 
 
-def test_log_file_exceeding_10000_lines_is_truncated_to_last_10000(
+def test_root_run_log_exceeding_10000_lines_is_truncated_to_last_10000(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
@@ -36,7 +36,7 @@ def test_log_file_exceeding_10000_lines_is_truncated_to_last_10000(
     assert result_lines[-1] == "line 14999"
 
 
-def test_log_file_at_or_below_10000_lines_is_unchanged(
+def test_root_run_log_at_or_below_10000_lines_is_unchanged(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
@@ -106,7 +106,7 @@ def test_flat_log_artifact_exceeding_10000_lines_is_truncated_to_last_10000(
     assert result_lines[-1] == '{"line": 14999}'
 
 
-def test_old_md_files_in_failures_dir_are_deleted(
+def test_old_failure_report_markdown_in_failures_dir_is_deleted(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
@@ -120,7 +120,7 @@ def test_old_md_files_in_failures_dir_are_deleted(
     assert not old_file.exists()
 
 
-def test_recent_md_files_in_failures_dir_survive(
+def test_recent_failure_report_markdown_in_failures_dir_survives(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs

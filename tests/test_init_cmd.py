@@ -1537,6 +1537,21 @@ def test_refresh_reports_missing_package_owned_file_but_not_operator_owned_file(
     assert lines == ["wrote setup/cron-install.sh"]
 
 
+def test_refresh_reseeds_missing_operator_owned_file_without_stdout_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    keywords = _ap(tmp_path) / "user-info" / "search-terms" / "keywords.md"
+    keywords.unlink()
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert keywords.exists()
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert lines == ["directory is current — no files changed"]
+
+
 def test_refresh_unchanged_file_preserves_mtime(tmp_path: Path) -> None:
     init(tmp_path)
     cron = _ap(tmp_path) / "setup" / "cron.sh"

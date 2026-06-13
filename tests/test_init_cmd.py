@@ -684,10 +684,10 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     # Modified global files appear
     assert "overwrote setup/cron.sh" in out
     assert "overwrote setup/cron-uninstall.sh" in out
+    assert "wrote setup/cron-install.sh" in out
     # Legacy removal still appears
     assert "removed layout.py" in out
-    # Suppressed: new file written during refresh, preserved user files
-    assert "cron-install.sh" not in out
+    # Suppressed: preserved user files
     assert "config.py" not in out
     assert "user-info" not in out
 
@@ -1485,7 +1485,11 @@ def test_refresh_prints_only_visible_actions_for_mixed_refresh_outcomes(
     init(tmp_path, refresh=True)
 
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-    assert lines == ["overwrote setup/cron.sh", "removed layout.py"]
+    assert lines == [
+        "wrote setup/cron-install.sh",
+        "overwrote setup/cron.sh",
+        "removed layout.py",
+    ]
 
 
 def test_refresh_config_and_gitignore_never_in_stdout(
@@ -1501,7 +1505,7 @@ def test_refresh_config_and_gitignore_never_in_stdout(
     assert ".gitignore" not in out
 
 
-def test_refresh_new_file_created_but_not_in_stdout(
+def test_refresh_new_package_owned_file_is_reported_in_stdout(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
@@ -1511,7 +1515,26 @@ def test_refresh_new_file_created_but_not_in_stdout(
     init(tmp_path, refresh=True)
 
     assert (_ap(tmp_path) / "setup" / "cron-install.sh").exists()
-    assert "cron-install.sh" not in capsys.readouterr().out
+    assert capsys.readouterr().out.splitlines() == ["wrote setup/cron-install.sh"]
+
+
+def test_refresh_reports_missing_package_owned_file_but_not_operator_owned_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    ap = _ap(tmp_path)
+    package_owned = ap / "setup" / "cron-install.sh"
+    operator_owned = ap / "user-info" / "search-terms" / "keywords.md"
+    package_owned.unlink()
+    operator_owned.unlink()
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert package_owned.exists()
+    assert operator_owned.exists()
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert lines == ["wrote setup/cron-install.sh"]
 
 
 def test_refresh_unchanged_file_preserves_mtime(tmp_path: Path) -> None:

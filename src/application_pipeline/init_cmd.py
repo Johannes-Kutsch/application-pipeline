@@ -227,7 +227,8 @@ def _plan_seed_actions(
     for entry in entries:
         dest = entry.dest_root / entry.rel
         display = _display_rel_path(entry.rel, policy=entry.policy)
-        overwrite = refresh and _is_package_owned(entry.rel, policy=entry.policy)
+        package_owned = _is_package_owned(entry.rel, policy=entry.policy)
+        overwrite = refresh and package_owned
         if dest.exists():
             if overwrite:
                 template_bytes = entry.template.read_bytes()
@@ -246,8 +247,16 @@ def _plan_seed_actions(
             else:
                 actions.append(_PlannedAction("skipped", "noop", dest, display, None))
             continue
+        report = not refresh or package_owned
         actions.append(
-            _PlannedAction("wrote", "write", dest, display, entry.template.read_bytes())
+            _PlannedAction(
+                "wrote",
+                "write",
+                dest,
+                display,
+                entry.template.read_bytes(),
+                report,
+            )
         )
     return actions
 
@@ -277,7 +286,7 @@ def _report_lines(actions: list[_PlannedAction], *, refresh: bool) -> list[str]:
         visible = [
             f"{action.verb} {action.display}"
             for action in actions
-            if action.report and action.verb in ("overwrote", "removed")
+            if action.report and action.verb in ("wrote", "overwrote", "removed")
         ]
         if visible:
             return visible

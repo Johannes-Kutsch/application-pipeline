@@ -352,6 +352,14 @@ def test_fresh_init_prints_single_summary_line(
     assert "wrote" in lines[0]
 
 
+def test_fresh_init_prints_wrote_only_summary_form(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+
+    assert re.fullmatch(r"wrote \d+ files\n", capsys.readouterr().out)
+
+
 def test_rerun_init_prints_single_summary_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -365,6 +373,17 @@ def test_rerun_init_prints_single_summary_line(
     assert len(lines) == 1
     assert re.search(r"\d+", lines[0])
     assert "skipped" in lines[0]
+
+
+def test_rerun_init_prints_skipped_only_summary_form(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    capsys.readouterr()
+
+    init(tmp_path)
+
+    assert re.fullmatch(r"skipped \d+ files\n", capsys.readouterr().out)
 
 
 def test_partial_init_prints_single_summary_line_with_both_counts(
@@ -384,6 +403,20 @@ def test_partial_init_prints_single_summary_line_with_both_counts(
     assert "wrote" in lines[0]
     assert "skipped" in lines[0]
     assert re.search(r"\d+", lines[0])
+
+
+def test_partial_init_prints_mixed_summary_form(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ap = _ap(tmp_path)
+    (ap / "user-info" / "triage-profile").mkdir(parents=True)
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
+        "# custom\n"
+    )
+
+    init(tmp_path)
+
+    assert re.fullmatch(r"wrote \d+ files, skipped \d+\n", capsys.readouterr().out)
 
 
 def test_banner_does_not_trigger_prompt_error(tmp_path: Path) -> None:
@@ -1401,6 +1434,23 @@ def test_refresh_with_one_modified_file_prints_only_that_file(
 
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
     assert lines == ["overwrote setup/cron.sh"]
+
+
+def test_refresh_prints_only_visible_actions_for_mixed_refresh_outcomes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    ap = _ap(tmp_path)
+    (ap / "setup" / "cron.sh").write_text("# modified\n")
+    (ap / "setup" / "cron-install.sh").unlink()
+    (ap / "config.py").write_text("# custom\n")
+    (ap / "layout.py").write_text("# legacy\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert lines == ["overwrote setup/cron.sh", "removed layout.py"]
 
 
 def test_refresh_config_and_gitignore_never_in_stdout(

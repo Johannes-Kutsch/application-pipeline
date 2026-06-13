@@ -100,8 +100,8 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
     if refresh:
         actions.extend(_plan_refresh_cleanup_actions(policies))
 
-    reports = _apply_actions(actions)
-    _render_report(reports, refresh=refresh)
+    applied_actions = _apply_actions(actions)
+    _render_report(applied_actions, refresh=refresh)
 
 
 def _plan_refresh_cleanup_actions(
@@ -246,8 +246,8 @@ def _plan_seed_actions(
     return actions
 
 
-def _apply_actions(actions: list[_PlannedAction]) -> list[tuple[str, str]]:
-    reports: list[tuple[str, str]] = []
+def _apply_actions(actions: list[_PlannedAction]) -> list[_PlannedAction]:
+    applied_actions: list[_PlannedAction] = []
     for action in actions:
         if action.kind == "write":
             action.dest.parent.mkdir(parents=True, exist_ok=True)
@@ -257,29 +257,28 @@ def _apply_actions(actions: list[_PlannedAction]) -> list[tuple[str, str]]:
             action.dest.unlink()
         elif action.kind == "remove_dir":
             action.dest.rmdir()
-        if action.report:
-            reports.append((action.verb, action.display))
-    return reports
+        applied_actions.append(action)
+    return applied_actions
 
 
-def _render_report(reports: list[tuple[str, str]], *, refresh: bool) -> None:
-    for line in _report_lines(reports, refresh=refresh):
+def _render_report(actions: list[_PlannedAction], *, refresh: bool) -> None:
+    for line in _report_lines(actions, refresh=refresh):
         print(line)
 
 
-def _report_lines(reports: list[tuple[str, str]], *, refresh: bool) -> list[str]:
+def _report_lines(actions: list[_PlannedAction], *, refresh: bool) -> list[str]:
     if refresh:
         visible = [
-            f"{verb} {display}"
-            for verb, display in reports
-            if verb in ("overwrote", "removed")
+            f"{action.verb} {action.display}"
+            for action in actions
+            if action.report and action.verb in ("overwrote", "removed")
         ]
         if visible:
             return visible
         return ["directory is current — no files changed"]
 
-    wrote = sum(1 for verb, _ in reports if verb == "wrote")
-    skipped = sum(1 for verb, _ in reports if verb == "skipped")
+    wrote = sum(1 for action in actions if action.report and action.verb == "wrote")
+    skipped = sum(1 for action in actions if action.report and action.verb == "skipped")
     if wrote and skipped:
         return [f"wrote {wrote} files, skipped {skipped}"]
     if wrote:

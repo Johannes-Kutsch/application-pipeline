@@ -101,23 +101,7 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
         actions.extend(_plan_refresh_cleanup_actions(policies))
 
     reports = _apply_actions(actions)
-
-    if refresh:
-        visible = [(v, d) for v, d in reports if v in ("overwrote", "removed")]
-        if visible:
-            for verb, display in visible:
-                print(f"{verb} {display}")
-        else:
-            print("directory is current — no files changed")
-    else:
-        wrote = sum(1 for v, _ in reports if v == "wrote")
-        skipped = sum(1 for v, _ in reports if v == "skipped")
-        if wrote and skipped:
-            print(f"wrote {wrote} files, skipped {skipped}")
-        elif wrote:
-            print(f"wrote {wrote} files")
-        else:
-            print(f"skipped {skipped} files")
+    _render_report(reports, refresh=refresh)
 
 
 def _plan_refresh_cleanup_actions(
@@ -276,6 +260,31 @@ def _apply_actions(actions: list[_PlannedAction]) -> list[tuple[str, str]]:
         if action.report:
             reports.append((action.verb, action.display))
     return reports
+
+
+def _render_report(reports: list[tuple[str, str]], *, refresh: bool) -> None:
+    for line in _report_lines(reports, refresh=refresh):
+        print(line)
+
+
+def _report_lines(reports: list[tuple[str, str]], *, refresh: bool) -> list[str]:
+    if refresh:
+        visible = [
+            f"{verb} {display}"
+            for verb, display in reports
+            if verb in ("overwrote", "removed")
+        ]
+        if visible:
+            return visible
+        return ["directory is current — no files changed"]
+
+    wrote = sum(1 for verb, _ in reports if verb == "wrote")
+    skipped = sum(1 for verb, _ in reports if verb == "skipped")
+    if wrote and skipped:
+        return [f"wrote {wrote} files, skipped {skipped}"]
+    if wrote:
+        return [f"wrote {wrote} files"]
+    return [f"skipped {skipped} files"]
 
 
 def _is_package_owned(rel: Path, *, policy: _SeedPolicy) -> bool:

@@ -17,9 +17,9 @@ def _truncate_logs(logs_dir: Path) -> None:
     if not logs_dir.is_dir():
         return
     for path in logs_dir.rglob("*"):
-        if not path.is_file():
-            continue
         try:
+            if not path.is_file():
+                continue
             lines = path.read_bytes().splitlines(keepends=True)
             if len(lines) > _LOG_TAIL_LINES:
                 path.write_bytes(b"".join(lines[-_LOG_TAIL_LINES:]))

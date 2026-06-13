@@ -49,6 +49,20 @@ def test_root_run_log_at_or_below_10000_lines_is_unchanged(
     assert log_file.read_text() == content
 
 
+def test_nested_log_artifact_at_or_below_10000_lines_is_unchanged(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "parser" / "component.events.jsonl"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    content = b'{"line": 1}\r\n{"line": 2}\r\n'
+    log_file.write_bytes(content)
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert log_file.read_bytes() == content
+
+
 @pytest.mark.parametrize(
     "relative_path",
     [
@@ -106,6 +120,33 @@ def test_flat_log_artifact_exceeding_10000_lines_is_truncated_to_last_10000(
     assert result_lines[-1] == '{"line": 14999}'
 
 
+def test_filesystem_error_on_one_nested_log_artifact_does_not_stop_other_truncation(
+    dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs_dir, failures_dir = dirs
+    bad_log = logs_dir / "parser" / "bad.events.jsonl"
+    good_log = logs_dir / "parser" / "good.events.jsonl"
+    bad_log.parent.mkdir(parents=True, exist_ok=True)
+    bad_log.write_text('{"line": 0}\n')
+    good_log.write_text("\n".join(f'{{"line": {i}}}' for i in range(15_000)) + "\n")
+
+    original_is_file = Path.is_file
+
+    def flaky_is_file(path: Path) -> bool:
+        if path == bad_log:
+            raise OSError("simulated stat failure")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", flaky_is_file)
+
+    run_maintenance(logs_dir, failures_dir)
+
+    result_lines = good_log.read_text().splitlines()
+    assert len(result_lines) == 10_000
+    assert result_lines[0] == '{"line": 5000}'
+    assert result_lines[-1] == '{"line": 14999}'
+
+
 def test_old_failure_report_markdown_in_failures_dir_is_deleted(
     dirs: tuple[Path, Path],
 ) -> None:
@@ -130,6 +171,21 @@ def test_recent_failure_report_markdown_in_failures_dir_survives(
     run_maintenance(logs_dir, failures_dir)
 
     assert recent_file.exists()
+
+
+def test_nested_failure_report_markdown_is_outside_cleanup_behavior(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    nested_file = failures_dir / "nested" / "old.md"
+    nested_file.parent.mkdir(parents=True, exist_ok=True)
+    nested_file.write_text("# failure\n")
+    old_mtime = time.time() - 31 * 24 * 3600
+    os.utime(nested_file, (old_mtime, old_mtime))
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert nested_file.exists()
 
 
 def test_maintenance_completes_silently_when_dirs_do_not_exist(

@@ -1127,6 +1127,36 @@ def test_refresh_preserves_unknown_files_inside_package_owned_codex_skill_dirs(
     assert notes.read_text() == "# wip\n"
 
 
+def test_refresh_preserves_preexisting_codex_adapter_local_shared_dir(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    shared_dir = _codex(tmp_path) / "skills" / "_shared"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    support_file = shared_dir / "STARTUP-TRIAGE.md"
+    support_file.write_text("# operator-local support\n")
+
+    init(tmp_path, refresh=True)
+
+    assert support_file.read_text() == "# operator-local support\n"
+
+
+def test_refresh_restores_missing_codex_wrapper_and_preserves_neighboring_user_files(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    skill_dir = _codex(tmp_path) / "skills" / "write-cv"
+    skill_file = skill_dir / "SKILL.md"
+    notes = skill_dir / "notes.md"
+    notes.write_text("# wip\n")
+    skill_file.unlink()
+
+    init(tmp_path, refresh=True)
+
+    assert skill_file.exists()
+    assert notes.read_text() == "# wip\n"
+
+
 # --- .claude/skills/ seeding (ADR-0044) ---
 
 

@@ -151,6 +151,8 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthin
 
 **Run Log**: Per-run instance writing **Log Artifacts**. Constructed once from `cfg.logs_dir`; threaded into every component. Safe to share across threads — each method opens, writes, closes per call. _Avoid_: log writer, logger (overloaded).
 
+**Maintenance**: Post-run cleanup behind `run_maintenance(logs_dir, failures_dir)`. Owns **Log Artifact** retention recursively beneath `<settings-dir>/.runtime-data/logs/`: root shared artifacts (`run.log`, `lifecycle.jsonl`), ADR-0036 layer subdirs (`parser/`, `llm/`, `pipeline/`), and old flat artifacts left by no-migration. Applies the existing tail-line rule per file and treats per-file filesystem errors as best-effort. Also deletes old root-level **Failure Report** markdown from `<settings-dir>/.runtime-data/failures/`; it does not recurse failure cleanup or expose Log Artifact layout to callers. _Avoid_: log rotation, cleanup adapter, exposing log layout to callers.
+
 **Status Display**: Live in-process progress view (ADR-0043). `StatusDisplay` Protocol: `RichStatusDisplay` (tty) and `PlainStatusDisplay` (cron). Uniform counters: queued/dropped/forwarded. Each parser gets parser row + gates row (non-zero drops only). `llm_classify_relevance` row adds `malformed` + `classifying` counters; `queued` shows current depth. Judge: terminal message only. _Avoid_: progress bar, TUI, dashboard.
 
 ### Sources & extraction

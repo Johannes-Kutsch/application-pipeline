@@ -1052,6 +1052,30 @@ def test_refresh_preserves_user_files_in_retired_iterate_cv_dir(
     assert notes.read_text() == "# my notes\n"
 
 
+def test_normal_init_does_not_run_refresh_cleanup(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    legacy_layout = _ap(tmp_path) / "layout.py"
+    legacy_layout.write_text("# legacy\n")
+    legacy_skill = _ap(tmp_path) / "agent-skills" / "iterate-cv.md"
+    legacy_skill.write_text("# old body\n")
+    legacy_cv_skeleton = _ap(tmp_path) / "skills" / "cv_skeleton.tex"
+    legacy_cv_skeleton.parent.mkdir(parents=True, exist_ok=True)
+    legacy_cv_skeleton.write_text("% stale\n")
+    capsys.readouterr()
+
+    init(tmp_path)
+
+    assert legacy_layout.exists()
+    assert legacy_skill.exists()
+    assert legacy_cv_skeleton.exists()
+    out = capsys.readouterr().out
+    assert "layout.py" not in out
+    assert "iterate-cv" not in out
+    assert "skills/cv_skeleton.tex" not in out
+
+
 def test_refresh_is_silent_when_retired_iterate_cv_files_absent(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1062,6 +1086,23 @@ def test_refresh_is_silent_when_retired_iterate_cv_files_absent(
 
     out = capsys.readouterr().out
     assert "iterate-cv" not in out
+
+
+def test_refresh_silently_prunes_empty_retired_iterate_cv_parent_dirs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    claude_skill = _claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md"
+    claude_skill.parent.mkdir(parents=True, exist_ok=True)
+    claude_skill.write_text("# old\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert "removed skills/iterate-cv/SKILL.md" in lines
+    assert "removed skills/iterate-cv" not in lines
+    assert "removed skills/" not in lines
 
 
 # --- .codex/skills/ seeding (issue #689) ---

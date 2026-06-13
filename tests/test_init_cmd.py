@@ -1052,7 +1052,8 @@ def test_refresh_removes_retired_iterate_cv_files_from_all_buckets(
     assert not codex_skill.exists()
     out = capsys.readouterr().out
     assert "removed agent-skills/iterate-cv.md" in out
-    assert "removed skills/iterate-cv/SKILL.md" in out
+    assert "removed .claude/skills/iterate-cv/SKILL.md" in out
+    assert "removed .codex/skills/iterate-cv/SKILL.md" in out
 
 
 def test_refresh_prunes_empty_parent_dir_after_removing_iterate_cv_skill(
@@ -1133,9 +1134,9 @@ def test_refresh_silently_prunes_empty_retired_iterate_cv_parent_dirs(
     init(tmp_path, refresh=True)
 
     lines = capsys.readouterr().out.splitlines()
-    assert "removed skills/iterate-cv/SKILL.md" in lines
-    assert "removed skills/iterate-cv" not in lines
-    assert "removed skills/" not in lines
+    assert "removed .claude/skills/iterate-cv/SKILL.md" in lines
+    assert "removed .claude/skills/iterate-cv" not in lines
+    assert "removed .claude/skills/" not in lines
 
 
 # --- .codex/skills/ seeding (issue #689) ---
@@ -1350,6 +1351,40 @@ def test_refresh_restores_missing_wrapper_and_preserves_neighboring_user_files(
 
     assert skill_file.exists()
     assert notes.read_text() == "# wip\n"
+
+
+def test_refresh_reports_changed_agent_skill_artifacts_with_bucketed_paths(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    ap = _ap(tmp_path)
+    claude_wrapper = _claude(tmp_path) / "skills" / "write-cv" / "SKILL.md"
+    codex_wrapper = _codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md"
+    shared_body = ap / "agent-skills" / "analyse-listing.md"
+    shared_support = ap / "agent-skills" / "_shared" / "CONVENTIONS.md"
+
+    shared_body.write_text("# tampered body\n")
+    shared_support.write_text("# tampered support\n")
+    claude_wrapper.write_text("# tampered claude wrapper\n")
+    codex_wrapper.write_text("# tampered codex wrapper\n")
+
+    user_claude_skill = _claude(tmp_path) / "skills" / "my-skill"
+    user_claude_skill.mkdir(parents=True, exist_ok=True)
+    (user_claude_skill / "SKILL.md").write_text("# private skill\n")
+
+    user_codex_note = _codex(tmp_path) / "skills" / "write-cv" / "notes.md"
+    user_codex_note.write_text("# private note\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert "overwrote agent-skills/analyse-listing.md" in lines
+    assert "overwrote agent-skills/_shared/CONVENTIONS.md" in lines
+    assert "overwrote .claude/skills/write-cv/SKILL.md" in lines
+    assert "overwrote .codex/skills/analyse-listing/SKILL.md" in lines
+    assert not any("my-skill" in line for line in lines)
+    assert not any("notes.md" in line for line in lines)
 
 
 def test_init_creates_claude_dir_if_missing(tmp_path: Path) -> None:

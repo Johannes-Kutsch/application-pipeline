@@ -162,7 +162,13 @@ def _plan_retired_refresh_actions(
             if not dest.exists():
                 continue
             actions.append(
-                _PlannedAction("removed", "remove_file", dest, rel.as_posix(), None)
+                _PlannedAction(
+                    "removed",
+                    "remove_file",
+                    dest,
+                    _display_rel_path(rel, policy=policies[bucket]),
+                    None,
+                )
             )
             actions.extend(_plan_empty_parent_prune_actions(root, dest))
     return actions
@@ -220,7 +226,7 @@ def _plan_seed_actions(
     actions: list[_PlannedAction] = []
     for entry in entries:
         dest = entry.dest_root / entry.rel
-        display = entry.rel.as_posix()
+        display = _display_rel_path(entry.rel, policy=entry.policy)
         overwrite = refresh and _is_package_owned(entry.rel, policy=entry.policy)
         if dest.exists():
             if overwrite:
@@ -294,3 +300,10 @@ def _is_package_owned(rel: Path, *, policy: _SeedPolicy) -> bool:
     if parts and parts[0] in policy.operator_owned_roots:
         return False
     return True
+
+
+def _display_rel_path(rel: Path, *, policy: _SeedPolicy) -> str:
+    rel_posix = rel.as_posix()
+    if policy.bucket == "application-pipeline":
+        return rel_posix
+    return f".{policy.bucket}/{rel_posix}"

@@ -37,6 +37,12 @@ def test_cover_paragraph_pattern_slots_match_cover_projection() -> None:
     )
 
 
+def test_cover_paragraph_pattern_slots_are_projected_from_slot_names() -> None:
+    assert COVER_PARAGRAPH_PATTERN_SLOTS == tuple(
+        slot_name for slot_name in SLOT_NAMES if slot_name.startswith("cover_")
+    )
+
+
 def test_template_markers_preserve_uppercase_slot_marker_spelling() -> None:
     assert TEMPLATE_MARKERS == {
         "recipient_company": "<<RECIPIENT_COMPANY>>",

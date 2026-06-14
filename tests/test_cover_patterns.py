@@ -6,11 +6,20 @@ import pytest
 from application_pipeline.cover_patterns import CoverPatternError, load, parse
 
 
-def test_parse_returns_named_cover_paragraph_patterns() -> None:
+@pytest.mark.parametrize(
+    ("slot", "name"),
+    [
+        ("cover_intro", "Product Resonance Intro"),
+        ("cover_pivot", "Product Resonance Pivot"),
+        ("cover_fit", "Product Resonance Fit"),
+        ("cover_closing", "Product Resonance Closing"),
+    ],
+)
+def test_parse_returns_named_cover_paragraph_patterns(slot: str, name: str) -> None:
     text = textwrap.dedent(
-        """\
-        ## Product Resonance Intro
-        - slot: cover_intro
+        f"""\
+        ## {name}
+        - slot: {slot}
         - argument_type: resonance
         - use_when: The listing's product surface matches a long-running motivation.
         - placeholders: Musterfirma, Musterprodukt, Musterprojekt
@@ -22,9 +31,9 @@ def test_parse_returns_named_cover_paragraph_patterns() -> None:
 
     result = parse(text)
 
-    assert [pattern.name for pattern in result] == ["Product Resonance Intro"]
+    assert [pattern.name for pattern in result] == [name]
     pattern = result[0]
-    assert pattern.slot == "cover_intro"
+    assert pattern.slot == slot
     assert pattern.argument_type == "resonance"
     assert (
         pattern.use_when

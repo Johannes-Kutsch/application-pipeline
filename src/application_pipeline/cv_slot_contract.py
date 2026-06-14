@@ -26,6 +26,7 @@ COVER_PARAGRAPH_PATTERN_SLOTS: tuple[str, ...] = (
 TEMPLATE_MARKERS: dict[str, str] = {
     slot_name: f"<<{slot_name.upper()}>>" for slot_name in SLOT_NAMES
 }
+TEMPLATE_MARKER_SET: frozenset[str] = frozenset(TEMPLATE_MARKERS.values())
 
 
 def template_marker(slot_name: str) -> str:

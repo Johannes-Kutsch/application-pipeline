@@ -11,6 +11,7 @@ import pytest
 
 from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import _PdflatexRunResult
+from application_pipeline.cv_slot_contract import TEMPLATE_MARKER_SET
 from application_pipeline.latex import slot_map
 
 _EXPECTED_LATEX_PACKAGE_FILES = frozenset(
@@ -86,10 +87,10 @@ def cv_template() -> str:
 def assert_template_contract(template: str) -> None:
     leaked = [t for t in _IDENTITY_TOKENS if t in template]
     assert leaked == [], f"cv_template.tex leaks identity tokens: {leaked}"
-    actual_slots = {
-        match.group(1).lower() for match in _TEMPLATE_SLOT_PATTERN.finditer(template)
+    actual_markers = {
+        match.group(0) for match in _TEMPLATE_SLOT_PATTERN.finditer(template)
     }
-    assert actual_slots == slot_map._CANONICAL_SLOTS
+    assert actual_markers == TEMPLATE_MARKER_SET
     assert _RECIPIENT_PATTERN.search(template)
     assert re.search(r"\\opening\{\s*<<OPENING>>\s*\}", template)
     assert _COVER_BODY_PATTERN.search(template)

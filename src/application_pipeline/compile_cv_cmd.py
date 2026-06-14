@@ -10,6 +10,7 @@ from application_pipeline.compile_cv_local import (
     _CompileCvLocalProductionAdapter,
     _PdflatexAdapter,
 )
+from application_pipeline.cv_slot_contract import template_marker
 from application_pipeline.init_cmd import home_dir, missing_config_message
 from application_pipeline.latex import slot_map
 
@@ -109,7 +110,7 @@ class _CompileCvWorkflow:
 def _substitute_slots(template: str, slots: dict[str, str]) -> str:
     result = template
     for name, body in slots.items():
-        result = result.replace(f"<<{name.upper()}>>", body.rstrip("\n"))
+        result = result.replace(template_marker(name), body.rstrip("\n"))
     return result
 
 

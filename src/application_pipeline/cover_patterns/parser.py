@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from application_pipeline.cv_slot_contract import COVER_PARAGRAPH_PATTERN_SLOTS
+
 _PATTERN_HEADER_RE = re.compile(r"^## (.+)$", re.MULTILINE)
 _METADATA_RE = re.compile(r"^- ([a-z_]+):\s*(.+)$")
 _PLACEHOLDER_RE = re.compile(r"\b(Muster[^\W\d_]+)\b")
@@ -12,14 +14,7 @@ _SENTENCE_RE = re.compile(r"[.!?](?:\s|$)")
 _REQUIRED_METADATA = frozenset(
     {"slot", "argument_type", "use_when", "placeholders", "why_it_works"}
 )
-_VALID_SLOTS = frozenset(
-    {
-        "cover_intro",
-        "cover_pivot",
-        "cover_fit",
-        "cover_closing",
-    }
-)
+_VALID_SLOTS = frozenset(COVER_PARAGRAPH_PATTERN_SLOTS)
 _VALID_PLACEHOLDERS = frozenset(
     {
         "Musterfirma",

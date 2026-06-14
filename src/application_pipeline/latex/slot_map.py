@@ -3,25 +3,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from application_pipeline.cv_slot_contract import SLOT_NAMES
+
 _HEADER = re.compile(r"^%% SLOT: (\S+)\s*$")
 
-_CANONICAL_SLOTS: frozenset[str] = frozenset(
-    {
-        "recipient_company",
-        "recipient_name",
-        "recipient_street",
-        "recipient_zip_city",
-        "opening",
-        "cover_intro",
-        "cover_pivot",
-        "cover_fit",
-        "cover_closing",
-        "resume_berufserfahrung",
-        "resume_ausbildung",
-        "resume_projekte",
-        "skills_block",
-    }
-)
+_CANONICAL_SLOTS: frozenset[str] = frozenset(SLOT_NAMES)
 
 
 class SlotMapError(Exception):

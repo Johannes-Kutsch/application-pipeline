@@ -42,21 +42,27 @@ def _require_pdflatex() -> None:
 
 
 def _cv_tex() -> str:
-    bodies = {
-        "recipient_company": "Smoke Test GmbH",
-        "recipient_name": "Frau Test",
-        "recipient_street": "Teststrasse 1",
-        "recipient_zip_city": "12345 Berlin",
-        "opening": "Sehr geehrte Damen und Herren,",
-        "cover_intro": "Placeholder intro.",
-        "cover_pivot": "Placeholder pivot.",
-        "cover_fit": "Placeholder fit.",
-        "cover_closing": "Placeholder closing.",
-        "resume_berufserfahrung": r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
-        "resume_ausbildung": r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
-        "resume_projekte": r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
-        "skills_block": "Python, LaTeX",
-    }
+    bodies = dict(
+        zip(
+            SLOT_NAMES,
+            (
+                "Smoke Test GmbH",
+                "Frau Test",
+                "Teststrasse 1",
+                "12345 Berlin",
+                "Sehr geehrte Damen und Herren,",
+                "Placeholder intro.",
+                "Placeholder pivot.",
+                "Placeholder fit.",
+                "Placeholder closing.",
+                r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+                r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+                r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+                "Python, LaTeX",
+            ),
+            strict=True,
+        )
+    )
     return "".join(f"%% SLOT: {name}\n{bodies[name]}\n" for name in SLOT_NAMES)
 
 

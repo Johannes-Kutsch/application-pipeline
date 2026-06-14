@@ -134,23 +134,27 @@ def _published_pdf(app_dir: Path, build_name: str) -> Path:
 
 
 def _slot_bodies(overrides: dict[str, str] | None = None) -> dict[str, str]:
-    bodies = {
-        "recipient_company": "Firma GmbH",
-        "recipient_name": "Frau Dr. Müller",
-        "recipient_street": "Musterstraße 1",
-        "recipient_zip_city": "12345 Berlin",
-        "opening": "Sehr geehrte Damen und Herren,",
-        "cover_intro": "Ich bewerbe mich hiermit.",
-        "cover_pivot": "Mein Hintergrund ist relevant.",
-        "cover_fit": "Ich passe gut zu Ihrer Firma.",
-        "cover_closing": "Ich freue mich auf Ihre Antwort.",
-        "resume_berufserfahrung": (
-            r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}"
-        ),
-        "resume_ausbildung": r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
-        "resume_projekte": r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
-        "skills_block": "Python, LaTeX",
-    }
+    bodies = dict(
+        zip(
+            SLOT_NAMES,
+            (
+                "Firma GmbH",
+                "Frau Dr. Müller",
+                "Musterstraße 1",
+                "12345 Berlin",
+                "Sehr geehrte Damen und Herren,",
+                "Ich bewerbe mich hiermit.",
+                "Mein Hintergrund ist relevant.",
+                "Ich passe gut zu Ihrer Firma.",
+                "Ich freue mich auf Ihre Antwort.",
+                r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+                r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+                r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+                "Python, LaTeX",
+            ),
+            strict=True,
+        )
+    )
     if overrides is not None:
         bodies.update(overrides)
     return {name: bodies[name] for name in SLOT_NAMES}

@@ -150,22 +150,27 @@ def assert_compiled_template_contract(
 
 
 def _compileable_slot_bodies() -> dict[str, str]:
-    bodies = {
-        "recipient_company": "Firma GmbH",
-        "recipient_name": "Frau Dr. Muller",
-        "recipient_street": "Musterstrasse 1",
-        "recipient_zip_city": "12345 Berlin",
-        "opening": "Sehr geehrte Damen und Herren,",
-        "cover_intro": "Ich bewerbe mich hiermit.",
-        "cover_pivot": "Mein Hintergrund ist relevant.",
-        "cover_fit": "Ich passe gut zu Ihrer Firma.",
-        "cover_closing": "Ich freue mich auf Ihre Antwort.",
-        "resume_berufserfahrung": r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
-        "resume_ausbildung": r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
-        "resume_projekte": r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
-        "skills_block": "Python, LaTeX",
-    }
-    return {name: bodies[name] for name in SLOT_NAMES}
+    return dict(
+        zip(
+            SLOT_NAMES,
+            (
+                "Firma GmbH",
+                "Frau Dr. Muller",
+                "Musterstrasse 1",
+                "12345 Berlin",
+                "Sehr geehrte Damen und Herren,",
+                "Ich bewerbe mich hiermit.",
+                "Mein Hintergrund ist relevant.",
+                "Ich passe gut zu Ihrer Firma.",
+                "Ich freue mich auf Ihre Antwort.",
+                r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+                r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+                r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+                "Python, LaTeX",
+            ),
+            strict=True,
+        )
+    )
 
 
 def test_cv_template_matches_structural_contract(cv_template: str) -> None:

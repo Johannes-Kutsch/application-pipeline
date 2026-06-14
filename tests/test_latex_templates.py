@@ -11,8 +11,7 @@ import pytest
 
 from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import _PdflatexRunResult
-from application_pipeline.cv_slot_contract import TEMPLATE_MARKER_SET
-from application_pipeline.latex import slot_map
+from application_pipeline.cv_slot_contract import SLOT_NAMES, TEMPLATE_MARKER_SET
 
 _EXPECTED_LATEX_PACKAGE_FILES = frozenset(
     {
@@ -297,9 +296,7 @@ def test_compile_cv_wires_slot_map_content_into_structural_surfaces(
     )
     (cv_dir / "content_pool.tex").write_text("", encoding="utf-8")
 
-    slot_bodies = {
-        name: f"slot-body-{name}" for name in sorted(slot_map._CANONICAL_SLOTS)
-    }
+    slot_bodies = {name: f"slot-body-{name}" for name in SLOT_NAMES}
     app_dir.joinpath("cv.tex").write_text(
         "".join(f"%% SLOT: {name}\n{body}\n" for name, body in slot_bodies.items()),
         encoding="utf-8",

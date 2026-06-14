@@ -6,6 +6,7 @@ from application_pipeline.cv_slot_contract import (
     COVER_PARAGRAPH_PATTERN_SLOTS,
     SLOT_NAME_SET,
     SLOT_NAMES,
+    TEMPLATE_MARKER_SET,
     TEMPLATE_MARKERS,
     template_marker,
 )
@@ -64,6 +65,10 @@ def test_template_markers_preserve_uppercase_slot_marker_spelling() -> None:
         "resume_projekte": "<<RESUME_PROJEKTE>>",
         "skills_block": "<<SKILLS_BLOCK>>",
     }
+
+
+def test_template_marker_set_matches_slot_vocabulary_projection() -> None:
+    assert TEMPLATE_MARKER_SET == frozenset(TEMPLATE_MARKERS.values())
 
 
 def test_template_marker_returns_marker_for_each_known_slot() -> None:

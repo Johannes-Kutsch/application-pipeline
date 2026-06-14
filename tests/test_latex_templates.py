@@ -11,7 +11,7 @@ import pytest
 
 from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import _PdflatexRunResult
-from application_pipeline.cv_slot_contract import SLOT_NAME_SET
+from application_pipeline.cv_slot_contract import SLOT_NAMES, TEMPLATE_MARKER_SET
 
 _EXPECTED_LATEX_PACKAGE_FILES = frozenset(
     {
@@ -86,10 +86,10 @@ def cv_template() -> str:
 def assert_template_contract(template: str) -> None:
     leaked = [t for t in _IDENTITY_TOKENS if t in template]
     assert leaked == [], f"cv_template.tex leaks identity tokens: {leaked}"
-    actual_slots = {
-        match.group(1).lower() for match in _TEMPLATE_SLOT_PATTERN.finditer(template)
+    actual_markers = {
+        match.group(0) for match in _TEMPLATE_SLOT_PATTERN.finditer(template)
     }
-    assert actual_slots == SLOT_NAME_SET
+    assert actual_markers == TEMPLATE_MARKER_SET
     assert _RECIPIENT_PATTERN.search(template)
     assert re.search(r"\\opening\{\s*<<OPENING>>\s*\}", template)
     assert _COVER_BODY_PATTERN.search(template)
@@ -296,7 +296,7 @@ def test_compile_cv_wires_slot_map_content_into_structural_surfaces(
     )
     (cv_dir / "content_pool.tex").write_text("", encoding="utf-8")
 
-    slot_bodies = {name: f"slot-body-{name}" for name in sorted(SLOT_NAME_SET)}
+    slot_bodies = {name: f"slot-body-{name}" for name in SLOT_NAMES}
     app_dir.joinpath("cv.tex").write_text(
         "".join(f"%% SLOT: {name}\n{body}\n" for name, body in slot_bodies.items()),
         encoding="utf-8",

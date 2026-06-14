@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from application_pipeline.compile_cv_cmd import compile_cv
+from application_pipeline.cv_slot_contract import SLOT_NAMES
 
 
 def _minimal_png() -> bytes:
@@ -41,25 +42,22 @@ def _require_pdflatex() -> None:
 
 
 def _cv_tex() -> str:
-    slots = [
-        ("recipient_company", "Smoke Test GmbH"),
-        ("recipient_name", "Frau Test"),
-        ("recipient_street", "Teststrasse 1"),
-        ("recipient_zip_city", "12345 Berlin"),
-        ("opening", "Sehr geehrte Damen und Herren,"),
-        ("cover_intro", "Placeholder intro."),
-        ("cover_pivot", "Placeholder pivot."),
-        ("cover_fit", "Placeholder fit."),
-        ("cover_closing", "Placeholder closing."),
-        (
-            "resume_berufserfahrung",
-            r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
-        ),
-        ("resume_ausbildung", r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}"),
-        ("resume_projekte", r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}"),
-        ("skills_block", "Python, LaTeX"),
-    ]
-    return "".join(f"%% SLOT: {name}\n{body}\n" for name, body in slots)
+    bodies = {
+        "recipient_company": "Smoke Test GmbH",
+        "recipient_name": "Frau Test",
+        "recipient_street": "Teststrasse 1",
+        "recipient_zip_city": "12345 Berlin",
+        "opening": "Sehr geehrte Damen und Herren,",
+        "cover_intro": "Placeholder intro.",
+        "cover_pivot": "Placeholder pivot.",
+        "cover_fit": "Placeholder fit.",
+        "cover_closing": "Placeholder closing.",
+        "resume_berufserfahrung": r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+        "resume_ausbildung": r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+        "resume_projekte": r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+        "skills_block": "Python, LaTeX",
+    }
+    return "".join(f"%% SLOT: {name}\n{bodies[name]}\n" for name in SLOT_NAMES)
 
 
 def _facts_tex() -> str:

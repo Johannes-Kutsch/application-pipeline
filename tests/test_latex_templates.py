@@ -149,6 +149,25 @@ def assert_compiled_template_contract(
     assert resume.search(compiled_template)
 
 
+def _compileable_slot_bodies() -> dict[str, str]:
+    bodies = {
+        "recipient_company": "Firma GmbH",
+        "recipient_name": "Frau Dr. Muller",
+        "recipient_street": "Musterstrasse 1",
+        "recipient_zip_city": "12345 Berlin",
+        "opening": "Sehr geehrte Damen und Herren,",
+        "cover_intro": "Ich bewerbe mich hiermit.",
+        "cover_pivot": "Mein Hintergrund ist relevant.",
+        "cover_fit": "Ich passe gut zu Ihrer Firma.",
+        "cover_closing": "Ich freue mich auf Ihre Antwort.",
+        "resume_berufserfahrung": r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
+        "resume_ausbildung": r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+        "resume_projekte": r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+        "skills_block": "Python, LaTeX",
+    }
+    return {name: bodies[name] for name in SLOT_NAMES}
+
+
 def test_cv_template_matches_structural_contract(cv_template: str) -> None:
     assert_template_contract(cv_template)
 
@@ -222,38 +241,9 @@ def test_compile_cv_template_is_compileable(
     (cv_dir / "content_pool.tex").write_text("", encoding="utf-8")
     (cv_dir / "profile.png").write_bytes(_MINIMAL_PNG)
     (cv_dir / "signature.png").write_bytes(_MINIMAL_PNG)
+    slot_bodies = _compileable_slot_bodies()
     app_dir.joinpath("cv.tex").write_text(
-        "\n".join(
-            (
-                "%% SLOT: recipient_company",
-                "Firma GmbH",
-                "%% SLOT: recipient_name",
-                "Frau Dr. Muller",
-                "%% SLOT: recipient_street",
-                "Musterstrasse 1",
-                "%% SLOT: recipient_zip_city",
-                "12345 Berlin",
-                "%% SLOT: opening",
-                "Sehr geehrte Damen und Herren,",
-                "%% SLOT: cover_intro",
-                "Ich bewerbe mich hiermit.",
-                "%% SLOT: cover_pivot",
-                "Mein Hintergrund ist relevant.",
-                "%% SLOT: cover_fit",
-                "Ich passe gut zu Ihrer Firma.",
-                "%% SLOT: cover_closing",
-                "Ich freue mich auf Ihre Antwort.",
-                "%% SLOT: resume_berufserfahrung",
-                r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
-                "%% SLOT: resume_ausbildung",
-                r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
-                "%% SLOT: resume_projekte",
-                r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
-                "%% SLOT: skills_block",
-                "Python, LaTeX",
-                "",
-            )
-        ),
+        "".join(f"%% SLOT: {name}\n{slot_bodies[name]}\n" for name in SLOT_NAMES),
         encoding="utf-8",
     )
 

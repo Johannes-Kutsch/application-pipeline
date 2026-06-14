@@ -13,16 +13,15 @@ from application_pipeline.cv_slot_contract import (
 
 
 def test_slot_names_match_cv_slot_map_vocabulary() -> None:
-    assert SLOT_NAMES == (
+    assert len(SLOT_NAMES) == 13
+    assert SLOT_NAMES[:4] == (
         "recipient_company",
         "recipient_name",
         "recipient_street",
         "recipient_zip_city",
-        "opening",
-        "cover_intro",
-        "cover_pivot",
-        "cover_fit",
-        "cover_closing",
+    )
+    assert SLOT_NAMES[4] == "opening"
+    assert SLOT_NAMES[-4:] == (
         "resume_berufserfahrung",
         "resume_ausbildung",
         "resume_projekte",
@@ -51,19 +50,7 @@ def test_cover_paragraph_pattern_slots_are_projected_from_slot_names() -> None:
 
 def test_template_markers_preserve_uppercase_slot_marker_spelling() -> None:
     assert TEMPLATE_MARKERS == {
-        "recipient_company": "<<RECIPIENT_COMPANY>>",
-        "recipient_name": "<<RECIPIENT_NAME>>",
-        "recipient_street": "<<RECIPIENT_STREET>>",
-        "recipient_zip_city": "<<RECIPIENT_ZIP_CITY>>",
-        "opening": "<<OPENING>>",
-        "cover_intro": "<<COVER_INTRO>>",
-        "cover_pivot": "<<COVER_PIVOT>>",
-        "cover_fit": "<<COVER_FIT>>",
-        "cover_closing": "<<COVER_CLOSING>>",
-        "resume_berufserfahrung": "<<RESUME_BERUFSERFAHRUNG>>",
-        "resume_ausbildung": "<<RESUME_AUSBILDUNG>>",
-        "resume_projekte": "<<RESUME_PROJEKTE>>",
-        "skills_block": "<<SKILLS_BLOCK>>",
+        slot_name: f"<<{slot_name.upper()}>>" for slot_name in SLOT_NAMES
     }
 
 

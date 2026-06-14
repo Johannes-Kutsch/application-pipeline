@@ -12,6 +12,7 @@ import application_pipeline.compile_cv_cmd as compile_cv_cmd_module
 from application_pipeline.__main__ import main
 from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import _PdflatexAdapter, _PdflatexRunResult
+from application_pipeline.cv_slot_contract import SLOT_NAMES
 from application_pipeline.latex import slot_map
 
 
@@ -130,6 +131,33 @@ def _run_compile_workflow(app_dir: Path, pdflatex: _PdflatexAdapter) -> None:
 
 def _published_pdf(app_dir: Path, build_name: str) -> Path:
     return app_dir / f"{build_name}_{app_dir.name}.pdf"
+
+
+def _slot_bodies(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    bodies = {
+        "recipient_company": "Firma GmbH",
+        "recipient_name": "Frau Dr. Müller",
+        "recipient_street": "Musterstraße 1",
+        "recipient_zip_city": "12345 Berlin",
+        "opening": "Sehr geehrte Damen und Herren,",
+        "cover_intro": "Ich bewerbe mich hiermit.",
+        "cover_pivot": "Mein Hintergrund ist relevant.",
+        "cover_fit": "Ich passe gut zu Ihrer Firma.",
+        "cover_closing": "Ich freue mich auf Ihre Antwort.",
+        "resume_berufserfahrung": (
+            r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}"
+        ),
+        "resume_ausbildung": r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
+        "resume_projekte": r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
+        "skills_block": "Python, LaTeX",
+    }
+    if overrides is not None:
+        bodies.update(overrides)
+    return {name: bodies[name] for name in SLOT_NAMES}
+
+
+def _render_cv_tex(bodies: dict[str, str]) -> str:
+    return "".join(f"%% SLOT: {name}\n{body}\n" for name, body in bodies.items())
 
 
 @pytest.fixture()
@@ -367,34 +395,17 @@ def test_compile_cv_malformed_cv_slot_map_missing_slot_exits_before_build_or_pdf
     )
     app_dir.mkdir()
     app_dir.joinpath("cv.tex").write_text(
-        "\n".join(
-            (
-                "%% SLOT: recipient_company",
-                "Firma GmbH",
-                "%% SLOT: recipient_name",
-                "Frau Dr. Muller",
-                "%% SLOT: recipient_street",
-                "Musterstrasse 1",
-                "%% SLOT: recipient_zip_city",
-                "12345 Berlin",
-                "%% SLOT: opening",
-                "Sehr geehrte Damen und Herren,",
-                "%% SLOT: cover_intro",
-                "Ich bewerbe mich hiermit.",
-                "%% SLOT: cover_pivot",
-                "Mein Hintergrund ist relevant.",
-                "%% SLOT: cover_fit",
-                "Ich passe gut zu Ihrer Firma.",
-                "%% SLOT: cover_closing",
-                "Ich freue mich auf Ihre Antwort.",
-                "%% SLOT: resume_berufserfahrung",
-                r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
-                "%% SLOT: resume_ausbildung",
-                r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
-                "%% SLOT: skills_block",
-                "Python, LaTeX",
-                "",
-            )
+        _render_cv_tex(
+            {
+                name: body
+                for name, body in _slot_bodies(
+                    {
+                        "recipient_name": "Frau Dr. Muller",
+                        "recipient_street": "Musterstrasse 1",
+                    }
+                ).items()
+                if name != "resume_projekte"
+            }
         ),
         encoding="utf-8",
     )
@@ -467,25 +478,7 @@ def test_compile_cv_runs_two_passes_for_each_build_mode(
 
 
 def _valid_cv_tex() -> str:
-    slots = [
-        ("recipient_company", "Firma GmbH"),
-        ("recipient_name", "Frau Dr. Müller"),
-        ("recipient_street", "Musterstraße 1"),
-        ("recipient_zip_city", "12345 Berlin"),
-        ("opening", "Sehr geehrte Damen und Herren,"),
-        ("cover_intro", "Ich bewerbe mich hiermit."),
-        ("cover_pivot", "Mein Hintergrund ist relevant."),
-        ("cover_fit", "Ich passe gut zu Ihrer Firma."),
-        ("cover_closing", "Ich freue mich auf Ihre Antwort."),
-        (
-            "resume_berufserfahrung",
-            r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
-        ),
-        ("resume_ausbildung", r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}"),
-        ("resume_projekte", r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}"),
-        ("skills_block", "Python, LaTeX"),
-    ]
-    return "".join(f"%% SLOT: {name}\n{body}\n" for name, body in slots)
+    return _render_cv_tex(_slot_bodies())
 
 
 def test_compile_cv_missing_cv_tex_exits_with_write_cv_message(
@@ -539,23 +532,23 @@ def test_compile_cv_three_resume_slots_independently_substituted(
 ) -> None:
     app_dir = tmp_path / "app_resume"
     app_dir.mkdir()
-    slots = [
-        ("recipient_company", "Firma GmbH"),
-        ("recipient_name", "Frau Müller"),
-        ("recipient_street", "Musterstraße 1"),
-        ("recipient_zip_city", "12345 Berlin"),
-        ("opening", "Sehr geehrte Damen und Herren,"),
-        ("cover_intro", "Intro."),
-        ("cover_pivot", "Pivot."),
-        ("cover_fit", "Fit."),
-        ("cover_closing", "Closing."),
-        ("resume_berufserfahrung", "BERUFSINHALT"),
-        ("resume_ausbildung", "AUSBILDUNGSINHALT"),
-        ("resume_projekte", "PROJEKTINHALT"),
-        ("skills_block", "KENNTNISSE"),
-    ]
     (app_dir / "cv.tex").write_text(
-        "".join(f"%% SLOT: {n}\n{b}\n" for n, b in slots), encoding="utf-8"
+        _render_cv_tex(
+            _slot_bodies(
+                {
+                    "recipient_name": "Frau Müller",
+                    "cover_intro": "Intro.",
+                    "cover_pivot": "Pivot.",
+                    "cover_fit": "Fit.",
+                    "cover_closing": "Closing.",
+                    "resume_berufserfahrung": "BERUFSINHALT",
+                    "resume_ausbildung": "AUSBILDUNGSINHALT",
+                    "resume_projekte": "PROJEKTINHALT",
+                    "skills_block": "KENNTNISSE",
+                }
+            )
+        ),
+        encoding="utf-8",
     )
     _run_compile_workflow(app_dir, _passing_pdflatex_adapter())
 

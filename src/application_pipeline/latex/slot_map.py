@@ -3,11 +3,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from application_pipeline.cv_slot_contract import SLOT_NAMES
+from application_pipeline.cv_slot_contract import SLOT_NAME_SET
 
 _HEADER = re.compile(r"^%% SLOT: (\S+)\s*$")
-
-_CANONICAL_SLOTS: frozenset[str] = frozenset(SLOT_NAMES)
+_CANONICAL_SLOTS = SLOT_NAME_SET
 
 
 class SlotMapError(Exception):
@@ -43,11 +42,11 @@ def parse(path: Path) -> dict[str, str]:
     if current_name is not None:
         slots[current_name] = "".join(current_lines)
 
-    unknown = set(slots) - _CANONICAL_SLOTS
+    unknown = set(slots) - SLOT_NAME_SET
     if unknown:
         raise UnknownSlotError(f"unknown slots: {', '.join(sorted(unknown))}")
 
-    missing = _CANONICAL_SLOTS - set(slots)
+    missing = SLOT_NAME_SET - set(slots)
     if missing:
         raise MissingSlotError(f"missing slots: {', '.join(sorted(missing))}")
 

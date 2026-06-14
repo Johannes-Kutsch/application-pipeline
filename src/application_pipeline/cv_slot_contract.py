@@ -16,6 +16,8 @@ SLOT_NAMES: tuple[str, ...] = (
     "skills_block",
 )
 
+SLOT_NAME_SET: frozenset[str] = frozenset(SLOT_NAMES)
+
 COVER_PARAGRAPH_PATTERN_SLOTS: tuple[str, ...] = (
     "cover_intro",
     "cover_pivot",

@@ -6,7 +6,6 @@ from pathlib import Path
 from application_pipeline.cv_slot_contract import SLOT_NAME_SET
 
 _HEADER = re.compile(r"^%% SLOT: (\S+)\s*$")
-_CANONICAL_SLOTS = SLOT_NAME_SET
 
 
 class SlotMapError(Exception):

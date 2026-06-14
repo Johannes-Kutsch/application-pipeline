@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from application_pipeline.cv_slot_contract import (
     COVER_PARAGRAPH_PATTERN_SLOTS,
+    SLOT_NAME_SET,
     SLOT_NAMES,
     TEMPLATE_MARKERS,
     template_marker,
@@ -26,6 +27,10 @@ def test_slot_names_match_cv_slot_map_vocabulary() -> None:
         "resume_projekte",
         "skills_block",
     )
+
+
+def test_slot_name_set_matches_slot_name_vocabulary() -> None:
+    assert SLOT_NAME_SET == frozenset(SLOT_NAMES)
 
 
 def test_cover_paragraph_pattern_slots_match_cover_projection() -> None:

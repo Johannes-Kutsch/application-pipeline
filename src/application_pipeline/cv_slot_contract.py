@@ -16,11 +16,12 @@ SLOT_NAMES: tuple[str, ...] = (
     "skills_block",
 )
 
-COVER_PARAGRAPH_PATTERN_SLOTS: tuple[str, ...] = (
-    "cover_intro",
-    "cover_pivot",
-    "cover_fit",
-    "cover_closing",
+_COVER_PARAGRAPH_SLOT_PREFIX = "cover_"
+
+COVER_PARAGRAPH_PATTERN_SLOTS: tuple[str, ...] = tuple(
+    slot_name
+    for slot_name in SLOT_NAMES
+    if slot_name.startswith(_COVER_PARAGRAPH_SLOT_PREFIX)
 )
 
 TEMPLATE_MARKERS: dict[str, str] = {

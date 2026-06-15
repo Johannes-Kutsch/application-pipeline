@@ -136,6 +136,49 @@ def test_lifecycle_creates_lifecycle_jsonl(tmp_path: Path) -> None:
     assert row["phase"] == "running"
 
 
+def test_lifecycle_uses_shared_root_file_and_preserves_writer_owned_fields(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+
+    log.lifecycle(
+        "parser_alpha",
+        "registered",
+        ts="not-the-real-timestamp",
+        component="shadowed",
+        phase="running",
+    )
+    log.lifecycle("llm_beta", "removed")
+
+    lifecycle_file = tmp_path / "lifecycle.jsonl"
+    assert lifecycle_file.exists()
+
+    rows = [
+        json.loads(line)
+        for line in lifecycle_file.read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows == [
+        {
+            "ts": rows[0]["ts"],
+            "event": "registered",
+            "component": "parser_alpha",
+            "phase": "running",
+        },
+        {
+            "ts": rows[1]["ts"],
+            "event": "removed",
+            "component": "llm_beta",
+        },
+    ]
+    assert _ISO8601_RE.match(rows[0]["ts"])
+    assert _ISO8601_RE.match(rows[1]["ts"])
+    assert not (tmp_path / "parser_alpha.events.jsonl").exists()
+    assert not (tmp_path / "parser_alpha.transcripts.jsonl").exists()
+    assert not (tmp_path / "llm_beta.events.jsonl").exists()
+    assert not (tmp_path / "llm_beta.transcripts.jsonl").exists()
+    assert not (tmp_path / "run.log").exists()
+
+
 def test_transcript_creates_transcripts_jsonl(tmp_path: Path) -> None:
     log = RunLog(tmp_path)
     entry = {"role": "user", "content": "hello"}

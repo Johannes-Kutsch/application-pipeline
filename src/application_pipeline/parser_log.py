@@ -49,10 +49,10 @@ class RunLog:
         self._write_jsonl(
             self.logs_dir / "lifecycle.jsonl",
             {
+                **fields,
                 "ts": self._now(),
                 "event": event_type,
                 "component": component_id,
-                **fields,
             },
         )
 

@@ -145,6 +145,7 @@ def test_lifecycle_uses_shared_root_file_and_preserves_writer_owned_fields(
         "parser_alpha",
         "registered",
         ts="not-the-real-timestamp",
+        event="shadowed",
         component="shadowed",
         phase="running",
     )
@@ -172,10 +173,8 @@ def test_lifecycle_uses_shared_root_file_and_preserves_writer_owned_fields(
     ]
     assert _ISO8601_RE.match(rows[0]["ts"])
     assert _ISO8601_RE.match(rows[1]["ts"])
-    assert not (tmp_path / "parser_alpha.events.jsonl").exists()
-    assert not (tmp_path / "parser_alpha.transcripts.jsonl").exists()
-    assert not (tmp_path / "llm_beta.events.jsonl").exists()
-    assert not (tmp_path / "llm_beta.transcripts.jsonl").exists()
+    assert not (tmp_path / "parser").exists()
+    assert not (tmp_path / "llm").exists()
     assert not (tmp_path / "run.log").exists()
 
 

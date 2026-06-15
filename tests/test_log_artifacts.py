@@ -227,6 +227,55 @@ def test_unprefixed_event_rows_keep_existing_root_file_behavior(tmp_path: Path) 
 
 
 # ---------------------------------------------------------------------------
+# <layer>/<rest>.transcripts.jsonl — transcript rows, one JSON object per line
+# ---------------------------------------------------------------------------
+
+
+def test_transcript_rows_for_prefixed_component_preserve_nested_and_null_fields(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    entry = {
+        "prompt": {"system": "triage", "messages": ["first", None]},
+        "response": {"matches": True, "reason": None},
+        "usage": {"input_tokens": 100, "output_tokens": 20},
+        "cost_usd": None,
+    }
+
+    log.transcript("llm_classify_relevance", entry)
+
+    transcript_file = tmp_path / "llm" / "classify_relevance.transcripts.jsonl"
+    assert transcript_file.exists()
+    assert json.loads(transcript_file.read_text(encoding="utf-8").strip()) == entry
+    assert not (tmp_path / "llm_classify_relevance.transcripts.jsonl").exists()
+
+
+def test_transcript_rows_append_in_call_order_and_stay_independent_from_events(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    log.event("llm_classify_relevance", "batch_sent", batch_id="b1")
+    entries: list[dict[str, object]] = [
+        {"status": "ok", "item_ids": [1, 2]},
+        {"status": "error", "item_ids": [], "parsed": None},
+    ]
+
+    for entry in entries:
+        log.transcript("llm_classify_relevance", entry)
+
+    transcript_file = tmp_path / "llm" / "classify_relevance.transcripts.jsonl"
+    assert transcript_file.exists()
+    assert [
+        json.loads(line)
+        for line in transcript_file.read_text(encoding="utf-8").splitlines()
+    ] == entries
+
+    event_file = tmp_path / "llm" / "classify_relevance.events.jsonl"
+    assert event_file.exists()
+    assert len(event_file.read_text(encoding="utf-8").splitlines()) == 1
+
+
+# ---------------------------------------------------------------------------
 # run.log — tracebacks
 # ---------------------------------------------------------------------------
 

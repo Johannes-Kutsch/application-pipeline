@@ -76,6 +76,23 @@ def test_record_each_line_has_iso8601_timestamp(tmp_path: Path) -> None:
     assert all(_ISO8601_RE.match(json.loads(line)["ts"]) for line in lines)
 
 
+def test_pipeline_component_event_uses_pipeline_subdir_with_stripped_filename(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    log.event("pipeline_run_metrics", "run_complete", matched=5)
+
+    events_file = tmp_path / "pipeline" / "run_metrics.events.jsonl"
+    assert events_file.exists()
+    assert not (tmp_path / "pipeline_run_metrics.events.jsonl").exists()
+
+    row = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert _ISO8601_RE.match(row["ts"])
+    assert row["event"] == "run_complete"
+    assert row["matched"] == 5
+    assert "component" not in row
+
+
 # ---------------------------------------------------------------------------
 # transcript
 # ---------------------------------------------------------------------------

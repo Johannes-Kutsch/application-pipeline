@@ -290,10 +290,14 @@ def test_traceback_writes_to_run_log_with_header(tmp_path: Path) -> None:
     run_log_file = tmp_path / "run.log"
     assert run_log_file.exists()
     content = run_log_file.read_text(encoding="utf-8")
-    assert "=== parser_bundesagentur_api" in content
-    assert "traceback" in content
-    assert "Traceback (most recent call last):" in content
-    assert "ValueError: oops" in content
+    lines = content.splitlines()
+    assert lines[0].startswith("=== parser_bundesagentur_api  ")
+    assert lines[0].endswith("  traceback ===")
+    assert lines[1:] == [
+        "Traceback (most recent call last):",
+        "  File ...",
+        "ValueError: oops",
+    ]
 
 
 def test_traceback_does_not_write_to_component_log(tmp_path: Path) -> None:
@@ -301,6 +305,22 @@ def test_traceback_does_not_write_to_component_log(tmp_path: Path) -> None:
     log.traceback("parser_bundesagentur_api", "Traceback...\nValueError\n")
 
     assert not (tmp_path / "parser_bundesagentur_api.log").exists()
+
+
+def test_traceback_without_trailing_newline_keeps_next_block_on_fresh_line_and_stays_root_only(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+
+    log.traceback("parser_bundesagentur_api", "Traceback...\nValueError")
+    log.traceback("parser_bundesagentur_api", "Another traceback...\nTypeError\n")
+
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
+    assert "ValueError\n=== parser_bundesagentur_api  " in content
+    assert "Another traceback...\nTypeError\n" in content
+    assert not (tmp_path / "parser" / "bundesagentur_api.log").exists()
+    assert not (tmp_path / "parser" / "bundesagentur_api.events.jsonl").exists()
+    assert not (tmp_path / "parser" / "bundesagentur_api.transcripts.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------

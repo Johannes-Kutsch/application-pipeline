@@ -291,8 +291,10 @@ def test_traceback_writes_to_run_log_with_header(tmp_path: Path) -> None:
     assert run_log_file.exists()
     content = run_log_file.read_text(encoding="utf-8")
     lines = content.splitlines()
-    assert lines[0].startswith("=== parser_bundesagentur_api  ")
-    assert lines[0].endswith("  traceback ===")
+    assert re.fullmatch(
+        r"=== parser_bundesagentur_api  \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z  traceback ===",
+        lines[0],
+    )
     assert lines[1:] == [
         "Traceback (most recent call last):",
         "  File ...",

@@ -143,53 +143,35 @@ def test_run_exits_nonzero_on_bad_config(
     assert exc_info.value.code != 0
 
 
-def test_run_materialises_logs_in_home(
+def test_run_materialises_logs_in_settings_dir_runtime_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    home = tmp_path / "application-pipeline"
-    _make_config(home)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator.run",
-        lambda *_a, **_kw: _fake_run_summary(),
-    )
+    settings_dir = _prepare_run_settings_dir(tmp_path, monkeypatch)
 
     _run_main(["run"])
 
-    assert (home / ".runtime-data" / "logs").is_dir()
+    assert (settings_dir / ".runtime-data" / "logs").is_dir()
 
 
-def test_run_logs_land_in_home_not_in_cwd_root(
+def test_run_materialises_logs_in_settings_dir_not_cwd_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    home = tmp_path / "application-pipeline"
-    _make_config(home)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator.run",
-        lambda *_a, **_kw: _fake_run_summary(),
-    )
+    settings_dir = _prepare_run_settings_dir(tmp_path, monkeypatch)
 
     _run_main(["run"])
 
-    assert (home / ".runtime-data" / "logs").is_dir()
+    assert (settings_dir / ".runtime-data" / "logs").is_dir()
     assert not (tmp_path / "logs").exists(), (
         "logs must not be created directly under cwd"
     )
 
 
-def test_run_prints_summary_line(
+def test_run_prints_completion_summary_line(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    home = tmp_path / "application-pipeline"
-    _make_config(home)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator.run",
-        lambda *_a, **_kw: _fake_run_summary(),
-    )
+    _prepare_run_settings_dir(tmp_path, monkeypatch)
 
     _run_main(["run"])
 
@@ -243,6 +225,17 @@ def _make_config(home: Path) -> Path:
     config_path = home / "config.py"
     config_path.write_text("# stub\n")
     return config_path
+
+
+def _prepare_run_settings_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    settings_dir = tmp_path / "application-pipeline"
+    _make_config(settings_dir)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: _fake_run_summary(),
+    )
+    return settings_dir
 
 
 def _fake_run_summary() -> object:

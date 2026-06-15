@@ -36,29 +36,6 @@ def test_record_appends_key_value_fields(tmp_path: Path) -> None:
     assert row["reason"] == "timeout"
 
 
-def test_parser_component_event_uses_layer_file_and_omits_component_field(
-    tmp_path: Path,
-) -> None:
-    log = RunLog(tmp_path)
-    log.event(
-        "parser_bundesagentur_api",
-        "discover_started",
-        query="python",
-        page=1,
-    )
-
-    events_file = tmp_path / "parser" / "bundesagentur_api.events.jsonl"
-    assert events_file.exists()
-    assert not (tmp_path / "parser_bundesagentur_api.events.jsonl").exists()
-
-    row = json.loads(events_file.read_text(encoding="utf-8").strip())
-    assert _ISO8601_RE.match(row["ts"])
-    assert row["event"] == "discover_started"
-    assert row["query"] == "python"
-    assert row["page"] == 1
-    assert "component" not in row
-
-
 def test_record_multiple_calls_append(tmp_path: Path) -> None:
     log = RunLog(tmp_path)
     log.event("p", "parser_started")
@@ -68,32 +45,6 @@ def test_record_multiple_calls_append(tmp_path: Path) -> None:
     assert len(lines) == 2
     assert json.loads(lines[0])["event"] == "parser_started"
     assert json.loads(lines[1])["event"] == "enrich_failed"
-
-
-def test_parser_component_multiple_calls_append_one_json_object_per_line(
-    tmp_path: Path,
-) -> None:
-    log = RunLog(tmp_path)
-    log.event("parser_bundesagentur_api", "discover_started", page=1)
-    log.event("parser_bundesagentur_api", "discover_finished", page=1, found=25)
-
-    lines = (
-        (tmp_path / "parser" / "bundesagentur_api.events.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    )
-    assert len(lines) == 2
-    assert json.loads(lines[0]) == {
-        "ts": json.loads(lines[0])["ts"],
-        "event": "discover_started",
-        "page": 1,
-    }
-    assert json.loads(lines[1]) == {
-        "ts": json.loads(lines[1])["ts"],
-        "event": "discover_finished",
-        "page": 1,
-        "found": 25,
-    }
 
 
 # ---------------------------------------------------------------------------

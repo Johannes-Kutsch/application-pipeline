@@ -138,6 +138,94 @@ def test_record_writes_jsonl_row_to_events_file(tmp_path: Path) -> None:
     assert not (tmp_path / "parser_bundesagentur_api.events.jsonl").exists()
 
 
+def test_event_rows_route_each_prefixed_layer_to_subdir_with_stripped_filename(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    log.event("parser_bundesagentur_api", "discover_started", page=1)
+    log.event("llm_classify_relevance", "batch_sent", batch_id="b1")
+    log.event("pipeline_run_metrics", "run_complete", matched=5)
+
+    parser_row = json.loads(
+        (tmp_path / "parser" / "bundesagentur_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    llm_row = json.loads(
+        (tmp_path / "llm" / "classify_relevance.events.jsonl")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+    pipeline_row = json.loads(
+        (tmp_path / "pipeline" / "run_metrics.events.jsonl")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+
+    assert _ISO8601_RE.match(parser_row["ts"])
+    assert parser_row["event"] == "discover_started"
+    assert parser_row["page"] == 1
+    assert "component" not in parser_row
+    assert not (tmp_path / "parser_bundesagentur_api.events.jsonl").exists()
+
+    assert _ISO8601_RE.match(llm_row["ts"])
+    assert llm_row["event"] == "batch_sent"
+    assert llm_row["batch_id"] == "b1"
+    assert "component" not in llm_row
+    assert not (tmp_path / "llm_classify_relevance.events.jsonl").exists()
+
+    assert _ISO8601_RE.match(pipeline_row["ts"])
+    assert pipeline_row["event"] == "run_complete"
+    assert pipeline_row["matched"] == 5
+    assert "component" not in pipeline_row
+    assert not (tmp_path / "pipeline_run_metrics.events.jsonl").exists()
+
+
+def test_event_rows_for_prefixed_component_append_one_json_object_per_line_in_call_order(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    log.event("parser_bundesagentur_api", "discover_started", page=1)
+    log.event("parser_bundesagentur_api", "discover_finished", page=1, found=25)
+
+    lines = (
+        (tmp_path / "parser" / "bundesagentur_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    rows = [json.loads(line) for line in lines]
+
+    assert len(rows) == 2
+    assert _ISO8601_RE.match(rows[0]["ts"])
+    assert rows[0] == {
+        "ts": rows[0]["ts"],
+        "event": "discover_started",
+        "page": 1,
+    }
+    assert _ISO8601_RE.match(rows[1]["ts"])
+    assert rows[1] == {
+        "ts": rows[1]["ts"],
+        "event": "discover_finished",
+        "page": 1,
+        "found": 25,
+    }
+
+
+def test_unprefixed_event_rows_keep_existing_root_file_behavior(tmp_path: Path) -> None:
+    log = RunLog(tmp_path)
+    log.event("startup", "phase_started", phase="bootstrap")
+
+    events_file = tmp_path / "startup.events.jsonl"
+    assert events_file.exists()
+
+    row = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert _ISO8601_RE.match(row["ts"])
+    assert row["event"] == "phase_started"
+    assert row["phase"] == "bootstrap"
+    assert "component" not in row
+    assert not (tmp_path / "startup" / "phase_started.events.jsonl").exists()
+
+
 # ---------------------------------------------------------------------------
 # run.log — tracebacks
 # ---------------------------------------------------------------------------

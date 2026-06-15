@@ -143,6 +143,60 @@ def test_run_exits_nonzero_on_bad_config(
     assert exc_info.value.code != 0
 
 
+def test_run_materialises_logs_in_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "application-pipeline"
+    _make_config(home)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: _fake_run_summary(),
+    )
+
+    _run_main(["run"])
+
+    assert (home / ".runtime-data" / "logs").is_dir()
+
+
+def test_run_logs_land_in_home_not_in_cwd_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "application-pipeline"
+    _make_config(home)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: _fake_run_summary(),
+    )
+
+    _run_main(["run"])
+
+    assert (home / ".runtime-data" / "logs").is_dir()
+    assert not (tmp_path / "logs").exists(), (
+        "logs must not be created directly under cwd"
+    )
+
+
+def test_run_prints_summary_line(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / "application-pipeline"
+    _make_config(home)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: _fake_run_summary(),
+    )
+
+    _run_main(["run"])
+
+    out = capsys.readouterr().out
+    assert out.startswith("run complete:")
+
+
 def test_run_no_judge_flag_exits_2_without_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -5,8 +5,6 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
-
 from application_pipeline.parser_log import RunLog
 
 _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
@@ -121,58 +119,6 @@ def test_two_sessions_produce_two_summary_blocks(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# __main__ startup
-# ---------------------------------------------------------------------------
-
-
-def test_main_materialises_logs_in_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from application_pipeline.orchestrator import RunSummary
-
-    home = tmp_path / "application-pipeline"
-    home.mkdir()
-    (home / "config.py").write_text("", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("sys.argv", ["app", "run"])
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator.run",
-        lambda *_a, **_kw: RunSummary(),
-    )
-
-    from application_pipeline.__main__ import main
-
-    main()
-
-    assert (home / ".runtime-data" / "logs").is_dir()
-
-
-def test_main_logs_land_in_home_not_in_cwd_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from application_pipeline.orchestrator import RunSummary
-
-    home = tmp_path / "application-pipeline"
-    home.mkdir()
-    (home / "config.py").write_text("", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("sys.argv", ["app", "run"])
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator.run",
-        lambda *_a, **_kw: RunSummary(),
-    )
-
-    from application_pipeline.__main__ import main
-
-    main()
-
-    assert (home / ".runtime-data" / "logs").is_dir()
-    assert not (tmp_path / "logs").exists(), (
-        "logs must not be created directly under cwd"
-    )
-
-
-# ---------------------------------------------------------------------------
 # lifecycle / transcript / construction
 # ---------------------------------------------------------------------------
 
@@ -207,26 +153,3 @@ def test_construction_creates_logs_dir_with_parents(tmp_path: Path) -> None:
     assert not nested.exists()
     RunLog(nested)
     assert nested.is_dir()
-
-
-def test_main_run_prints_summary_line(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from application_pipeline.orchestrator import RunSummary
-
-    home = tmp_path / "application-pipeline"
-    home.mkdir()
-    (home / "config.py").write_text("", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("sys.argv", ["app", "run"])
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator.run",
-        lambda *_a, **_kw: RunSummary(),
-    )
-
-    from application_pipeline.__main__ import main
-
-    main()
-
-    out = capsys.readouterr().out
-    assert out.startswith("run complete:")

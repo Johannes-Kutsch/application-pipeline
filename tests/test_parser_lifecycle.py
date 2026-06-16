@@ -456,6 +456,10 @@ def test_parser_dead_preserves_failure_report_run_log_and_metrics_observations(
         if call.method == "update_phase" and call.name == "parser test parser"
     ]
     assert phase_calls[-1].kwargs["phase"] == "dead"
+    assert "discovered=0" in run_log_content
+    assert "enrich_failed=0" in run_log_content
+    assert "not_served_queries=0" in run_log_content
+    assert "unparseable_dates=0" in run_log_content
 
 
 def test_stall_watchdog_logs_one_stalled_event_and_stack_trace_via_lifecycle(
@@ -564,3 +568,76 @@ def test_parser_summary_duration_is_nonnegative_in_run_log(
     run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
     assert "=== parser_test_parser" in run_log_content
     assert "duration=0.0" in run_log_content
+
+
+def test_parser_lifecycle_emits_one_parser_summary_section_per_parser(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    card_store = load_card_store(tmp_path / "extracts.json")
+    dedup = load_dedup(
+        tmp_path / ".seen.json",
+        card_store=card_store,
+        run_log=run_log,
+    )
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser(
+        "parser_a",
+        order=0,
+        total_queries=1,
+        has_native_enrich=False,
+    )
+    metrics.register_parser(
+        "parser_b",
+        order=2,
+        total_queries=1,
+        has_native_enrich=False,
+    )
+
+    run_parser_lifecycle(
+        ParserLifecyclePlan(
+            parsers=[
+                ParserLifecycleExecution(
+                    parser=_ImmediateParser(),
+                    parser_id="parser_a",
+                    classify_handoff=_CollectingHandoff(),
+                ),
+                ParserLifecycleExecution(
+                    parser=_ImmediateParser(),
+                    parser_id="parser_b",
+                    classify_handoff=_CollectingHandoff(),
+                ),
+            ],
+            keywords=["python"],
+            locations=[City("Hamburg")],
+            collaborators=ParserLifecycleCollaborators(
+                run_log=run_log,
+                run_state=_RunState(),
+                freshness=FreshnessGate(
+                    anchored_today=date(2026, 6, 16),
+                    max_listing_age_days=30,
+                    dedup=dedup,
+                    run_log=run_log,
+                    card_store=card_store,
+                ),
+                prefilter=PreFilterGate(
+                    blacklist=[],
+                    dedup=dedup,
+                    run_log=run_log,
+                ),
+                content_gate=ContentGate(run_log=run_log),
+                dedup=dedup,
+                dedup_counters=DedupCounters(display=display, run_log=run_log),
+                pool=Pool(),
+                metrics=metrics,
+                card_store=card_store,
+                failure_report_writer=FailureReportWriter(tmp_path / "failures"),
+            ),
+        )
+    )
+
+    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert run_log_content.count("=== parser_parser_a") == 1
+    assert run_log_content.count("=== parser_parser_b") == 1

@@ -1260,6 +1260,10 @@ def test_orchestrator_parser_lifecycle_full_run_smoke(tmp_path: Path) -> None:
         "query_started",
         "query_ended",
     ]
+    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
+    assert "SUMMARY OF SESSION" in run_log_content
+    assert "=== parser_bundesagentur_api" in run_log_content
+    assert "queries_done=1" in run_log_content
 
     # .seen.json: 2 out_of_domain, 4 selected_by_judge
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))

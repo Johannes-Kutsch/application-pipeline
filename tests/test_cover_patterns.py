@@ -664,6 +664,34 @@ def test_cover_pattern_library_rejects_multi_paragraph_text_at_seam() -> None:
         )
 
 
+def test_cover_pattern_library_rejects_multi_paragraph_text_with_spaced_blank_line_at_seam() -> (
+    None
+):
+    with pytest.raises(
+        CoverPatternError,
+        match="Spaced Paragraphs: must contain exactly one paragraph",
+    ):
+        CoverPatternLibrary(
+            (
+                CoverPattern(
+                    name="Spaced Paragraphs",
+                    slot="cover_intro",
+                    argument_type="resonance",
+                    use_when="If the product is unusually compelling.",
+                    placeholders=("Musterfirma",),
+                    why_it_works="It is specific.",
+                    text=(
+                        "Ich will bei Musterfirma arbeiten, weil mich das Thema "
+                        "lange begleitet und ich es konkret weiterbauen will.\n"
+                        "   \n"
+                        "Der zweite Absatz duerfte auch mit Leerzeichen in der "
+                        "Trennzeile nicht erlaubt sein."
+                    ),
+                ),
+            )
+        )
+
+
 def test_cover_pattern_library_rejects_one_sentence_text_at_seam() -> None:
     with pytest.raises(
         CoverPatternError,

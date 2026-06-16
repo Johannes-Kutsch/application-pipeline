@@ -133,9 +133,10 @@ def _validate_pattern(pattern: CoverPattern) -> str:
 
 
 def _normalize_pattern_text(name: str, text: str) -> str:
+    normalized_text = text.replace("\r\n", "\n").strip()
     paragraphs = [
         " ".join(line.strip() for line in chunk.splitlines() if line.strip())
-        for chunk in text.strip().split("\n\n")
+        for chunk in re.split(r"\n\s*\n", normalized_text)
         if chunk.strip()
     ]
     if not paragraphs:

@@ -310,19 +310,33 @@ class DeduplicationStore:
             return _MatchDecision("miss", miss_listing_id)
         return _MatchDecision("tuple_hit", listing_id, mutation="prepend_url_persist")
 
-    def _apply_exact_tuple_match(
+    def _decide_fuzzy_match(
+        self,
+        listing_id: int,
+        record: dict[str, Any],
+    ) -> _MatchDecision:
+        """Return the private match decision for a fuzzy hit."""
+        if self._in_run is not None and listing_id in self._in_run:
+            return _MatchDecision("run_hit", listing_id)
+        if record.get("status") == "matched":
+            return _MatchDecision(
+                "judge_pending", listing_id, mutation="prepend_url_in_memory"
+            )
+        return _MatchDecision("fuzzy_hit", listing_id, mutation="prepend_url_persist")
+
+    def _apply_alias_match(
         self,
         decision: _MatchDecision,
         *,
         key: _SeenKey,
     ) -> RunScopedSeenResult:
-        """Apply tuple-match side effects and return the public result."""
+        """Apply tuple/fuzzy alias side effects and return the public result."""
         if decision.mutation == "prepend_url_in_memory":
             self._prepend_url(decision.listing_id, key.url, persist=False)
             if self._in_run is not None:
                 self._in_run.add(decision.listing_id)
         elif decision.mutation == "prepend_url_persist":
-            self._log_hit("tuple_hit", key, decision.listing_id)
+            self._log_hit(decision.kind, key, decision.listing_id)
             self._prepend_url(decision.listing_id, key.url, persist=True)
         return RunScopedSeenResult(decision.kind, decision.listing_id)
 
@@ -351,16 +365,13 @@ class DeduplicationStore:
                             match_record,
                             miss_listing_id=existing_id,
                         )
-                        return self._apply_exact_tuple_match(decision, key=key)
+                        return self._apply_alias_match(decision, key=key)
                     match_id = self._fuzzy_lookup(key)
                     if match_id is not None and match_id != existing_id:
-                        match_status = self._records[match_id].get("status")
-                        if match_status == "matched":
-                            self._prepend_url(match_id, key.url, persist=False)
-                            return RunScopedSeenResult("judge_pending", match_id)
-                        self._log_hit("fuzzy_hit", key, match_id)
-                        self._prepend_url(match_id, key.url, persist=True)
-                        return RunScopedSeenResult("fuzzy_hit", match_id)
+                        decision = self._decide_fuzzy_match(
+                            match_id, self._records[match_id]
+                        )
+                        return self._apply_alias_match(decision, key=key)
                 decision = self._decide_existing_url_match(existing_id, existing)
                 if decision.mutation == "refresh_pending":
                     # No cross-listing match; refresh pending with backfilled fields.
@@ -375,21 +386,12 @@ class DeduplicationStore:
                     self._records[match_id],
                     miss_listing_id=self._next_id,
                 )
-                return self._apply_exact_tuple_match(decision, key=key)
+                return self._apply_alias_match(decision, key=key)
 
             match_id = self._fuzzy_lookup(key)
             if match_id is not None:
-                original_status = self._records[match_id].get("status")
-                if original_status == "matched":
-                    if self._in_run is not None and match_id in self._in_run:
-                        return RunScopedSeenResult("run_hit", match_id)
-                    self._prepend_url(match_id, key.url, persist=False)
-                    if self._in_run is not None:
-                        self._in_run.add(match_id)
-                    return RunScopedSeenResult("judge_pending", match_id)
-                self._log_hit("fuzzy_hit", key, match_id)
-                self._prepend_url(match_id, key.url, persist=True)
-                return RunScopedSeenResult("fuzzy_hit", match_id)
+                decision = self._decide_fuzzy_match(match_id, self._records[match_id])
+                return self._apply_alias_match(decision, key=key)
 
             new_id = self._write_pending(key)
             if self._in_run is not None:

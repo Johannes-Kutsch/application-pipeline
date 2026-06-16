@@ -384,10 +384,22 @@ def test_lifecycle_records_not_served_and_completed_queries_without_parser_dead(
 
     run_parser_lifecycle(plan)
 
+    events_path = tmp_path / "logs" / "parser" / "test_parser.events.jsonl"
+    event_rows = [
+        {k: v for k, v in json.loads(line).items() if k != "ts"}
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
     run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
     assert "not_served_queries=1" in run_log_content
     assert "queries_done=2" in run_log_content
     assert "parsers_dead=0" in run_log_content
+    assert event_rows == [
+        {"event": "parser started"},
+        {"event": "query_started", "keyword": "python", "location": "Hamburg"},
+        {"event": "query_ended", "keyword": "python", "location": "Hamburg"},
+        {"event": "query_started", "keyword": "django", "location": "Hamburg"},
+        {"event": "query_ended", "keyword": "django", "location": "Hamburg"},
+    ]
 
     phase_calls = [
         call

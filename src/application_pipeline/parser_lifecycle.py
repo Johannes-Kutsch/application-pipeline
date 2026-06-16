@@ -267,91 +267,92 @@ def run_parser_lifecycle(
     parser_states: dict[str, _ParserState] = {}
     threads: list[tuple[str, _ParserThread]] = []
 
-    for execution in plan.parsers:
-        parser = execution.parser
-        parser_id = execution.parser_id
-        worklist = [
-            ParserQuery(keyword=keyword, location=location)
-            for keyword in plan.keywords
-            for location in plan.locations
-        ]
-        parser_states[parser_id] = _ParserState(parser_id=parser_id)
-        threads.append(
-            (
-                parser_id,
-                _ParserThread(
+    with collaborators.dedup.run_scope():
+        for execution in plan.parsers:
+            parser = execution.parser
+            parser_id = execution.parser_id
+            worklist = [
+                ParserQuery(keyword=keyword, location=location)
+                for keyword in plan.keywords
+                for location in plan.locations
+            ]
+            parser_states[parser_id] = _ParserState(parser_id=parser_id)
+            threads.append(
+                (
                     parser_id,
-                    parser,
-                    worklist,
-                    outbound,
-                    classify_handoff=execution.classify_handoff,
+                    _ParserThread(
+                        parser_id,
+                        parser,
+                        worklist,
+                        outbound,
+                        classify_handoff=execution.classify_handoff,
+                        run_log=collaborators.run_log,
+                        run_state=collaborators.run_state,
+                        freshness=collaborators.freshness,
+                        prefilter=collaborators.prefilter,
+                        content_gate=collaborators.content_gate,
+                        dedup=collaborators.dedup,
+                        dedup_counters=collaborators.dedup_counters,
+                        pool=collaborators.pool,
+                        metrics=collaborators.metrics,
+                        card_store=collaborators.card_store,
+                    ),
+                )
+            )
+
+        for parser_id, thread in threads:
+            state = parser_states[parser_id]
+            state.started_at = datetime.now(timezone.utc)
+            state.started_monotonic = time.monotonic()
+            state.last_event_monotonic = state.started_monotonic
+            _log.info("parser %s started", parser_id)
+            collaborators.run_log.event("parser_" + parser_id, "parser started")
+            thread.start()
+
+        dispatcher = _OutboundDispatcher(
+            metrics=collaborators.metrics,
+            run_log=collaborators.run_log,
+            failure_report_writer=collaborators.failure_report_writer,
+        )
+        parsers_remaining: set[str] = set(parser_states)
+        poll_s = min(collaborators.stall_threshold_s, 5.0)
+
+        while parsers_remaining:
+            try:
+                parser_id, payload = outbound.get(timeout=poll_s)
+            except queue.Empty:
+                if collaborators.run_state.is_aborted:
+                    continue
+                _log_parser_stalls(
+                    parser_states=parser_states,
+                    parsers_remaining=parsers_remaining,
+                    threads=threads,
                     run_log=collaborators.run_log,
-                    run_state=collaborators.run_state,
-                    freshness=collaborators.freshness,
-                    prefilter=collaborators.prefilter,
-                    content_gate=collaborators.content_gate,
-                    dedup=collaborators.dedup,
-                    dedup_counters=collaborators.dedup_counters,
-                    pool=collaborators.pool,
-                    metrics=collaborators.metrics,
-                    card_store=collaborators.card_store,
-                ),
-            )
-        )
-
-    for parser_id, thread in threads:
-        state = parser_states[parser_id]
-        state.started_at = datetime.now(timezone.utc)
-        state.started_monotonic = time.monotonic()
-        state.last_event_monotonic = state.started_monotonic
-        _log.info("parser %s started", parser_id)
-        collaborators.run_log.event("parser_" + parser_id, "parser started")
-        thread.start()
-
-    dispatcher = _OutboundDispatcher(
-        metrics=collaborators.metrics,
-        run_log=collaborators.run_log,
-        failure_report_writer=collaborators.failure_report_writer,
-    )
-    parsers_remaining: set[str] = set(parser_states)
-    poll_s = min(collaborators.stall_threshold_s, 5.0)
-
-    while parsers_remaining:
-        try:
-            parser_id, payload = outbound.get(timeout=poll_s)
-        except queue.Empty:
-            if collaborators.run_state.is_aborted:
+                    stall_threshold_s=collaborators.stall_threshold_s,
+                )
                 continue
-            _log_parser_stalls(
-                parser_states=parser_states,
-                parsers_remaining=parsers_remaining,
-                threads=threads,
-                run_log=collaborators.run_log,
-                stall_threshold_s=collaborators.stall_threshold_s,
+
+            current_stage.set(f"parser:{parser_id}")
+            state = parser_states[parser_id]
+            state.last_event_monotonic = time.monotonic()
+            state.stall_logged = False
+            if dispatcher.dispatch(parser_id, payload):
+                parsers_remaining.discard(parser_id)
+
+        for _, thread in threads:
+            thread.join()
+
+        parsers_done_monotonic = time.monotonic()
+        for parser_id, parser_state in parser_states.items():
+            collaborators.run_log.summary(
+                "parser_" + parser_id,
+                collaborators.metrics.parser_summary(
+                    parser_id,
+                    parsers_done_monotonic,
+                    parser_state.started_monotonic,
+                ),
+                parser_state.started_at,
             )
-            continue
-
-        current_stage.set(f"parser:{parser_id}")
-        state = parser_states[parser_id]
-        state.last_event_monotonic = time.monotonic()
-        state.stall_logged = False
-        if dispatcher.dispatch(parser_id, payload):
-            parsers_remaining.discard(parser_id)
-
-    for _, thread in threads:
-        thread.join()
-
-    parsers_done_monotonic = time.monotonic()
-    for parser_id, parser_state in parser_states.items():
-        collaborators.run_log.summary(
-            "parser_" + parser_id,
-            collaborators.metrics.parser_summary(
-                parser_id,
-                parsers_done_monotonic,
-                parser_state.started_monotonic,
-            ),
-            parser_state.started_at,
-        )
 
 
 def _log_parser_stalls(

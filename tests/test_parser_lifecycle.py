@@ -34,6 +34,9 @@ class _RunState:
 
 
 class _CollectingHandoff:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, PositionStub, str, str]] = []
+
     def submit_ready(
         self,
         *,
@@ -42,7 +45,7 @@ class _CollectingHandoff:
         raw_description: str,
         parser_id: str,
     ) -> None:
-        pass
+        self.calls.append((listing_id, stub, raw_description, parser_id))
 
 
 class _ExplosiveTruthinessHandoff:
@@ -175,6 +178,26 @@ class _LifecycleAccountingParser:
         return EnrichResult(stub=stub, body="x" * 200, mode="fallback")
 
 
+class _PrefilterDropParser:
+    def __enter__(self) -> _PrefilterDropParser:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery):
+        yield PositionStub(
+            url="https://example.com/blacklisted",
+            title="Senior Python Developer",
+            source="test",
+            company="Acme",
+            location="Hamburg",
+        )
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        raise AssertionError("prefilter drop should stop before enrich()")
+
+
 class _DiscoverCrashParser:
     def __enter__(self) -> _DiscoverCrashParser:
         return self
@@ -266,6 +289,7 @@ def _make_plan_with_display(
     parser: Parser,
     keywords: list[str] | None = None,
     locations: list[City | Remote] | None = None,
+    blacklist: list[str] | None = None,
 ) -> tuple[ParserLifecyclePlan, FakeStatusDisplay]:
     logs_dir = tmp_path / "logs"
     run_log = RunLog(logs_dir)
@@ -306,7 +330,7 @@ def _make_plan_with_display(
                 card_store=card_store,
             ),
             prefilter=PreFilterGate(
-                blacklist=[],
+                blacklist=[] if blacklist is None else blacklist,
                 dedup=dedup,
                 run_log=run_log,
             ),
@@ -385,6 +409,70 @@ def test_query_heartbeats_wrap_each_query_with_keyword_and_location(
         ("django", "City"),
         ("django", "Remote"),
     ]
+
+
+def test_accepted_listing_reaches_classify_handoff_through_parser_lifecycle(
+    tmp_path: Path,
+) -> None:
+    handoff = _CollectingHandoff()
+    parser = _ForwardingParser()
+    plan = _make_plan(
+        tmp_path,
+        parser=parser,
+        classify_handoff=handoff,
+    )
+
+    run_parser_lifecycle(plan)
+
+    assert handoff.calls == [
+        (
+            1,
+            PositionStub(
+                url="https://example.com/python",
+                title="Python Engineer",
+                source="test",
+            ),
+            "x" * 200,
+            "test_parser",
+        )
+    ]
+
+
+def test_prefilter_skip_through_parser_lifecycle_preserves_log_rows_and_metrics(
+    tmp_path: Path,
+) -> None:
+    plan, display = _make_plan_with_display(
+        tmp_path,
+        parser=_PrefilterDropParser(),
+        blacklist=["python"],
+    )
+
+    run_parser_lifecycle(plan)
+
+    transcript_rows = [
+        {k: v for k, v in json.loads(line).items() if k != "ts"}
+        for line in (tmp_path / "logs" / "pipeline" / "prefilter.transcripts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+    assert transcript_rows == [
+        {
+            "url": "https://example.com/blacklisted",
+            "title": "Senior Python Developer",
+            "source": "test",
+            "passes": False,
+            "reason": "blacklist_drop",
+            "blacklist_matches": [{"term": "python"}],
+            "title_len": len("Senior Python Developer"),
+        }
+    ]
+    assert any(
+        call.method in ("register", "update_body")
+        and call.name == "parser test parser gates"
+        and call.kwargs["body"] == "1 pre-filter"
+        for call in display.calls
+    )
 
 
 def test_query_ended_is_still_logged_when_discover_raises(tmp_path: Path) -> None:

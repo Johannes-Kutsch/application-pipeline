@@ -112,6 +112,7 @@ class DeduplicationStore:
         )
         self._lock = threading.Lock()
         self._in_run: set[int] | None = None
+        self._run_scope_depth = 0
         self._card_store = card_store
         self._cooldown_days = cooldown_days
         self._run_log = run_log
@@ -559,13 +560,17 @@ class DeduplicationStore:
     @contextmanager
     def run_scope(self) -> Generator[DeduplicationStore, None, None]:
         with self._lock:
-            self._in_run = set()
+            if self._run_scope_depth == 0:
+                self._in_run = set()
+            self._run_scope_depth += 1
         try:
             yield self
         finally:
             with self._lock:
-                self._in_run = None
-                self._evict_pending()
+                self._run_scope_depth -= 1
+                if self._run_scope_depth == 0:
+                    self._in_run = None
+                    self._evict_pending()
 
     def _evict_pending(self) -> None:
         """Remove in-memory pending entries that were never promoted. Caller must hold self._lock."""

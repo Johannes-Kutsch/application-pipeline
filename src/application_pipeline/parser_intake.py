@@ -110,9 +110,7 @@ class ParserIntake:
         self._domain_pre_filter = domain_pre_filter
         self._content_gate = content_gate
         self._card_store = card_store
-        self._pool_collector = (
-            _NullPoolCollector() if pool_collector is None else pool_collector
-        )
+        self._pool_collector = pool_collector or _NullPoolCollector()
         self._classify_handoff = (
             _NullClassifyStageHandoff()
             if classify_handoff is None

@@ -477,7 +477,9 @@ def test_stall_watchdog_logs_one_stalled_event_and_stack_trace_via_lifecycle(
         .splitlines()
     ]
 
-    assert sum(1 for row in rows if row.get("event") == "stalled") == 1
+    stalled_rows = [row for row in rows if row.get("event") == "stalled"]
+    assert len(stalled_rows) == 1
+    assert stalled_rows[0]["last_event_age_s"] >= threshold_s
     run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
     assert "traceback" in run_log_content
     assert "File " in run_log_content
@@ -504,6 +506,7 @@ def test_stall_watchdog_can_report_again_after_parser_progress_ends_silence(
 
     stalled_rows = [row for row in rows if row.get("event") == "stalled"]
     assert len(stalled_rows) == 2
+    assert all(row["last_event_age_s"] >= threshold_s for row in stalled_rows)
 
 
 def test_lifecycle_records_not_served_and_completed_queries_without_parser_dead(

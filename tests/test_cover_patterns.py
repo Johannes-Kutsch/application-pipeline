@@ -189,6 +189,35 @@ def test_parse_and_load_remain_list_compatibility_wrappers(
     loaded = load(path)
 
     assert isinstance(parsed, list) and isinstance(loaded, list)
+    assert parsed == parse_library(text).all_patterns()
+    assert loaded == load_library(path).all_patterns()
+
+
+@pytest.mark.parametrize("loader_name", ["parse_library", "load_library"])
+def test_cover_pattern_library_builders_preserve_cover_pattern_failures(
+    loader_name: str, tmp_path: Path
+) -> None:
+    text = textwrap.dedent(
+        """\
+        ## Invalid Pattern
+        - slot: opening
+        - argument_type: resonance
+        - use_when: If the product is unusually compelling.
+        - placeholders: Musterfirma
+        - why_it_works: It is specific.
+
+        Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will.
+        """
+    )
+
+    if loader_name == "parse_library":
+        with pytest.raises(CoverPatternError, match="unknown cover slot"):
+            parse_library(text)
+    else:
+        path = tmp_path / "cover-patterns.md"
+        path.write_text(text)
+        with pytest.raises(CoverPatternError, match="unknown cover slot"):
+            load_library(path)
 
 
 @pytest.mark.parametrize(

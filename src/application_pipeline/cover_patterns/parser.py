@@ -55,6 +55,10 @@ class CoverPattern:
 class CoverPatternLibrary:
     _patterns: tuple[CoverPattern, ...] = ()
 
+    def __post_init__(self) -> None:
+        for pattern in self._patterns:
+            _validate_pattern_placeholders(pattern)
+
     @classmethod
     def parse(cls, text: str) -> CoverPatternLibrary:
         stripped = text.strip()
@@ -119,6 +123,30 @@ def _validate_projection_slot(slot: str) -> None:
     raise CoverPatternError(f"unknown cover slot: {slot}")
 
 
+def _validate_pattern_placeholders(pattern: CoverPattern) -> None:
+    _validate_declared_placeholders(pattern.name, pattern.placeholders)
+    _validate_text_placeholders(pattern.name, pattern.placeholders, pattern.text)
+
+
+def _validate_declared_placeholders(name: str, placeholders: tuple[str, ...]) -> None:
+    unsupported = [item for item in placeholders if item not in _VALID_PLACEHOLDERS]
+    if unsupported:
+        unsupported_text = ", ".join(unsupported)
+        raise CoverPatternError(f"{name}: unsupported placeholder: {unsupported_text}")
+
+
+def _validate_text_placeholders(
+    name: str, placeholders: tuple[str, ...], text: str
+) -> None:
+    text_placeholders = set(_PLACEHOLDER_RE.findall(text))
+    undeclared = sorted(text_placeholders - set(placeholders))
+    if undeclared:
+        undeclared_text = ", ".join(undeclared)
+        raise CoverPatternError(
+            f"{name}: undeclared placeholders in text: {undeclared_text}"
+        )
+
+
 def _parse_block(block: str) -> CoverPattern:
     lines = block.splitlines()
     name = lines[0].removeprefix("## ").strip()
@@ -150,10 +178,7 @@ def _parse_block(block: str) -> CoverPattern:
     placeholders = tuple(
         item.strip() for item in metadata["placeholders"].split(",") if item.strip()
     )
-    unsupported = [item for item in placeholders if item not in _VALID_PLACEHOLDERS]
-    if unsupported:
-        unsupported_text = ", ".join(unsupported)
-        raise CoverPatternError(f"{name}: unsupported placeholder: {unsupported_text}")
+    _validate_declared_placeholders(name, placeholders)
 
     body_lines = lines[body_start:] if body_start is not None else []
     paragraphs = [
@@ -170,15 +195,7 @@ def _parse_block(block: str) -> CoverPattern:
     if len(_SENTENCE_RE.findall(paragraph)) < 2:
         raise CoverPatternError(f"{name}: must contain at least two sentences")
 
-    text_placeholders = set(_PLACEHOLDER_RE.findall(paragraph))
-    undeclared = sorted(text_placeholders - set(placeholders))
-    if undeclared:
-        undeclared_text = ", ".join(undeclared)
-        raise CoverPatternError(
-            f"{name}: undeclared placeholders in text: {undeclared_text}"
-        )
-
-    return CoverPattern(
+    pattern = CoverPattern(
         name=name,
         slot=slot,
         argument_type=metadata["argument_type"],
@@ -187,3 +204,5 @@ def _parse_block(block: str) -> CoverPattern:
         why_it_works=metadata["why_it_works"],
         text=paragraph,
     )
+    _validate_pattern_placeholders(pattern)
+    return pattern

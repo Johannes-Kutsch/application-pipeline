@@ -565,3 +565,55 @@ def test_cover_pattern_library_loads_shipped_cover_patterns_template() -> None:
     assert [pattern.name for pattern in result.all_patterns()] == [
         "Product Resonance Intro"
     ]
+
+
+def test_cover_pattern_library_rejects_unsupported_declared_placeholder_at_seam() -> (
+    None
+):
+    with pytest.raises(
+        CoverPatternError,
+        match="Unsupported Placeholder: unsupported placeholder: Musterskill",
+    ):
+        CoverPatternLibrary(
+            (
+                CoverPattern(
+                    name="Unsupported Placeholder",
+                    slot="cover_fit",
+                    argument_type="capability",
+                    use_when="If a role maps clearly to prior evidence.",
+                    placeholders=("Musterfirma", "Musterskill"),
+                    why_it_works="It ties evidence to the role.",
+                    text=(
+                        "Bei Musterfirma kann ich Musterskill in einem Umfeld "
+                        "einsetzen, in dem ich bereits belastbare Wirkung gezeigt "
+                        "habe. Diese Verantwortung moechte ich bewusst weiter "
+                        "tragen."
+                    ),
+                ),
+            )
+        )
+
+
+def test_cover_pattern_library_rejects_undeclared_text_placeholder_at_seam() -> None:
+    with pytest.raises(
+        CoverPatternError,
+        match="Undeclared Placeholder: undeclared placeholders in text: Musterprodukt",
+    ):
+        CoverPatternLibrary(
+            (
+                CoverPattern(
+                    name="Undeclared Placeholder",
+                    slot="cover_intro",
+                    argument_type="resonance",
+                    use_when="If the product is unusually compelling.",
+                    placeholders=("Musterfirma",),
+                    why_it_works="It is specific.",
+                    text=(
+                        "Ich will bei Musterfirma arbeiten, weil Musterprodukt fuer "
+                        "mich ein glaubwuerdiger Hebel ist und ich dazu bereits "
+                        "belastbare Erfahrung gesammelt habe. Diese Verbindung "
+                        "wuerde ich im Team gern weiter ausbauen."
+                    ),
+                ),
+            )
+        )

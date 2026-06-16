@@ -409,6 +409,7 @@ class RunMetrics:
                 "discovered": c.discovered,
                 "enrich_failed": c.enrich_failed,
                 "not_served_queries": c.not_served_queries,
+                "queries_done": c.queries_done,
                 "parsers_dead": c.parsers_dead,
                 "unparseable_dates": c.unparseable_dates,
                 "duration": round(end_monotonic - started_monotonic, 1),

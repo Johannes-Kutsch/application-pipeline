@@ -54,12 +54,17 @@ class _ParserDone:
     __slots__ = ()
 
 
+class _NotServedQuery:
+    __slots__ = ()
+
+
 @dataclass
 class _ParserDead:
     exc: BaseException
     traceback_str: str
 
 
+_NOT_SERVED_QUERY = _NotServedQuery()
 _PARSER_DONE = _ParserDone()
 
 
@@ -134,7 +139,7 @@ class _ParserThread(threading.Thread):
                     try:
                         for item in gen:
                             if isinstance(item, NotServedQuery):
-                                self._outbound.put((self._parser_id, item))
+                                self._outbound.put((self._parser_id, _NOT_SERVED_QUERY))
                                 continue
                             if self._run_state.is_aborted:
                                 break
@@ -185,7 +190,7 @@ class _OutboundDispatcher:
         self._failure_report_writer = failure_report_writer
 
     def dispatch(self, parser_id: str, payload: object) -> bool:
-        if isinstance(payload, NotServedQuery):
+        if payload is _NOT_SERVED_QUERY:
             self._metrics.not_served_query(parser_id)
         elif payload is _QUERY_DONE:
             self._metrics.query_done(parser_id)

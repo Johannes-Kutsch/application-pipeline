@@ -108,6 +108,29 @@ class _SleepingParser:
         raise AssertionError("empty discover should not call enrich()")
 
 
+class _LifecycleAccountingParser:
+    def __enter__(self) -> _LifecycleAccountingParser:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery):
+        if query.keyword == "python":
+            from application_pipeline.parsers import NotServedQuery
+
+            yield NotServedQuery()
+            return
+        yield PositionStub(
+            url=f"https://example.com/{query.keyword}",
+            title=f"{query.keyword.title()} Engineer",
+            source="test",
+        )
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        return EnrichResult(stub=stub, body="x" * 200, mode="fallback")
+
+
 def _make_plan(
     tmp_path: Path,
     *,
@@ -171,6 +194,68 @@ def _make_plan(
         locations=configured_locations,
         collaborators=collaborators,
     )
+
+
+def _make_plan_with_display(
+    tmp_path: Path,
+    *,
+    parser: Parser,
+    keywords: list[str] | None = None,
+    locations: list[City | Remote] | None = None,
+) -> tuple[ParserLifecyclePlan, FakeStatusDisplay]:
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    card_store = load_card_store(tmp_path / "extracts.json")
+    dedup = load_dedup(
+        tmp_path / ".seen.json",
+        card_store=card_store,
+        run_log=run_log,
+    )
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    configured_keywords = keywords or ["python"]
+    configured_locations = locations or [City("Hamburg")]
+    metrics.register_parser(
+        "test_parser",
+        order=0,
+        total_queries=len(configured_keywords) * len(configured_locations),
+        has_native_enrich=False,
+    )
+    plan = ParserLifecyclePlan(
+        parsers=[
+            ParserLifecycleExecution(
+                parser=parser,
+                parser_id="test_parser",
+                classify_handoff=_CollectingHandoff(),
+            )
+        ],
+        keywords=configured_keywords,
+        locations=configured_locations,
+        collaborators=ParserLifecycleCollaborators(
+            run_log=run_log,
+            run_state=_RunState(),
+            freshness=FreshnessGate(
+                anchored_today=date(2026, 6, 16),
+                max_listing_age_days=30,
+                dedup=dedup,
+                run_log=run_log,
+                card_store=card_store,
+            ),
+            prefilter=PreFilterGate(
+                blacklist=[],
+                dedup=dedup,
+                run_log=run_log,
+            ),
+            content_gate=ContentGate(run_log=run_log),
+            dedup=dedup,
+            dedup_counters=DedupCounters(display=display, run_log=run_log),
+            pool=Pool(),
+            metrics=metrics,
+            card_store=card_store,
+            failure_report_writer=FailureReportWriter(tmp_path / "failures"),
+        ),
+    )
+    return plan, display
 
 
 def test_parser_started_is_logged_before_query_worklist_begins(tmp_path: Path) -> None:
@@ -286,3 +371,28 @@ def test_stall_watchdog_logs_one_stalled_event_and_stack_trace_via_lifecycle(
     run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
     assert "traceback" in run_log_content
     assert "File " in run_log_content
+
+
+def test_lifecycle_records_not_served_and_completed_queries_without_parser_dead(
+    tmp_path: Path,
+) -> None:
+    plan, display = _make_plan_with_display(
+        tmp_path,
+        parser=_LifecycleAccountingParser(),
+        keywords=["python", "django"],
+    )
+
+    run_parser_lifecycle(plan)
+
+    run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
+    assert "not_served_queries=1" in run_log_content
+    assert "queries_done=2" in run_log_content
+    assert "parsers_dead=0" in run_log_content
+
+    phase_calls = [
+        call
+        for call in display.calls
+        if call.method == "update_phase" and call.name == "parser test parser"
+    ]
+    assert phase_calls[-1].kwargs["phase"] == "done"
+    assert all(call.kwargs["phase"] != "dead" for call in phase_calls)

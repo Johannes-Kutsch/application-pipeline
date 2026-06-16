@@ -44,6 +44,7 @@ def test_parser_lifecycle_exports_only_plan_facade_surface() -> None:
 
 def test_orchestrator_keeps_parser_lifecycle_private_symbols_out_of_module() -> None:
     hidden_symbols = {
+        "_NotServedQuery",
         "_ParserDone",
         "_ParserDead",
         "_ParserThread",
@@ -60,3 +61,43 @@ def test_orchestrator_keeps_parser_lifecycle_private_symbols_out_of_module() -> 
     }
 
     assert hidden_symbols.isdisjoint(defined_names)
+
+
+def test_parser_thread_uses_private_not_served_control_payload() -> None:
+    tree = ast.parse(
+        (_SRC / "parser_lifecycle.py").read_text(encoding="utf-8"),
+    )
+
+    matching_payloads: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        if not isinstance(node.test, ast.Call):
+            continue
+        if (
+            not isinstance(node.test.func, ast.Name)
+            or node.test.func.id != "isinstance"
+        ):
+            continue
+        if len(node.test.args) != 2:
+            continue
+        subject, typ = node.test.args
+        if not isinstance(subject, ast.Name) or subject.id != "item":
+            continue
+        if not isinstance(typ, ast.Name) or typ.id != "NotServedQuery":
+            continue
+        for stmt in node.body:
+            if not isinstance(stmt, ast.Expr):
+                continue
+            call = stmt.value
+            if not isinstance(call, ast.Call):
+                continue
+            if not isinstance(call.func, ast.Attribute) or call.func.attr != "put":
+                continue
+            if len(call.args) != 1 or not isinstance(call.args[0], ast.Tuple):
+                continue
+            payload = call.args[0].elts[1]
+            if isinstance(payload, ast.Name):
+                matching_payloads.append(payload.id)
+
+    assert matching_payloads == ["_NOT_SERVED_QUERY"]

@@ -1455,6 +1455,7 @@ def test_parser_summary_key_set_is_exact(run_log: RunLog) -> None:
         "discovered",
         "enrich_failed",
         "not_served_queries",
+        "queries_done",
         "parsers_dead",
         "unparseable_dates",
         "duration",
@@ -1473,6 +1474,7 @@ def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
     metrics.enrich_failed("p")
     metrics.parser_dead("p")
     metrics.not_served_query("p")
+    metrics.query_done("p")
     metrics.unparseable_date("p")
     end = time.monotonic()
 
@@ -1481,6 +1483,7 @@ def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
     assert s["enrich_failed"] == 1
     assert s["parsers_dead"] == 1
     assert s["not_served_queries"] == 1
+    assert s["queries_done"] == 1
     assert s["unparseable_dates"] == 1
     assert isinstance(s["duration"], float)
     assert s["duration"] >= 0.0
@@ -1549,6 +1552,7 @@ def test_parser_summary_unknown_parser_id_returns_zeros(run_log: RunLog) -> None
     assert s["discovered"] == 0
     assert s["enrich_failed"] == 0
     assert s["not_served_queries"] == 0
+    assert s["queries_done"] == 0
     assert s["parsers_dead"] == 0
     assert s["unparseable_dates"] == 0
 

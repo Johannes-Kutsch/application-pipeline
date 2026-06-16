@@ -1319,6 +1319,42 @@ def test_url_hit_on_selected_by_judge_within_cooldown_returns_url_hit(
     assert store.is_seen(stub).kind == "url_hit"
 
 
+@pytest.mark.parametrize(
+    ("status", "changed_at"),
+    [
+        ("out_of_domain", "2020-01-01"),
+        ("selected_by_judge", date.today().isoformat()),
+        ("expired", date.today().isoformat()),
+    ],
+)
+def test_url_hit_on_registered_record_preserves_existing_listing_id(
+    store_path: Path,
+    status: str,
+    changed_at: str,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "urls": ["https://example.com/original"],
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": status,
+                    "status_last_changed": changed_at,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+
+    result = store.is_seen(StubLike(url="https://example.com/original"))
+
+    assert result.kind == "url_hit"
+    assert result.listing_id == 7
+
+
 def test_url_hit_on_expired_within_cooldown_returns_url_hit(
     store_path: Path,
 ) -> None:
@@ -1347,7 +1383,9 @@ def test_url_hit_on_expired_after_cooldown_returns_miss(
         encoding="utf-8",
     )
     store = dedup_load(store_path, cooldown_days=30)
-    assert store.is_seen(StubLike(url="https://example.com/expired")).kind == "miss"
+    result = store.is_seen(StubLike(url="https://example.com/expired"))
+    assert result.kind == "miss"
+    assert result.listing_id == 1
 
 
 def test_tuple_hit_on_expired_after_cooldown_returns_miss(
@@ -1393,7 +1431,46 @@ def test_url_hit_on_selected_by_judge_after_cooldown_returns_judge_pending(
     )
     store = dedup_load(store_path, cooldown_days=30)
     same = StubLike(url="https://example.com/original")
-    assert store.is_seen(same).kind == "judge_pending"
+    result = store.is_seen(same)
+    assert result.kind == "judge_pending"
+    assert result.listing_id == 1
+
+
+@pytest.mark.parametrize("status", ["matched", "selected_by_judge"])
+def test_run_scope_url_hit_on_claimed_rediscovery_returns_run_hit_before_status_outcome(
+    store_path: Path,
+    status: str,
+) -> None:
+    status_last_changed = (
+        "2020-01-01" if status == "selected_by_judge" else date.today().isoformat()
+    )
+    store_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "urls": ["https://example.com/original"],
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": status,
+                    "status_last_changed": status_last_changed,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    alias = StubLike(url="https://example.com/alias")
+    canonical = StubLike(url="https://example.com/original")
+
+    with store.run_scope() as scope:
+        first = scope.is_seen(alias)
+        second = scope.is_seen(canonical)
+
+    assert first.kind == "judge_pending"
+    assert first.listing_id == 7
+    assert second.kind == "run_hit"
+    assert second.listing_id == 7
 
 
 # ---------------------------------------------------------------------------

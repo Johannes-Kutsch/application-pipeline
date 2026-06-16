@@ -68,17 +68,8 @@ class CoverPatternLibrary:
         if not stripped:
             return cls()
 
-        matches = list(_PATTERN_HEADER_RE.finditer(stripped))
         patterns: list[CoverPattern] = []
-
-        for index, match in enumerate(matches):
-            start = match.start()
-            end = (
-                matches[index + 1].start()
-                if index + 1 < len(matches)
-                else len(stripped)
-            )
-            block = stripped[start:end].strip()
+        for block in _pattern_blocks(stripped):
             patterns.append(_parse_block(block))
 
         return cls(tuple(patterns))
@@ -124,6 +115,30 @@ def _validate_projection_slot(slot: str) -> None:
             f"cover slot projection requires a cover paragraph slot, got: {slot}"
         )
     raise CoverPatternError(f"unknown cover slot: {slot}")
+
+
+def _pattern_blocks(text: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] = []
+
+    for line in text.splitlines():
+        if _PATTERN_HEADER_RE.fullmatch(line):
+            if current:
+                blocks.append("\n".join(current).strip())
+            current = [line]
+            continue
+        if line.startswith("# "):
+            if current:
+                blocks.append("\n".join(current).strip())
+                current = []
+            continue
+        if current:
+            current.append(line)
+
+    if current:
+        blocks.append("\n".join(current).strip())
+
+    return blocks
 
 
 def _validate_pattern(pattern: CoverPattern) -> str:

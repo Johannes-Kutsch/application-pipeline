@@ -565,6 +565,49 @@ def test_cover_pattern_library_loads_shipped_cover_patterns_template() -> None:
     assert [pattern.name for pattern in result.all_patterns()] == [
         "Product Resonance Intro"
     ]
+    assert [pattern.name for pattern in result.patterns_for_slot("cover_intro")] == [
+        "Product Resonance Intro"
+    ]
+
+
+def test_parse_library_accepts_cover_patterns_markdown_sections_between_patterns() -> (
+    None
+):
+    text = textwrap.dedent(
+        """\
+        # Intro Patterns
+
+        ## Product Resonance Intro
+        - slot: cover_intro
+        - argument_type: resonance
+        - use_when: Use when the employer's product or platform connects directly to a long-running motivation or curiosity.
+        - placeholders: Musterfirma, Musterprodukt, Musterprojekt
+        - why_it_works: It links the employer's surface to concrete candidate evidence instead of opening with generic motivation.
+
+        Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
+
+        # Closing Patterns
+
+        ## Product Resonance Closing
+        - slot: cover_closing
+        - argument_type: closing
+        - use_when: Use when the close should stay direct and tie intent back to the role.
+        - placeholders: Musterfirma, Musterrolle
+        - why_it_works: It closes with clear intent and keeps the role reference explicit.
+
+        Deshalb moechte ich meine Erfahrung bei Musterfirma in der Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie ich den Beitrag konkret leisten kann, freue ich mich.
+        """
+    )
+
+    result = parse_library(text)
+
+    assert [pattern.name for pattern in result.all_patterns()] == [
+        "Product Resonance Intro",
+        "Product Resonance Closing",
+    ]
+    assert [pattern.name for pattern in result.patterns_for_slot("cover_closing")] == [
+        "Product Resonance Closing"
+    ]
 
 
 def test_cover_pattern_library_rejects_unsupported_declared_placeholder_at_seam() -> (

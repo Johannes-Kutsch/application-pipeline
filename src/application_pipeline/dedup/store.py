@@ -314,14 +314,23 @@ class DeduplicationStore:
         self,
         listing_id: int,
         record: dict[str, Any],
+        *,
+        miss_listing_id: int,
     ) -> _MatchDecision:
         """Return the private match decision for a fuzzy hit."""
         if self._in_run is not None and listing_id in self._in_run:
             return _MatchDecision("run_hit", listing_id)
-        if record.get("status") == "matched":
+        status = record.get("status")
+        if status == "matched":
             return _MatchDecision(
                 "judge_pending", listing_id, mutation="prepend_url_in_memory"
             )
+        if status == "selected_by_judge" and self._cooldown_expired(record):
+            return _MatchDecision(
+                "judge_pending", listing_id, mutation="prepend_url_in_memory"
+            )
+        if status == "expired" and self._cooldown_expired(record):
+            return _MatchDecision("miss", miss_listing_id)
         return _MatchDecision("fuzzy_hit", listing_id, mutation="prepend_url_persist")
 
     def _apply_alias_match(
@@ -369,7 +378,9 @@ class DeduplicationStore:
                     match_id = self._fuzzy_lookup(key)
                     if match_id is not None and match_id != existing_id:
                         decision = self._decide_fuzzy_match(
-                            match_id, self._records[match_id]
+                            match_id,
+                            self._records[match_id],
+                            miss_listing_id=existing_id,
                         )
                         return self._apply_alias_match(decision, key=key)
                 decision = self._decide_existing_url_match(existing_id, existing)
@@ -390,7 +401,11 @@ class DeduplicationStore:
 
             match_id = self._fuzzy_lookup(key)
             if match_id is not None:
-                decision = self._decide_fuzzy_match(match_id, self._records[match_id])
+                decision = self._decide_fuzzy_match(
+                    match_id,
+                    self._records[match_id],
+                    miss_listing_id=self._next_id,
+                )
                 return self._apply_alias_match(decision, key=key)
 
             new_id = self._write_pending(key)

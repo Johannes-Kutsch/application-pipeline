@@ -1166,6 +1166,125 @@ def test_fuzzy_hit_on_matched_returns_judge_pending(store_path: Path) -> None:
     assert store.is_seen(b).kind == "judge_pending"
 
 
+def test_fuzzy_hit_on_selected_by_judge_within_cooldown_returns_fuzzy_hit_and_persists_alias(
+    store_path: Path,
+) -> None:
+    canonical = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend",
+        location="Hamburg",
+    )
+    alias = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    store.mark_matched(canonical)
+    store.mark_selected_by_judge(canonical)
+
+    result = store.is_seen(alias)
+
+    assert result.kind == "fuzzy_hit"
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert _has_url(on_disk, alias.url)
+
+
+def test_fuzzy_hit_on_selected_by_judge_after_cooldown_returns_judge_pending_without_alias(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "urls": ["https://example.com/a"],
+                    "company_lc": "acme",
+                    "title_lc": "senior software engineer backend",
+                    "location_lc": "hamburg",
+                    "status": "selected_by_judge",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    alias = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+
+    result = store.is_seen(alias)
+
+    assert result.kind == "judge_pending"
+    assert result.listing_id == 7
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert not _has_url(on_disk, alias.url)
+
+
+def test_fuzzy_hit_on_expired_within_cooldown_returns_fuzzy_hit_and_persists_alias(
+    store_path: Path,
+) -> None:
+    canonical = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend",
+        location="Hamburg",
+    )
+    alias = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    store.mark_expired(canonical)
+
+    result = store.is_seen(alias)
+
+    assert result.kind == "fuzzy_hit"
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert _has_url(on_disk, alias.url)
+
+
+def test_fuzzy_hit_on_expired_after_cooldown_returns_miss_without_alias(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "urls": ["https://example.com/a"],
+                    "company_lc": "acme",
+                    "title_lc": "senior software engineer backend",
+                    "location_lc": "hamburg",
+                    "status": "expired",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    alias = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+
+    result = store.is_seen(alias)
+
+    assert result.kind == "miss"
+    assert result.listing_id == 8
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert not _has_url(on_disk, alias.url)
+
+
 def test_second_fuzzy_hit_on_matched_within_run_scope_returns_run_hit(
     store_path: Path,
 ) -> None:

@@ -8,9 +8,7 @@ from application_pipeline.cover_patterns import (
     CoverPatternError,
     CoverPatternLibrary,
     load,
-    load_library,
     parse,
-    parse_library,
 )
 from application_pipeline.cv_slot_contract import COVER_PARAGRAPH_PATTERN_SLOTS
 
@@ -208,13 +206,12 @@ def test_parse_and_load_remain_list_compatibility_wrappers(
     path = tmp_path / "cover-patterns.md"
     path.write_text(text)
 
-    assert parse(text) == parse_library(text).all_patterns()
-    assert load(path) == load_library(path).all_patterns()
+    assert parse(text) == CoverPatternLibrary.parse(text).all_patterns()
+    assert load(path) == CoverPatternLibrary.load(path).all_patterns()
 
 
-@pytest.mark.parametrize("loader_name", ["parse_library", "load_library"])
-def test_cover_pattern_library_builders_preserve_cover_pattern_failures(
-    loader_name: str, tmp_path: Path
+def test_cover_pattern_library_load_preserves_cover_pattern_failures(
+    tmp_path: Path,
 ) -> None:
     text = _pattern_block(
         "Invalid Pattern",
@@ -228,15 +225,11 @@ def test_cover_pattern_library_builders_preserve_cover_pattern_failures(
         use_when="If the product is unusually compelling.",
         why_it_works="It is specific.",
     )
+    path = tmp_path / "cover-patterns.md"
+    path.write_text(text)
 
-    if loader_name == "parse_library":
-        with pytest.raises(CoverPatternError, match="unknown cover slot"):
-            parse_library(text)
-    else:
-        path = tmp_path / "cover-patterns.md"
-        path.write_text(text)
-        with pytest.raises(CoverPatternError, match="unknown cover slot"):
-            load_library(path)
+    with pytest.raises(CoverPatternError, match="unknown cover slot"):
+        CoverPatternLibrary.load(path)
 
 
 def test_cover_pattern_library_load_rejects_empty_required_metadata_value(

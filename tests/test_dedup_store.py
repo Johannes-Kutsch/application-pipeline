@@ -1851,6 +1851,37 @@ def test_run_scope_url_hit_on_claimed_rediscovery_returns_run_hit_before_status_
     assert second.listing_id == 7
 
 
+def test_run_scope_url_miss_after_expired_cooldown_returns_run_hit_on_second_lookup(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "7": {
+                    "urls": ["https://example.com/original"],
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "expired",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+    stub = StubLike(url="https://example.com/original")
+
+    with store.run_scope() as scope:
+        first = scope.is_seen(stub)
+        second = scope.is_seen(stub)
+
+    assert first.kind == "miss"
+    assert first.listing_id == 7
+    assert second.kind == "run_hit"
+    assert second.listing_id == 7
+
+
 # ---------------------------------------------------------------------------
 # JSONL hit logging — tuple_hit and fuzzy_hit
 # ---------------------------------------------------------------------------
@@ -1927,6 +1958,44 @@ def test_url_hit_does_not_write_to_jsonl(store_path: Path, tmp_path: Path) -> No
     result = store.is_seen(stub)
 
     assert result.kind == "url_hit"
+    assert _read_dedup_events(logs_dir) == []
+
+
+@pytest.mark.parametrize(
+    "canonical,new_job",
+    [
+        (
+            StubLike(url="https://example.com/canonical", title="Software Engineer"),
+            StubLike(url="https://example.com/new-url", title="software engineer"),
+        ),
+        (
+            StubLike(
+                url="https://example.com/canonical",
+                title="Senior Software Engineer Backend",
+            ),
+            StubLike(
+                url="https://example.com/new-url",
+                title="Senior Software Engineer Backend Developer",
+            ),
+        ),
+    ],
+)
+def test_judge_pending_rediscovery_does_not_write_to_jsonl(
+    store_path: Path,
+    tmp_path: Path,
+    canonical: StubLike,
+    new_job: StubLike,
+) -> None:
+    from application_pipeline.parser_log import RunLog
+
+    logs_dir = tmp_path / "logs"
+    run_log = RunLog(logs_dir)
+    store = dedup_load(store_path, run_log=run_log)
+    store.mark_matched(canonical)
+
+    result = store.is_seen(new_job)
+
+    assert result.kind == "judge_pending"
     assert _read_dedup_events(logs_dir) == []
 
 

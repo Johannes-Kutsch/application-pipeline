@@ -224,13 +224,26 @@ def test_cover_pattern_library_projects_one_valid_slot_in_authored_order() -> No
     ]
 
 
-@pytest.mark.parametrize("slot", ["opening", "resume_projekte", "unknown_slot"])
+@pytest.mark.parametrize(
+    ("slot", "message"),
+    [
+        (
+            "opening",
+            "cover slot projection requires a cover paragraph slot, got: opening",
+        ),
+        (
+            "resume_projekte",
+            "cover slot projection requires a cover paragraph slot, got: resume_projekte",
+        ),
+        ("unknown_slot", "unknown cover slot: unknown_slot"),
+    ],
+)
 def test_cover_pattern_library_rejects_non_cover_or_unknown_projection_slots(
-    slot: str,
+    slot: str, message: str
 ) -> None:
     library = CoverPatternLibrary()
 
-    with pytest.raises(CoverPatternError, match=slot):
+    with pytest.raises(CoverPatternError, match=message):
         library.patterns_for_slot(slot)
 
 

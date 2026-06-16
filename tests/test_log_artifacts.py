@@ -1,6 +1,6 @@
-"""Tests for the ADR-0045 log artifact layout.
+"""RunLog contract tests for ADR-backed Log Artifacts.
 
-Per ADR-0045, data/logs/ is laid out as:
+Per ADR-0012, ADR-0036, and ADR-0037, `RunLog` writes:
 - lifecycle.jsonl — status-display events (registered/phase_changed/removed), shared, includes component field
 - run.log — tracebacks and SUMMARY OF SESSION blocks, shared, with === headers
 - <layer>/<rest>.events.jsonl — per-step structured events, per-component, no component field
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from application_pipeline.parser_log import RunLog
@@ -67,6 +67,45 @@ def test_lifecycle_jsonl_multiple_components_all_in_shared_file(
     assert rows[3]["event"] == "removed"
 
 
+def test_lifecycle_jsonl_preserves_run_log_owned_fields_and_stays_root_only(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    log.lifecycle(
+        "parser_alpha",
+        "registered",
+        ts="not-the-real-timestamp",
+        event="shadowed",
+        component="shadowed",
+        phase="running",
+    )
+    log.lifecycle("llm_beta", "removed")
+
+    lifecycle_file = tmp_path / "lifecycle.jsonl"
+    rows = [
+        json.loads(line)
+        for line in lifecycle_file.read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows == [
+        {
+            "ts": rows[0]["ts"],
+            "event": "registered",
+            "component": "parser_alpha",
+            "phase": "running",
+        },
+        {
+            "ts": rows[1]["ts"],
+            "event": "removed",
+            "component": "llm_beta",
+        },
+    ]
+    assert _ISO8601_RE.match(rows[0]["ts"])
+    assert _ISO8601_RE.match(rows[1]["ts"])
+    assert not (tmp_path / "parser").exists()
+    assert not (tmp_path / "llm").exists()
+    assert not (tmp_path / "run.log").exists()
+
+
 # ---------------------------------------------------------------------------
 # status_display routes lifecycle events to lifecycle.jsonl, not per-comp .log
 # ---------------------------------------------------------------------------
@@ -116,6 +155,44 @@ def test_summarize_writes_to_run_log_with_header(tmp_path: Path) -> None:
     assert "summary" in content
     assert "SUMMARY OF SESSION" in content
     assert "discovered=12" in content
+
+
+def test_summarize_on_fresh_logs_dir_writes_exact_root_block_in_utc(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    started = datetime(2026, 5, 12, 17, 30, 0, tzinfo=timezone(timedelta(hours=2)))
+
+    log.summary("llm_classify_relevance", {"calls": 2}, started)
+
+    assert (tmp_path / "run.log").read_text(encoding="utf-8") == (
+        "=== llm_classify_relevance  2026-05-12T15:30:00Z  summary ===\n\n"
+        "SUMMARY OF SESSION 2026-05-12T15:30:00Z\n"
+        "calls=2\n\n\n"
+    )
+    assert not (tmp_path / "llm" / "classify_relevance.summary").exists()
+
+
+def test_summarize_renders_string_counts_with_colon_and_preserves_text(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    started = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+
+    log.summary(
+        "pipeline_run_metrics",
+        {
+            "written": 5,
+            "persisted": "4 discovered",
+            "status": "retry: deferred",
+        },
+        started,
+    )
+
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
+    assert "written=5" in content
+    assert "persisted: 4 discovered" in content
+    assert "status: retry: deferred" in content
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +352,19 @@ def test_transcript_rows_append_in_call_order_and_stay_independent_from_events(
     assert len(event_file.read_text(encoding="utf-8").splitlines()) == 1
 
 
+def test_unprefixed_transcript_rows_keep_existing_root_file_behavior(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    entry = {"role": "user", "content": "hello"}
+
+    log.transcript("agent", entry)
+
+    transcript_file = tmp_path / "agent.transcripts.jsonl"
+    assert transcript_file.exists()
+    assert json.loads(transcript_file.read_text(encoding="utf-8").strip()) == entry
+
+
 # ---------------------------------------------------------------------------
 # run.log — tracebacks
 # ---------------------------------------------------------------------------
@@ -341,3 +431,11 @@ def test_lifecycle_only_component_produces_no_per_component_log(
     assert not (tmp_path / "startup.log").exists()
     assert not (tmp_path / "startup.events.jsonl").exists()
     assert (tmp_path / "lifecycle.jsonl").exists()
+
+
+def test_run_log_construction_creates_logs_dir_with_parents(tmp_path: Path) -> None:
+    nested = tmp_path / "a" / "b" / "c"
+
+    assert not nested.exists()
+    RunLog(nested)
+    assert nested.is_dir()

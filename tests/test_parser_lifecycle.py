@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 from fake_status_display import FakeStatusDisplay
 
+from application_pipeline.classify_stage import ClassifyStageHandoff
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import load as load_dedup
 from application_pipeline.dedup_counters import DedupCounters
@@ -42,6 +43,21 @@ class _CollectingHandoff:
         parser_id: str,
     ) -> None:
         pass
+
+
+class _ExplosiveTruthinessHandoff:
+    def __bool__(self) -> bool:
+        raise AssertionError("parser-dead handling must not evaluate classify handoff")
+
+    def submit_ready(
+        self,
+        *,
+        listing_id: int,
+        stub: PositionStub,
+        raw_description: str,
+        parser_id: str,
+    ) -> None:
+        raise AssertionError("dead parser must not submit classify work")
 
 
 class _SlowParserStartedRunLog(RunLog):
@@ -131,10 +147,26 @@ class _LifecycleAccountingParser:
         return EnrichResult(stub=stub, body="x" * 200, mode="fallback")
 
 
+class _DiscoverCrashParser:
+    def __enter__(self) -> _DiscoverCrashParser:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery):  # type: ignore[return]
+        raise RuntimeError("fatal error in parser")
+        yield  # pragma: no cover
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        raise AssertionError("discover crash should not call enrich()")
+
+
 def _make_plan(
     tmp_path: Path,
     *,
     parser: Parser,
+    classify_handoff: ClassifyStageHandoff | None = None,
     run_log: RunLog | None = None,
     keywords: list[str] | None = None,
     locations: list[City | Remote] | None = None,
@@ -187,7 +219,11 @@ def _make_plan(
             ParserLifecycleExecution(
                 parser=parser,
                 parser_id="test_parser",
-                classify_handoff=_CollectingHandoff(),
+                classify_handoff=(
+                    _CollectingHandoff()
+                    if classify_handoff is None
+                    else classify_handoff
+                ),
             )
         ],
         keywords=configured_keywords,
@@ -346,6 +382,52 @@ def test_query_ended_is_still_logged_when_discover_raises(tmp_path: Path) -> Non
     assert {"event": "query_ended", "keyword": "python", "location": "Hamburg"} in rows
     failure_reports = list((tmp_path / "failures").glob("*.md"))
     assert len(failure_reports) == 1
+
+
+def test_parser_dead_writes_one_failure_report_without_touching_classify_handoff(
+    tmp_path: Path,
+) -> None:
+    plan = _make_plan(
+        tmp_path,
+        parser=_DiscoverCrashParser(),
+        classify_handoff=_ExplosiveTruthinessHandoff(),
+    )
+
+    run_parser_lifecycle(plan)
+
+    failure_reports = list((tmp_path / "failures").glob("*.md"))
+    assert len(failure_reports) == 1
+
+
+def test_parser_dead_preserves_failure_report_run_log_and_metrics_observations(
+    tmp_path: Path,
+) -> None:
+    plan, display = _make_plan_with_display(
+        tmp_path,
+        parser=_DiscoverCrashParser(),
+    )
+
+    run_parser_lifecycle(plan)
+
+    failure_report = next((tmp_path / "failures").glob("*.md"))
+    failure_body = failure_report.read_text(encoding="utf-8")
+    assert "parser:test_parser" in failure_body
+    assert "RuntimeError" in failure_body
+    assert "fatal error in parser" in failure_body
+    assert "Traceback" in failure_body
+
+    run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
+    assert "=== parser_test_parser" in run_log_content
+    assert "traceback ===" in run_log_content
+    assert "RuntimeError: fatal error in parser" in run_log_content
+    assert "parsers_dead=1" in run_log_content
+
+    phase_calls = [
+        call
+        for call in display.calls
+        if call.method == "update_phase" and call.name == "parser test parser"
+    ]
+    assert phase_calls[-1].kwargs["phase"] == "dead"
 
 
 def test_stall_watchdog_logs_one_stalled_event_and_stack_trace_via_lifecycle(

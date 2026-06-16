@@ -75,6 +75,13 @@ class _QueryDone:
 _QUERY_DONE = _QueryDone()
 
 
+class _ParserProgress:
+    __slots__ = ()
+
+
+_PARSER_PROGRESS = _ParserProgress()
+
+
 class _ParserThread(threading.Thread):
     """Owns Parser discovery and Parser Intake handoff for one Parser."""
 
@@ -166,6 +173,7 @@ class _ParserThread(threading.Thread):
     def _process_position_stub(self, position_stub: PositionStub) -> None:
         self._metrics.discovered(self._parser_id)
         self._parser_intake.process_position_stub(position_stub)
+        self._outbound.put((self._parser_id, _PARSER_PROGRESS))
 
 
 @dataclass
@@ -206,6 +214,8 @@ class _OutboundDispatcher:
                 traceback_str=payload.traceback_str,
             )
             return True
+        elif payload is _PARSER_PROGRESS:
+            return False
         return False
 
 

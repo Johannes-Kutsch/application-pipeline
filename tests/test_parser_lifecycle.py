@@ -124,6 +124,34 @@ class _SleepingParser:
         raise AssertionError("empty discover should not call enrich()")
 
 
+class _TwoSilencesAroundProgressParser:
+    def __init__(self, *, sleep_s: float) -> None:
+        self._sleep_s = sleep_s
+
+    def __enter__(self) -> _TwoSilencesAroundProgressParser:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
+    def discover(self, query: ParserQuery):
+        time.sleep(self._sleep_s)
+        yield PositionStub(
+            url=f"https://example.com/{query.keyword}-1",
+            title=f"{query.keyword.title()} Engineer I",
+            source="test",
+        )
+        time.sleep(self._sleep_s)
+        yield PositionStub(
+            url=f"https://example.com/{query.keyword}-2",
+            title=f"{query.keyword.title()} Engineer II",
+            source="test",
+        )
+
+    def enrich(self, stub: PositionStub) -> EnrichResult:
+        return EnrichResult(stub=stub, body="x" * 200, mode="fallback")
+
+
 class _LifecycleAccountingParser:
     def __enter__(self) -> _LifecycleAccountingParser:
         return self
@@ -453,6 +481,29 @@ def test_stall_watchdog_logs_one_stalled_event_and_stack_trace_via_lifecycle(
     run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
     assert "traceback" in run_log_content
     assert "File " in run_log_content
+
+
+def test_stall_watchdog_can_report_again_after_parser_progress_ends_silence(
+    tmp_path: Path,
+) -> None:
+    threshold_s = 0.05
+    plan = _make_plan(
+        tmp_path,
+        parser=_TwoSilencesAroundProgressParser(sleep_s=threshold_s * 4),
+        stall_threshold_s=threshold_s,
+    )
+
+    run_parser_lifecycle(plan)
+
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "parser" / "test_parser.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+    stalled_rows = [row for row in rows if row.get("event") == "stalled"]
+    assert len(stalled_rows) == 2
 
 
 def test_lifecycle_records_not_served_and_completed_queries_without_parser_dead(

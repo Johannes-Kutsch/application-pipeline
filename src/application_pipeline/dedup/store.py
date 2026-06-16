@@ -54,12 +54,20 @@ SeenResult = Literal["url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "miss
 RunScopedSeenKind = Literal[
     "url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "run_hit", "miss"
 ]
+_MatchDecisionMutation = Literal["none", "refresh_pending"]
 
 
 @dataclass
 class RunScopedSeenResult:
     kind: RunScopedSeenKind
     listing_id: int
+
+
+@dataclass(frozen=True)
+class _MatchDecision:
+    kind: RunScopedSeenKind
+    listing_id: int
+    mutation: _MatchDecisionMutation = "none"
 
 
 @runtime_checkable
@@ -255,6 +263,25 @@ class DeduplicationStore:
         """Return the listing_id for a URL, or None if not registered."""
         return self._url_index.get(url)
 
+    def _decide_existing_url_match(
+        self, listing_id: int, record: dict[str, Any]
+    ) -> _MatchDecision:
+        """Return the private match decision for an already-registered URL."""
+        if record.get("status") == "pending":
+            if self._in_run is not None and listing_id in self._in_run:
+                return _MatchDecision("run_hit", listing_id, mutation="refresh_pending")
+            return _MatchDecision("url_hit", listing_id, mutation="refresh_pending")
+        if self._in_run is not None and listing_id in self._in_run:
+            return _MatchDecision("run_hit", listing_id)
+        status = record.get("status")
+        if status == "matched":
+            return _MatchDecision("judge_pending", listing_id)
+        if status == "selected_by_judge" and self._cooldown_expired(record):
+            return _MatchDecision("judge_pending", listing_id)
+        if status == "expired" and self._cooldown_expired(record):
+            return _MatchDecision("miss", listing_id)
+        return _MatchDecision("url_hit", listing_id)
+
     def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
         """Return which dedup tier matched ``key``; on tuple/fuzzy match, update urls list.
 
@@ -300,25 +327,11 @@ class DeduplicationStore:
                         self._log_hit("fuzzy_hit", key, match_id)
                         self._prepend_url(match_id, key.url, persist=True)
                         return RunScopedSeenResult("fuzzy_hit", match_id)
-                    # No cross-listing match; refresh pending with backfilled fields
+                decision = self._decide_existing_url_match(existing_id, existing)
+                if decision.mutation == "refresh_pending":
+                    # No cross-listing match; refresh pending with backfilled fields.
                     self._write_pending(key, listing_id=existing_id)
-                    if self._in_run is not None and existing_id in self._in_run:
-                        return RunScopedSeenResult("run_hit", existing_id)
-                    return RunScopedSeenResult("url_hit", existing_id)
-                else:
-                    # URL already seen with a real (non-pending) status
-                    if self._in_run is not None and existing_id in self._in_run:
-                        return RunScopedSeenResult("run_hit", existing_id)
-                    status = existing.get("status")
-                    if status == "matched":
-                        return RunScopedSeenResult("judge_pending", existing_id)
-                    if status == "selected_by_judge" and self._cooldown_expired(
-                        existing
-                    ):
-                        return RunScopedSeenResult("judge_pending", existing_id)
-                    if status == "expired" and self._cooldown_expired(existing):
-                        return RunScopedSeenResult("miss", existing_id)
-                    return RunScopedSeenResult("url_hit", existing_id)
+                return RunScopedSeenResult(decision.kind, decision.listing_id)
 
             # URL not yet registered — check tuple, fuzzy, then miss
             match_id = self._tuple_lookup(key)

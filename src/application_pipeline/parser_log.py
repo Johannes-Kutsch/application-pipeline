@@ -74,7 +74,7 @@ class RunLog:
         counts: Mapping[str, int | float | str],
         started_at: datetime,
     ) -> None:
-        ts = started_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = started_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         lines = "\n".join(
             f"{k}: {v}" if isinstance(v, str) else f"{k}={v}" for k, v in counts.items()
         )

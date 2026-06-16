@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from application_pipeline.parser_log import RunLog
@@ -181,6 +181,22 @@ def test_summarize_with_caller_supplied_counts(tmp_path: Path) -> None:
         assert f"{key}={value}" in content
 
 
+def test_summary_on_fresh_logs_dir_writes_exact_root_block_in_utc(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    started = datetime(2026, 5, 12, 17, 30, 0, tzinfo=timezone(timedelta(hours=2)))
+
+    log.summary("llm_classify_relevance", {"calls": 2}, started)
+
+    assert (tmp_path / "run.log").read_text(encoding="utf-8") == (
+        "=== llm_classify_relevance  2026-05-12T15:30:00Z  summary ===\n\n"
+        "SUMMARY OF SESSION 2026-05-12T15:30:00Z\n"
+        "calls=2\n\n\n"
+    )
+    assert not (tmp_path / "llm" / "classify_relevance.summary").exists()
+
+
 def test_summarize_with_zero_events_produces_valid_trailer(tmp_path: Path) -> None:
     log = RunLog(tmp_path)
     started = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
@@ -190,6 +206,29 @@ def test_summarize_with_zero_events_produces_valid_trailer(tmp_path: Path) -> No
     assert "SUMMARY OF SESSION" in content
     assert "calls=0" in content
     assert "duration_s=0.0" in content
+    assert not (tmp_path / "llm" / "judge_match.summary").exists()
+
+
+def test_summarize_renders_string_counts_with_colon_and_preserves_text(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    started = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+
+    log.summary(
+        "pipeline_run_metrics",
+        {
+            "written": 5,
+            "persisted": "4 discovered",
+            "status": "retry: deferred",
+        },
+        started,
+    )
+
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
+    assert "written=5" in content
+    assert "persisted: 4 discovered" in content
+    assert "status: retry: deferred" in content
 
 
 def test_two_sessions_produce_two_summary_blocks_separated_by_blank_line(

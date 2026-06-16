@@ -54,9 +54,8 @@ SeenResult = Literal["url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "miss
 RunScopedSeenKind = Literal[
     "url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "run_hit", "miss"
 ]
-_MatchDecisionMutation = Literal[
+_PrependUrlMutation = Literal[
     "none",
-    "refresh_pending",
     "prepend_url_in_memory",
     "prepend_url_persist",
 ]
@@ -69,10 +68,18 @@ class RunScopedSeenResult:
 
 
 @dataclass(frozen=True)
+class _MatchMutationPlan:
+    pending_write_listing_id: int | None = None
+    prepend_url: _PrependUrlMutation = "none"
+    claim_in_run: bool = False
+    log_hit: bool = False
+
+
+@dataclass(frozen=True)
 class _MatchDecision:
     kind: RunScopedSeenKind
     listing_id: int
-    mutation: _MatchDecisionMutation = "none"
+    plan: _MatchMutationPlan = _MatchMutationPlan()
 
 
 @runtime_checkable
@@ -274,17 +281,33 @@ class DeduplicationStore:
         """Return the private match decision for an already-registered URL."""
         if record.get("status") == "pending":
             if self._in_run is not None and listing_id in self._in_run:
-                return _MatchDecision("run_hit", listing_id, mutation="refresh_pending")
-            return _MatchDecision("url_hit", listing_id, mutation="refresh_pending")
+                return _MatchDecision(
+                    "run_hit",
+                    listing_id,
+                    plan=_MatchMutationPlan(pending_write_listing_id=listing_id),
+                )
+            return _MatchDecision(
+                "url_hit",
+                listing_id,
+                plan=_MatchMutationPlan(pending_write_listing_id=listing_id),
+            )
         if self._in_run is not None and listing_id in self._in_run:
             return _MatchDecision("run_hit", listing_id)
         status = record.get("status")
         if status == "matched":
-            return _MatchDecision("judge_pending", listing_id)
+            return _MatchDecision(
+                "judge_pending",
+                listing_id,
+                plan=_MatchMutationPlan(claim_in_run=self._in_run is not None),
+            )
         if status == "selected_by_judge" and self._cooldown_expired(record):
-            return _MatchDecision("judge_pending", listing_id)
+            return _MatchDecision(
+                "judge_pending",
+                listing_id,
+                plan=_MatchMutationPlan(claim_in_run=self._in_run is not None),
+            )
         if status == "expired" and self._cooldown_expired(record):
-            return _MatchDecision("miss", listing_id)
+            return self._decide_miss(listing_id)
         return _MatchDecision("url_hit", listing_id)
 
     def _decide_exact_tuple_match(
@@ -300,15 +323,32 @@ class DeduplicationStore:
         status = record.get("status")
         if status == "matched":
             return _MatchDecision(
-                "judge_pending", listing_id, mutation="prepend_url_in_memory"
+                "judge_pending",
+                listing_id,
+                plan=_MatchMutationPlan(
+                    prepend_url="prepend_url_in_memory",
+                    claim_in_run=self._in_run is not None,
+                ),
             )
         if status == "selected_by_judge" and self._cooldown_expired(record):
             return _MatchDecision(
-                "judge_pending", listing_id, mutation="prepend_url_in_memory"
+                "judge_pending",
+                listing_id,
+                plan=_MatchMutationPlan(
+                    prepend_url="prepend_url_in_memory",
+                    claim_in_run=self._in_run is not None,
+                ),
             )
         if status == "expired" and self._cooldown_expired(record):
-            return _MatchDecision("miss", miss_listing_id)
-        return _MatchDecision("tuple_hit", listing_id, mutation="prepend_url_persist")
+            return self._decide_miss(miss_listing_id)
+        return _MatchDecision(
+            "tuple_hit",
+            listing_id,
+            plan=_MatchMutationPlan(
+                prepend_url="prepend_url_persist",
+                log_hit=True,
+            ),
+        )
 
     def _decide_fuzzy_match(
         self,
@@ -323,15 +363,42 @@ class DeduplicationStore:
         status = record.get("status")
         if status == "matched":
             return _MatchDecision(
-                "judge_pending", listing_id, mutation="prepend_url_in_memory"
+                "judge_pending",
+                listing_id,
+                plan=_MatchMutationPlan(
+                    prepend_url="prepend_url_in_memory",
+                    claim_in_run=self._in_run is not None,
+                ),
             )
         if status == "selected_by_judge" and self._cooldown_expired(record):
             return _MatchDecision(
-                "judge_pending", listing_id, mutation="prepend_url_in_memory"
+                "judge_pending",
+                listing_id,
+                plan=_MatchMutationPlan(
+                    prepend_url="prepend_url_in_memory",
+                    claim_in_run=self._in_run is not None,
+                ),
             )
         if status == "expired" and self._cooldown_expired(record):
-            return _MatchDecision("miss", miss_listing_id)
-        return _MatchDecision("fuzzy_hit", listing_id, mutation="prepend_url_persist")
+            return self._decide_miss(miss_listing_id)
+        return _MatchDecision(
+            "fuzzy_hit",
+            listing_id,
+            plan=_MatchMutationPlan(
+                prepend_url="prepend_url_persist",
+                log_hit=True,
+            ),
+        )
+
+    def _decide_miss(self, listing_id: int) -> _MatchDecision:
+        return _MatchDecision(
+            "miss",
+            listing_id,
+            plan=_MatchMutationPlan(
+                pending_write_listing_id=listing_id,
+                claim_in_run=self._in_run is not None,
+            ),
+        )
 
     def _decide_pending_post_enrich_match(
         self, existing_id: int, key: _SeenKey
@@ -361,15 +428,16 @@ class DeduplicationStore:
         key: _SeenKey,
     ) -> RunScopedSeenResult:
         """Apply decision-local side effects and return the public result."""
-        if decision.mutation == "refresh_pending":
-            self._write_pending(key, listing_id=decision.listing_id)
-        if decision.mutation == "prepend_url_in_memory":
-            self._prepend_url(decision.listing_id, key.url, persist=False)
-            if self._in_run is not None:
-                self._in_run.add(decision.listing_id)
-        elif decision.mutation == "prepend_url_persist":
+        if decision.plan.pending_write_listing_id is not None:
+            self._write_pending(key, listing_id=decision.plan.pending_write_listing_id)
+        if decision.plan.log_hit:
             self._log_hit(decision.kind, key, decision.listing_id)
+        if decision.plan.prepend_url == "prepend_url_in_memory":
+            self._prepend_url(decision.listing_id, key.url, persist=False)
+        elif decision.plan.prepend_url == "prepend_url_persist":
             self._prepend_url(decision.listing_id, key.url, persist=True)
+        if decision.plan.claim_in_run and self._in_run is not None:
+            self._in_run.add(decision.listing_id)
         return RunScopedSeenResult(decision.kind, decision.listing_id)
 
     def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
@@ -411,10 +479,8 @@ class DeduplicationStore:
                 )
                 return self._apply_match_decision(decision, key=key)
 
-            new_id = self._write_pending(key)
-            if self._in_run is not None:
-                self._in_run.add(new_id)
-            return RunScopedSeenResult("miss", new_id)
+            decision = self._decide_miss(self._next_id)
+            return self._apply_match_decision(decision, key=key)
 
     def _write_pending(self, key: _SeenKey, *, listing_id: int | None = None) -> int:
         """Write or refresh an in-memory pending entry for key. Caller must hold self._lock.

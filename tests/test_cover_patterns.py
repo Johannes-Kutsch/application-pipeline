@@ -19,80 +19,59 @@ _COVER_PATTERNS_TEMPLATE = Path(
 )
 
 
-@pytest.mark.parametrize(
-    ("slot", "name"),
-    [
-        ("cover_intro", "Product Resonance Intro"),
-        ("cover_pivot", "Product Resonance Pivot"),
-        ("cover_fit", "Product Resonance Fit"),
-        ("cover_closing", "Product Resonance Closing"),
-    ],
-)
-def test_parse_returns_named_cover_paragraph_patterns(slot: str, name: str) -> None:
-    text = textwrap.dedent(
+def _pattern_block(
+    name: str,
+    slot: str,
+    *,
+    argument_type: str = "resonance",
+    use_when: str = "The listing's product surface matches a long-running motivation.",
+    placeholders: str = "Musterfirma, Musterprodukt, Musterprojekt",
+    why_it_works: str = "It ties employer context to concrete candidate evidence.",
+    text: str = (
+        "Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem "
+        "adressiert, das ich in Musterprojekt bereits aus der Builder-"
+        "Perspektive durchdrungen habe. Gerade diese Naehe zwischen "
+        "Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich "
+        "plausibel."
+    ),
+) -> str:
+    header = textwrap.dedent(
         f"""\
         ## {name}
         - slot: {slot}
-        - argument_type: resonance
-        - use_when: The listing's product surface matches a long-running motivation.
-        - placeholders: Musterfirma, Musterprodukt, Musterprojekt
-        - why_it_works: It ties employer context to concrete candidate evidence.
-
-        Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
+        - argument_type: {argument_type}
+        - use_when: {use_when}
+        - placeholders: {placeholders}
+        - why_it_works: {why_it_works}
         """
     )
-
-    result = parse(text)
-
-    assert [pattern.name for pattern in result] == [name]
-    pattern = result[0]
-    assert pattern.slot == slot
-    assert pattern.argument_type == "resonance"
-    assert (
-        pattern.use_when
-        == "The listing's product surface matches a long-running motivation."
-    )
-    assert pattern.placeholders == (
-        "Musterfirma",
-        "Musterprodukt",
-        "Musterprojekt",
-    )
-    assert (
-        pattern.why_it_works
-        == "It ties employer context to concrete candidate evidence."
-    )
-    assert (
-        pattern.text
-        == "Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel."
-    )
+    return f"{header}\n{text}\n"
 
 
-def test_parse_library_returns_patterns_in_authored_order() -> None:
-    text = textwrap.dedent(
-        """\
-        ## Intro Pattern
-        - slot: cover_intro
-        - argument_type: resonance
-        - use_when: The listing's product surface matches a long-running motivation.
-        - placeholders: Musterfirma, Musterprodukt, Musterprojekt
-        - why_it_works: It ties employer context to concrete candidate evidence.
-
-        Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
-
-        ## Closing Pattern
-        - slot: cover_closing
-        - argument_type: closing
-        - use_when: The role is a strong match and the close should stay direct.
-        - placeholders: Musterfirma, Musterrolle
-        - why_it_works: It closes with clear intent and references the role directly.
-
-        Deshalb moechte ich meine Erfahrung bei Musterfirma in der Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie ich den Beitrag konkret leisten kann, freue ich mich.
-        """
+def test_cover_pattern_library_parse_returns_patterns_in_authored_order() -> None:
+    library = CoverPatternLibrary.parse(
+        "\n\n".join(
+            [
+                _pattern_block("Intro Pattern", "cover_intro"),
+                _pattern_block(
+                    "Closing Pattern",
+                    "cover_closing",
+                    argument_type="closing",
+                    use_when="The role is a strong match and the close should stay direct.",
+                    placeholders="Musterfirma, Musterrolle",
+                    why_it_works="It closes with clear intent and references the role directly.",
+                    text=(
+                        "Deshalb moechte ich meine Erfahrung bei Musterfirma in "
+                        "der Musterrolle wirksam einbringen. Ueber ein Gespraech "
+                        "dazu, wie ich den Beitrag konkret leisten kann, freue "
+                        "ich mich."
+                    ),
+                ),
+            ]
+        )
     )
 
-    result = parse_library(text)
-
-    assert result.all_patterns() == [
+    assert library.all_patterns() == [
         CoverPattern(
             name="Intro Pattern",
             slot="cover_intro",
@@ -100,7 +79,13 @@ def test_parse_library_returns_patterns_in_authored_order() -> None:
             use_when="The listing's product surface matches a long-running motivation.",
             placeholders=("Musterfirma", "Musterprodukt", "Musterprojekt"),
             why_it_works="It ties employer context to concrete candidate evidence.",
-            text="Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.",
+            text=(
+                "Bei Musterfirma reizt mich besonders, dass Musterprodukt ein "
+                "Problem adressiert, das ich in Musterprojekt bereits aus der "
+                "Builder-Perspektive durchdrungen habe. Gerade diese Naehe "
+                "zwischen Produktproblem und Umsetzungserfahrung macht den "
+                "Wechsel fuer mich plausibel."
+            ),
         ),
         CoverPattern(
             name="Closing Pattern",
@@ -109,7 +94,11 @@ def test_parse_library_returns_patterns_in_authored_order() -> None:
             use_when="The role is a strong match and the close should stay direct.",
             placeholders=("Musterfirma", "Musterrolle"),
             why_it_works="It closes with clear intent and references the role directly.",
-            text="Deshalb moechte ich meine Erfahrung bei Musterfirma in der Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie ich den Beitrag konkret leisten kann, freue ich mich.",
+            text=(
+                "Deshalb moechte ich meine Erfahrung bei Musterfirma in der "
+                "Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie "
+                "ich den Beitrag konkret leisten kann, freue ich mich."
+            ),
         ),
     ]
 
@@ -122,110 +111,54 @@ def test_cover_pattern_library_load_returns_empty_library_for_missing_or_blank_f
     if seed is not None:
         path.write_text(seed)
 
-    result = CoverPatternLibrary.load(path)
-
-    assert result == CoverPatternLibrary()
+    assert CoverPatternLibrary.load(path) == CoverPatternLibrary()
 
 
-def test_load_library_filters_patterns_by_slot_in_authored_order(
+def test_cover_pattern_library_load_projects_patterns_by_slot_in_authored_order(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "cover-patterns.md"
     path.write_text(
-        textwrap.dedent(
-            """\
-            ## Intro Pattern
-            - slot: cover_intro
-            - argument_type: resonance
-            - use_when: The listing's product surface matches a long-running motivation.
-            - placeholders: Musterfirma, Musterprodukt, Musterprojekt
-            - why_it_works: It ties employer context to concrete candidate evidence.
-
-            Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
-
-            ## Fit Pattern
-            - slot: cover_fit
-            - argument_type: capability
-            - use_when: The role maps directly to prior evidence.
-            - placeholders: Musterfirma, Musterrolle
-            - why_it_works: It ties the role to demonstrated evidence.
-
-            Bei Musterfirma kann ich fuer die Musterrolle belastbare Erfahrung direkt nutzbar machen. Diese Verantwortung habe ich bereits konkret getragen und moechte sie weiter vertiefen.
-
-            ## Second Intro Pattern
-            - slot: cover_intro
-            - argument_type: resonance
-            - use_when: The domain is compelling for a second intro variant.
-            - placeholders: Musterfirma, Musterdomäne
-            - why_it_works: It keeps the intro specific to the employer domain.
-
-            Bei Musterfirma reizt mich besonders die Arbeit in der Musterdomäne. Diese Verbindung habe ich bereits konkret erlebt und moechte sie dort weiter ausbauen.
-            """
+        "\n\n".join(
+            [
+                _pattern_block("Intro Pattern", "cover_intro"),
+                _pattern_block(
+                    "Fit Pattern",
+                    "cover_fit",
+                    argument_type="capability",
+                    placeholders="Musterfirma, Musterrolle",
+                    text=(
+                        "Bei Musterfirma kann ich fuer die Musterrolle "
+                        "belastbare Erfahrung direkt nutzbar machen. Diese "
+                        "Verantwortung habe ich bereits konkret getragen und "
+                        "moechte sie weiter vertiefen."
+                    ),
+                    why_it_works="It ties the role to demonstrated evidence.",
+                    use_when="The role maps directly to prior evidence.",
+                ),
+                _pattern_block(
+                    "Second Intro Pattern",
+                    "cover_intro",
+                    placeholders="Musterfirma, Musterdomäne",
+                    use_when="The domain is compelling for a second intro variant.",
+                    why_it_works="It keeps the intro specific to the employer domain.",
+                    text=(
+                        "Bei Musterfirma reizt mich besonders die Arbeit in der "
+                        "Musterdomäne. Diese Verbindung habe ich bereits konkret "
+                        "erlebt und moechte sie dort weiter ausbauen."
+                    ),
+                ),
+            ]
         )
     )
 
-    result = load_library(path)
+    library = CoverPatternLibrary.load(path)
 
-    assert [pattern.name for pattern in result.patterns_for_slot("cover_intro")] == [
+    assert [pattern.name for pattern in library.patterns_for_slot("cover_intro")] == [
         "Intro Pattern",
         "Second Intro Pattern",
     ]
-
-
-def test_cover_pattern_library_projects_one_valid_slot_in_authored_order() -> None:
-    text = textwrap.dedent(
-        """\
-        ## Intro Pattern
-        - slot: cover_intro
-        - argument_type: resonance
-        - use_when: The listing's product surface matches a long-running motivation.
-        - placeholders: Musterfirma, Musterprodukt, Musterprojekt
-        - why_it_works: It ties employer context to concrete candidate evidence.
-
-        Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
-
-        ## Fit Pattern
-        - slot: cover_fit
-        - argument_type: capability
-        - use_when: The role maps directly to prior evidence.
-        - placeholders: Musterfirma, Musterrolle
-        - why_it_works: It ties the role to demonstrated evidence.
-
-        Bei Musterfirma kann ich fuer die Musterrolle belastbare Erfahrung direkt nutzbar machen. Diese Verantwortung habe ich bereits konkret getragen und moechte sie weiter vertiefen.
-
-        ## Second Intro Pattern
-        - slot: cover_intro
-        - argument_type: resonance
-        - use_when: The domain is compelling for a second intro variant.
-        - placeholders: Musterfirma, Musterdomäne
-        - why_it_works: It keeps the intro specific to the employer domain.
-
-        Bei Musterfirma reizt mich besonders die Arbeit in der Musterdomäne. Diese Verbindung habe ich bereits konkret erlebt und möchte sie dort weiter ausbauen.
-        """
-    )
-
-    result = parse_library(text)
-
-    assert result.patterns_for_slot("cover_intro") == [
-        CoverPattern(
-            name="Intro Pattern",
-            slot="cover_intro",
-            argument_type="resonance",
-            use_when="The listing's product surface matches a long-running motivation.",
-            placeholders=("Musterfirma", "Musterprodukt", "Musterprojekt"),
-            why_it_works="It ties employer context to concrete candidate evidence.",
-            text="Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.",
-        ),
-        CoverPattern(
-            name="Second Intro Pattern",
-            slot="cover_intro",
-            argument_type="resonance",
-            use_when="The domain is compelling for a second intro variant.",
-            placeholders=("Musterfirma", "Musterdomäne"),
-            why_it_works="It keeps the intro specific to the employer domain.",
-            text="Bei Musterfirma reizt mich besonders die Arbeit in der Musterdomäne. Diese Verbindung habe ich bereits konkret erlebt und möchte sie dort weiter ausbauen.",
-        ),
-    ]
+    assert library.patterns_for_slot("cover_closing") == []
 
 
 @pytest.mark.parametrize(
@@ -245,29 +178,8 @@ def test_cover_pattern_library_projects_one_valid_slot_in_authored_order() -> No
 def test_cover_pattern_library_rejects_non_cover_or_unknown_projection_slots(
     slot: str, message: str
 ) -> None:
-    library = CoverPatternLibrary()
-
     with pytest.raises(CoverPatternError, match=message):
-        library.patterns_for_slot(slot)
-
-
-def test_cover_pattern_library_returns_empty_projection_for_valid_unused_slot() -> None:
-    library = parse_library(
-        textwrap.dedent(
-            """\
-            ## Intro Pattern
-            - slot: cover_intro
-            - argument_type: resonance
-            - use_when: The listing's product surface matches a long-running motivation.
-            - placeholders: Musterfirma, Musterprodukt, Musterprojekt
-            - why_it_works: It ties employer context to concrete candidate evidence.
-
-            Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
-            """
-        )
-    )
-
-    assert library.patterns_for_slot("cover_fit") == []
+        CoverPatternLibrary().patterns_for_slot(slot)
 
 
 @pytest.mark.parametrize("slot", COVER_PARAGRAPH_PATTERN_SLOTS)
@@ -280,44 +192,41 @@ def test_cover_pattern_library_accepts_cover_slot_contract_for_projection(
 def test_parse_and_load_remain_list_compatibility_wrappers(
     tmp_path: Path,
 ) -> None:
-    text = textwrap.dedent(
-        """\
-        ## Compat Pattern
-        - slot: cover_closing
-        - argument_type: closing
-        - use_when: The role is a strong match and the close should stay direct.
-        - placeholders: Musterfirma, Musterrolle
-        - why_it_works: It closes with clear intent and references the role directly.
-
-        Deshalb moechte ich meine Erfahrung bei Musterfirma in der Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie ich den Beitrag konkret leisten kann, freue ich mich.
-        """
+    text = _pattern_block(
+        "Compat Pattern",
+        "cover_closing",
+        argument_type="closing",
+        placeholders="Musterfirma, Musterrolle",
+        use_when="The role is a strong match and the close should stay direct.",
+        why_it_works="It closes with clear intent and references the role directly.",
+        text=(
+            "Deshalb moechte ich meine Erfahrung bei Musterfirma in der "
+            "Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie ich "
+            "den Beitrag konkret leisten kann, freue ich mich."
+        ),
     )
     path = tmp_path / "cover-patterns.md"
     path.write_text(text)
 
-    parsed = parse(text)
-    loaded = load(path)
-
-    assert isinstance(parsed, list) and isinstance(loaded, list)
-    assert parsed == parse_library(text).all_patterns()
-    assert loaded == load_library(path).all_patterns()
+    assert parse(text) == parse_library(text).all_patterns()
+    assert load(path) == load_library(path).all_patterns()
 
 
 @pytest.mark.parametrize("loader_name", ["parse_library", "load_library"])
 def test_cover_pattern_library_builders_preserve_cover_pattern_failures(
     loader_name: str, tmp_path: Path
 ) -> None:
-    text = textwrap.dedent(
-        """\
-        ## Invalid Pattern
-        - slot: opening
-        - argument_type: resonance
-        - use_when: If the product is unusually compelling.
-        - placeholders: Musterfirma
-        - why_it_works: It is specific.
-
-        Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will.
-        """
+    text = _pattern_block(
+        "Invalid Pattern",
+        "opening",
+        placeholders="Musterfirma",
+        text=(
+            "Ich will bei Musterfirma arbeiten, weil mich das Thema lange "
+            "begleitet und ich es konkret weiterbauen will. Diese Verbindung "
+            "macht den Wechsel fuer mich plausibel."
+        ),
+        use_when="If the product is unusually compelling.",
+        why_it_works="It is specific.",
     )
 
     if loader_name == "parse_library":
@@ -335,17 +244,18 @@ def test_cover_pattern_library_load_rejects_empty_required_metadata_value(
 ) -> None:
     path = tmp_path / "cover-patterns.md"
     path.write_text(
-        textwrap.dedent(
-            """\
-            ## Missing Argument Type
-            - slot: cover_intro
-            - argument_type:
-            - use_when: If the product is unusually compelling.
-            - placeholders: Musterfirma
-            - why_it_works: It is specific.
-
-            Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will. Diese Verbindung macht den Wechsel fuer mich plausibel.
-            """
+        _pattern_block(
+            "Missing Argument Type",
+            "cover_intro",
+            argument_type="",
+            placeholders="Musterfirma",
+            text=(
+                "Ich will bei Musterfirma arbeiten, weil mich das Thema lange "
+                "begleitet und ich es konkret weiterbauen will. Diese "
+                "Verbindung macht den Wechsel fuer mich plausibel."
+            ),
+            use_when="If the product is unusually compelling.",
+            why_it_works="It is specific.",
         )
     )
 
@@ -383,169 +293,143 @@ def test_cover_pattern_library_load_reports_each_missing_required_metadata_key(
         CoverPatternLibrary.load(path)
 
 
-def test_cover_pattern_library_load_reports_unsupported_slot_value(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "cover-patterns.md"
-    path.write_text(
-        textwrap.dedent(
-            """\
-            ## Unsupported Slot
-            - slot: opening
-            - argument_type: resonance
-            - use_when: If the product is unusually compelling.
-            - placeholders: Musterfirma
-            - why_it_works: It is specific.
-
-            Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will. Diese Verbindung macht den Wechsel fuer mich plausibel.
-            """
-        )
-    )
-
-    with pytest.raises(
-        CoverPatternError,
-        match="Unsupported Slot: unknown cover slot: opening",
-    ):
-        CoverPatternLibrary.load(path)
-
-
 @pytest.mark.parametrize(
     ("text", "message"),
     [
         (
-            """\
-            ## Unknown Slot
-            - slot: opening
-            - argument_type: resonance
-            - use_when: If the product is unusually compelling.
-            - placeholders: Musterfirma
-            - why_it_works: It is specific.
-
-            Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will.
-            """,
-            "unknown cover slot",
-        ),
-        (
-            """\
-            ## Missing Metadata
-            - slot: cover_intro
-            - use_when: If the product is unusually compelling.
-            - placeholders: Musterfirma
-            - why_it_works: It is specific.
-
-            Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will.
-            """,
-            "missing required metadata",
-        ),
-        (
-            """\
-            ## Empty Text
-            - slot: cover_intro
-            - argument_type: resonance
-            - use_when: If the product is unusually compelling.
-            - placeholders: Musterfirma
-            - why_it_works: It is specific.
-            """,
+            _pattern_block(
+                "Empty Text",
+                "cover_intro",
+                placeholders="Musterfirma",
+                text="",
+                use_when="If the product is unusually compelling.",
+                why_it_works="It is specific.",
+            ),
             "text paragraph is empty",
         ),
         (
-            """\
-            ## Multi Paragraph
-            - slot: cover_intro
-            - argument_type: resonance
-            - use_when: If the product is unusually compelling.
-            - placeholders: Musterfirma
-            - why_it_works: It is specific.
-
-            Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will.
-
-            Der zweite Absatz duerfte hier nicht erlaubt sein, weil ein Muster genau einen Absatz enthalten muss.
-            """,
-            "must contain exactly one paragraph",
-        ),
-        (
-            """\
-            ## One Sentence
-            - slot: cover_intro
-            - argument_type: resonance
-            - use_when: If the product is unusually compelling.
-            - placeholders: Musterfirma
-            - why_it_works: It is specific.
-
-            Ich will bei Musterfirma arbeiten.
-            """,
+            _pattern_block(
+                "One Sentence",
+                "cover_intro",
+                placeholders="Musterfirma",
+                text="Ich will bei Musterfirma arbeiten.",
+                use_when="If the product is unusually compelling.",
+                why_it_works="It is specific.",
+            ),
             "must contain at least two sentences",
         ),
         (
-            """\
-            ## Undeclared Placeholder
-            - slot: cover_intro
-            - argument_type: resonance
-            - use_when: If the product is unusually compelling.
-            - placeholders: Musterfirma
-            - why_it_works: It is specific.
-
-            Ich will bei Musterfirma arbeiten, weil Musterprodukt fuer mich ein glaubwuerdiger Hebel ist und ich dazu bereits belastbare Erfahrung gesammelt habe. Diese Verbindung wuerde ich im Team gern weiter ausbauen.
-            """,
+            _pattern_block(
+                "Undeclared Placeholder",
+                "cover_intro",
+                placeholders="Musterfirma",
+                text=(
+                    "Ich will bei Musterfirma arbeiten, weil Musterprodukt fuer "
+                    "mich ein glaubwuerdiger Hebel ist und ich dazu bereits "
+                    "belastbare Erfahrung gesammelt habe. Diese Verbindung "
+                    "wuerde ich im Team gern weiter ausbauen."
+                ),
+                use_when="If the product is unusually compelling.",
+                why_it_works="It is specific.",
+            ),
             "undeclared placeholders in text",
         ),
         (
-            """\
-            ## Unsupported Placeholder
-            - slot: cover_fit
-            - argument_type: capability
-            - use_when: If a role maps clearly to prior evidence.
-            - placeholders: Musterfirma, Musterskill
-            - why_it_works: It ties evidence to the role.
-
-            Bei Musterfirma kann ich Musterskill in einem Umfeld einsetzen, in dem ich bereits belastbare Wirkung gezeigt habe und die Verantwortung bewusst tragen will.
-            """,
+            _pattern_block(
+                "Unsupported Placeholder",
+                "cover_fit",
+                argument_type="capability",
+                placeholders="Musterfirma, Musterskill",
+                text=(
+                    "Bei Musterfirma kann ich Musterskill in einem Umfeld "
+                    "einsetzen, in dem ich bereits belastbare Wirkung gezeigt "
+                    "habe. Diese Verantwortung moechte ich bewusst weiter "
+                    "tragen."
+                ),
+                use_when="If a role maps clearly to prior evidence.",
+                why_it_works="It ties evidence to the role.",
+            ),
             "unsupported placeholder",
+        ),
+        (
+            textwrap.dedent(
+                """\
+                ## Missing Metadata
+                - slot: cover_intro
+                - use_when: If the product is unusually compelling.
+                - placeholders: Musterfirma
+                - why_it_works: It is specific.
+
+                Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will. Diese Verbindung macht den Wechsel fuer mich plausibel.
+                """
+            ),
+            "missing required metadata",
+        ),
+        (
+            _pattern_block(
+                "Multi Paragraph",
+                "cover_intro",
+                placeholders="Musterfirma",
+                text=(
+                    "Ich will bei Musterfirma arbeiten, weil mich das Thema "
+                    "lange begleitet und ich es konkret weiterbauen will.\n\n"
+                    "Der zweite Absatz duerfte hier nicht erlaubt sein, weil "
+                    "ein Muster genau einen Absatz enthalten muss."
+                ),
+                use_when="If the product is unusually compelling.",
+                why_it_works="It is specific.",
+            ),
+            "must contain exactly one paragraph",
         ),
     ],
 )
-def test_parse_rejects_invalid_cover_patterns(text: str, message: str) -> None:
+def test_cover_pattern_library_parse_rejects_invalid_patterns(
+    text: str, message: str
+) -> None:
     with pytest.raises(CoverPatternError, match=message):
-        parse(textwrap.dedent(text))
+        CoverPatternLibrary.parse(text)
 
 
-@pytest.mark.parametrize(
-    "placeholder",
-    ["Musterdomäne", "Mustertechnologie"],
-)
-def test_parse_accepts_canonical_placeholder_vocabulary(placeholder: str) -> None:
-    text = textwrap.dedent(
-        f"""\
-        ## Vocab Pattern
-        - slot: cover_intro
-        - argument_type: resonance
-        - use_when: When the domain maps clearly.
-        - placeholders: Musterfirma, {placeholder}
-        - why_it_works: It ties employer context to candidate evidence.
-
-        Bei Musterfirma reizt mich besonders die Arbeit im Bereich {placeholder}. Diese Verbindung habe ich bereits konkret erlebt und möchte sie weiterentwickeln.
-        """
+@pytest.mark.parametrize("placeholder", ["Musterdomäne", "Mustertechnologie"])
+def test_cover_pattern_library_parse_accepts_canonical_placeholder_vocabulary(
+    placeholder: str,
+) -> None:
+    library = CoverPatternLibrary.parse(
+        _pattern_block(
+            "Vocab Pattern",
+            "cover_intro",
+            placeholders=f"Musterfirma, {placeholder}",
+            use_when="When the domain maps clearly.",
+            text=(
+                f"Bei Musterfirma reizt mich besonders die Arbeit im Bereich "
+                f"{placeholder}. Diese Verbindung habe ich bereits konkret "
+                "erlebt und moechte sie weiterentwickeln."
+            ),
+        )
     )
-    result = parse(text)
-    assert len(result) == 1
-    assert placeholder in result[0].placeholders
+
+    assert library.all_patterns()[0].placeholders == ("Musterfirma", placeholder)
 
 
-def test_parse_detects_umlaut_placeholder_as_undeclared_in_text() -> None:
-    text = textwrap.dedent(
-        """\
-        ## Umlaut Undeclared
-        - slot: cover_intro
-        - argument_type: resonance
-        - use_when: When domain matches.
-        - placeholders: Musterfirma
-        - why_it_works: It is specific.
-
-        Bei Musterfirma reizt mich die Arbeit in der Musterdomäne besonders. Diese Verbindung habe ich bereits konkret erlebt und möchte sie aktiv weiterentwickeln.
-        """
-    )
-    with pytest.raises(CoverPatternError, match="undeclared placeholders in text"):
-        parse(text)
+def test_cover_pattern_library_parse_detects_umlaut_placeholder_as_undeclared() -> None:
+    with pytest.raises(
+        CoverPatternError,
+        match="undeclared placeholders in text",
+    ):
+        CoverPatternLibrary.parse(
+            _pattern_block(
+                "Umlaut Undeclared",
+                "cover_intro",
+                placeholders="Musterfirma",
+                use_when="When domain matches.",
+                why_it_works="It is specific.",
+                text=(
+                    "Bei Musterfirma reizt mich die Arbeit in der Musterdomäne "
+                    "besonders. Diese Verbindung habe ich bereits konkret "
+                    "erlebt und moechte sie aktiv weiterentwickeln."
+                ),
+            )
+        )
 
 
 @pytest.mark.parametrize("seed", [None, "", "   \n"])
@@ -560,298 +444,81 @@ def test_load_tolerates_missing_or_empty_cover_patterns(
 
 
 def test_cover_pattern_library_loads_shipped_cover_patterns_template() -> None:
-    result = load_library(_COVER_PATTERNS_TEMPLATE)
+    library = CoverPatternLibrary.load(_COVER_PATTERNS_TEMPLATE)
 
-    assert [pattern.name for pattern in result.all_patterns()] == [
+    assert [pattern.name for pattern in library.all_patterns()] == [
         "Product Resonance Intro"
     ]
-    assert [pattern.name for pattern in result.patterns_for_slot("cover_intro")] == [
+    assert [pattern.name for pattern in library.patterns_for_slot("cover_intro")] == [
         "Product Resonance Intro"
     ]
 
 
-def test_parse_library_accepts_cover_patterns_markdown_sections_between_patterns() -> (
+def test_cover_pattern_library_parse_accepts_markdown_sections_between_patterns() -> (
     None
 ):
-    text = textwrap.dedent(
-        """\
-        # Intro Patterns
-
-        ## Product Resonance Intro
-        - slot: cover_intro
-        - argument_type: resonance
-        - use_when: Use when the employer's product or platform connects directly to a long-running motivation or curiosity.
-        - placeholders: Musterfirma, Musterprodukt, Musterprojekt
-        - why_it_works: It links the employer's surface to concrete candidate evidence instead of opening with generic motivation.
-
-        Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
-
-        # Closing Patterns
-
-        ## Product Resonance Closing
-        - slot: cover_closing
-        - argument_type: closing
-        - use_when: Use when the close should stay direct and tie intent back to the role.
-        - placeholders: Musterfirma, Musterrolle
-        - why_it_works: It closes with clear intent and keeps the role reference explicit.
-
-        Deshalb moechte ich meine Erfahrung bei Musterfirma in der Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie ich den Beitrag konkret leisten kann, freue ich mich.
-        """
+    library = CoverPatternLibrary.parse(
+        "\n\n".join(
+            [
+                "# Intro Patterns",
+                _pattern_block("Product Resonance Intro", "cover_intro").strip(),
+                "# Closing Patterns",
+                _pattern_block(
+                    "Product Resonance Closing",
+                    "cover_closing",
+                    argument_type="closing",
+                    placeholders="Musterfirma, Musterrolle",
+                    use_when=(
+                        "Use when the close should stay direct and tie intent back "
+                        "to the role."
+                    ),
+                    why_it_works=(
+                        "It closes with clear intent and keeps the role reference "
+                        "explicit."
+                    ),
+                    text=(
+                        "Deshalb moechte ich meine Erfahrung bei Musterfirma in der "
+                        "Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, "
+                        "wie ich den Beitrag konkret leisten kann, freue ich mich."
+                    ),
+                ).strip(),
+            ]
+        )
     )
 
-    result = parse_library(text)
-
-    assert [pattern.name for pattern in result.all_patterns()] == [
+    assert [pattern.name for pattern in library.all_patterns()] == [
         "Product Resonance Intro",
         "Product Resonance Closing",
     ]
-    assert [pattern.name for pattern in result.patterns_for_slot("cover_closing")] == [
-        "Product Resonance Closing"
-    ]
 
 
-def test_parse_library_rejects_non_pattern_text_after_markdown_section_heading() -> (
+def test_cover_pattern_library_parse_rejects_non_pattern_text_after_markdown_section_heading() -> (
     None
 ):
-    text = textwrap.dedent(
-        """\
-        # Intro Patterns
-
-        ## Product Resonance Intro
-        - slot: cover_intro
-        - argument_type: resonance
-        - use_when: Use when the employer's product or platform connects directly to a long-running motivation or curiosity.
-        - placeholders: Musterfirma, Musterprodukt, Musterprojekt
-        - why_it_works: It links the employer's surface to concrete candidate evidence instead of opening with generic motivation.
-
-        Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
-
-        # Closing Patterns
-
-        This line is not a pattern header and must not be ignored.
-
-        ## Product Resonance Closing
-        - slot: cover_closing
-        - argument_type: closing
-        - use_when: Use when the close should stay direct and tie intent back to the role.
-        - placeholders: Musterfirma, Musterrolle
-        - why_it_works: It closes with clear intent and keeps the role reference explicit.
-
-        Deshalb moechte ich meine Erfahrung bei Musterfirma in der Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie ich den Beitrag konkret leisten kann, freue ich mich.
-        """
+    text = "\n\n".join(
+        [
+            "# Intro Patterns",
+            _pattern_block("Product Resonance Intro", "cover_intro").strip(),
+            "# Closing Patterns",
+            "This line is not a pattern header and must not be ignored.",
+            _pattern_block(
+                "Product Resonance Closing",
+                "cover_closing",
+                argument_type="closing",
+                placeholders="Musterfirma, Musterrolle",
+                use_when="Use when the close should stay direct and tie intent back to the role.",
+                why_it_works="It closes with clear intent and keeps the role reference explicit.",
+                text=(
+                    "Deshalb moechte ich meine Erfahrung bei Musterfirma in der "
+                    "Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie "
+                    "ich den Beitrag konkret leisten kann, freue ich mich."
+                ),
+            ).strip(),
+        ]
     )
 
     with pytest.raises(
         CoverPatternError,
         match="content outside a cover pattern block is not supported",
     ):
-        parse_library(text)
-
-
-def test_cover_pattern_library_rejects_unsupported_declared_placeholder_at_seam() -> (
-    None
-):
-    with pytest.raises(
-        CoverPatternError,
-        match="Unsupported Placeholder: unsupported placeholder: Musterskill",
-    ):
-        CoverPatternLibrary(
-            (
-                CoverPattern(
-                    name="Unsupported Placeholder",
-                    slot="cover_fit",
-                    argument_type="capability",
-                    use_when="If a role maps clearly to prior evidence.",
-                    placeholders=("Musterfirma", "Musterskill"),
-                    why_it_works="It ties evidence to the role.",
-                    text=(
-                        "Bei Musterfirma kann ich Musterskill in einem Umfeld "
-                        "einsetzen, in dem ich bereits belastbare Wirkung gezeigt "
-                        "habe. Diese Verantwortung moechte ich bewusst weiter "
-                        "tragen."
-                    ),
-                ),
-            )
-        )
-
-
-def test_cover_pattern_library_rejects_undeclared_text_placeholder_at_seam() -> None:
-    with pytest.raises(
-        CoverPatternError,
-        match="Undeclared Placeholder: undeclared placeholders in text: Musterprodukt",
-    ):
-        CoverPatternLibrary(
-            (
-                CoverPattern(
-                    name="Undeclared Placeholder",
-                    slot="cover_intro",
-                    argument_type="resonance",
-                    use_when="If the product is unusually compelling.",
-                    placeholders=("Musterfirma",),
-                    why_it_works="It is specific.",
-                    text=(
-                        "Ich will bei Musterfirma arbeiten, weil Musterprodukt fuer "
-                        "mich ein glaubwuerdiger Hebel ist und ich dazu bereits "
-                        "belastbare Erfahrung gesammelt habe. Diese Verbindung "
-                        "wuerde ich im Team gern weiter ausbauen."
-                    ),
-                ),
-            )
-        )
-
-
-def test_cover_pattern_library_rejects_empty_text_at_seam() -> None:
-    with pytest.raises(
-        CoverPatternError,
-        match="Empty Text: text paragraph is empty",
-    ):
-        CoverPatternLibrary(
-            (
-                CoverPattern(
-                    name="Empty Text",
-                    slot="cover_intro",
-                    argument_type="resonance",
-                    use_when="If the product is unusually compelling.",
-                    placeholders=("Musterfirma",),
-                    why_it_works="It is specific.",
-                    text=" \n\n ",
-                ),
-            )
-        )
-
-
-def test_cover_pattern_library_rejects_multi_paragraph_text_at_seam() -> None:
-    with pytest.raises(
-        CoverPatternError,
-        match="Multi Paragraph: must contain exactly one paragraph",
-    ):
-        CoverPatternLibrary(
-            (
-                CoverPattern(
-                    name="Multi Paragraph",
-                    slot="cover_intro",
-                    argument_type="resonance",
-                    use_when="If the product is unusually compelling.",
-                    placeholders=("Musterfirma",),
-                    why_it_works="It is specific.",
-                    text=(
-                        "Ich will bei Musterfirma arbeiten, weil mich das Thema "
-                        "lange begleitet und ich es konkret weiterbauen will.\n\n"
-                        "Der zweite Absatz duerfte hier nicht erlaubt sein, weil "
-                        "ein Muster genau einen Absatz enthalten muss."
-                    ),
-                ),
-            )
-        )
-
-
-def test_cover_pattern_library_rejects_multi_paragraph_text_with_spaced_blank_line_at_seam() -> (
-    None
-):
-    with pytest.raises(
-        CoverPatternError,
-        match="Spaced Paragraphs: must contain exactly one paragraph",
-    ):
-        CoverPatternLibrary(
-            (
-                CoverPattern(
-                    name="Spaced Paragraphs",
-                    slot="cover_intro",
-                    argument_type="resonance",
-                    use_when="If the product is unusually compelling.",
-                    placeholders=("Musterfirma",),
-                    why_it_works="It is specific.",
-                    text=(
-                        "Ich will bei Musterfirma arbeiten, weil mich das Thema "
-                        "lange begleitet und ich es konkret weiterbauen will.\n"
-                        "   \n"
-                        "Der zweite Absatz duerfte auch mit Leerzeichen in der "
-                        "Trennzeile nicht erlaubt sein."
-                    ),
-                ),
-            )
-        )
-
-
-def test_cover_pattern_library_rejects_one_sentence_text_at_seam() -> None:
-    with pytest.raises(
-        CoverPatternError,
-        match="One Sentence: must contain at least two sentences",
-    ):
-        CoverPatternLibrary(
-            (
-                CoverPattern(
-                    name="One Sentence",
-                    slot="cover_intro",
-                    argument_type="resonance",
-                    use_when="If the product is unusually compelling.",
-                    placeholders=("Musterfirma",),
-                    why_it_works="It is specific.",
-                    text="Ich will bei Musterfirma arbeiten.",
-                ),
-            )
-        )
-
-
-def test_cover_pattern_library_projects_normalized_one_paragraph_text_at_seam() -> None:
-    result = CoverPatternLibrary(
-        (
-            CoverPattern(
-                name="Normalized Paragraph",
-                slot="cover_intro",
-                argument_type="resonance",
-                use_when="If the product is unusually compelling.",
-                placeholders=("Musterfirma", "Musterprodukt"),
-                why_it_works="It is specific.",
-                text=(
-                    "Bei Musterfirma reizt mich besonders,\n"
-                    "dass Musterprodukt ein glaubwuerdiger Hebel ist.\n"
-                    "Diese Verbindung habe ich bereits konkret erlebt\n"
-                    "und moechte sie dort weiter ausbauen."
-                ),
-            ),
-        )
-    )
-
-    assert result.all_patterns() == [
-        CoverPattern(
-            name="Normalized Paragraph",
-            slot="cover_intro",
-            argument_type="resonance",
-            use_when="If the product is unusually compelling.",
-            placeholders=("Musterfirma", "Musterprodukt"),
-            why_it_works="It is specific.",
-            text=(
-                "Bei Musterfirma reizt mich besonders, dass Musterprodukt ein "
-                "glaubwuerdiger Hebel ist. Diese Verbindung habe ich bereits "
-                "konkret erlebt und moechte sie dort weiter ausbauen."
-            ),
-        )
-    ]
-
-
-def test_cover_pattern_library_preserves_canonical_umlaut_placeholders_at_seam() -> (
-    None
-):
-    result = CoverPatternLibrary(
-        (
-            CoverPattern(
-                name="Canonical Umlaut Placeholder",
-                slot="cover_intro",
-                argument_type="resonance",
-                use_when="If the employer domain is unusually compelling.",
-                placeholders=("Musterfirma", "Musterdomäne"),
-                why_it_works="It ties employer context to candidate evidence.",
-                text=(
-                    "Bei Musterfirma reizt mich besonders die Arbeit in der "
-                    "Musterdomäne. Diese Verbindung habe ich bereits konkret "
-                    "erlebt und moechte sie dort weiter ausbauen."
-                ),
-            ),
-        )
-    )
-
-    assert result.all_patterns()[0].placeholders == (
-        "Musterfirma",
-        "Musterdomäne",
-    )
+        CoverPatternLibrary.parse(text)

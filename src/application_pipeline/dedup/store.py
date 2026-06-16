@@ -54,7 +54,12 @@ SeenResult = Literal["url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "miss
 RunScopedSeenKind = Literal[
     "url_hit", "tuple_hit", "fuzzy_hit", "judge_pending", "run_hit", "miss"
 ]
-_MatchDecisionMutation = Literal["none", "refresh_pending"]
+_MatchDecisionMutation = Literal[
+    "none",
+    "refresh_pending",
+    "prepend_url_in_memory",
+    "prepend_url_persist",
+]
 
 
 @dataclass
@@ -282,6 +287,45 @@ class DeduplicationStore:
             return _MatchDecision("miss", listing_id)
         return _MatchDecision("url_hit", listing_id)
 
+    def _decide_exact_tuple_match(
+        self,
+        listing_id: int,
+        record: dict[str, Any],
+        *,
+        miss_listing_id: int,
+    ) -> _MatchDecision:
+        """Return the private match decision for an exact tuple hit."""
+        if self._in_run is not None and listing_id in self._in_run:
+            return _MatchDecision("run_hit", listing_id)
+        status = record.get("status")
+        if status == "matched":
+            return _MatchDecision(
+                "judge_pending", listing_id, mutation="prepend_url_in_memory"
+            )
+        if status == "selected_by_judge" and self._cooldown_expired(record):
+            return _MatchDecision(
+                "judge_pending", listing_id, mutation="prepend_url_in_memory"
+            )
+        if status == "expired" and self._cooldown_expired(record):
+            return _MatchDecision("miss", miss_listing_id)
+        return _MatchDecision("tuple_hit", listing_id, mutation="prepend_url_persist")
+
+    def _apply_exact_tuple_match(
+        self,
+        decision: _MatchDecision,
+        *,
+        key: _SeenKey,
+    ) -> RunScopedSeenResult:
+        """Apply tuple-match side effects and return the public result."""
+        if decision.mutation == "prepend_url_in_memory":
+            self._prepend_url(decision.listing_id, key.url, persist=False)
+            if self._in_run is not None:
+                self._in_run.add(decision.listing_id)
+        elif decision.mutation == "prepend_url_persist":
+            self._log_hit("tuple_hit", key, decision.listing_id)
+            self._prepend_url(decision.listing_id, key.url, persist=True)
+        return RunScopedSeenResult(decision.kind, decision.listing_id)
+
     def is_seen(self, key: _SeenKey) -> RunScopedSeenResult:
         """Return which dedup tier matched ``key``; on tuple/fuzzy match, update urls list.
 
@@ -302,22 +346,12 @@ class DeduplicationStore:
                     match_id = self._tuple_lookup(key)
                     if match_id is not None and match_id != existing_id:
                         match_record = self._records[match_id]
-                        match_status = match_record.get("status")
-                        if match_status == "matched":
-                            self._prepend_url(match_id, key.url, persist=False)
-                            return RunScopedSeenResult("judge_pending", match_id)
-                        if (
-                            match_status == "selected_by_judge"
-                            and self._cooldown_expired(match_record)
-                        ):
-                            return RunScopedSeenResult("judge_pending", match_id)
-                        if match_status == "expired" and self._cooldown_expired(
-                            match_record
-                        ):
-                            return RunScopedSeenResult("miss", existing_id)
-                        self._log_hit("tuple_hit", key, match_id)
-                        self._prepend_url(match_id, key.url, persist=True)
-                        return RunScopedSeenResult("tuple_hit", match_id)
+                        decision = self._decide_exact_tuple_match(
+                            match_id,
+                            match_record,
+                            miss_listing_id=existing_id,
+                        )
+                        return self._apply_exact_tuple_match(decision, key=key)
                     match_id = self._fuzzy_lookup(key)
                     if match_id is not None and match_id != existing_id:
                         match_status = self._records[match_id].get("status")
@@ -336,29 +370,12 @@ class DeduplicationStore:
             # URL not yet registered — check tuple, fuzzy, then miss
             match_id = self._tuple_lookup(key)
             if match_id is not None:
-                original_record = self._records[match_id]
-                original_status = original_record.get("status")
-                if original_status == "matched":
-                    if self._in_run is not None and match_id in self._in_run:
-                        return RunScopedSeenResult("run_hit", match_id)
-                    self._prepend_url(match_id, key.url, persist=False)
-                    if self._in_run is not None:
-                        self._in_run.add(match_id)
-                    return RunScopedSeenResult("judge_pending", match_id)
-                if original_status == "selected_by_judge" and self._cooldown_expired(
-                    original_record
-                ):
-                    self._prepend_url(match_id, key.url, persist=False)
-                    if self._in_run is not None:
-                        self._in_run.add(match_id)
-                    return RunScopedSeenResult("judge_pending", match_id)
-                if original_status == "expired" and self._cooldown_expired(
-                    original_record
-                ):
-                    return RunScopedSeenResult("miss", self._next_id)
-                self._log_hit("tuple_hit", key, match_id)
-                self._prepend_url(match_id, key.url, persist=True)
-                return RunScopedSeenResult("tuple_hit", match_id)
+                decision = self._decide_exact_tuple_match(
+                    match_id,
+                    self._records[match_id],
+                    miss_listing_id=self._next_id,
+                )
+                return self._apply_exact_tuple_match(decision, key=key)
 
             match_id = self._fuzzy_lookup(key)
             if match_id is not None:

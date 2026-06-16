@@ -6,9 +6,9 @@ import re
 import textwrap
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -1216,10 +1216,11 @@ class _FakeExtractor:
         return verdicts, _FAKE_JUDGE_USAGE
 
 
-def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
-    """Happy path: 6 stubs, 1 prefilter-dropped, 1 classifier-dropped (by enricher), 4 written."""
+def test_orchestrator_parser_lifecycle_full_run_smoke(tmp_path: Path) -> None:
+    """Full-run smoke keeps only the Orchestrator-to-Parser-Lifecycle wiring surface."""
     seen_path = tmp_path / ".seen.json"
     results_dir = tmp_path / "results"
+    logs_dir = tmp_path / "logs"
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -1230,6 +1231,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     )
     card_store = _make_card_store(tmp_path)
     dedup_store = dedup_module.load(seen_path)
+    run_log = RunLog(logs_dir)
 
     summary = run(
         config_path,
@@ -1238,6 +1240,7 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
         card_store=card_store,
         parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_store,
+        run_log=run_log,
     )
 
     assert summary.discovered == 6
@@ -1245,6 +1248,18 @@ def test_integration_classify_judge_render_write_mark(tmp_path: Path) -> None:
     assert summary.prefilter_dropped == 1
     assert summary.classifier_dropped == 1
     assert summary.written == 4
+
+    parser_rows = [
+        json.loads(line)
+        for line in (logs_dir / "parser" / "bundesagentur_api.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [row["event"] for row in parser_rows] == [
+        "parser started",
+        "query_started",
+        "query_ended",
+    ]
 
     # .seen.json: 2 out_of_domain, 4 selected_by_judge
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -2715,108 +2730,6 @@ def test_results_write_error_propagates_from_run(
             parser_registry=lambda _: _LLMStubParser,  # type: ignore[return-value, arg-type]
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
         )
-
-
-# ---------------------------------------------------------------------------
-# parser_log integration
-# ---------------------------------------------------------------------------
-
-
-def test_parser_summary_written_to_run_log(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Parser summaries still appear in run.log during a full orchestrator run."""
-    import logging
-
-    import application_pipeline.parser_log as parser_log
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = parser_log.RunLog(logs_dir)
-
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-
-    with caplog.at_level(logging.INFO, logger="application_pipeline.orchestrator"):
-        run(
-            config_path,
-            extractor=_stub_extractor(),
-            parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
-            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            run_log=run_log,
-        )
-
-    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
-    assert "SUMMARY OF SESSION" in run_log_content
-    assert "discovered=" in run_log_content
-    assert "duration=" in run_log_content
-
-    assert any(
-        "parser bundesagentur_api started" in record.message
-        for record in caplog.records
-    ), "INFO line 'parser <id> started' must appear in stderr"
-
-
-def test_not_served_queries_counted_in_parser_log_summary(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Three NotServedQuery sentinels â†' not_served_queries=3 in SUMMARY, nothing in body, no stderr."""
-    import logging
-
-    import application_pipeline.parser_log as parser_log
-    from application_pipeline.parsers import NotServedQuery
-
-    class _NotServedParser(_StubParserBase):
-        def __enter__(self) -> "_NotServedParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> list[NotServedQuery]:
-            return [NotServedQuery()]
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = parser_log.RunLog(logs_dir)
-
-    # 3 keywords Ã— 1 location Ã— no remote = 3 discover() calls â†' 3 sentinels
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python", "java", "rust"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-
-    with caplog.at_level(logging.DEBUG):
-        run(
-            config_path,
-            extractor=_stub_extractor(),
-            parser_registry=lambda _: _NotServedParser,  # type: ignore[return-value, arg-type]
-            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-            run_log=run_log,
-        )
-
-    # Events file must not contain not_served events
-    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
-    if events_file.exists():
-        assert "not_served" not in events_file.read_text(encoding="utf-8")
-
-    # SUMMARY in run.log must contain not_served_queries=3
-    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
-    assert "SUMMARY OF SESSION" in run_log_content
-    assert "not_served_queries=3" in run_log_content
-
-    # No stderr log records mentioning not_served
-    assert not any("not_served" in record.message for record in caplog.records), (
-        "not_served must not appear in any stderr log record"
-    )
 
 
 def test_parser_log_records_enrich_failed_redirect_and_dead(
@@ -6492,99 +6405,6 @@ def test_classify_workers_sized_by_claude_classify_parallelism(tmp_path: Path) -
     assert all(name.startswith("classify-worker-") for name in classify_worker_names), (
         f"LLM classify must run on classify-worker threads, got: {classify_worker_names}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Failure Report on parser dead (#574)
-# ---------------------------------------------------------------------------
-
-
-def test_parser_dead_writes_one_failure_report_even_with_distinct_timestamps(
-    tmp_path: Path,
-) -> None:
-    """When a parser thread dies, the orchestrator records exactly one Failure Report."""
-    card_store = _make_card_store(tmp_path)
-
-    class _DyingParser(_StubParserBase):
-        def __enter__(self) -> "_DyingParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery):  # type: ignore[return]
-            raise RuntimeError("fatal error in parser")
-            yield  # pragma: no cover
-
-    report_times = [
-        datetime(2026, 5, 11, 16, 4, 0, tzinfo=UTC),
-        datetime(2026, 5, 11, 16, 4, 1, tzinfo=UTC),
-    ]
-    with patch("application_pipeline.failure_report.datetime") as mock_dt:
-        mock_dt.now.side_effect = report_times
-        run(
-            _write_config(
-                tmp_path,
-                sources='[SourceEntry(parser_type="bundesagentur_api")]',
-                keywords='["python"]',
-                locations='["Hamburg"]',
-                include_remote=False,
-            ),
-            llm_enricher=_make_fake_llm_enricher(card_store),
-            extractor=_stub_extractor(),
-            card_store=card_store,
-            parser_registry=lambda _: _DyingParser,  # type: ignore[return-value, arg-type]
-            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        )
-
-    failures_dir = tmp_path / ".runtime-data" / "failures"
-    assert failures_dir.is_dir(), "failures dir must be created when parser dies"
-    failure_files = list(failures_dir.glob("*.md"))
-    assert len(failure_files) == 1, (
-        f"expected 1 failure report, got {len(failure_files)}"
-    )
-
-
-def test_parser_dead_failure_report_contains_parser_id_exception_type_and_traceback(
-    tmp_path: Path,
-) -> None:
-    """The Failure Report contains parser ID, exception type, and traceback."""
-    card_store = _make_card_store(tmp_path)
-
-    class _DyingParser(_StubParserBase):
-        def __enter__(self) -> "_DyingParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery):  # type: ignore[return]
-            raise ValueError("something went wrong")
-            yield  # pragma: no cover
-
-    run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-        ),
-        llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=_stub_extractor(),
-        card_store=card_store,
-        parser_registry=lambda _: _DyingParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-    )
-
-    failures_dir = tmp_path / ".runtime-data" / "failures"
-    body = next(failures_dir.glob("*.md")).read_text(encoding="utf-8")
-    assert "parser:bundesagentur_api" in body, "parser ID must appear in failure report"
-    assert "ValueError" in body, "exception type must appear in failure report"
-    assert "something went wrong" in body, (
-        "exception message must appear in failure report"
-    )
-    assert "Traceback" in body, "traceback must appear in failure report"
 
 
 def test_parser_dead_failure_reports_distinguish_exception_types(

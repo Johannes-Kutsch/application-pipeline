@@ -61,3 +61,23 @@ def test_orchestrator_keeps_parser_lifecycle_private_symbols_out_of_module() -> 
     }
 
     assert hidden_symbols.isdisjoint(defined_names)
+
+
+def test_orchestrator_test_surface_keeps_only_one_parser_lifecycle_full_run_smoke() -> (
+    None
+):
+    orchestrator_test_source = (_ROOT / "tests" / "test_orchestrator.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "def test_orchestrator_parser_lifecycle_full_run_smoke("
+        in orchestrator_test_source
+    )
+    for retired_test_name in {
+        "test_parser_summary_written_to_run_log",
+        "test_not_served_queries_counted_in_parser_log_summary",
+        "test_parser_dead_writes_one_failure_report_even_with_distinct_timestamps",
+        "test_parser_dead_failure_report_contains_parser_id_exception_type_and_traceback",
+    }:
+        assert f"def {retired_test_name}(" not in orchestrator_test_source

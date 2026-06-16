@@ -1166,6 +1166,39 @@ def test_fuzzy_hit_on_matched_returns_judge_pending(store_path: Path) -> None:
     assert store.is_seen(b).kind == "judge_pending"
 
 
+def test_second_fuzzy_hit_on_matched_within_run_scope_returns_run_hit(
+    store_path: Path,
+) -> None:
+    a = StubLike(
+        url="https://example.com/a",
+        company="Acme",
+        title="Senior Software Engineer Backend",
+        location="Hamburg",
+    )
+    b = StubLike(
+        url="https://example.com/b",
+        company="Acme",
+        title="Senior Software Engineer Backend Developer",
+        location="Hamburg",
+    )
+    c = StubLike(
+        url="https://example.com/c",
+        company="Acme",
+        title="Senior Software Engineer Backend Platform",
+        location="Hamburg",
+    )
+    store = dedup_load(store_path)
+    store.mark_matched(a)
+
+    with store.run_scope() as scope:
+        first = scope.is_seen(b)
+        later = scope.is_seen(c)
+
+    assert first.kind == "judge_pending"
+    assert later.kind == "run_hit"
+    assert later.listing_id == first.listing_id
+
+
 def test_pending_entry_populates_fuzzy_index_on_miss(store_path: Path) -> None:
     """On miss, pending entry is written and populates fuzzy index so a second call fuzzy-matches."""
     a = StubLike(

@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
 import sys
 import threading
 import time
-import traceback
 from collections.abc import Callable
 from contextlib import ExitStack
-from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -22,9 +19,13 @@ from application_pipeline.classify_stage import (
     ClassifyStageHandoff,
 )
 from application_pipeline.llm import quota as _quota
-from application_pipeline.parser_log import RunLog
 from application_pipeline._context import current_stage
+from application_pipeline.parser_log import RunLog
 from application_pipeline.dedup_counters import DedupCounters
+from application_pipeline.parser_lifecycle import (
+    STALL_THRESHOLD_S as _STALL_THRESHOLD_S,
+    run_parser_lifecycle,
+)
 from application_pipeline.run_metrics import (
     JudgeLifecycleFailureObservation,
     JudgeLifecycleOutcomeObservation,
@@ -53,15 +54,9 @@ from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.llm_enricher import LLMEnricher, LLMExtractor
 from application_pipeline.pool import Pool
-from application_pipeline.parsers import (
-    NotServedQuery,
-    Parser,
-    ParserQuery,
-    PositionStub,
-)
+from application_pipeline.parsers import Parser
 from application_pipeline.parsers.types import City, Location, Remote
 from application_pipeline.parsers import registry as _default_registry
-from application_pipeline.parser_intake import ParserIntake
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
@@ -70,8 +65,7 @@ from application_pipeline.daily_results_file import DailyResultsFile, ResultsFil
 from application_pipeline.search_terms import SearchTerms, load_search_terms
 
 _log = logging.getLogger(__name__)
-
-_STALL_THRESHOLD_S: float = 60.0
+__all__ = ["RunSummary", "current_stage", "run"]
 
 
 def _has_native_enrich(cls: type) -> bool:
@@ -88,11 +82,6 @@ class _LLMJudge(Protocol):
     def judge_top_n(
         self, candidates: list[JudgeCandidate]
     ) -> tuple[list[MatchVerdict], CallUsage]: ...
-
-
-# ---------------------------------------------------------------------------
-# Run state
-# ---------------------------------------------------------------------------
 
 
 class _RunState:
@@ -124,194 +113,6 @@ class _RunState:
         with self._lock:
             if self.fatal_exc is None:
                 self.fatal_exc = exc
-
-
-# ---------------------------------------------------------------------------
-# Queue protocol sentinels
-# ---------------------------------------------------------------------------
-
-
-class _ParserDone:
-    __slots__ = ()
-
-
-@dataclass
-class _ParserDead:
-    exc: BaseException
-    traceback_str: str
-
-
-_PARSER_DONE = _ParserDone()
-
-
-class _QueryDone:
-    __slots__ = ()
-
-
-_QUERY_DONE = _QueryDone()
-
-
-# ---------------------------------------------------------------------------
-# Parser thread — runs full pre-LLM pipeline per stub inline
-# ---------------------------------------------------------------------------
-
-
-class _ParserThread(threading.Thread):
-    def __init__(
-        self,
-        parser_id: str,
-        parser: Parser,
-        worklist: list[ParserQuery],
-        outbound: queue.Queue[tuple[str, object]],
-        *,
-        classify_handoff: ClassifyStageHandoff,
-        run_log: RunLog,
-        run_state: _RunState,
-        freshness: FreshnessGate,
-        prefilter: PreFilterGate,
-        content_gate: ContentGate,
-        dedup: DeduplicationStore,
-        dedup_counters: DedupCounters,
-        pool: Pool,
-        metrics: RunMetrics,
-        card_store: CardStore,
-    ) -> None:
-        super().__init__(name=f"parser-{parser_id}", daemon=True)
-        self._parser_id = parser_id
-        self._parser = parser
-        self._worklist = worklist
-        self._outbound = outbound
-        self._run_log = run_log
-        self._run_state = run_state
-        self._freshness = freshness
-        self._prefilter = prefilter
-        self._content_gate = content_gate
-        self._dedup = dedup
-        self._metrics = metrics
-        self._parser_intake = ParserIntake(
-            parser_id=parser_id,
-            parser=parser,
-            freshness_gate=freshness,
-            deduplication=dedup,
-            dedup_counters=dedup_counters,
-            domain_pre_filter=prefilter,
-            content_gate=content_gate,
-            card_store=card_store,
-            pool_collector=pool,
-            classify_handoff=classify_handoff,
-            run_log=run_log,
-            metrics=metrics,
-        )
-
-    def run(self) -> None:
-        try:
-            for query in self._worklist:
-                location_str = (
-                    query.location.name
-                    if isinstance(query.location, City)
-                    else "Remote"
-                )
-                self._run_log.event(
-                    "parser_" + self._parser_id,
-                    "query_started",
-                    keyword=query.keyword,
-                    location=location_str,
-                )
-                try:
-                    gen = iter(self._parser.discover(query))
-                    try:
-                        for item in gen:
-                            if isinstance(item, NotServedQuery):
-                                self._outbound.put((self._parser_id, item))
-                                continue
-                            if self._run_state.is_aborted:
-                                break
-                            self._process_stub(item)
-                    finally:
-                        close = getattr(gen, "close", None)
-                        if close is not None:
-                            close()
-                    self._outbound.put((self._parser_id, _QUERY_DONE))
-                finally:
-                    self._run_log.event(
-                        "parser_" + self._parser_id,
-                        "query_ended",
-                        keyword=query.keyword,
-                        location=location_str,
-                    )
-        except BaseException as exc:
-            self._outbound.put(
-                (self._parser_id, _ParserDead(exc, traceback.format_exc()))
-            )
-        else:
-            self._outbound.put((self._parser_id, _PARSER_DONE))
-
-    def _process_stub(self, stub: PositionStub) -> None:
-        self._metrics.discovered(self._parser_id)
-        self._parser_intake.process_position_stub(stub)
-
-
-@dataclass
-class _ParserState:
-    parser_id: str
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    started_monotonic: float = field(default_factory=time.monotonic)
-    last_event_monotonic: float = field(default_factory=time.monotonic)
-    stall_logged: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Outbound dispatcher — routes control signals only
-# ---------------------------------------------------------------------------
-
-
-class _OutboundDispatcher:
-    """Routes control signals from the outbound queue to the appropriate handlers."""
-
-    def __init__(
-        self,
-        *,
-        parser_states: dict[str, "_ParserState"],
-        metrics: "RunMetrics",
-        run_log: RunLog,
-        failure_report_writer: FailureReportWriter,
-    ) -> None:
-        self._parser_states = parser_states
-        self._metrics = metrics
-        self._run_log = run_log
-        self._failure_report_writer = failure_report_writer
-
-    def dispatch(self, pid: str, payload: object) -> bool:
-        """Dispatch a control payload; returns True if the parser has finished."""
-        if isinstance(payload, NotServedQuery):
-            self._handle_not_served(pid)
-        elif payload is _QUERY_DONE:
-            self._handle_query_done(pid)
-        elif payload is _PARSER_DONE:
-            self._handle_parser_done(pid)
-            return True
-        elif isinstance(payload, _ParserDead):
-            self._handle_parser_dead(pid, payload)
-            return True
-        return False
-
-    def _handle_not_served(self, pid: str) -> None:
-        self._metrics.not_served_query(pid)
-
-    def _handle_query_done(self, pid: str) -> None:
-        self._metrics.query_done(pid)
-
-    def _handle_parser_done(self, pid: str) -> None:
-        self._metrics.parser_done(pid)
-
-    def _handle_parser_dead(self, pid: str, payload: _ParserDead) -> None:
-        self._run_log.traceback("parser_" + pid, payload.traceback_str)
-        self._metrics.parser_dead(pid)
-        self._failure_report_writer.record_parser_dead(
-            parser_id=pid,
-            error=payload.exc,
-            traceback_str=payload.traceback_str,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -442,8 +243,6 @@ def run(
         if cfg.include_remote:
             locations.append(Remote())
 
-        outbound: queue.Queue[tuple[str, object]] = queue.Queue()
-
         with ExitStack() as stack:
             parsers_list: list[tuple[Parser, SourceEntry]] = [
                 (
@@ -511,111 +310,30 @@ def run(
                 quota_wall=quota_wall,
             )
 
-            parser_states: dict[str, _ParserState] = {}
-            threads: list[tuple[str, _ParserThread]] = []
-
-            for parser, source in parsers_list:
-                parser_id = source.parser_type
-                worklist = [
-                    ParserQuery(keyword=kw, location=loc)
-                    for kw in search_terms.keywords
-                    for loc in locations
-                ]
-                parser_states[parser_id] = _ParserState(parser_id=parser_id)
-                t = _ParserThread(
-                    parser_id,
-                    parser,
-                    worklist,
-                    outbound,
-                    classify_handoff=classify_stage.handoff_for(
-                        parser_id=parser_id,
-                        metrics=metrics,
-                    ),
-                    run_log=run_log,
-                    run_state=run_state,
-                    freshness=freshness,
-                    prefilter=prefilter,
-                    content_gate=content_gate,
-                    dedup=dedup_run,
-                    dedup_counters=dedup_counters,
-                    pool=pool,
-                    metrics=metrics,
-                    card_store=card_store,
-                )
-                threads.append((parser_id, t))
-
             classify_stage.start()
-            for i, (pid, t) in enumerate(threads):
-                t.start()
-                state = parser_states[pid]
-                state.started_at = datetime.now(timezone.utc)
-                state.started_monotonic = time.monotonic()
-                state.last_event_monotonic = state.started_monotonic
-                _log.info("parser %s started", pid)
-                run_log.event("parser_" + pid, "parser started")
-
-            dispatcher = _OutboundDispatcher(
-                parser_states=parser_states,
-                metrics=metrics,
-                run_log=run_log,
-                failure_report_writer=failure_report_writer,
+            classify_handoff_for: Callable[..., ClassifyStageHandoff] = (
+                classify_stage.handoff_for
             )
-
-            parsers_remaining: set[str] = set(parser_states.keys())
-
-            poll_s = min(stall_threshold_s, 5.0)
-            while parsers_remaining:
-                try:
-                    pid, payload = outbound.get(timeout=poll_s)
-                except queue.Empty:
-                    if run_state.is_aborted:
-                        continue
-                    now = time.monotonic()
-                    frames = sys._current_frames()
-                    threads_by_name = {t.name: t for t in threading.enumerate()}
-                    for stall_pid in parsers_remaining:
-                        stall_state = parser_states[stall_pid]
-                        age = now - stall_state.last_event_monotonic
-                        if age < stall_threshold_s or stall_state.stall_logged:
-                            continue
-                        run_log.event(
-                            "parser_" + stall_pid,
-                            "stalled",
-                            last_event_age_s=round(age, 1),
-                        )
-                        thread = threads_by_name.get(f"parser-{stall_pid}")
-                        frame = (
-                            frames.get(thread.ident)
-                            if thread is not None and thread.ident is not None
-                            else None
-                        )
-                        if frame is not None:
-                            run_log.traceback(
-                                "parser_" + stall_pid,
-                                "".join(traceback.format_stack(frame)),
-                            )
-                        stall_state.stall_logged = True
-                    continue
-                current_stage.set(f"parser:{pid}")
-                state = parser_states[pid]
-                state.last_event_monotonic = time.monotonic()
-                state.stall_logged = False
-
-                if dispatcher.dispatch(pid, payload):
-                    parsers_remaining.discard(pid)
-
-            for _, t in threads:
-                t.join()
-
-            parsers_done_monotonic = time.monotonic()
-            for pid, pstate in parser_states.items():
-                run_log.summary(
-                    "parser_" + pid,
-                    metrics.parser_summary(
-                        pid, parsers_done_monotonic, pstate.started_monotonic
-                    ),
-                    pstate.started_at,
-                )
+            run_parser_lifecycle(
+                parsers=[
+                    (parser, source.parser_type) for parser, source in parsers_list
+                ],
+                keywords=list(search_terms.keywords),
+                locations=locations,
+                classify_handoff_for=classify_handoff_for,
+                run_log=run_log,
+                run_state=run_state,
+                freshness=freshness,
+                prefilter=prefilter,
+                content_gate=content_gate,
+                dedup=dedup_run,
+                dedup_counters=dedup_counters,
+                pool=pool,
+                metrics=metrics,
+                card_store=card_store,
+                failure_report_writer=failure_report_writer,
+                stall_threshold_s=stall_threshold_s,
+            )
 
             freshness.emit_run_complete()
             freshness_snapshot = freshness.snapshot()

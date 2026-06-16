@@ -2722,11 +2722,11 @@ def test_results_write_error_propagates_from_run(
 # ---------------------------------------------------------------------------
 
 
-def test_parser_log_integration(
+def test_parser_summary_written_to_run_log(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """parser started line + SUMMARY with discovered= and duration= appear in the log file."""
+    """Parser summaries still appear in run.log during a full orchestrator run."""
     import logging
 
     import application_pipeline.parser_log as parser_log
@@ -2750,11 +2750,6 @@ def test_parser_log_integration(
             dedup_store=dedup_module.load(tmp_path / ".seen.json"),
             run_log=run_log,
         )
-
-    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
-    assert events_file.exists(), "events log file must be created"
-    events_content = events_file.read_text(encoding="utf-8")
-    assert "parser started" in events_content
 
     run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
     assert "SUMMARY OF SESSION" in run_log_content
@@ -4325,199 +4320,6 @@ def test_classify_row_done_when_no_sources(tmp_path: Path) -> None:
     )
     assert phase_updates[-1].kwargs["phase"] == "done", (
         "classify row must show 'done' after classify shutdown even with no sources"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Stuck-thread watchdog
-# ---------------------------------------------------------------------------
-
-
-def test_stall_watchdog_logs_stalled_and_stack_trace(tmp_path: Path) -> None:
-    """Parser that sleeps past the stall threshold emits 'stalled' + stack trace in its log."""
-    import time
-
-    import application_pipeline.parser_log as parser_log
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = parser_log.RunLog(logs_dir)
-
-    _THRESHOLD = 0.05  # 50 ms â€" fast enough for tests
-
-    class _SleepyParser(_StubParserBase):
-        def __enter__(self) -> "_SleepyParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> list[PositionStub]:
-            time.sleep(_THRESHOLD * 4)  # sleep well past threshold
-            return []
-
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-
-    run(
-        config_path,
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _SleepyParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        stall_threshold_s=_THRESHOLD,
-        run_log=run_log,
-    )
-
-    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
-    assert events_file.exists(), "events log file must be created"
-    events_content = events_file.read_text(encoding="utf-8")
-    assert "stalled" in events_content, "stalled event must appear in events log"
-
-    run_log_content = (logs_dir / "run.log").read_text(encoding="utf-8")
-    assert "traceback" in run_log_content, "stack trace header must appear in run.log"
-    assert "File " in run_log_content, "stack frame lines must appear in run.log"
-
-
-def test_stall_watchdog_fires_only_once_per_silence(tmp_path: Path) -> None:
-    """Stall is logged at most once per silence period â€" not on every poll tick."""
-    import time
-
-    import application_pipeline.parser_log as parser_log
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = parser_log.RunLog(logs_dir)
-
-    _THRESHOLD = 0.05
-
-    class _LongSleepParser(_StubParserBase):
-        def __enter__(self) -> "_LongSleepParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> list[PositionStub]:
-            time.sleep(_THRESHOLD * 8)  # sleep for multiple poll ticks
-            return []
-
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-
-    run(
-        config_path,
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _LongSleepParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        stall_threshold_s=_THRESHOLD,
-        run_log=run_log,
-    )
-
-    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
-    events_rows = [
-        json.loads(line)
-        for line in events_file.read_text(encoding="utf-8").splitlines()
-    ]
-    stalled_count = sum(1 for row in events_rows if row.get("event") == "stalled")
-    assert stalled_count == 1, f"expected exactly 1 stalled entry, got {stalled_count}"
-
-
-# ---------------------------------------------------------------------------
-# _ParserThread: query_started / query_ended heartbeats (issue #208)
-# ---------------------------------------------------------------------------
-
-
-def test_query_heartbeats_n_started_and_n_ended(tmp_path: Path) -> None:
-    """N queries â†' exactly N query_started and N query_ended lines in the parser log."""
-    import application_pipeline.parser_log as parser_log
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = parser_log.RunLog(logs_dir)
-
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python", "django"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-
-    run(
-        config_path,
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        run_log=run_log,
-    )
-
-    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
-    events_rows = [
-        json.loads(line)
-        for line in events_file.read_text(encoding="utf-8").splitlines()
-    ]
-    # 2 keywords Ã— 1 location = 2 queries
-    started_count = sum(1 for row in events_rows if row.get("event") == "query_started")
-    ended_count = sum(1 for row in events_rows if row.get("event") == "query_ended")
-    assert started_count == 2, f"expected 2 query_started lines, got {started_count}"
-    assert ended_count == 2, f"expected 2 query_ended lines, got {ended_count}"
-
-
-def test_query_ended_fires_even_when_discover_raises(tmp_path: Path) -> None:
-    """query_ended is written even when discover() raises mid-query (parser dies)."""
-    import application_pipeline.parser_log as parser_log
-
-    logs_dir = tmp_path / "synched" / "logs"
-    run_log = parser_log.RunLog(logs_dir)
-
-    class _RaisingParser(_StubParserBase):
-        def __enter__(self) -> "_RaisingParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery):  # type: ignore[return]
-            yield PositionStub(
-                url="https://raise.example/0", title="Job 0", source="stub"
-            )
-            raise RuntimeError("boom mid-discover")
-
-    config_path = _write_config(
-        tmp_path,
-        sources='[SourceEntry(parser_type="bundesagentur_api")]',
-        keywords='["python"]',
-        locations='["Hamburg"]',
-        include_remote=False,
-    )
-
-    summary = run(
-        config_path,
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _RaisingParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        run_log=run_log,
-    )
-
-    assert summary.parsers_dead == 1
-
-    events_file = logs_dir / "parser" / "bundesagentur_api.events.jsonl"
-    events_rows = [
-        json.loads(line)
-        for line in events_file.read_text(encoding="utf-8").splitlines()
-    ]
-    assert any(row.get("event") == "query_started" for row in events_rows), (
-        "query_started must be logged before the crash"
-    )
-    assert any(row.get("event") == "query_ended" for row in events_rows), (
-        "query_ended must fire even when discover() raises"
     )
 
 

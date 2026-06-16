@@ -285,13 +285,13 @@ def run_parser_lifecycle(
         )
 
     for parser_id, thread in threads:
-        thread.start()
         state = parser_states[parser_id]
         state.started_at = datetime.now(timezone.utc)
         state.started_monotonic = time.monotonic()
         state.last_event_monotonic = state.started_monotonic
         _log.info("parser %s started", parser_id)
         collaborators.run_log.event("parser_" + parser_id, "parser started")
+        thread.start()
 
     dispatcher = _OutboundDispatcher(
         metrics=collaborators.metrics,

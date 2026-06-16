@@ -617,3 +617,30 @@ def test_cover_pattern_library_rejects_undeclared_text_placeholder_at_seam() -> 
                 ),
             )
         )
+
+
+def test_cover_pattern_library_preserves_canonical_umlaut_placeholders_at_seam() -> (
+    None
+):
+    result = CoverPatternLibrary(
+        (
+            CoverPattern(
+                name="Canonical Umlaut Placeholder",
+                slot="cover_intro",
+                argument_type="resonance",
+                use_when="If the employer domain is unusually compelling.",
+                placeholders=("Musterfirma", "Musterdomäne"),
+                why_it_works="It ties employer context to candidate evidence.",
+                text=(
+                    "Bei Musterfirma reizt mich besonders die Arbeit in der "
+                    "Musterdomäne. Diese Verbindung habe ich bereits konkret "
+                    "erlebt und moechte sie dort weiter ausbauen."
+                ),
+            ),
+        )
+    )
+
+    assert result.all_patterns()[0].placeholders == (
+        "Musterfirma",
+        "Musterdomäne",
+    )

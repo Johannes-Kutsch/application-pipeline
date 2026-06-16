@@ -44,7 +44,6 @@ def test_orchestrator_imports_only_classify_stage_facade_surface() -> None:
     assert imported == {
         "BatchLLMEnricher",
         "ClassifyStage",
-        "ClassifyStageHandoff",
     }
 
 

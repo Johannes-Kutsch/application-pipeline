@@ -16,7 +16,6 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline.classify_stage import (
     BatchLLMEnricher,
     ClassifyStage,
-    ClassifyStageHandoff,
 )
 from application_pipeline.llm import quota as _quota
 from application_pipeline._context import current_stage
@@ -313,20 +312,16 @@ def run(
             )
 
             classify_stage.start()
-            classify_handoffs: dict[str, ClassifyStageHandoff] = {
-                source.parser_type: classify_stage.handoff_for(
-                    parser_id=source.parser_type,
-                    metrics=metrics,
-                )
-                for _, source in parsers_list
-            }
             run_parser_lifecycle(
                 ParserLifecyclePlan(
                     parsers=[
                         ParserLifecycleExecution(
                             parser=parser,
                             parser_id=source.parser_type,
-                            classify_handoff=classify_handoffs[source.parser_type],
+                            classify_handoff=classify_stage.handoff_for(
+                                parser_id=source.parser_type,
+                                metrics=metrics,
+                            ),
                         )
                         for parser, source in parsers_list
                     ],

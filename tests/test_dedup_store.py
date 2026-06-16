@@ -1203,6 +1203,104 @@ def test_post_enrich_is_seen_catches_tuple_match_after_company_backfill(
     assert result.kind == "tuple_hit"
 
 
+def test_post_enrich_exact_tuple_hit_on_out_of_domain_persists_alias(
+    store_path: Path,
+) -> None:
+    store = dedup_load(store_path)
+    store.mark_out_of_domain(StubLike(url="https://example.com/original"))
+
+    pending = StubLike(url="https://example.com/new-url", company=None)
+    assert store.is_seen(pending).kind == "miss"
+
+    enriched = StubLike(url="https://example.com/new-url", company="Acme")
+    result = store.is_seen(enriched)
+
+    assert result.kind == "tuple_hit"
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert _has_url(on_disk, enriched.url)
+
+
+def test_post_enrich_exact_tuple_hit_on_matched_returns_judge_pending_then_run_hit(
+    store: DeduplicationStore,
+) -> None:
+    store.mark_matched(StubLike(url="https://example.com/original"))
+
+    with store.run_scope() as scope:
+        pending = StubLike(url="https://example.com/new-url", company=None)
+        assert scope.is_seen(pending).kind == "miss"
+
+        enriched = StubLike(url="https://example.com/new-url", company="Acme")
+        first = scope.is_seen(enriched)
+        later = scope.is_seen(StubLike(url="https://example.com/later-alias"))
+
+    assert first.kind == "judge_pending"
+    assert later.kind == "run_hit"
+    assert later.listing_id == first.listing_id
+
+
+def test_post_enrich_exact_tuple_hit_on_selected_by_judge_after_cooldown_is_in_memory_only(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "urls": ["https://example.com/original"],
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "selected_by_judge",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+
+    pending = StubLike(url="https://example.com/new-url", company=None)
+    assert store.is_seen(pending).kind == "miss"
+
+    enriched = StubLike(url="https://example.com/new-url", company="Acme")
+    result = store.is_seen(enriched)
+
+    assert result.kind == "judge_pending"
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert not _has_url(on_disk, enriched.url)
+
+
+def test_post_enrich_exact_tuple_hit_on_expired_after_cooldown_returns_miss_without_alias(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "1": {
+                    "urls": ["https://example.com/original"],
+                    "company_lc": "acme",
+                    "title_lc": "engineer",
+                    "location_lc": "hamburg",
+                    "status": "expired",
+                    "status_last_changed": "2020-01-01",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = dedup_load(store_path, cooldown_days=30)
+
+    pending = StubLike(url="https://example.com/new-url", company=None)
+    first = store.is_seen(pending)
+    enriched = StubLike(url="https://example.com/new-url", company="Acme")
+    second = store.is_seen(enriched)
+
+    assert first.kind == "miss"
+    assert second.kind == "miss"
+    assert second.listing_id == first.listing_id
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert not _has_url(on_disk, enriched.url)
+
+
 # ---------------------------------------------------------------------------
 # Cooldown decay: selected_by_judge and expired
 # ---------------------------------------------------------------------------

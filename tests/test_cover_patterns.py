@@ -619,6 +619,108 @@ def test_cover_pattern_library_rejects_undeclared_text_placeholder_at_seam() -> 
         )
 
 
+def test_cover_pattern_library_rejects_empty_text_at_seam() -> None:
+    with pytest.raises(
+        CoverPatternError,
+        match="Empty Text: text paragraph is empty",
+    ):
+        CoverPatternLibrary(
+            (
+                CoverPattern(
+                    name="Empty Text",
+                    slot="cover_intro",
+                    argument_type="resonance",
+                    use_when="If the product is unusually compelling.",
+                    placeholders=("Musterfirma",),
+                    why_it_works="It is specific.",
+                    text=" \n\n ",
+                ),
+            )
+        )
+
+
+def test_cover_pattern_library_rejects_multi_paragraph_text_at_seam() -> None:
+    with pytest.raises(
+        CoverPatternError,
+        match="Multi Paragraph: must contain exactly one paragraph",
+    ):
+        CoverPatternLibrary(
+            (
+                CoverPattern(
+                    name="Multi Paragraph",
+                    slot="cover_intro",
+                    argument_type="resonance",
+                    use_when="If the product is unusually compelling.",
+                    placeholders=("Musterfirma",),
+                    why_it_works="It is specific.",
+                    text=(
+                        "Ich will bei Musterfirma arbeiten, weil mich das Thema "
+                        "lange begleitet und ich es konkret weiterbauen will.\n\n"
+                        "Der zweite Absatz duerfte hier nicht erlaubt sein, weil "
+                        "ein Muster genau einen Absatz enthalten muss."
+                    ),
+                ),
+            )
+        )
+
+
+def test_cover_pattern_library_rejects_one_sentence_text_at_seam() -> None:
+    with pytest.raises(
+        CoverPatternError,
+        match="One Sentence: must contain at least two sentences",
+    ):
+        CoverPatternLibrary(
+            (
+                CoverPattern(
+                    name="One Sentence",
+                    slot="cover_intro",
+                    argument_type="resonance",
+                    use_when="If the product is unusually compelling.",
+                    placeholders=("Musterfirma",),
+                    why_it_works="It is specific.",
+                    text="Ich will bei Musterfirma arbeiten.",
+                ),
+            )
+        )
+
+
+def test_cover_pattern_library_projects_normalized_one_paragraph_text_at_seam() -> None:
+    result = CoverPatternLibrary(
+        (
+            CoverPattern(
+                name="Normalized Paragraph",
+                slot="cover_intro",
+                argument_type="resonance",
+                use_when="If the product is unusually compelling.",
+                placeholders=("Musterfirma", "Musterprodukt"),
+                why_it_works="It is specific.",
+                text=(
+                    "Bei Musterfirma reizt mich besonders,\n"
+                    "dass Musterprodukt ein glaubwuerdiger Hebel ist.\n"
+                    "Diese Verbindung habe ich bereits konkret erlebt\n"
+                    "und moechte sie dort weiter ausbauen."
+                ),
+            ),
+        )
+    )
+
+    assert result.all_patterns() == [
+        CoverPattern(
+            name="Normalized Paragraph",
+            slot="cover_intro",
+            argument_type="resonance",
+            use_when="If the product is unusually compelling.",
+            placeholders=("Musterfirma", "Musterprodukt"),
+            why_it_works="It is specific.",
+            text=(
+                "Bei Musterfirma reizt mich besonders, dass Musterprodukt ein "
+                "glaubwuerdiger Hebel ist. Diese Verbindung habe ich bereits "
+                "konkret erlebt und moechte sie dort weiter ausbauen."
+            ),
+        )
+    ]
+
+
 def test_cover_pattern_library_preserves_canonical_umlaut_placeholders_at_seam() -> (
     None
 ):

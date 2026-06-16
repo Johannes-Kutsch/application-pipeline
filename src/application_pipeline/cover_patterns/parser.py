@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from application_pipeline.cv_slot_contract import (
@@ -56,8 +56,11 @@ class CoverPatternLibrary:
     _patterns: tuple[CoverPattern, ...] = ()
 
     def __post_init__(self) -> None:
+        normalized_patterns = []
         for pattern in self._patterns:
-            _validate_pattern_placeholders(pattern)
+            normalized_text = _validate_pattern(pattern)
+            normalized_patterns.append(replace(pattern, text=normalized_text))
+        object.__setattr__(self, "_patterns", tuple(normalized_patterns))
 
     @classmethod
     def parse(cls, text: str) -> CoverPatternLibrary:
@@ -123,9 +126,27 @@ def _validate_projection_slot(slot: str) -> None:
     raise CoverPatternError(f"unknown cover slot: {slot}")
 
 
-def _validate_pattern_placeholders(pattern: CoverPattern) -> None:
+def _validate_pattern(pattern: CoverPattern) -> str:
     _validate_declared_placeholders(pattern.name, pattern.placeholders)
     _validate_text_placeholders(pattern.name, pattern.placeholders, pattern.text)
+    return _normalize_pattern_text(pattern.name, pattern.text)
+
+
+def _normalize_pattern_text(name: str, text: str) -> str:
+    paragraphs = [
+        " ".join(line.strip() for line in chunk.splitlines() if line.strip())
+        for chunk in text.strip().split("\n\n")
+        if chunk.strip()
+    ]
+    if not paragraphs:
+        raise CoverPatternError(f"{name}: text paragraph is empty")
+    if len(paragraphs) != 1:
+        raise CoverPatternError(f"{name}: must contain exactly one paragraph")
+
+    paragraph = paragraphs[0]
+    if len(_SENTENCE_RE.findall(paragraph)) < 2:
+        raise CoverPatternError(f"{name}: must contain at least two sentences")
+    return paragraph
 
 
 def _validate_declared_placeholders(name: str, placeholders: tuple[str, ...]) -> None:
@@ -181,19 +202,7 @@ def _parse_block(block: str) -> CoverPattern:
     _validate_declared_placeholders(name, placeholders)
 
     body_lines = lines[body_start:] if body_start is not None else []
-    paragraphs = [
-        " ".join(line.strip() for line in chunk.splitlines() if line.strip())
-        for chunk in "\n".join(body_lines).strip().split("\n\n")
-        if chunk.strip()
-    ]
-    if not paragraphs:
-        raise CoverPatternError(f"{name}: text paragraph is empty")
-    if len(paragraphs) != 1:
-        raise CoverPatternError(f"{name}: must contain exactly one paragraph")
-
-    paragraph = paragraphs[0]
-    if len(_SENTENCE_RE.findall(paragraph)) < 2:
-        raise CoverPatternError(f"{name}: must contain at least two sentences")
+    paragraph = _normalize_pattern_text(name, "\n".join(body_lines))
 
     pattern = CoverPattern(
         name=name,
@@ -204,5 +213,5 @@ def _parse_block(block: str) -> CoverPattern:
         why_it_works=metadata["why_it_works"],
         text=paragraph,
     )
-    _validate_pattern_placeholders(pattern)
+    _validate_pattern(pattern)
     return pattern

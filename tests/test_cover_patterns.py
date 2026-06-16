@@ -356,6 +356,59 @@ def test_cover_pattern_library_load_rejects_empty_required_metadata_value(
         CoverPatternLibrary.load(path)
 
 
+def test_cover_pattern_library_load_reports_each_missing_required_metadata_key(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cover-patterns.md"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            ## Missing Metadata
+            - slot: cover_intro
+            - argument_type:
+            - placeholders:
+
+            Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will. Diese Verbindung macht den Wechsel fuer mich plausibel.
+            """
+        )
+    )
+
+    with pytest.raises(
+        CoverPatternError,
+        match=(
+            "Missing Metadata: missing required metadata: "
+            "argument_type, placeholders, use_when, why_it_works"
+        ),
+    ):
+        CoverPatternLibrary.load(path)
+
+
+def test_cover_pattern_library_load_reports_unsupported_slot_value(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cover-patterns.md"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            ## Unsupported Slot
+            - slot: opening
+            - argument_type: resonance
+            - use_when: If the product is unusually compelling.
+            - placeholders: Musterfirma
+            - why_it_works: It is specific.
+
+            Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will. Diese Verbindung macht den Wechsel fuer mich plausibel.
+            """
+        )
+    )
+
+    with pytest.raises(
+        CoverPatternError,
+        match="Unsupported Slot: unknown cover slot: opening",
+    ):
+        CoverPatternLibrary.load(path)
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [

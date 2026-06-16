@@ -36,20 +36,18 @@ _log = logging.getLogger("application_pipeline.orchestrator")
 
 _STALL_THRESHOLD_S: float = 60.0
 
-__all__ = ["run_parser_lifecycle"]
+__all__ = [
+    "ParserLifecycleCollaborators",
+    "ParserLifecycleExecution",
+    "ParserLifecyclePlan",
+    "run_parser_lifecycle",
+]
 
 
 @runtime_checkable
 class _ParserLifecycleRunState(Protocol):
     @property
     def is_aborted(self) -> bool: ...
-
-
-@runtime_checkable
-class _ParserLifecycleHandoffFactory(Protocol):
-    def __call__(
-        self, *, parser_id: str, metrics: RunMetrics
-    ) -> ClassifyStageHandoff: ...
 
 
 class _ParserDone:
@@ -206,24 +204,39 @@ class _OutboundDispatcher:
         return False
 
 
+@dataclass(frozen=True)
+class ParserLifecycleExecution:
+    parser: Parser
+    parser_id: str
+    classify_handoff: ClassifyStageHandoff
+
+
+@dataclass(frozen=True)
+class ParserLifecycleCollaborators:
+    run_log: RunLog
+    run_state: _ParserLifecycleRunState
+    freshness: FreshnessGate
+    prefilter: PreFilterGate
+    content_gate: ContentGate
+    dedup: DeduplicationStore
+    dedup_counters: DedupCounters
+    pool: Pool
+    metrics: RunMetrics
+    card_store: CardStore
+    failure_report_writer: FailureReportWriter
+    stall_threshold_s: float = _STALL_THRESHOLD_S
+
+
+@dataclass(frozen=True)
+class ParserLifecyclePlan:
+    parsers: Sequence[ParserLifecycleExecution]
+    keywords: Sequence[str]
+    locations: Sequence[Location]
+    collaborators: ParserLifecycleCollaborators
+
+
 def run_parser_lifecycle(
-    *,
-    parsers: list[tuple[Parser, str]],
-    keywords: list[str],
-    locations: Sequence[Location],
-    classify_handoff_for: _ParserLifecycleHandoffFactory,
-    run_log: RunLog,
-    run_state: _ParserLifecycleRunState,
-    freshness: FreshnessGate,
-    prefilter: PreFilterGate,
-    content_gate: ContentGate,
-    dedup: DeduplicationStore,
-    dedup_counters: DedupCounters,
-    pool: Pool,
-    metrics: RunMetrics,
-    card_store: CardStore,
-    failure_report_writer: FailureReportWriter,
-    stall_threshold_s: float = _STALL_THRESHOLD_S,
+    plan: ParserLifecyclePlan,
 ) -> None:
     """Own Parser Lifecycle without changing the Orchestrator call flow.
 
@@ -235,14 +248,17 @@ def run_parser_lifecycle(
     """
 
     outbound: queue.Queue[tuple[str, object]] = queue.Queue()
+    collaborators = plan.collaborators
     parser_states: dict[str, _ParserState] = {}
     threads: list[tuple[str, _ParserThread]] = []
 
-    for parser, parser_id in parsers:
+    for execution in plan.parsers:
+        parser = execution.parser
+        parser_id = execution.parser_id
         worklist = [
             ParserQuery(keyword=keyword, location=location)
-            for keyword in keywords
-            for location in locations
+            for keyword in plan.keywords
+            for location in plan.locations
         ]
         parser_states[parser_id] = _ParserState(parser_id=parser_id)
         threads.append(
@@ -253,20 +269,17 @@ def run_parser_lifecycle(
                     parser,
                     worklist,
                     outbound,
-                    classify_handoff=classify_handoff_for(
-                        parser_id=parser_id,
-                        metrics=metrics,
-                    ),
-                    run_log=run_log,
-                    run_state=run_state,
-                    freshness=freshness,
-                    prefilter=prefilter,
-                    content_gate=content_gate,
-                    dedup=dedup,
-                    dedup_counters=dedup_counters,
-                    pool=pool,
-                    metrics=metrics,
-                    card_store=card_store,
+                    classify_handoff=execution.classify_handoff,
+                    run_log=collaborators.run_log,
+                    run_state=collaborators.run_state,
+                    freshness=collaborators.freshness,
+                    prefilter=collaborators.prefilter,
+                    content_gate=collaborators.content_gate,
+                    dedup=collaborators.dedup,
+                    dedup_counters=collaborators.dedup_counters,
+                    pool=collaborators.pool,
+                    metrics=collaborators.metrics,
+                    card_store=collaborators.card_store,
                 ),
             )
         )
@@ -278,28 +291,28 @@ def run_parser_lifecycle(
         state.started_monotonic = time.monotonic()
         state.last_event_monotonic = state.started_monotonic
         _log.info("parser %s started", parser_id)
-        run_log.event("parser_" + parser_id, "parser started")
+        collaborators.run_log.event("parser_" + parser_id, "parser started")
 
     dispatcher = _OutboundDispatcher(
-        metrics=metrics,
-        run_log=run_log,
-        failure_report_writer=failure_report_writer,
+        metrics=collaborators.metrics,
+        run_log=collaborators.run_log,
+        failure_report_writer=collaborators.failure_report_writer,
     )
     parsers_remaining: set[str] = set(parser_states)
-    poll_s = min(stall_threshold_s, 5.0)
+    poll_s = min(collaborators.stall_threshold_s, 5.0)
 
     while parsers_remaining:
         try:
             parser_id, payload = outbound.get(timeout=poll_s)
         except queue.Empty:
-            if run_state.is_aborted:
+            if collaborators.run_state.is_aborted:
                 continue
             _log_parser_stalls(
                 parser_states=parser_states,
                 parsers_remaining=parsers_remaining,
                 threads=threads,
-                run_log=run_log,
-                stall_threshold_s=stall_threshold_s,
+                run_log=collaborators.run_log,
+                stall_threshold_s=collaborators.stall_threshold_s,
             )
             continue
 
@@ -315,9 +328,9 @@ def run_parser_lifecycle(
 
     parsers_done_monotonic = time.monotonic()
     for parser_id, parser_state in parser_states.items():
-        run_log.summary(
+        collaborators.run_log.summary(
             "parser_" + parser_id,
-            metrics.parser_summary(
+            collaborators.metrics.parser_summary(
                 parser_id,
                 parsers_done_monotonic,
                 parser_state.started_monotonic,

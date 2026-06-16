@@ -23,6 +23,9 @@ from application_pipeline._context import current_stage
 from application_pipeline.parser_log import RunLog
 from application_pipeline.dedup_counters import DedupCounters
 from application_pipeline.parser_lifecycle import (
+    ParserLifecycleCollaborators,
+    ParserLifecycleExecution,
+    ParserLifecyclePlan,
     run_parser_lifecycle,
 )
 from application_pipeline.run_metrics import (
@@ -310,28 +313,40 @@ def run(
             )
 
             classify_stage.start()
-            classify_handoff_for: Callable[..., ClassifyStageHandoff] = (
-                classify_stage.handoff_for
-            )
+            classify_handoffs: dict[str, ClassifyStageHandoff] = {
+                source.parser_type: classify_stage.handoff_for(
+                    parser_id=source.parser_type,
+                    metrics=metrics,
+                )
+                for _, source in parsers_list
+            }
             run_parser_lifecycle(
-                parsers=[
-                    (parser, source.parser_type) for parser, source in parsers_list
-                ],
-                keywords=list(search_terms.keywords),
-                locations=locations,
-                classify_handoff_for=classify_handoff_for,
-                run_log=run_log,
-                run_state=run_state,
-                freshness=freshness,
-                prefilter=prefilter,
-                content_gate=content_gate,
-                dedup=dedup_run,
-                dedup_counters=dedup_counters,
-                pool=pool,
-                metrics=metrics,
-                card_store=card_store,
-                failure_report_writer=failure_report_writer,
-                stall_threshold_s=stall_threshold_s,
+                ParserLifecyclePlan(
+                    parsers=[
+                        ParserLifecycleExecution(
+                            parser=parser,
+                            parser_id=source.parser_type,
+                            classify_handoff=classify_handoffs[source.parser_type],
+                        )
+                        for parser, source in parsers_list
+                    ],
+                    keywords=list(search_terms.keywords),
+                    locations=locations,
+                    collaborators=ParserLifecycleCollaborators(
+                        run_log=run_log,
+                        run_state=run_state,
+                        freshness=freshness,
+                        prefilter=prefilter,
+                        content_gate=content_gate,
+                        dedup=dedup_run,
+                        dedup_counters=dedup_counters,
+                        pool=pool,
+                        metrics=metrics,
+                        card_store=card_store,
+                        failure_report_writer=failure_report_writer,
+                        stall_threshold_s=stall_threshold_s,
+                    ),
+                )
             )
 
             freshness.emit_run_complete()

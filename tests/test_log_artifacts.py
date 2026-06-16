@@ -195,6 +195,47 @@ def test_summarize_renders_string_counts_with_colon_and_preserves_text(
     assert "status: retry: deferred" in content
 
 
+def test_summarize_with_zero_counts_produces_valid_root_block(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    started = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+
+    log.summary("llm_judge_match", {"calls": 0, "duration_s": 0.0}, started)
+
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
+    assert "SUMMARY OF SESSION 2026-05-12T00:00:00Z" in content
+    assert "calls=0" in content
+    assert "duration_s=0.0" in content
+    assert not (tmp_path / "llm" / "judge_match.summary").exists()
+
+
+def test_two_summary_blocks_stay_separated_by_blank_line(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+    started1 = datetime(2026, 5, 12, 8, 0, 0, tzinfo=timezone.utc)
+    started2 = datetime(2026, 5, 12, 16, 0, 0, tzinfo=timezone.utc)
+
+    log.event("llm_classify_relevance", "batch_sent", batch_id="b1")
+    log.summary(
+        "llm_classify_relevance", {"batches_sent": 1, "items_classified": 5}, started1
+    )
+    log.event("llm_classify_relevance", "batch_sent", batch_id="b2")
+    log.summary(
+        "llm_classify_relevance", {"batches_sent": 1, "items_classified": 3}, started2
+    )
+
+    content = (tmp_path / "run.log").read_text(encoding="utf-8")
+    assert content.count("SUMMARY OF SESSION") == 2
+    assert "2026-05-12T08:00:00Z" in content
+    assert "2026-05-12T16:00:00Z" in content
+
+    first_idx = content.index("SUMMARY OF SESSION 2026-05-12T08:00:00Z")
+    second_idx = content.index("SUMMARY OF SESSION 2026-05-12T16:00:00Z")
+    assert "\n\n" in content[first_idx:second_idx]
+
+
 # ---------------------------------------------------------------------------
 # <layer>/<rest>.events.jsonl — structured per-step events, no component field
 # ---------------------------------------------------------------------------
@@ -363,6 +404,20 @@ def test_unprefixed_transcript_rows_keep_existing_root_file_behavior(
     transcript_file = tmp_path / "agent.transcripts.jsonl"
     assert transcript_file.exists()
     assert json.loads(transcript_file.read_text(encoding="utf-8").strip()) == entry
+
+
+def test_event_and_transcript_files_stay_separate_for_same_prefixed_component(
+    tmp_path: Path,
+) -> None:
+    log = RunLog(tmp_path)
+
+    log.event("llm_classify_relevance", "batch_sent")
+    log.transcript(
+        "llm_classify_relevance", {"ts": "2026-05-12T10:00:00Z", "status": "ok"}
+    )
+
+    assert (tmp_path / "llm" / "classify_relevance.events.jsonl").exists()
+    assert (tmp_path / "llm" / "classify_relevance.transcripts.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -120,20 +120,30 @@ def _validate_projection_slot(slot: str) -> None:
 def _pattern_blocks(text: str) -> list[str]:
     blocks: list[str] = []
     current: list[str] = []
+    saw_section_heading = False
 
     for line in text.splitlines():
         if _PATTERN_HEADER_RE.fullmatch(line):
             if current:
                 blocks.append("\n".join(current).strip())
             current = [line]
+            saw_section_heading = False
             continue
         if line.startswith("# "):
             if current:
                 blocks.append("\n".join(current).strip())
                 current = []
+            saw_section_heading = True
             continue
         if current:
             current.append(line)
+            continue
+        if not line.strip():
+            continue
+        if saw_section_heading:
+            raise CoverPatternError(
+                "content outside a cover pattern block is not supported"
+            )
 
     if current:
         blocks.append("\n".join(current).strip())

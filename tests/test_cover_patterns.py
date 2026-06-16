@@ -610,6 +610,44 @@ def test_parse_library_accepts_cover_patterns_markdown_sections_between_patterns
     ]
 
 
+def test_parse_library_rejects_non_pattern_text_after_markdown_section_heading() -> (
+    None
+):
+    text = textwrap.dedent(
+        """\
+        # Intro Patterns
+
+        ## Product Resonance Intro
+        - slot: cover_intro
+        - argument_type: resonance
+        - use_when: Use when the employer's product or platform connects directly to a long-running motivation or curiosity.
+        - placeholders: Musterfirma, Musterprodukt, Musterprojekt
+        - why_it_works: It links the employer's surface to concrete candidate evidence instead of opening with generic motivation.
+
+        Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
+
+        # Closing Patterns
+
+        This line is not a pattern header and must not be ignored.
+
+        ## Product Resonance Closing
+        - slot: cover_closing
+        - argument_type: closing
+        - use_when: Use when the close should stay direct and tie intent back to the role.
+        - placeholders: Musterfirma, Musterrolle
+        - why_it_works: It closes with clear intent and keeps the role reference explicit.
+
+        Deshalb moechte ich meine Erfahrung bei Musterfirma in der Musterrolle wirksam einbringen. Ueber ein Gespraech dazu, wie ich den Beitrag konkret leisten kann, freue ich mich.
+        """
+    )
+
+    with pytest.raises(
+        CoverPatternError,
+        match="content outside a cover pattern block is not supported",
+    ):
+        parse_library(text)
+
+
 def test_cover_pattern_library_rejects_unsupported_declared_placeholder_at_seam() -> (
     None
 ):

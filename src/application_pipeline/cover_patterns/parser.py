@@ -48,30 +48,61 @@ class CoverPattern:
     text: str
 
 
+@dataclass(frozen=True)
+class CoverPatternLibrary:
+    _patterns: tuple[CoverPattern, ...] = ()
+
+    @classmethod
+    def parse(cls, text: str) -> CoverPatternLibrary:
+        stripped = text.strip()
+        if not stripped:
+            return cls()
+
+        matches = list(_PATTERN_HEADER_RE.finditer(stripped))
+        patterns: list[CoverPattern] = []
+
+        for index, match in enumerate(matches):
+            start = match.start()
+            end = (
+                matches[index + 1].start()
+                if index + 1 < len(matches)
+                else len(stripped)
+            )
+            block = stripped[start:end].strip()
+            patterns.append(_parse_block(block))
+
+        return cls(tuple(patterns))
+
+    @classmethod
+    def load(cls, path: Path) -> CoverPatternLibrary:
+        if not path.exists():
+            return cls()
+        text = path.read_text(encoding="utf-8-sig")
+        if not text.strip():
+            return cls()
+        return cls.parse(text)
+
+    def all_patterns(self) -> list[CoverPattern]:
+        return list(self._patterns)
+
+    def patterns_for_slot(self, slot: str) -> list[CoverPattern]:
+        return [pattern for pattern in self._patterns if pattern.slot == slot]
+
+
+def parse_library(text: str) -> CoverPatternLibrary:
+    return CoverPatternLibrary.parse(text)
+
+
 def parse(text: str) -> list[CoverPattern]:
-    stripped = text.strip()
-    if not stripped:
-        return []
+    return parse_library(text).all_patterns()
 
-    matches = list(_PATTERN_HEADER_RE.finditer(stripped))
-    patterns: list[CoverPattern] = []
 
-    for index, match in enumerate(matches):
-        start = match.start()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(stripped)
-        block = stripped[start:end].strip()
-        patterns.append(_parse_block(block))
-
-    return patterns
+def load_library(path: Path) -> CoverPatternLibrary:
+    return CoverPatternLibrary.load(path)
 
 
 def load(path: Path) -> list[CoverPattern]:
-    if not path.exists():
-        return []
-    text = path.read_text(encoding="utf-8-sig")
-    if not text.strip():
-        return []
-    return parse(text)
+    return load_library(path).all_patterns()
 
 
 def _parse_block(block: str) -> CoverPattern:

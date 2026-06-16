@@ -405,6 +405,7 @@ class RunMetrics:
     ) -> dict[str, int | float]:
         with self._lock:
             c = self._per_parser.get(parser_id, _ParserCounters())
+            duration = max(0.0, end_monotonic - started_monotonic)
             return {
                 "discovered": c.discovered,
                 "enrich_failed": c.enrich_failed,
@@ -412,7 +413,7 @@ class RunMetrics:
                 "queries_done": c.queries_done,
                 "parsers_dead": c.parsers_dead,
                 "unparseable_dates": c.unparseable_dates,
-                "duration": round(end_monotonic - started_monotonic, 1),
+                "duration": round(duration, 1),
             }
 
     # -----------------------------------------------------------------------

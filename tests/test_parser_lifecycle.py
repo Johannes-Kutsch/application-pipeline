@@ -544,3 +544,23 @@ def test_lifecycle_records_not_served_and_completed_queries_without_parser_dead(
     ]
     assert phase_calls[-1].kwargs["phase"] == "done"
     assert all(call.kwargs["phase"] != "dead" for call in phase_calls)
+
+
+def test_parser_summary_duration_is_nonnegative_in_run_log(
+    tmp_path: Path, monkeypatch
+) -> None:
+    plan = _make_plan(
+        tmp_path,
+        parser=_ImmediateParser(),
+    )
+    monotonic_values = iter([5.0, 4.0, 3.0, 2.0])
+    monkeypatch.setattr(
+        "application_pipeline.parser_lifecycle.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+
+    run_parser_lifecycle(plan)
+
+    run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
+    assert "=== parser_test_parser" in run_log_content
+    assert "duration=0.0" in run_log_content

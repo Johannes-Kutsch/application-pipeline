@@ -10,7 +10,7 @@ from application_pipeline.cv_slot_contract import (
 )
 
 _PATTERN_HEADER_RE = re.compile(r"^## (.+)$", re.MULTILINE)
-_METADATA_RE = re.compile(r"^- ([a-z_]+):\s*(.+)$")
+_METADATA_RE = re.compile(r"^- ([a-z_]+):\s*(.*)$")
 _PLACEHOLDER_RE = re.compile(r"\b(Muster[^\W\d_]+)\b")
 _SENTENCE_RE = re.compile(r"[.!?](?:\s|$)")
 
@@ -136,7 +136,9 @@ def _parse_block(block: str) -> CoverPattern:
             continue
         raise CoverPatternError(f"{name}: expected metadata bullets before text")
 
-    missing = _REQUIRED_METADATA - metadata.keys()
+    missing = {
+        key for key in _REQUIRED_METADATA if key not in metadata or not metadata[key]
+    }
     if missing:
         missing_text = ", ".join(sorted(missing))
         raise CoverPatternError(f"{name}: missing required metadata: {missing_text}")

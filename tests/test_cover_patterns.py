@@ -14,6 +14,10 @@ from application_pipeline.cover_patterns import (
 )
 from application_pipeline.cv_slot_contract import COVER_PARAGRAPH_PATTERN_SLOTS
 
+_COVER_PATTERNS_TEMPLATE = Path(
+    "src/application_pipeline/templates/application-pipeline/user-info/cv/cover-patterns.md"
+)
+
 
 @pytest.mark.parametrize(
     ("slot", "name"),
@@ -326,6 +330,32 @@ def test_cover_pattern_library_builders_preserve_cover_pattern_failures(
             load_library(path)
 
 
+def test_cover_pattern_library_load_rejects_empty_required_metadata_value(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cover-patterns.md"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            ## Missing Argument Type
+            - slot: cover_intro
+            - argument_type:
+            - use_when: If the product is unusually compelling.
+            - placeholders: Musterfirma
+            - why_it_works: It is specific.
+
+            Ich will bei Musterfirma arbeiten, weil mich das Thema lange begleitet und ich es konkret weiterbauen will. Diese Verbindung macht den Wechsel fuer mich plausibel.
+            """
+        )
+    )
+
+    with pytest.raises(
+        CoverPatternError,
+        match="Missing Argument Type: missing required metadata: argument_type",
+    ):
+        CoverPatternLibrary.load(path)
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [
@@ -474,3 +504,11 @@ def test_load_tolerates_missing_or_empty_cover_patterns(
         path.write_text(seed)
 
     assert load(path) == []
+
+
+def test_cover_pattern_library_loads_shipped_cover_patterns_template() -> None:
+    result = load_library(_COVER_PATTERNS_TEMPLATE)
+
+    assert [pattern.name for pattern in result.all_patterns()] == [
+        "Product Resonance Intro"
+    ]

@@ -34,17 +34,19 @@ from application_pipeline.run_metrics import RunMetrics
 
 _log = logging.getLogger("application_pipeline.orchestrator")
 
-STALL_THRESHOLD_S: float = 60.0
+_STALL_THRESHOLD_S: float = 60.0
+
+__all__ = ["run_parser_lifecycle"]
 
 
 @runtime_checkable
-class ParserLifecycleRunState(Protocol):
+class _ParserLifecycleRunState(Protocol):
     @property
     def is_aborted(self) -> bool: ...
 
 
 @runtime_checkable
-class ParserLifecycleHandoffFactory(Protocol):
+class _ParserLifecycleHandoffFactory(Protocol):
     def __call__(
         self, *, parser_id: str, metrics: RunMetrics
     ) -> ClassifyStageHandoff: ...
@@ -82,7 +84,7 @@ class _ParserThread(threading.Thread):
         *,
         classify_handoff: ClassifyStageHandoff,
         run_log: RunLog,
-        run_state: ParserLifecycleRunState,
+        run_state: _ParserLifecycleRunState,
         freshness: FreshnessGate,
         prefilter: PreFilterGate,
         content_gate: ContentGate,
@@ -209,9 +211,9 @@ def run_parser_lifecycle(
     parsers: list[tuple[Parser, str]],
     keywords: list[str],
     locations: Sequence[Location],
-    classify_handoff_for: ParserLifecycleHandoffFactory,
+    classify_handoff_for: _ParserLifecycleHandoffFactory,
     run_log: RunLog,
-    run_state: ParserLifecycleRunState,
+    run_state: _ParserLifecycleRunState,
     freshness: FreshnessGate,
     prefilter: PreFilterGate,
     content_gate: ContentGate,
@@ -221,7 +223,7 @@ def run_parser_lifecycle(
     metrics: RunMetrics,
     card_store: CardStore,
     failure_report_writer: FailureReportWriter,
-    stall_threshold_s: float = STALL_THRESHOLD_S,
+    stall_threshold_s: float = _STALL_THRESHOLD_S,
 ) -> None:
     """Own Parser Lifecycle without changing the Orchestrator call flow.
 

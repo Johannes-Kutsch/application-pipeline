@@ -23,7 +23,6 @@ from application_pipeline._context import current_stage
 from application_pipeline.parser_log import RunLog
 from application_pipeline.dedup_counters import DedupCounters
 from application_pipeline.parser_lifecycle import (
-    STALL_THRESHOLD_S as _STALL_THRESHOLD_S,
     run_parser_lifecycle,
 )
 from application_pipeline.run_metrics import (
@@ -152,7 +151,7 @@ def run(
     dedup_store: DeduplicationStore | None = None,
     status_display: StatusDisplay | None = None,
     run_log: RunLog | None = None,
-    stall_threshold_s: float = _STALL_THRESHOLD_S,
+    stall_threshold_s: float = 60.0,
     quota_wall: "_quota.QuotaWall | None" = None,
     no_judge: bool = False,
 ) -> RunSummary:

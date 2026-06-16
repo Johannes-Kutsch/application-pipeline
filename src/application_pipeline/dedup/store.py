@@ -333,13 +333,36 @@ class DeduplicationStore:
             return _MatchDecision("miss", miss_listing_id)
         return _MatchDecision("fuzzy_hit", listing_id, mutation="prepend_url_persist")
 
-    def _apply_alias_match(
+    def _decide_pending_post_enrich_match(
+        self, existing_id: int, key: _SeenKey
+    ) -> _MatchDecision:
+        """Route pending post-enrich handling through the shared decision helpers."""
+        existing = self._records[existing_id]
+        match_id = self._tuple_lookup(key)
+        if match_id is not None and match_id != existing_id:
+            return self._decide_exact_tuple_match(
+                match_id,
+                self._records[match_id],
+                miss_listing_id=existing_id,
+            )
+        match_id = self._fuzzy_lookup(key)
+        if match_id is not None and match_id != existing_id:
+            return self._decide_fuzzy_match(
+                match_id,
+                self._records[match_id],
+                miss_listing_id=existing_id,
+            )
+        return self._decide_existing_url_match(existing_id, existing)
+
+    def _apply_match_decision(
         self,
         decision: _MatchDecision,
         *,
         key: _SeenKey,
     ) -> RunScopedSeenResult:
-        """Apply tuple/fuzzy alias side effects and return the public result."""
+        """Apply decision-local side effects and return the public result."""
+        if decision.mutation == "refresh_pending":
+            self._write_pending(key, listing_id=decision.listing_id)
         if decision.mutation == "prepend_url_in_memory":
             self._prepend_url(decision.listing_id, key.url, persist=False)
             if self._in_run is not None:
@@ -364,30 +387,10 @@ class DeduplicationStore:
             if existing_id is not None:
                 existing = self._records[existing_id]
                 if existing.get("status") == "pending":
-                    # Post-enrich path: fields may be backfilled; check for new tuple/fuzzy
-                    # match against a different listing (exclude self-references).
-                    match_id = self._tuple_lookup(key)
-                    if match_id is not None and match_id != existing_id:
-                        match_record = self._records[match_id]
-                        decision = self._decide_exact_tuple_match(
-                            match_id,
-                            match_record,
-                            miss_listing_id=existing_id,
-                        )
-                        return self._apply_alias_match(decision, key=key)
-                    match_id = self._fuzzy_lookup(key)
-                    if match_id is not None and match_id != existing_id:
-                        decision = self._decide_fuzzy_match(
-                            match_id,
-                            self._records[match_id],
-                            miss_listing_id=existing_id,
-                        )
-                        return self._apply_alias_match(decision, key=key)
-                decision = self._decide_existing_url_match(existing_id, existing)
-                if decision.mutation == "refresh_pending":
-                    # No cross-listing match; refresh pending with backfilled fields.
-                    self._write_pending(key, listing_id=existing_id)
-                return RunScopedSeenResult(decision.kind, decision.listing_id)
+                    decision = self._decide_pending_post_enrich_match(existing_id, key)
+                else:
+                    decision = self._decide_existing_url_match(existing_id, existing)
+                return self._apply_match_decision(decision, key=key)
 
             # URL not yet registered — check tuple, fuzzy, then miss
             match_id = self._tuple_lookup(key)
@@ -397,7 +400,7 @@ class DeduplicationStore:
                     self._records[match_id],
                     miss_listing_id=self._next_id,
                 )
-                return self._apply_alias_match(decision, key=key)
+                return self._apply_match_decision(decision, key=key)
 
             match_id = self._fuzzy_lookup(key)
             if match_id is not None:
@@ -406,7 +409,7 @@ class DeduplicationStore:
                     self._records[match_id],
                     miss_listing_id=self._next_id,
                 )
-                return self._apply_alias_match(decision, key=key)
+                return self._apply_match_decision(decision, key=key)
 
             new_id = self._write_pending(key)
             if self._in_run is not None:

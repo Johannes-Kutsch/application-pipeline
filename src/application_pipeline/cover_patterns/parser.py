@@ -4,7 +4,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from application_pipeline.cv_slot_contract import COVER_PARAGRAPH_PATTERN_SLOTS
+from application_pipeline.cv_slot_contract import (
+    COVER_PARAGRAPH_PATTERN_SLOTS,
+    SLOT_NAME_SET,
+)
 
 _PATTERN_HEADER_RE = re.compile(r"^## (.+)$", re.MULTILINE)
 _METADATA_RE = re.compile(r"^- ([a-z_]+):\s*(.+)$")
@@ -86,6 +89,7 @@ class CoverPatternLibrary:
         return list(self._patterns)
 
     def patterns_for_slot(self, slot: str) -> list[CoverPattern]:
+        _validate_projection_slot(slot)
         return [pattern for pattern in self._patterns if pattern.slot == slot]
 
 
@@ -103,6 +107,16 @@ def load_library(path: Path) -> CoverPatternLibrary:
 
 def load(path: Path) -> list[CoverPattern]:
     return load_library(path).all_patterns()
+
+
+def _validate_projection_slot(slot: str) -> None:
+    if slot in _VALID_SLOTS:
+        return
+    if slot in SLOT_NAME_SET:
+        raise CoverPatternError(
+            f"cover slot projection requires a cover paragraph slot, got: {slot}"
+        )
+    raise CoverPatternError(f"unknown cover slot: {slot}")
 
 
 def _parse_block(block: str) -> CoverPattern:

@@ -12,6 +12,7 @@ from application_pipeline.cover_patterns import (
     parse,
     parse_library,
 )
+from application_pipeline.cv_slot_contract import COVER_PARAGRAPH_PATTERN_SLOTS
 
 
 @pytest.mark.parametrize(
@@ -165,6 +166,98 @@ def test_load_library_filters_patterns_by_slot_in_authored_order(
         "Intro Pattern",
         "Second Intro Pattern",
     ]
+
+
+def test_cover_pattern_library_projects_one_valid_slot_in_authored_order() -> None:
+    text = textwrap.dedent(
+        """\
+        ## Intro Pattern
+        - slot: cover_intro
+        - argument_type: resonance
+        - use_when: The listing's product surface matches a long-running motivation.
+        - placeholders: Musterfirma, Musterprodukt, Musterprojekt
+        - why_it_works: It ties employer context to concrete candidate evidence.
+
+        Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
+
+        ## Fit Pattern
+        - slot: cover_fit
+        - argument_type: capability
+        - use_when: The role maps directly to prior evidence.
+        - placeholders: Musterfirma, Musterrolle
+        - why_it_works: It ties the role to demonstrated evidence.
+
+        Bei Musterfirma kann ich fuer die Musterrolle belastbare Erfahrung direkt nutzbar machen. Diese Verantwortung habe ich bereits konkret getragen und moechte sie weiter vertiefen.
+
+        ## Second Intro Pattern
+        - slot: cover_intro
+        - argument_type: resonance
+        - use_when: The domain is compelling for a second intro variant.
+        - placeholders: Musterfirma, Musterdomäne
+        - why_it_works: It keeps the intro specific to the employer domain.
+
+        Bei Musterfirma reizt mich besonders die Arbeit in der Musterdomäne. Diese Verbindung habe ich bereits konkret erlebt und möchte sie dort weiter ausbauen.
+        """
+    )
+
+    result = parse_library(text)
+
+    assert result.patterns_for_slot("cover_intro") == [
+        CoverPattern(
+            name="Intro Pattern",
+            slot="cover_intro",
+            argument_type="resonance",
+            use_when="The listing's product surface matches a long-running motivation.",
+            placeholders=("Musterfirma", "Musterprodukt", "Musterprojekt"),
+            why_it_works="It ties employer context to concrete candidate evidence.",
+            text="Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.",
+        ),
+        CoverPattern(
+            name="Second Intro Pattern",
+            slot="cover_intro",
+            argument_type="resonance",
+            use_when="The domain is compelling for a second intro variant.",
+            placeholders=("Musterfirma", "Musterdomäne"),
+            why_it_works="It keeps the intro specific to the employer domain.",
+            text="Bei Musterfirma reizt mich besonders die Arbeit in der Musterdomäne. Diese Verbindung habe ich bereits konkret erlebt und möchte sie dort weiter ausbauen.",
+        ),
+    ]
+
+
+@pytest.mark.parametrize("slot", ["opening", "resume_projekte", "unknown_slot"])
+def test_cover_pattern_library_rejects_non_cover_or_unknown_projection_slots(
+    slot: str,
+) -> None:
+    library = CoverPatternLibrary()
+
+    with pytest.raises(CoverPatternError, match=slot):
+        library.patterns_for_slot(slot)
+
+
+def test_cover_pattern_library_returns_empty_projection_for_valid_unused_slot() -> None:
+    library = parse_library(
+        textwrap.dedent(
+            """\
+            ## Intro Pattern
+            - slot: cover_intro
+            - argument_type: resonance
+            - use_when: The listing's product surface matches a long-running motivation.
+            - placeholders: Musterfirma, Musterprodukt, Musterprojekt
+            - why_it_works: It ties employer context to concrete candidate evidence.
+
+            Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
+            """
+        )
+    )
+
+    assert library.patterns_for_slot("cover_fit") == []
+
+
+@pytest.mark.parametrize("slot", COVER_PARAGRAPH_PATTERN_SLOTS)
+def test_cover_pattern_library_accepts_cover_slot_contract_for_projection(
+    slot: str,
+) -> None:
+    assert CoverPatternLibrary().patterns_for_slot(slot) == []
 
 
 def test_parse_and_load_remain_list_compatibility_wrappers(

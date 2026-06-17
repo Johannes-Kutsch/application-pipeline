@@ -1,3 +1,5 @@
 # Shared Agent Skill bodies with tool wrappers
 
+Superseded by ADR-0050.
+
 Agent Skills are shared workflow instructions seeded by `init` into `application-pipeline/agent-skills/`, with thin Claude and Codex `SKILL.md` wrappers under `.claude/skills/` and `.codex/skills/` that point to the shared body. This amends ADR-0035: the package owns the shared bodies and both tool adapters, but the workflow body is runtime-visible shared markdown to avoid drift between Claude and Codex while preserving each tool's required skill metadata shape. `init --refresh` overwrites shared bodies and package-owned wrappers. Claude and Codex expose the same skill names and descriptions; only adapter bootstrap wording may differ. Shared support files live only under `application-pipeline/agent-skills/_shared/`, not in adapter-local `_shared` directories. Migration is manual: `init --refresh` does not delete pre-existing adapter-local `_shared` directories.

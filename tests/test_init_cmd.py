@@ -68,6 +68,9 @@ def _codex_template_text(rel: str) -> str:
     return _codex_template_bytes(rel).decode().replace("\r\n", "\n")
 
 
+_SKILL_DIRS = ("analyse-listing", "write-cv", "build-cv")
+
+
 def _front_matter_field(text: str, field: str) -> str:
     match = re.search(rf"^{field}: .+$", text, flags=re.MULTILINE)
     assert match is not None
@@ -1150,7 +1153,15 @@ def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
 
     codex_skills = _codex(tmp_path) / "skills"
     assert codex_skills.is_dir()
-    for d in ("analyse-listing", "write-cv", "build-cv"):
+    shared_dir = codex_skills / "_shared"
+    assert shared_dir.is_dir()
+    assert (shared_dir / "CONVENTIONS.md").read_bytes() == _codex_template_bytes(
+        "skills/_shared/CONVENTIONS.md"
+    )
+    assert (shared_dir / "SLOT-MAP.md").read_bytes() == _codex_template_bytes(
+        "skills/_shared/SLOT-MAP.md"
+    )
+    for d in _SKILL_DIRS:
         wrapper = codex_skills / d / "SKILL.md"
         assert wrapper.exists(), f"{d}/SKILL.md missing"
         assert wrapper.read_bytes() == _codex_template_bytes(f"skills/{d}/SKILL.md")
@@ -1164,10 +1175,9 @@ def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
             claude_text, "description"
         )
         assert f"../../../application-pipeline/agent-skills/{d}.md" not in codex_text
-        if d == "analyse-listing":
+        if d in {"analyse-listing", "write-cv"}:
             assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in codex_text
-        elif d == "write-cv":
-            assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in codex_text
+        if d == "write-cv":
             assert "[_shared/SLOT-MAP.md](../_shared/SLOT-MAP.md)" in codex_text
 
     assert not (_ap(tmp_path) / ".codex").exists()
@@ -1254,7 +1264,7 @@ def test_fresh_init_seeds_claude_skills(tmp_path: Path) -> None:
     assert (shared_dir / "SLOT-MAP.md").read_bytes() == _claude_template_bytes(
         "skills/_shared/SLOT-MAP.md"
     )
-    for d in ("analyse-listing", "write-cv", "build-cv"):
+    for d in _SKILL_DIRS:
         assert (claude_skills / d).is_dir(), f"{d} missing"
 
 
@@ -1263,33 +1273,27 @@ def test_fresh_init_seeds_claude_skill_templates_with_inlined_workflows(
 ) -> None:
     init(tmp_path)
 
-    expected = {
-        "analyse-listing": (
-            "Fragt den Nutzer zu einem konkreten Listing, fasst die Erkenntnisse im passenden Bewerbungsordner zusammen und verarbeitet immer genau ein Listing pro Sitzung. Wird aktiviert, wenn der Nutzer /analyse-listing aufruft.",
-            "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)",
-        ),
-        "write-cv": (
-            "Erzeugt eine angepasste cv.tex (CV Slot-Map) plus anwendungsgebundene cover/resume/combined PDFs fuer ein durch /analyse-listing analysiertes Listing. Haltet einen editierbaren Feedback-Loop fuer cv.tex, Build-Output und triage-profile bis der Nutzer beendet.",
-            "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)",
-        ),
-    }
-
-    for skill, (description, shared_link) in expected.items():
-        text = (_claude(tmp_path) / "skills" / skill / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        name, body = _skill_frontmatter(text)
+    for skill in _SKILL_DIRS:
+        skill_file = _claude(tmp_path) / "skills" / skill / "SKILL.md"
+        text = skill_file.read_text(encoding="utf-8")
+        name, description = _skill_frontmatter(text)
         assert name == skill
-        assert shared_link in text
+        assert skill_file.read_bytes() == _claude_template_bytes(
+            f"skills/{skill}/SKILL.md"
+        )
         assert f"../../../application-pipeline/agent-skills/{skill}.md" not in text
+        if skill in {"analyse-listing", "write-cv"}:
+            assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in text
         if skill == "write-cv":
             assert description.startswith(
                 "Erzeugt eine angepasste cv.tex (CV Slot-Map)"
             )
-            assert "cover/resume/combined PDFs" in body
             assert "[_shared/SLOT-MAP.md](../_shared/SLOT-MAP.md)" in text
-        else:
-            assert body == description
+        if skill == "build-cv":
+            assert (
+                "Rufe das Skript `application-pipeline compile-cv <application-folder>` auf."
+                in text
+            )
 
 
 def test_fresh_init_seeds_known_skill_files_with_template_content(
@@ -1297,15 +1301,11 @@ def test_fresh_init_seeds_known_skill_files_with_template_content(
 ) -> None:
     init(tmp_path)
     claude_skills = _claude(tmp_path) / "skills"
-    expected_files = [
-        "analyse-listing/SKILL.md",
-        "write-cv/SKILL.md",
-        "build-cv/SKILL.md",
-    ]
+    expected_files = [f"{skill}/SKILL.md" for skill in _SKILL_DIRS]
     for rel in expected_files:
         dest = claude_skills / rel
         assert dest.exists(), f"expected {rel} to be seeded"
-    return
+        assert dest.read_bytes() == _claude_template_bytes(f"skills/{rel}")
 
 
 def test_refresh_overwrites_package_owned_skill_files(tmp_path: Path) -> None:

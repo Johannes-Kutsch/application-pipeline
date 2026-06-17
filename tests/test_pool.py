@@ -362,7 +362,7 @@ def test_pool_uses_latest_admitted_stub_when_applying_match_verdicts(
     assert dedup_store.calls == [(606, "https://example.com/replacement")]
 
 
-def test_pool_commits_empty_url_when_stub_is_missing(tmp_path: Path) -> None:
+def test_pool_skips_verdicts_when_stub_is_missing(tmp_path: Path) -> None:
     card_store = load_card_store(tmp_path / "extracts.json")
     pool = Pool()
     results_file = _RecordingDailyResultsFile()
@@ -384,14 +384,99 @@ def test_pool_commits_empty_url_when_stub_is_missing(tmp_path: Path) -> None:
         dedup_store=dedup_store,
     )
 
-    assert written == 1
-    assert results_file.commits == [
-        {
-            "rank": 1,
-            "header": "Header 505",
-            "summary": "Summary 505",
-            "url": "",
-            "body": "Raw description 505",
-        }
-    ]
+    assert written == 0
+    assert results_file.commits == []
     assert dedup_store.calls == []
+
+
+def test_pool_commits_only_pool_admitted_cards_in_rank_order(tmp_path: Path) -> None:
+    pool = Pool()
+    card_store = load_card_store(tmp_path / "extracts.json")
+    dedup_store = load_dedup(tmp_path / ".seen.json", card_store=card_store)
+    daily_results_file = DailyResultsFile(tmp_path / "results" / "2026-06-17.md")
+    daily_results_file.ensure_initialized()
+
+    second_rank_stub = PositionStub(
+        url="https://example.com/101",
+        title="Second rank role",
+        source="test",
+    )
+    first_rank_stub = PositionStub(
+        url="https://example.com/202",
+        title="First rank role",
+        source="test",
+    )
+
+    pool.add_matched(second_rank_stub, listing_id=101)
+    pool.add_judge_pending(first_rank_stub, listing_id=202)
+    dedup_store.mark_matched(101, second_rank_stub)
+    dedup_store.mark_matched(202, first_rank_stub)
+
+    card_store.put(
+        101,
+        CardExtract(
+            header="Header 101",
+            summary="Summary 101",
+            body="Raw description 101",
+        ),
+    )
+    card_store.put(
+        202,
+        CardExtract(
+            header="Header 202",
+            summary="Summary 202",
+            body="Raw description 202",
+        ),
+    )
+    card_store.put(
+        303,
+        CardExtract(
+            header="Header 303",
+            summary="Summary 303",
+            body="Raw description 303",
+        ),
+    )
+
+    written = pool.apply_match_verdicts(
+        [
+            MatchVerdict(id=101, rank=2),
+            MatchVerdict(id=303, rank=3),
+            MatchVerdict(id=202, rank=1),
+        ],
+        card_store=card_store,
+        daily_results_file=daily_results_file,
+        dedup_store=dedup_store,
+    )
+
+    assert written == 2
+    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
+        "# **1:** Header 202\n"
+        "\n"
+        "\n"
+        "https://example.com/202\n"
+        "\n"
+        "Summary 202\n"
+        "\n"
+        "---\n"
+        "\n"
+        "Raw description 202\n"
+        "\n"
+        "---\n"
+        "# **2:** Header 101\n"
+        "\n"
+        "\n"
+        "https://example.com/101\n"
+        "\n"
+        "Summary 101\n"
+        "\n"
+        "---\n"
+        "\n"
+        "Raw description 101\n"
+        "\n"
+        "---\n"
+    )
+
+    on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
+    assert on_disk["101"]["status"] == "selected_by_judge"
+    assert on_disk["202"]["status"] == "selected_by_judge"
+    assert "303" not in on_disk

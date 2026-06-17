@@ -2007,7 +2007,7 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write card store in v2 format so build_candidates can retrieve the card
+    # Write card store in v2 format so judge_candidates can retrieve the card
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
         json.dumps({"1": _card}),
@@ -2068,7 +2068,7 @@ def test_judge_pending_success_transitions_to_selected_by_judge(tmp_path: Path) 
         ),
         encoding="utf-8",
     )
-    # Write card store in v2 format so build_candidates produces a JudgeCandidate
+    # Write card store in v2 format so judge_candidates produces a JudgeCandidate
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(json.dumps({"1": _card}), encoding="utf-8")
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -2110,7 +2110,7 @@ def test_judge_pending_failure_stays_matched(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write card store in v2 format so build_candidates finds the candidate
+    # Write card store in v2 format so judge_candidates finds the candidate
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(json.dumps({"1": _card}), encoding="utf-8")
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -2160,7 +2160,7 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write card store in v2 format â€" this is what build_candidates uses
+    # Write card store in v2 format; this is what judge_candidates uses
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(
         json.dumps({"1": _card}),

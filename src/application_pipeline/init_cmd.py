@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.resources
 import importlib.resources.abc
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import Callable, Literal, NamedTuple
 
 # Top-level files never seeded (retired; kept as user-space only if operator placed them there).
 _EXCLUDE_FILES = frozenset({"layout.py"})
@@ -21,6 +21,7 @@ class _SeedPolicy(NamedTuple):
     dest_root: Path
     operator_owned_roots: frozenset[str]
     operator_owned_top_level_files: frozenset[str]
+    package_owned: Callable[[Path], bool]
 
 
 class _SeedEntry(NamedTuple):
@@ -46,18 +47,21 @@ def _seed_policies(cwd: Path) -> dict[str, _SeedPolicy]:
             dest_root=cwd / "application-pipeline",
             operator_owned_roots=frozenset({"user-info"}),
             operator_owned_top_level_files=frozenset({"config.py", ".gitignore"}),
+            package_owned=_default_package_owned,
         ),
         "claude": _SeedPolicy(
             bucket="claude",
             dest_root=cwd / ".claude",
             operator_owned_roots=frozenset(),
             operator_owned_top_level_files=frozenset(),
+            package_owned=_tool_skills_package_owned,
         ),
         "codex": _SeedPolicy(
             bucket="codex",
             dest_root=cwd / ".codex",
             operator_owned_roots=frozenset(),
             operator_owned_top_level_files=frozenset(),
+            package_owned=_tool_skills_package_owned,
         ),
     }
 
@@ -314,7 +318,20 @@ def _is_package_owned(rel: Path, *, policy: _SeedPolicy) -> bool:
         return False
     if parts and parts[0] in policy.operator_owned_roots:
         return False
+    return policy.package_owned(rel)
+
+
+def _default_package_owned(rel: Path) -> bool:
     return True
+
+
+def _tool_skills_package_owned(rel: Path) -> bool:
+    parts = rel.parts
+    if len(parts) == 3 and parts[0] == "skills" and parts[2] == "SKILL.md":
+        return True
+    if len(parts) >= 3 and parts[0] == "skills" and parts[1] == "_shared":
+        return True
+    return False
 
 
 def _display_rel_path(rel: Path, *, policy: _SeedPolicy) -> str:

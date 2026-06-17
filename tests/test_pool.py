@@ -258,6 +258,55 @@ def test_pool_skips_verdicts_without_cards(tmp_path: Path) -> None:
     assert dedup_store.calls == []
 
 
+def test_pool_uses_latest_admitted_stub_when_applying_match_verdicts(
+    tmp_path: Path,
+) -> None:
+    card_store = load_card_store(tmp_path / "extracts.json")
+    pool = Pool()
+    results_file = _RecordingDailyResultsFile()
+    dedup_store = _RecordingSelectedByJudgeStore()
+
+    original_stub = PositionStub(
+        url="https://example.com/original",
+        title="Original role",
+        source="test",
+    )
+    replacement_stub = PositionStub(
+        url="https://example.com/replacement",
+        title="Replacement role",
+        source="test",
+    )
+    pool.add_matched(original_stub, listing_id=606)
+    pool.add_judge_pending(replacement_stub, listing_id=606)
+    card_store.put(
+        606,
+        CardExtract(
+            header="Header 606",
+            summary="Summary 606",
+            body="Raw description 606",
+        ),
+    )
+
+    written = pool.apply_match_verdicts(
+        [MatchVerdict(id=606, rank=1)],
+        card_store=card_store,
+        daily_results_file=results_file,
+        dedup_store=dedup_store,
+    )
+
+    assert written == 1
+    assert results_file.commits == [
+        {
+            "rank": 1,
+            "header": "Header 606",
+            "summary": "Summary 606",
+            "url": "https://example.com/replacement",
+            "body": "Raw description 606",
+        }
+    ]
+    assert dedup_store.calls == [(606, "https://example.com/replacement")]
+
+
 def test_pool_commits_empty_url_when_stub_is_missing(tmp_path: Path) -> None:
     card_store = load_card_store(tmp_path / "extracts.json")
     pool = Pool()

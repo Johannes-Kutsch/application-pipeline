@@ -1163,7 +1163,12 @@ def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
         assert _front_matter_field(codex_text, "description") == _front_matter_field(
             claude_text, "description"
         )
-        assert f"../../../application-pipeline/agent-skills/{d}.md" in codex_text
+        assert f"../../../application-pipeline/agent-skills/{d}.md" not in codex_text
+        if d == "analyse-listing":
+            assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in codex_text
+        elif d == "write-cv":
+            assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in codex_text
+            assert "[_shared/SLOT-MAP.md](../_shared/SLOT-MAP.md)" in codex_text
 
     assert not (_ap(tmp_path) / ".codex").exists()
 
@@ -1241,39 +1246,48 @@ def test_fresh_init_seeds_claude_skills(tmp_path: Path) -> None:
 
     claude_skills = _claude(tmp_path) / "skills"
     assert claude_skills.is_dir()
-    assert not (claude_skills / "_shared").exists()
+    shared_dir = claude_skills / "_shared"
+    assert shared_dir.is_dir()
+    assert (shared_dir / "CONVENTIONS.md").read_bytes() == _claude_template_bytes(
+        "skills/_shared/CONVENTIONS.md"
+    )
+    assert (shared_dir / "SLOT-MAP.md").read_bytes() == _claude_template_bytes(
+        "skills/_shared/SLOT-MAP.md"
+    )
     for d in ("analyse-listing", "write-cv", "build-cv"):
         assert (claude_skills / d).is_dir(), f"{d} missing"
 
 
-def test_fresh_init_seeds_claude_wrappers_that_delegate_to_shared_bodies(
+def test_fresh_init_seeds_claude_skill_templates_with_inlined_workflows(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
 
     expected = {
         "analyse-listing": (
-            "Grills the user about why they want to apply to a specific listing and writes the conclusion into a per-listing application folder. Always one listing per session. Runs when the user types /analyse-listing.",
-            "../../../application-pipeline/agent-skills/analyse-listing.md",
+            "Fragt den Nutzer zu einem konkreten Listing, fasst die Erkenntnisse im passenden Bewerbungsordner zusammen und verarbeitet immer genau ein Listing pro Sitzung. Wird aktiviert, wenn der Nutzer /analyse-listing aufruft.",
+            "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)",
         ),
         "write-cv": (
-            "Generates a tailored cv.tex (CV Slot-Map) plus cover/resume/combined PDFs for a listing previously analysed by /analyse-listing, then stays in the same resident edit loop for follow-up cv.tex, analysis.md, and triage-profile feedback until the user signals done. Calls `application-pipeline compile-cv` and iteratively strips content until cover â‰¤ 1 page and resume â‰¤ 2 pages. Runs when the user types /write-cv.",
-            "../../../application-pipeline/agent-skills/write-cv.md",
+            "Erzeugt eine angepasste cv.tex (CV Slot-Map) plus anwendungsgebundene cover/resume/combined PDFs fuer ein durch /analyse-listing analysiertes Listing. Haltet einen editierbaren Feedback-Loop fuer cv.tex, Build-Output und triage-profile bis der Nutzer beendet.",
+            "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)",
         ),
     }
 
-    for skill, (description, body_path) in expected.items():
+    for skill, (description, shared_link) in expected.items():
         text = (_claude(tmp_path) / "skills" / skill / "SKILL.md").read_text(
             encoding="utf-8"
         )
         name, body = _skill_frontmatter(text)
         assert name == skill
-        assert body_path in text
-        return
+        assert shared_link in text
+        assert f"../../../application-pipeline/agent-skills/{skill}.md" not in text
         if skill == "write-cv":
-            assert description.startswith("Generates a tailored cv.tex (CV Slot-Map)")
+            assert description.startswith(
+                "Erzeugt eine angepasste cv.tex (CV Slot-Map)"
+            )
             assert "cover/resume/combined PDFs" in body
-            assert "Runs when the user types /write-cv." in body
+            assert "[_shared/SLOT-MAP.md](../_shared/SLOT-MAP.md)" in text
         else:
             assert body == description
 

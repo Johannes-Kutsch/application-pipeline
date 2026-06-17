@@ -35,22 +35,6 @@ class Pool:
         """Admit a Classify Stage match without exposing storage details."""
         self._store_stub(listing_id=listing_id, stub=stub)
 
-    def selected_listing_url(self, listing_id: int) -> str | None:
-        with self._lock:
-            stub = self._stubs.get(listing_id)
-        if stub is None:
-            return None
-        return stub.url
-
-    def mark_selected_by_judge(
-        self, dedup_store: "SelectedByJudgeRecorder", listing_id: int
-    ) -> None:
-        with self._lock:
-            stub = self._stubs.get(listing_id)
-        if stub is None:
-            return
-        dedup_store.mark_selected_by_judge(listing_id, stub)
-
     def judge_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
         with self._lock:
             stubs = dict(self._stubs)
@@ -77,14 +61,17 @@ class Pool:
             card = card_store.get(verdict.id)
             if card is None:
                 continue
+            with self._lock:
+                stub = self._stubs.get(verdict.id)
             daily_results_file.commit(
                 rank=verdict.rank,
                 header=card.header,
                 summary=card.summary,
-                url=self.selected_listing_url(verdict.id) or "",
+                url="" if stub is None else stub.url,
                 body=card.body,
             )
-            self.mark_selected_by_judge(dedup_store, verdict.id)
+            if stub is not None:
+                dedup_store.mark_selected_by_judge(verdict.id, stub)
             written += 1
         return written
 

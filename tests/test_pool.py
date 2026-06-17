@@ -86,12 +86,16 @@ def test_pool_exposes_judge_candidates_as_the_candidate_projection_operation() -
     pool = Pool()
 
     assert not hasattr(pool, "build_candidates")
+    assert not hasattr(pool, "selected_listing_url")
+    assert not hasattr(pool, "mark_selected_by_judge")
 
 
 def test_pool_completes_judge_selection_without_exposing_stub_storage(
     tmp_path: Path,
 ) -> None:
     pool = Pool()
+    card_store = load_card_store(tmp_path / "extracts.json")
+    results_file = _RecordingDailyResultsFile()
     stub = PositionStub(
         url="https://example.com/selected",
         title="Selected role",
@@ -103,11 +107,32 @@ def test_pool_completes_judge_selection_without_exposing_stub_storage(
 
     pool.add_matched(stub, listing_id=21)
     dedup_store.mark_matched(21, stub)
+    card_store.put(
+        21,
+        CardExtract(
+            header="Header 21",
+            summary="Summary 21",
+            body="Raw description 21",
+        ),
+    )
 
-    assert pool.selected_listing_url(21) == "https://example.com/selected"
+    written = pool.apply_match_verdicts(
+        [MatchVerdict(id=21, rank=1)],
+        card_store=card_store,
+        daily_results_file=results_file,
+        dedup_store=dedup_store,
+    )
 
-    pool.mark_selected_by_judge(dedup_store, 21)
-
+    assert written == 1
+    assert results_file.commits == [
+        {
+            "rank": 1,
+            "header": "Header 21",
+            "summary": "Summary 21",
+            "url": "https://example.com/selected",
+            "body": "Raw description 21",
+        }
+    ]
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["21"]["status"] == "selected_by_judge"
 

@@ -1,8 +1,8 @@
 ---
 name: write-cv
-description: Generates a tailored cv.tex (CV Slot-Map) plus application-suffixed cover/resume/combined PDFs for a listing previously analysed by /analyse-listing, then stays in the same resident edit loop for follow-up cv.tex, analysis.md, and triage-profile feedback until the user signals done. Calls `application-pipeline compile-cv` and iteratively strips content until cover ≤ 1 page and resume ≤ 2 pages. Runs when the user types /write-cv.
+description: Erzeugt eine angepasste cv.tex (CV Slot-Map) plus anwendungsgebundene cover/resume/combined PDFs fuer ein durch /analyse-listing analysiertes Listing. Haltet einen editierbaren Feedback-Loop fuer cv.tex, Build-Output und triage-profile bis der Nutzer beendet.
 ---
 
-Read and follow the authoritative workflow body:
+Lese und befolge die verbindliche Workflow-Datei:
 
 `../../../application-pipeline/agent-skills/write-cv.md`

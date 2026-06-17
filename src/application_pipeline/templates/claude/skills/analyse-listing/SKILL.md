@@ -1,8 +1,8 @@
 ---
 name: analyse-listing
-description: Grills the user about why they want to apply to a specific listing and writes the conclusion into a per-listing application folder. Always one listing per session. Runs when the user types /analyse-listing.
+description: Fragt den Nutzer zu einem konkreten Listing, fasst die Erkenntnisse im passenden Bewerbungsordner zusammen und verarbeitet immer genau ein Listing pro Sitzung. Wird aktiviert, wenn der Nutzer /analyse-listing aufruft.
 ---
 
-Read and follow the authoritative workflow body:
+Lese und befolge die verbindliche Workflow-Datei:
 
 `../../../application-pipeline/agent-skills/analyse-listing.md`

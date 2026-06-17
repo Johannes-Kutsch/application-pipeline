@@ -1,4 +1,5 @@
 import pathlib
+import re
 
 import pytest
 
@@ -91,8 +92,8 @@ def test_triage_profile_load_prompt_slots_raises_for_legacy_domain_fit_file(
     with pytest.raises(
         PromptError,
         match=(
-            rf"{legacy_file}: legacy file retired per ADR-0043; merge its "
-            r"in-scope / out-of-scope content into gate-criteria\.md and "
+            rf"{re.escape(legacy_file.as_posix())}: legacy file retired per ADR-0043; "
+            r"merge its in-scope / out-of-scope content into gate-criteria\.md and "
             r"delete the file\."
         ),
     ):
@@ -108,8 +109,8 @@ def test_triage_profile_load_prompt_slots_raises_for_legacy_self_description_fil
     with pytest.raises(
         PromptError,
         match=(
-            rf"{legacy_file}: legacy filename retired; rename it to "
-            r"candidate-profile\.md\."
+            rf"{re.escape(legacy_file.as_posix())}: legacy filename retired; "
+            r"rename it to candidate-profile\.md\."
         ),
     ):
         triage_profile.load_prompt_slots(triage_profile_dir)
@@ -124,8 +125,8 @@ def test_triage_profile_load_prompt_slots_raises_for_legacy_match_criteria_file(
     with pytest.raises(
         PromptError,
         match=(
-            rf"{legacy_file}: legacy filename retired; rename it to "
-            r"gate-criteria\.md\."
+            rf"{re.escape(legacy_file.as_posix())}: legacy filename retired; "
+            r"rename it to gate-criteria\.md\."
         ),
     ):
         triage_profile.load_prompt_slots(triage_profile_dir)

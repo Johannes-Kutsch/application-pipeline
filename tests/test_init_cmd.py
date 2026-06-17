@@ -771,6 +771,7 @@ def test_fresh_init_seeds_shared_agent_skill_bodies(tmp_path: Path) -> None:
     expected_files = [
         "analyse-listing.md",
         "write-cv.md",
+        "build-cv.md",
         "_shared/CONVENTIONS.md",
         "_shared/SLOT-MAP.md",
     ]
@@ -788,7 +789,7 @@ def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
     init(tmp_path)
 
     shared_root = _ap(tmp_path) / "agent-skills"
-    for rel in ("analyse-listing.md", "write-cv.md"):
+    for rel in ("analyse-listing.md", "write-cv.md", "build-cv.md"):
         text = (shared_root / rel).read_text()
         assert "../_shared/" not in text
     write_cv = (shared_root / "write-cv.md").read_text(encoding="utf-8")
@@ -1149,7 +1150,7 @@ def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
 
     codex_skills = _codex(tmp_path) / "skills"
     assert codex_skills.is_dir()
-    for d in ("analyse-listing", "write-cv"):
+    for d in ("analyse-listing", "write-cv", "build-cv"):
         wrapper = codex_skills / d / "SKILL.md"
         assert wrapper.exists(), f"{d}/SKILL.md missing"
         assert wrapper.read_bytes() == _codex_template_bytes(f"skills/{d}/SKILL.md")
@@ -1241,7 +1242,7 @@ def test_fresh_init_seeds_claude_skills(tmp_path: Path) -> None:
     claude_skills = _claude(tmp_path) / "skills"
     assert claude_skills.is_dir()
     assert not (claude_skills / "_shared").exists()
-    for d in ("analyse-listing", "write-cv"):
+    for d in ("analyse-listing", "write-cv", "build-cv"):
         assert (claude_skills / d).is_dir(), f"{d} missing"
 
 
@@ -1285,6 +1286,7 @@ def test_fresh_init_seeds_known_skill_files_with_template_content(
     expected_files = [
         "analyse-listing/SKILL.md",
         "write-cv/SKILL.md",
+        "build-cv/SKILL.md",
     ]
     for rel in expected_files:
         dest = claude_skills / rel

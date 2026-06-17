@@ -78,7 +78,7 @@ class CoverPatternLibrary:
     def load(cls, path: Path) -> CoverPatternLibrary:
         if not path.exists():
             return cls()
-        text = path.read_text(encoding="utf-8-sig")
+        text = _read_text_file(path)
         if not text.strip():
             return cls()
         return cls.parse(text)
@@ -105,6 +105,13 @@ def load_library(path: Path) -> CoverPatternLibrary:
 
 def load(path: Path) -> list[CoverPattern]:
     return load_library(path).all_patterns()
+
+
+def _read_text_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="cp1252")
 
 
 def _validate_projection_slot(slot: str) -> None:

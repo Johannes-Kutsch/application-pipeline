@@ -68,7 +68,7 @@ def _check_legacy_files(triage_profile_dir: Path) -> None:
     for filename, message in LEGACY_TRIAGE_PROFILE_FILES:
         legacy_path = triage_profile_dir / filename
         if legacy_path.exists():
-            raise _prompt_error(f"{legacy_path}: {message}")
+            raise _prompt_error(f"{legacy_path.as_posix()}: {message}")
 
 
 def _read_required_file(path: Path) -> str:

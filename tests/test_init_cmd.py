@@ -83,6 +83,34 @@ def _analyse_listing_step_2(text: str) -> str:
     return match.group("step")
 
 
+def _legacy_agent_skill_text(skill: str) -> str:
+    return _ap_template_bytes(f"agent-skills/{skill}.md").decode().replace("\r\n", "\n")
+
+
+def _skill_body_without_frontmatter(text: str) -> str:
+    frontmatter = re.match(r"^---\n.*?\n---\n", text, flags=re.DOTALL)
+    if frontmatter is None:
+        return text.lstrip("\n")
+    return text[frontmatter.end() :].lstrip("\n")
+
+
+def _normalize_inlined_skill_body(text: str) -> str:
+    body = _skill_body_without_frontmatter(text)
+    body = body.replace(
+        "(application-pipeline/agent-skills/_shared/CONVENTIONS.md)",
+        "(../_shared/CONVENTIONS.md)",
+    )
+    body = body.replace(
+        "(application-pipeline/agent-skills/_shared/SLOT-MAP.md)",
+        "(../_shared/SLOT-MAP.md)",
+    )
+    return body
+
+
+def _normalize_legacy_skill_body(text: str) -> str:
+    return _normalize_inlined_skill_body(text)
+
+
 def _assert_write_cv_cover_strategy_usage(text: str) -> None:
     return
 
@@ -1294,6 +1322,24 @@ def test_fresh_init_seeds_claude_skill_templates_with_inlined_workflows(
                 "Rufe das Skript `application-pipeline compile-cv <application-folder>` auf."
                 in text
             )
+
+
+def test_init_preserves_legacy_workflow_wording_in_inlined_tool_skills(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    for skill in _SKILL_DIRS:
+        legacy = _normalize_legacy_skill_body(_legacy_agent_skill_text(skill))
+        claude = (_claude(tmp_path) / "skills" / skill / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        codex = (_codex(tmp_path) / "skills" / skill / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+
+        assert _normalize_inlined_skill_body(claude) == legacy
+        assert _normalize_inlined_skill_body(codex) == legacy
 
 
 def test_fresh_init_seeds_known_skill_files_with_template_content(

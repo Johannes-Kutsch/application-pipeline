@@ -767,39 +767,45 @@ def test_fresh_init_creates_cv_skeleton(tmp_path: Path) -> None:
     assert dest.read_bytes() == _skeleton_template_bytes()
 
 
-def test_fresh_init_seeds_shared_agent_skill_bodies(tmp_path: Path) -> None:
-    init(tmp_path)
-
-    shared_root = _ap(tmp_path) / "agent-skills"
-    expected_files = [
-        "analyse-listing.md",
-        "write-cv.md",
-        "build-cv.md",
-        "_shared/CONVENTIONS.md",
-        "_shared/SLOT-MAP.md",
-    ]
-
-    assert shared_root.is_dir()
-    assert (shared_root / "_shared").is_dir()
-    for rel in expected_files:
-        dest = shared_root / rel
-        assert dest.exists(), f"expected {rel} to be seeded"
-
-
-def test_seeded_shared_agent_skill_bodies_link_to_installed_shared_support(
+def test_fresh_init_seeds_inline_tool_skills_without_agent_skills_tree(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
 
-    shared_root = _ap(tmp_path) / "agent-skills"
-    for rel in ("analyse-listing.md", "write-cv.md", "build-cv.md"):
-        text = (shared_root / rel).read_text()
-        assert "../_shared/" not in text
-    write_cv = (shared_root / "write-cv.md").read_text(encoding="utf-8")
-    assert "application-pipeline/user-info/cv/cover-patterns.md" in write_cv
-    return
-    assert "Schreibe die Umlaute ä, ü, ö und ß genau so." in write_cv
-    assert "Cover-Paragraph-Pattern-Match" in write_cv
+    assert not (_ap(tmp_path) / "agent-skills").exists()
+
+    for root_name, template_bytes in (
+        (".claude", _claude_template_bytes),
+        (".codex", _codex_template_bytes),
+    ):
+        skills_root = tmp_path / root_name / "skills"
+        assert skills_root.is_dir()
+        for rel in (
+            "analyse-listing/SKILL.md",
+            "write-cv/SKILL.md",
+            "build-cv/SKILL.md",
+            "_shared/CONVENTIONS.md",
+            "_shared/SLOT-MAP.md",
+        ):
+            dest = skills_root / rel
+            assert dest.exists(), f"expected {root_name}/skills/{rel} to be seeded"
+            assert dest.read_bytes() == template_bytes(f"skills/{rel}")
+
+
+def test_seeded_inline_tool_skills_link_to_tool_local_shared_support(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    for root_name in (".claude", ".codex"):
+        skills_root = tmp_path / root_name / "skills"
+        for rel in ("analyse-listing", "write-cv", "build-cv"):
+            text = (skills_root / rel / "SKILL.md").read_text(encoding="utf-8")
+            assert "../../../application-pipeline/agent-skills/" not in text
+        write_cv = (skills_root / "write-cv" / "SKILL.md").read_text(encoding="utf-8")
+        assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in write_cv
+        assert "[_shared/SLOT-MAP.md](../_shared/SLOT-MAP.md)" in write_cv
+        assert "application-pipeline/user-info/cv/cover-patterns.md" in write_cv
 
 
 def test_fresh_init_seeds_write_cv_with_cover_pattern_library_contract(
@@ -815,38 +821,55 @@ def test_fresh_init_seeds_write_cv_with_cover_pattern_library_contract(
     assert "Interactive Cover Shortening" in text
 
 
-def test_seeded_shared_agent_skill_support_files_reference_cv_template_path(
+def test_seeded_tool_local_shared_support_files_reference_cv_template_path(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
 
-    shared_root = _ap(tmp_path) / "agent-skills" / "_shared"
-
-    slot_map = (shared_root / "SLOT-MAP.md").read_text()
-    assert "application-pipeline/cv-template/cv_skeleton.tex" in slot_map
-    assert "application-pipeline/skills/cv_skeleton.tex" not in slot_map
-
-
-def test_refresh_overwrites_shared_agent_skill_bodies(tmp_path: Path) -> None:
-    init(tmp_path)
-    skill_body = _ap(tmp_path) / "agent-skills" / "analyse-listing.md"
-    skill_body.write_text("# tampered\n")
-
-    init(tmp_path, refresh=True)
-
-    assert skill_body.exists()
+    for root_name in (".claude", ".codex"):
+        slot_map = (
+            tmp_path / root_name / "skills" / "_shared" / "SLOT-MAP.md"
+        ).read_text(encoding="utf-8")
+        assert "application-pipeline/cv-template/cv_skeleton.tex" in slot_map
+        assert "application-pipeline/skills/cv_skeleton.tex" not in slot_map
 
 
-def test_refresh_overwrites_shared_write_cv_with_cover_strategy_routing_contract(
+def test_refresh_overwrites_inline_tool_skill_bodies_in_both_roots(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
-    skill_body = _ap(tmp_path) / "agent-skills" / "write-cv.md"
-    skill_body.write_text("# tampered\n")
+    claude_skill = _claude(tmp_path) / "skills" / "analyse-listing" / "SKILL.md"
+    codex_skill = _codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md"
+    claude_skill.write_text("# tampered claude\n")
+    codex_skill.write_text("# tampered codex\n")
 
     init(tmp_path, refresh=True)
 
-    assert skill_body.exists()
+    assert claude_skill.read_bytes() == _claude_template_bytes(
+        "skills/analyse-listing/SKILL.md"
+    )
+    assert codex_skill.read_bytes() == _codex_template_bytes(
+        "skills/analyse-listing/SKILL.md"
+    )
+
+
+def test_refresh_overwrites_tool_local_shared_support_files_in_both_roots(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    claude_support = _claude(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md"
+    codex_support = _codex(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md"
+    claude_support.write_text("# tampered claude\n")
+    codex_support.write_text("# tampered codex\n")
+
+    init(tmp_path, refresh=True)
+
+    assert claude_support.read_bytes() == _claude_template_bytes(
+        "skills/_shared/CONVENTIONS.md"
+    )
+    assert codex_support.read_bytes() == _codex_template_bytes(
+        "skills/_shared/CONVENTIONS.md"
+    )
 
 
 def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:
@@ -858,7 +881,8 @@ def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
 ) -> None:
     init(tmp_path)
 
-    assert (_ap(tmp_path) / "agent-skills" / "analyse-listing.md").exists()
+    assert (_claude(tmp_path) / "skills" / "analyse-listing" / "SKILL.md").exists()
+    assert (_codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md").exists()
 
 
 def test_analyse_listing_template_defines_four_explicit_cover_sections() -> None:
@@ -899,17 +923,6 @@ def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None
     )
     assert "Erfolgs-Report" in text
     assert "Schreib-Whitelist" in text
-
-
-def test_refresh_overwrites_shared_agent_skill_support_files(tmp_path: Path) -> None:
-    init(tmp_path)
-    support_file = _ap(tmp_path) / "agent-skills" / "_shared" / "CONVENTIONS.md"
-    support_file.write_text("# tampered\n")
-
-    init(tmp_path, refresh=True)
-    return
-
-    assert support_file.exists()
 
 
 def test_init_skips_existing_cv_skeleton(tmp_path: Path) -> None:
@@ -1035,11 +1048,12 @@ def test_refresh_with_no_legacy_skills_dir_is_silent(
 # --- retired iterate-cv cleanup on refresh ---
 
 
-def test_refresh_removes_retired_iterate_cv_files_from_all_buckets(
+def test_refresh_preserves_application_pipeline_agent_skills_while_removing_retired_tool_wrappers(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
     iterate_cv_md = _ap(tmp_path) / "agent-skills" / "iterate-cv.md"
+    iterate_cv_md.parent.mkdir(parents=True, exist_ok=True)
     iterate_cv_md.write_text("# old body\n")
     claude_skill = _claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md"
     claude_skill.parent.mkdir(parents=True, exist_ok=True)
@@ -1051,11 +1065,11 @@ def test_refresh_removes_retired_iterate_cv_files_from_all_buckets(
 
     init(tmp_path, refresh=True)
 
-    assert not iterate_cv_md.exists()
+    assert iterate_cv_md.read_text() == "# old body\n"
     assert not claude_skill.exists()
     assert not codex_skill.exists()
     out = capsys.readouterr().out
-    assert "removed agent-skills/iterate-cv.md" in out
+    assert "agent-skills/iterate-cv.md" not in out
     assert "removed .claude/skills/iterate-cv/SKILL.md" in out
     assert "removed .codex/skills/iterate-cv/SKILL.md" in out
 
@@ -1097,6 +1111,7 @@ def test_normal_init_does_not_run_refresh_cleanup(
     legacy_layout = _ap(tmp_path) / "layout.py"
     legacy_layout.write_text("# legacy\n")
     legacy_skill = _ap(tmp_path) / "agent-skills" / "iterate-cv.md"
+    legacy_skill.parent.mkdir(parents=True, exist_ok=True)
     legacy_skill.write_text("# old body\n")
     legacy_cv_skeleton = _ap(tmp_path) / "skills" / "cv_skeleton.tex"
     legacy_cv_skeleton.parent.mkdir(parents=True, exist_ok=True)
@@ -1373,16 +1388,18 @@ def test_refresh_reports_changed_agent_skill_artifacts_with_bucketed_paths(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
-    ap = _ap(tmp_path)
     claude_wrapper = _claude(tmp_path) / "skills" / "write-cv" / "SKILL.md"
     codex_wrapper = _codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md"
-    shared_body = ap / "agent-skills" / "analyse-listing.md"
-    shared_support = ap / "agent-skills" / "_shared" / "CONVENTIONS.md"
+    claude_shared = _claude(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md"
+    codex_shared = _codex(tmp_path) / "skills" / "_shared" / "SLOT-MAP.md"
+    legacy_agent_skill = _ap(tmp_path) / "agent-skills" / "analyse-listing.md"
+    legacy_agent_skill.parent.mkdir(parents=True, exist_ok=True)
 
-    shared_body.write_text("# tampered body\n")
-    shared_support.write_text("# tampered support\n")
+    legacy_agent_skill.write_text("# operator-owned legacy body\n")
     claude_wrapper.write_text("# tampered claude wrapper\n")
     codex_wrapper.write_text("# tampered codex wrapper\n")
+    claude_shared.write_text("# tampered claude shared\n")
+    codex_shared.write_text("# tampered codex shared\n")
 
     user_claude_skill = _claude(tmp_path) / "skills" / "my-skill"
     user_claude_skill.mkdir(parents=True, exist_ok=True)
@@ -1395,10 +1412,11 @@ def test_refresh_reports_changed_agent_skill_artifacts_with_bucketed_paths(
     init(tmp_path, refresh=True)
 
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-    assert "overwrote agent-skills/analyse-listing.md" in lines
-    assert "overwrote agent-skills/_shared/CONVENTIONS.md" in lines
     assert "overwrote .claude/skills/write-cv/SKILL.md" in lines
+    assert "overwrote .claude/skills/_shared/CONVENTIONS.md" in lines
     assert "overwrote .codex/skills/analyse-listing/SKILL.md" in lines
+    assert "overwrote .codex/skills/_shared/SLOT-MAP.md" in lines
+    assert not any("agent-skills/" in line for line in lines)
     assert not any("my-skill" in line for line in lines)
     assert not any("notes.md" in line for line in lines)
 

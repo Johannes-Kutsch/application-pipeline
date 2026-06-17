@@ -7,8 +7,10 @@ from typing import Literal, NamedTuple
 
 # Top-level files never seeded (retired; kept as user-space only if operator placed them there).
 _EXCLUDE_FILES = frozenset({"layout.py"})
+_EXCLUDE_ROOT_DIRS: dict[str, frozenset[str]] = {
+    "application-pipeline": frozenset({"agent-skills"}),
+}
 _RETIRED_REFRESH_PATHS: dict[str, tuple[Path, ...]] = {
-    "application-pipeline": (Path("agent-skills/iterate-cv.md"),),
     "claude": (Path("skills/iterate-cv/SKILL.md"),),
     "codex": (Path("skills/iterate-cv/SKILL.md"),),
 }
@@ -210,6 +212,10 @@ def _collect_seed_entries(
             continue
         item_rel = rel / item.name
         if item.is_dir():
+            if len(rel.parts) == 0 and item.name in _EXCLUDE_ROOT_DIRS.get(
+                policy.bucket, frozenset()
+            ):
+                continue
             entries.extend(_collect_seed_entries(item, target_dir, item_rel, policy))
             continue
         if len(rel.parts) == 0 and item.name in _EXCLUDE_FILES:

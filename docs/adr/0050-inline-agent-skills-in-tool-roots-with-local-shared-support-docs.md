@@ -44,7 +44,8 @@ or `init --refresh`.
 - Existing legacy `application-pipeline/agent-skills/` content is not auto-deleted.
 - Operators may manually compare, archive, or delete that legacy directory after
   confirming the tool-root inline skills and tool-local `_shared` docs are in place.
-- Adapter-local `_shared` cleanup remains manual for any older pre-ADR-0050 layouts.
+- Legacy tool-local `_shared` cleanup remains manual for any older pre-ADR-0050
+  layouts.
 
 ## Consequences
 

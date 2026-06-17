@@ -3201,7 +3201,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     assert len(judge_candidate_ids) == 1
     assert len(judge_candidate_ids[0]) == 1  # only the in-domain candidate
     assert card_store.get(1) is None
-    assert card_store.get(2) is not None
+    assert card_store.get(2) is None
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert (
@@ -3325,7 +3325,7 @@ def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
     assert summary.errored == 2
     assert summary.written == 1
     assert summary.classify_items == 1
-    assert card_store.get(3) is not None
+    assert card_store.get(3) is None
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert not any(urls[0] in row.get("urls", []) for row in seen_data.values())
@@ -6124,7 +6124,7 @@ def test_post_llm_stale_outcome_is_dropped_and_fresh_batch_peer_reaches_judge(
     assert summary.classifier_dropped == 1
     assert summary.written == 1
     assert card_store.get(1) is None
-    assert card_store.get(2) is not None
+    assert card_store.get(2) is None
     assert judge_candidate_ids == [[2]]
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -6685,11 +6685,7 @@ def test_matched_llm_enricher_outcome_reaches_judge_and_daily_results_file(
     assert run_summary.written == 1
 
     reloaded_card_store = load_card_store(extracts_path)
-    persisted = reloaded_card_store.get(1)
-    assert persisted is not None
-    assert persisted.header == header
-    assert persisted.summary == card_summary
-    assert persisted.body == body
+    assert reloaded_card_store.get(1) is None
 
     assert judge_candidates == [
         JudgeCandidate(id=1, header=header, summary=card_summary)

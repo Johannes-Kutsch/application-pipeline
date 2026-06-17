@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from application_pipeline.dedup import load as load_dedup
+from application_pipeline.daily_results_file import DailyResultsFile
 from application_pipeline.extracts import CardExtract, load_card_store
 from application_pipeline.llm import JudgeCandidate, MatchVerdict
 from application_pipeline.parsers import PositionStub
@@ -135,6 +136,60 @@ def test_pool_completes_judge_selection_without_exposing_stub_storage(
     ]
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["21"]["status"] == "selected_by_judge"
+
+
+def test_pool_applies_match_verdicts_through_real_local_collaborators(
+    tmp_path: Path,
+) -> None:
+    pool = Pool()
+    card_store = load_card_store(tmp_path / "extracts.json")
+    dedup_store = load_dedup(tmp_path / ".seen.json")
+    daily_results_file = DailyResultsFile(tmp_path / "results" / "2026-06-17.md")
+    daily_results_file.ensure_initialized()
+    stub = PositionStub(
+        url="https://example.com/selected",
+        title="Selected role",
+        source="test",
+        company="Acme",
+        location="Hamburg",
+    )
+
+    pool.add_matched(stub, listing_id=22)
+    dedup_store.mark_matched(22, stub)
+    card_store.put(
+        22,
+        CardExtract(
+            header="Header 22\nAcme · Hamburg",
+            summary="Summary 22",
+            body="Raw description 22",
+        ),
+    )
+
+    written = pool.apply_match_verdicts(
+        [MatchVerdict(id=22, rank=1)],
+        card_store=card_store,
+        daily_results_file=daily_results_file,
+        dedup_store=dedup_store,
+    )
+
+    assert written == 1
+    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
+        "# **1:** Header 22\n"
+        "\n"
+        "Acme · Hamburg\n"
+        "https://example.com/selected\n"
+        "\n"
+        "Summary 22\n"
+        "\n"
+        "---\n"
+        "\n"
+        "Raw description 22\n"
+        "\n"
+        "---\n"
+    )
+    on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
+    assert on_disk["22"]["status"] == "selected_by_judge"
+    assert card_store.get(22) is None
 
 
 def test_pool_applies_match_verdicts_in_rank_order(tmp_path: Path) -> None:

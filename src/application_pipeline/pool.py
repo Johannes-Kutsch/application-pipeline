@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from application_pipeline.extracts.card_store import CardStore
 from application_pipeline.llm import JudgeCandidate, MatchVerdict
@@ -56,6 +56,8 @@ class Pool:
         daily_results_file: "DailyResultsFileWriter",
         dedup_store: "SelectedByJudgeRecorder",
     ) -> int:
+        if isinstance(dedup_store, CardStoreAttachable):
+            dedup_store.attach_card_store(card_store)
         written = 0
         for verdict in sorted(verdicts, key=lambda item: item.rank):
             card = card_store.get(verdict.id)
@@ -89,6 +91,11 @@ class SelectedByJudgeRecorder(Protocol):
     def mark_selected_by_judge(
         self, key_or_listing_id: int, stub: PositionStub | None = None
     ) -> None: ...
+
+
+@runtime_checkable
+class CardStoreAttachable(Protocol):
+    def attach_card_store(self, card_store: CardStore) -> None: ...
 
 
 class DailyResultsFileWriter(Protocol):

@@ -792,6 +792,20 @@ def test_fresh_init_seeds_inline_tool_skills_without_agent_skills_tree(
             assert dest.read_bytes() == template_bytes(f"skills/{rel}")
 
 
+def test_first_bootstrap_preserves_preexisting_application_pipeline_agent_skills(
+    tmp_path: Path,
+) -> None:
+    legacy_skill = _ap(tmp_path) / "agent-skills" / "analyse-listing.md"
+    legacy_skill.parent.mkdir(parents=True, exist_ok=True)
+    legacy_skill.write_text("# operator-owned legacy body\n")
+
+    init(tmp_path)
+
+    assert legacy_skill.read_text() == "# operator-owned legacy body\n"
+    assert (_claude(tmp_path) / "skills" / "analyse-listing" / "SKILL.md").exists()
+    assert (_codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md").exists()
+
+
 def test_seeded_inline_tool_skills_link_to_tool_local_shared_support(
     tmp_path: Path,
 ) -> None:
@@ -853,6 +867,30 @@ def test_refresh_overwrites_inline_tool_skill_bodies_in_both_roots(
     )
 
 
+def test_first_bootstrap_seeds_missing_tool_skill_files_and_preserves_unknown_neighbors(
+    tmp_path: Path,
+) -> None:
+    for root in (_claude(tmp_path), _codex(tmp_path)):
+        skill_dir = root / "skills" / "write-cv"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "notes.md").write_text("# operator note\n")
+
+    init(tmp_path)
+
+    assert (_claude(tmp_path) / "skills" / "write-cv" / "SKILL.md").read_bytes() == (
+        _claude_template_bytes("skills/write-cv/SKILL.md")
+    )
+    assert (_codex(tmp_path) / "skills" / "write-cv" / "SKILL.md").read_bytes() == (
+        _codex_template_bytes("skills/write-cv/SKILL.md")
+    )
+    assert (
+        _claude(tmp_path) / "skills" / "write-cv" / "notes.md"
+    ).read_text() == "# operator note\n"
+    assert (
+        _codex(tmp_path) / "skills" / "write-cv" / "notes.md"
+    ).read_text() == "# operator note\n"
+
+
 def test_refresh_overwrites_tool_local_shared_support_files_in_both_roots(
     tmp_path: Path,
 ) -> None:
@@ -870,6 +908,30 @@ def test_refresh_overwrites_tool_local_shared_support_files_in_both_roots(
     assert codex_support.read_bytes() == _codex_template_bytes(
         "skills/_shared/CONVENTIONS.md"
     )
+
+
+def test_first_bootstrap_seeds_missing_tool_shared_files_and_preserves_unknown_neighbors(
+    tmp_path: Path,
+) -> None:
+    for root in (_claude(tmp_path), _codex(tmp_path)):
+        shared_dir = root / "skills" / "_shared"
+        shared_dir.mkdir(parents=True, exist_ok=True)
+        (shared_dir / "STARTUP-TRIAGE.md").write_text("# operator-local support\n")
+
+    init(tmp_path)
+
+    assert (
+        _claude(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md"
+    ).read_bytes() == (_claude_template_bytes("skills/_shared/CONVENTIONS.md"))
+    assert (
+        _codex(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md"
+    ).read_bytes() == (_codex_template_bytes("skills/_shared/CONVENTIONS.md"))
+    assert (
+        _claude(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md"
+    ).read_text() == "# operator-local support\n"
+    assert (
+        _codex(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md"
+    ).read_text() == "# operator-local support\n"
 
 
 def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:

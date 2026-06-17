@@ -3191,7 +3191,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         extractor=_TrackingExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _TwoLangParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
+        dedup_store=dedup_module.load(seen_path, card_store=card_store),
         run_log=run_log,
     )
 
@@ -3318,7 +3318,7 @@ def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
         extractor=_stub_extractor(),
         card_store=card_store,
         parser_registry=lambda _: _ThreeStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
+        dedup_store=dedup_module.load(seen_path, card_store=card_store),
         run_log=run_log,
     )
 
@@ -6117,7 +6117,7 @@ def test_post_llm_stale_outcome_is_dropped_and_fresh_batch_peer_reaches_judge(
         extractor=_TrackingExtractor(),
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
+        dedup_store=dedup_module.load(seen_path, card_store=card_store),
         run_log=run_log,
     )
 
@@ -6665,8 +6665,8 @@ def test_matched_llm_enricher_outcome_reaches_judge_and_daily_results_file(
             return [MatchVerdict(id=candidates[0].id, rank=1)], _ZERO_USAGE
 
     extractor = _Extractor()
-    dedup_store = dedup_module.load(seen_path)
     card_store = load_card_store(extracts_path)
+    dedup_store = dedup_module.load(seen_path, card_store=card_store)
 
     run_summary = run(
         _write_config(

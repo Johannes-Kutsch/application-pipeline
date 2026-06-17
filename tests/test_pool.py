@@ -143,7 +143,7 @@ def test_pool_applies_match_verdicts_through_real_local_collaborators(
 ) -> None:
     pool = Pool()
     card_store = load_card_store(tmp_path / "extracts.json")
-    dedup_store = load_dedup(tmp_path / ".seen.json")
+    dedup_store = load_dedup(tmp_path / ".seen.json", card_store=card_store)
     daily_results_file = DailyResultsFile(tmp_path / "results" / "2026-06-17.md")
     daily_results_file.ensure_initialized()
     stub = PositionStub(

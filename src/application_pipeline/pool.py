@@ -64,9 +64,6 @@ class Pool:
             )
         return candidates
 
-    def build_candidates(self, card_store: CardStore) -> list[JudgeCandidate]:
-        return self.judge_candidates(card_store)
-
     def apply_match_verdicts(
         self,
         verdicts: list[MatchVerdict],

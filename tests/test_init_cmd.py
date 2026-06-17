@@ -1164,6 +1164,21 @@ def test_refresh_preserves_application_pipeline_agent_skills_while_removing_reti
     assert "removed .codex/skills/iterate-cv/SKILL.md" in out
 
 
+def test_refresh_preserves_legacy_application_pipeline_agent_skills_shared_docs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    legacy_shared = _ap(tmp_path) / "agent-skills" / "_shared" / "CONVENTIONS.md"
+    legacy_shared.parent.mkdir(parents=True, exist_ok=True)
+    legacy_shared.write_text("# operator-owned legacy shared doc\n")
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert legacy_shared.read_text() == "# operator-owned legacy shared doc\n"
+    assert "agent-skills/_shared/CONVENTIONS.md" not in capsys.readouterr().out
+
+
 def test_refresh_prunes_empty_parent_dir_after_removing_iterate_cv_skill(
     tmp_path: Path,
 ) -> None:
@@ -1323,6 +1338,18 @@ def test_refresh_preserves_unknown_files_inside_package_owned_codex_skill_dirs(
     assert notes.read_text() == "# wip\n"
 
 
+def test_refresh_preserves_operator_notes_at_codex_skills_root(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    notes = _codex(tmp_path) / "skills" / "README.md"
+    notes.write_text("# private notes\n")
+
+    init(tmp_path, refresh=True)
+
+    assert notes.read_text() == "# private notes\n"
+
+
 def test_refresh_preserves_preexisting_codex_adapter_local_shared_dir(
     tmp_path: Path,
 ) -> None:
@@ -1474,6 +1501,18 @@ def test_refresh_preserves_unknown_files_inside_package_owned_skill_dirs(
     init(tmp_path, refresh=True)
 
     assert notes.read_text() == "# wip\n"
+
+
+def test_refresh_preserves_operator_notes_at_claude_skills_root(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    notes = _claude(tmp_path) / "skills" / "README.md"
+    notes.write_text("# private notes\n")
+
+    init(tmp_path, refresh=True)
+
+    assert notes.read_text() == "# private notes\n"
 
 
 def test_refresh_restores_missing_wrapper_and_preserves_neighboring_user_files(

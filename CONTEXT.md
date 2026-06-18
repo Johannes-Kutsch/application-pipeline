@@ -32,6 +32,8 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Structured Extract**: _Retired_ per ADR-0032. Replaced by **Header** + **Summary** + **Raw Description**. `extracts.json` is `{listing_id: {header, summary, body}}`, keyed by **Listing ID** integer. _Avoid_: do not reintroduce.
 
+**Card Store**: In-process module (`application_pipeline.extracts.card_store`) owning `extracts.json` interpretation and persistence. Caller-facing seam is `load_card_store(path)` returning a store with `get`, `put`, `replace_body_if_present`, and `delete` keyed by **Listing ID**. It accepts current records with **Header** + **Summary** + optional **Raw Description** body (missing body defaults empty), rejects legacy URL-keyed data, applies the retired v1 wipe policy at load, validates malformed Card records at load with `ExtractStoreError`, and persists integer **Listing ID** string keys unchanged through the **Atomic Write Helper**. **Orchestrator** requests a Card Store; it does not pre-validate or interpret `extracts.json`. _Avoid_: extract store, card-store adapter, filesystem port.
+
 **Header**: Three-line block authored by the **LLM Enricher** at classify time (ADR-0032) — title, `company · location · work_model`, `posted_date · seniority · salary`. LLM substitutes known values, infers from body, or drops segments. Persisted in `extracts.json`. _Avoid_: card top, headline.
 
 **Summary**: Prose paragraph authored at classify time (ADR-0032), describing the role in the **Triage Profile**'s frame. Persisted alongside **Header**. **Match Judge** ranks on Header + Summary directly. _Avoid_: match verdict summary (retired), description (overloaded).
@@ -149,7 +151,7 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0037; synced via Syncthin
 
 **DailyResultsFile**: Module that owns both rendering and durability for the **Daily Results File** artefact. Card shape is hardcoded inside this module per ADR-0033. Write durability is `write + flush + fsync` per ADR-0015. Public interface: `ensure_initialized()` (mkdir parent dir) and `commit(*, rank, header, summary, url, body)` (render Card then append to file). `OSError` is wrapped as `ResultsFileError` at the public interface edge. Path bound at construction. _Avoid_: renderer, formatter, results file manager, writer, output manager.
 
-**Atomic Write Helper**: `write_atomic(path, payload: bytes)` — crash-safe atomic overwrite via `.tmp` sibling + `os.write` → `os.fsync` → `os.replace`. Used by **Deduplication Store** and **Extract Store**. _Avoid_: persistence helper, file writer (overloaded with **DailyResultsFile**'s append).
+**Atomic Write Helper**: `write_atomic(path, payload: bytes)` — crash-safe atomic overwrite via `.tmp` sibling + `os.write` → `os.fsync` → `os.replace`. Used by **Deduplication Store** and **Card Store**. _Avoid_: persistence helper, file writer (overloaded with **DailyResultsFile**'s append).
 
 ### Observability
 

@@ -147,6 +147,7 @@ def test_run_materialises_logs_in_settings_dir_runtime_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings_dir = _prepare_run_settings_dir(tmp_path, monkeypatch)
+    _stub_successful_run(monkeypatch)
 
     _run_main(["run"])
 
@@ -157,6 +158,7 @@ def test_run_materialises_logs_in_settings_dir_not_cwd_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings_dir = _prepare_run_settings_dir(tmp_path, monkeypatch)
+    _stub_successful_run(monkeypatch)
 
     _run_main(["run"])
 
@@ -172,6 +174,7 @@ def test_run_prints_completion_summary_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _prepare_run_settings_dir(tmp_path, monkeypatch)
+    _stub_successful_run(monkeypatch)
 
     _run_main(["run"])
 
@@ -231,10 +234,6 @@ def _prepare_run_settings_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     settings_dir = tmp_path / "application-pipeline"
     _make_config(settings_dir)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "application_pipeline.orchestrator.run",
-        lambda *_a, **_kw: _fake_run_summary(),
-    )
     return settings_dir
 
 
@@ -258,6 +257,13 @@ def _fake_run_summary() -> object:
         duration_seconds: float = 0.0
 
     return Summary()
+
+
+def _stub_successful_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: _fake_run_summary(),
+    )
 
 
 def test_cron_without_config_exits_2(
@@ -288,58 +294,40 @@ def test_cron_unknown_flag_exits_nonzero_with_cron_in_usage(
     assert "cron" in stderr
 
 
-def test_cron_success_runs_init_refresh_then_run(
+def test_cron_success_refreshes_workspace_and_prints_summary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     home = tmp_path / "application-pipeline"
     _make_config(home)
+    (home / "layout.py").write_text("# old layout\n")
     monkeypatch.chdir(tmp_path)
-
-    calls: list[str] = []
-
-    def fake_init(cwd: Path, *, refresh: bool) -> None:
-        calls.append(f"init refresh={refresh}")
-
-    def fake_run(
-        config_path: Path, *, status_display: object, run_log: object, no_judge: bool
-    ) -> object:
-        calls.append(f"run no_judge={no_judge}")
-        return _fake_run_summary()
-
-    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
-    monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
+    _stub_successful_run(monkeypatch)
 
     _run_main(["cron"])
 
-    assert calls == ["init refresh=True", "run no_judge=False"]
+    assert not (home / "layout.py").exists()
+    assert (home / ".runtime-data" / "logs").is_dir()
+    out = capsys.readouterr().out
+    assert "removed layout.py" in out
+    assert "run complete:" in out
 
 
-def test_cron_no_judge_passes_through(
+def test_cron_no_judge_accepts_flag_and_runs_successfully(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     home = tmp_path / "application-pipeline"
     _make_config(home)
     monkeypatch.chdir(tmp_path)
-
-    received: dict[str, bool] = {}
-
-    def fake_init(cwd: Path, *, refresh: bool) -> None:
-        pass
-
-    def fake_run(
-        config_path: Path, *, status_display: object, run_log: object, no_judge: bool
-    ) -> object:
-        received["no_judge"] = no_judge
-        return _fake_run_summary()
-
-    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
-    monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
+    _stub_successful_run(monkeypatch)
 
     _run_main(["cron", "--no-judge"])
 
-    assert received["no_judge"] is True
+    assert (home / ".runtime-data" / "logs").is_dir()
+    assert "run complete:" in capsys.readouterr().out
 
 
 def test_cron_init_failure_writes_failure_report(

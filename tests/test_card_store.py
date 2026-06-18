@@ -87,6 +87,18 @@ def test_load_rejects_non_object_json(store_path: Path) -> None:
         load_card_store(store_path)
 
 
+def test_load_rejects_record_outside_documented_card_store_shapes(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps({"5": {"header": "H", "body": "B"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ExtractStoreError, match="invalid card record"):
+        load_card_store(store_path)
+
+
 def test_url_keyed_extracts_raises_on_load(store_path: Path) -> None:
     store_path.write_text(
         json.dumps({"https://example.com/job": {"header": "H", "summary": "S"}}),

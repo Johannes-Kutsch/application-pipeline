@@ -1,4 +1,9 @@
-"""Card Extract Store — v3 schema: {stable_id: {header, summary, body}}."""
+"""Card Extract Store.
+
+Accepted persisted record shapes:
+- {stable_id: {header, summary, body}}
+- {stable_id: {header, summary}} with body defaulting to ""
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,7 @@ import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from application_pipeline.atomic_write import write_atomic
 
@@ -18,6 +23,12 @@ class CardExtract:
     header: str
     summary: str
     body: str = ""
+
+
+class _PersistedCardRecord(TypedDict):
+    header: str
+    summary: str
+    body: NotRequired[str]
 
 
 class CardStore:
@@ -112,12 +123,51 @@ def _decode_card_store_records(
         ) from exc
 
     return {
-        key: CardExtract(
-            header=record["header"],
-            summary=record["summary"],
-            body=record.get("body", ""),
+        key: _decode_card_record(record, path, key) for key, record in parsed.items()
+    }
+
+
+def _decode_card_record(record: Any, path: Path, key: int) -> CardExtract:
+    persisted_record = _validate_persisted_card_record(record, path, key)
+    body = persisted_record["body"] if "body" in persisted_record else ""
+    return CardExtract(
+        header=persisted_record["header"],
+        summary=persisted_record["summary"],
+        body=body,
+    )
+
+
+def _validate_persisted_card_record(
+    record: Any, path: Path, key: int
+) -> _PersistedCardRecord:
+    if not isinstance(record, dict):
+        raise ExtractStoreError(
+            f"card store at {path} has invalid card record for key {key}: "
+            "expected object with header, summary, and optional body"
         )
-        for key, record in parsed.items()
+
+    header = record.get("header")
+    summary = record.get("summary")
+    body = record.get("body", "")
+    if (
+        not isinstance(header, str)
+        or not isinstance(summary, str)
+        or not isinstance(body, str)
+    ):
+        raise ExtractStoreError(
+            f"card store at {path} has invalid card record for key {key}: "
+            "expected object with header, summary, and optional body"
+        )
+
+    if "body" in record:
+        return {
+            "header": header,
+            "summary": summary,
+            "body": body,
+        }
+    return {
+        "header": header,
+        "summary": summary,
     }
 
 

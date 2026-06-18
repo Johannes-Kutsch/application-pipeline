@@ -109,18 +109,22 @@ def test_load_prompts_classify_contains_gate_criteria_not_candidate_profile(
     assert "I am a developer" not in rendered
 
 
-def test_load_prompts_classify_is_single_gate_check_no_skill_floor(
+def test_load_prompts_keep_only_runtime_slots_after_profile_injection(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(
-        LISTINGS="## Stellenanzeige id=1\n\n- Jobtitel: x\n\ny"
-    )
+    classify_rendered = prompts.classify_relevance.render(LISTINGS="listing")
+    judge_rendered = prompts.judge_top_n.render(CANDIDATES="candidate")
 
-    assert "Skill" not in rendered
-    assert "Erfahrungs" not in rendered
+    assert prompts.classify_relevance.expected_slots == CLASSIFY_RELEVANCE_SLOTS
+    assert prompts.judge_top_n.expected_slots == JUDGE_TOP_N_SLOTS
+    assert "listing" in classify_rendered
+    assert "candidate" in judge_rendered
+    assert "{GATE_CRITERIA}" not in classify_rendered
+    assert "{CANDIDATE_PROFILE}" not in judge_rendered
+    assert "{SKILLS}" not in judge_rendered
 
 
 def test_load_prompts_judge_contains_candidate_profile_and_skills_not_gate_criteria(
@@ -148,17 +152,49 @@ def test_load_prompts_judge_keeps_skills_routing_outside_classifier(
     assert "Judge-only skill" in judge_rendered
 
 
-def test_load_prompts_classify_contains_verdict_id_tag_instruction(
+def test_load_prompts_shipped_templates_render_runtime_payload_verbatim(
     tmp_path: pathlib.Path,
 ) -> None:
     config = make_config_with_user_info(tmp_path)
+    listing = "## Stellenanzeige id=1\n\n- Jobtitel: x\n\ny"
+    candidates = "## Kandidat id=7\n\nHeader\n\nSummary"
 
     prompts = load_prompts(config)
-    rendered = prompts.classify_relevance.render(
-        LISTINGS="## Stellenanzeige id=1\n\n- Jobtitel: x\n\ny"
+    classify_rendered = prompts.classify_relevance.render(LISTINGS=listing)
+    judge_rendered = prompts.judge_top_n.render(CANDIDATES=candidates)
+
+    assert listing in classify_rendered
+    assert candidates in judge_rendered
+
+
+def test_load_prompts_accepts_prompt_wording_edits_that_preserve_slot_contracts(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    prompt_pkg = tmp_path / "prompt-pkg"
+    prompt_pkg.mkdir()
+    (prompt_pkg / "classify_relevance.md").write_text(
+        "Pruefe nur Domain-Fit.\n\n{GATE_CRITERIA}\n\n{LISTINGS}\n"
+    )
+    (prompt_pkg / "judge_top_n.md").write_text(
+        "Rangfolge nach Profil und Skills.\n\n"
+        "{CANDIDATE_PROFILE}\n\n{SKILLS}\n\n{CANDIDATES}\n"
     )
 
-    assert '<verdict id="N">' in rendered
+    monkeypatch.setattr(importlib.resources, "files", lambda _: prompt_pkg)
+
+    prompts = load_prompts(config)
+    classify_rendered = prompts.classify_relevance.render(LISTINGS="listing")
+    judge_rendered = prompts.judge_top_n.render(CANDIDATES="candidate")
+
+    assert "Pruefe nur Domain-Fit." in classify_rendered
+    assert "Rangfolge nach Profil und Skills." in judge_rendered
+    assert "Hamburg, remote" in classify_rendered
+    assert "I am a developer" in judge_rendered
+    assert "Judge-only skill" in judge_rendered
+    assert "listing" in classify_rendered
+    assert "candidate" in judge_rendered
 
 
 @pytest.mark.parametrize(

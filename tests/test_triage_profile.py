@@ -3,6 +3,7 @@ import re
 
 import pytest
 
+from application_pipeline.init_cmd import init
 from application_pipeline import PromptError
 from application_pipeline import triage_profile
 
@@ -81,6 +82,20 @@ def test_triage_profile_load_skills_slot_keeps_tolerant_malformed_attribute_hand
     assert triage_profile.load_skills_slot(triage_profile_dir) == (
         "- Pandas {always\n- NumPy\n- Go"
     )
+
+
+def test_init_seeds_triage_profile_template_that_loads_prompt_slots_successfully(
+    tmp_path: pathlib.Path,
+) -> None:
+    init(tmp_path)
+
+    prompt_slots = triage_profile.load_prompt_slots(
+        tmp_path / "application-pipeline" / "user-info" / "triage-profile"
+    )
+
+    assert prompt_slots.candidate_profile
+    assert prompt_slots.gate_criteria
+    assert isinstance(prompt_slots.skills, str)
 
 
 def test_triage_profile_load_prompt_slots_raises_for_legacy_domain_fit_file(

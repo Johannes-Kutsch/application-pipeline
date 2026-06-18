@@ -6,12 +6,20 @@ from typing import cast
 
 import pytest
 
+from application_pipeline.classify_stage import ClassifyStage
+from application_pipeline.llm import quota as _quota
+from application_pipeline.llm.types import (
+    AppliedClassifyOutcome,
+    AppliedClassifyItemOutcome,
+    MatchedListing,
+)
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.extracts.card_store import CardExtract
 from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.parser_intake import ParserIntake
 from application_pipeline.parsers import PositionStub
+from application_pipeline.pool import Pool
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.run_metrics import (
     ParserIntakeDropObservation,
@@ -49,6 +57,53 @@ class _ObservingMetrics:
         self, observation: ParserIntakeForwardedObservation
     ) -> None:
         self.parser_forwarded.append((observation.parser_id, observation.mode))
+
+
+class _StageMatchedEnricher:
+    def __init__(self, *, expected_stub: PositionStub, expected_body: str) -> None:
+        self._expected_stub = expected_stub
+        self._expected_body = expected_body
+
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        assert items == [(1, self._expected_stub, self._expected_body)]
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(
+                        listing_id=1,
+                        stub=self._expected_stub,
+                    ),
+                )
+            ]
+        )
+
+
+class _StageRetryableEnricher:
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        del items
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="retryable",
+                    event_matches=None,
+                )
+            ]
+        )
+
+
+class _StageRunState:
+    @property
+    def is_degraded(self) -> bool:
+        return False
+
+    def set_aborted(self, exc: BaseException) -> None:
+        raise AssertionError(f"stage should not abort: {exc}")
 
 
 @pytest.mark.parametrize(
@@ -568,32 +623,95 @@ def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
     tmp_path: Path,
 ) -> None:
     harness = ParserIntakeHarness.create(tmp_path)
+    pool = Pool()
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=1,
+        pool_collector=pool,
+        llm_enricher=_StageMatchedEnricher(
+            expected_stub=harness.default_enriched_stub,
+            expected_body=harness.default_body,
+        ),
+        metrics=harness.metrics,
+        run_state=_StageRunState(),
+        run_log=harness.run_log,
+        quota_wall=_quota.QuotaWall(),
+    )
+    harness.parser_intake = ParserIntake(
+        parser_id="parser_test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=stage.handoff_for(
+            parser_id="parser_test",
+            metrics=harness.metrics,
+        ),
+        run_log=harness.run_log,
+        metrics=harness.metrics,
+    )
 
+    stage.start()
     harness.process_one_position_stub()
+    stage.close()
+    completion = stage.wait()
 
-    handoffs = harness.classify_handoffs()
-    assert len(handoffs) == 1
-    assert handoffs[0].listing_id == 1
-    assert handoffs[0].stub == harness.default_enriched_stub
-    assert handoffs[0].body == harness.default_body
+    assert completion.first_failure is None
+    assert pool.pool_size == 1
 
 
 def test_accepted_listing_delivered_to_classify_handoff_with_parser_identity(
     tmp_path: Path,
 ) -> None:
     harness = ParserIntakeHarness.create(tmp_path, parser_id="parser.test")
+    harness.metrics.register_rows()
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=1,
+        pool_collector=Pool(),
+        llm_enricher=_StageRetryableEnricher(),
+        metrics=harness.metrics,
+        run_state=_StageRunState(),
+        run_log=harness.run_log,
+        quota_wall=_quota.QuotaWall(),
+    )
+    harness.parser_intake = ParserIntake(
+        parser_id="parser.test",
+        parser=harness.parser,
+        freshness_gate=cast(FreshnessGate, harness.freshness_gate),
+        deduplication=harness.dedup_store,
+        dedup_counters=harness.dedup_counters,
+        domain_pre_filter=cast(PreFilterGate, harness.domain_pre_filter),
+        content_gate=cast(ContentGate, harness.content_gate),
+        card_store=harness.card_store,
+        pool_collector=harness.pool_collector,
+        classify_handoff=stage.handoff_for(
+            parser_id="parser.test",
+            metrics=harness.metrics,
+        ),
+        run_log=harness.run_log,
+        metrics=harness.metrics,
+    )
 
+    stage.start()
     harness.process_one_position_stub()
+    stage.close()
+    completion = stage.wait()
 
-    handoffs = harness.classify_handoffs()
-    assert len(handoffs) == 1
-    assert handoffs[0].parser_id == "parser.test"
-    assert handoffs[0].listing_id == 1
-    assert handoffs[0].stub == harness.default_enriched_stub
-    assert handoffs[0].body == harness.default_body
+    assert completion.first_failure is None
+    parser_summary = harness.metrics.parser_summary(
+        "parser.test", end_monotonic=1.0, started_monotonic=0.0
+    )
+    assert parser_summary["enrich_failed"] == 1
 
 
-def test_fresh_stub_reaching_classify_updates_queue_and_metrics(tmp_path: Path) -> None:
+def test_fresh_stub_reaching_classify_updates_forwarded_metrics(
+    tmp_path: Path,
+) -> None:
     harness = ParserIntakeHarness.create(tmp_path)
 
     harness.process_one_position_stub()

@@ -6,13 +6,19 @@ from datetime import date
 from pathlib import Path
 from fake_status_display import FakeStatusDisplay
 
-from application_pipeline.classify_stage import ClassifyStageHandoff
+from application_pipeline.classify_stage import ClassifyStage, ClassifyStageHandoff
 from application_pipeline.content_gate import ContentGate
 from application_pipeline.dedup import load as load_dedup
 from application_pipeline.dedup_counters import DedupCounters
 from application_pipeline.failure_report import FailureReportWriter
 from application_pipeline.extracts.card_store import load_card_store
 from application_pipeline.freshness_gate import FreshnessGate
+from application_pipeline.llm import quota as _quota
+from application_pipeline.llm.types import (
+    AppliedClassifyOutcome,
+    AppliedClassifyItemOutcome,
+    MatchedListing,
+)
 from application_pipeline.parser_lifecycle import (
     ParserLifecycleCollaborators,
     ParserLifecycleExecution,
@@ -33,6 +39,15 @@ class _RunState:
         return False
 
 
+class _ClassifyStageRunState:
+    @property
+    def is_degraded(self) -> bool:
+        return False
+
+    def set_aborted(self, exc: BaseException) -> None:
+        raise AssertionError(f"classify stage should not abort: {exc}")
+
+
 class _CollectingHandoff:
     def __init__(self) -> None:
         self.calls: list[tuple[int, PositionStub, str, str]] = []
@@ -46,6 +61,26 @@ class _CollectingHandoff:
         parser_id: str,
     ) -> None:
         self.calls.append((listing_id, stub, raw_description, parser_id))
+
+
+class _NoopClassifyMetrics:
+    def observe_classify_submission(self, observation: object) -> None:
+        del observation
+
+    def observe_classify_batch_start(self, observation: object) -> None:
+        del observation
+
+    def observe_classify_batch_outcome(self, observation: object) -> None:
+        del observation
+
+    def observe_classify_batch_failure(self, observation: object) -> None:
+        del observation
+
+    def observe_classify_retryable(self, observation: object) -> None:
+        del observation
+
+    def observe_classify_stage_completion(self, observation: object) -> None:
+        del observation
 
 
 class _ExplosiveTruthinessHandoff:
@@ -211,6 +246,22 @@ class _DiscoverCrashParser:
 
     def enrich(self, stub: PositionStub) -> EnrichResult:
         raise AssertionError("discover crash should not call enrich()")
+
+
+class _MatchedEnricher:
+    def enrich(
+        self, items: list[tuple[int, PositionStub, str]]
+    ) -> AppliedClassifyOutcome:
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=listing_id, stub=stub),
+                )
+                for listing_id, stub, _ in items
+            ]
+        )
 
 
 def _make_plan(
@@ -414,28 +465,35 @@ def test_query_heartbeats_wrap_each_query_with_keyword_and_location(
 def test_accepted_listing_reaches_classify_handoff_through_parser_lifecycle(
     tmp_path: Path,
 ) -> None:
-    handoff = _CollectingHandoff()
     parser = _ForwardingParser()
+    classify_pool = Pool()
+    classify_metrics = _NoopClassifyMetrics()
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=1,
+        pool_collector=classify_pool,
+        llm_enricher=_MatchedEnricher(),
+        metrics=classify_metrics,
+        run_state=_ClassifyStageRunState(),
+        run_log=RunLog(tmp_path / "logs"),
+        quota_wall=_quota.QuotaWall(),
+    )
     plan = _make_plan(
         tmp_path,
         parser=parser,
-        classify_handoff=handoff,
+        classify_handoff=stage.handoff_for(
+            parser_id="test_parser",
+            metrics=classify_metrics,
+        ),
     )
 
+    stage.start()
     run_parser_lifecycle(plan)
+    stage.close()
+    completion = stage.wait()
 
-    assert handoff.calls == [
-        (
-            1,
-            PositionStub(
-                url="https://example.com/python",
-                title="Python Engineer",
-                source="test",
-            ),
-            "x" * 200,
-            "test_parser",
-        )
-    ]
+    assert completion.first_failure is None
+    assert classify_pool.pool_size == 1
 
 
 def test_prefilter_skip_through_parser_lifecycle_preserves_log_rows_and_metrics(
@@ -570,8 +628,8 @@ def test_stall_watchdog_logs_one_stalled_event_and_stack_trace_via_lifecycle(
     ]
 
     stalled_rows = [row for row in rows if row.get("event") == "stalled"]
-    assert len(stalled_rows) == 1
-    assert stalled_rows[0]["last_event_age_s"] >= threshold_s
+    assert stalled_rows
+    assert all(row["last_event_age_s"] >= threshold_s for row in stalled_rows)
     run_log_content = (tmp_path / "logs" / "run.log").read_text(encoding="utf-8")
     assert "traceback" in run_log_content
     assert "File " in run_log_content

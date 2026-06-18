@@ -163,6 +163,22 @@ def test_loaded_legacy_record_without_body_still_allows_body_replacement(
     )
 
 
+def test_replace_body_if_present_persists_updated_card_shape(store_path: Path) -> None:
+    store = load_card_store(store_path)
+    store.put(7, CardExtract(header="Persisted header", summary="Persisted summary"))
+
+    assert store.replace_body_if_present(7, "Fresh raw description") is True
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk == {
+        "7": {
+            "header": "Persisted header",
+            "summary": "Persisted summary",
+            "body": "Fresh raw description",
+        }
+    }
+
+
 def test_replace_body_if_present_keeps_header_and_summary_and_noops_for_empty_or_missing_input(
     store: CardStore,
 ) -> None:
@@ -205,3 +221,20 @@ def test_concurrent_writers_do_not_corrupt_file(store_path: Path) -> None:
     assert set(on_disk) == {str(i) for i in range(8)}
     for i in range(8):
         assert store.get(i) == CardExtract(header=f"H{i}", summary=f"S{i}")
+
+
+def test_delete_persists_remaining_integer_keyed_cards(store_path: Path) -> None:
+    store = load_card_store(store_path)
+    store.put(9, CardExtract(header="Header 9", summary="Summary 9", body="Body 9"))
+    store.put(11, CardExtract(header="Header 11", summary="Summary 11"))
+
+    store.delete(9)
+
+    on_disk = json.loads(store_path.read_text(encoding="utf-8"))
+    assert on_disk == {
+        "11": {
+            "header": "Header 11",
+            "summary": "Summary 11",
+            "body": "",
+        }
+    }

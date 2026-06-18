@@ -181,18 +181,20 @@ def run(
 
         # Step 7: Dedup store + Card Store
         extracts_path = cfg.seen_store_path.parent / "extracts.json"
+        if card_store is None:
+            card_store = load_card_store(extracts_path)
         if dedup_store is None:
             try:
                 dedup_store = dedup_module.load(
                     cfg.seen_store_path,
+                    card_store=card_store,
                     cooldown_days=cfg.dedup_cooldown_days,
                     run_log=run_log,
                 )
             except DedupStoreError as exc:
                 _log.error("startup failed — dedup store: %s", exc)
                 raise
-        if card_store is None:
-            card_store = load_card_store(extracts_path)
+        else:
             dedup_store.attach_card_store(card_store)
 
         # Step 8: Build shared quota wall; default LLMEnricher is constructed later

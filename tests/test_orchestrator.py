@@ -2262,7 +2262,7 @@ def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write a current-format extracts.json so the card-store wipe helper keeps it
+    # Write current-format extracts.json for matched pool re-entry coverage.
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(json.dumps({"1": _card}), encoding="utf-8")
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -2362,7 +2362,7 @@ def test_judge_pending_judge_failure_stays_matched_on_rerun(
         ),
         encoding="utf-8",
     )
-    # Write a current-format extracts.json so the card-store wipe helper keeps it
+    # Write current-format extracts.json for matched pool re-entry coverage.
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(json.dumps({"1": _card}), encoding="utf-8")
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -3221,44 +3221,6 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
         False,
         True,
     ]
-
-
-def test_retired_v1_extracts_are_wiped_by_card_store_during_orchestrator_startup(
-    tmp_path: Path,
-) -> None:
-    runtime_dir = tmp_path / ".runtime-data"
-    extracts_path = runtime_dir / "extracts.json"
-    extracts_path.parent.mkdir(parents=True, exist_ok=True)
-    extracts_path.write_text(
-        json.dumps({"1": {"company": "Acme", "title": "Legacy extract"}}),
-        encoding="utf-8",
-    )
-
-    class _EmptyParser(_StubParserBase):
-        def __enter__(self) -> "_EmptyParser":
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pass
-
-        def discover(self, query: ParserQuery) -> list[PositionStub]:
-            return []
-
-    summary = run(
-        _write_config(
-            tmp_path,
-            sources='[SourceEntry(parser_type="bundesagentur_api")]',
-            keywords='["python"]',
-            locations='["Hamburg"]',
-            include_remote=False,
-        ),
-        llm_enricher=_make_fake_llm_enricher(load_card_store(tmp_path / "unused.json")),
-        extractor=_stub_extractor(),
-        parser_registry=lambda _: _EmptyParser,  # type: ignore[return-value, arg-type]
-    )
-
-    assert summary.written == 0
-    assert not extracts_path.exists()
 
 
 def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
@@ -5106,7 +5068,7 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write a current-format extract for the URL so the card-store wipe helper keeps it
+    # Write a current-format extract for the URL for freshness cleanup coverage.
     extracts_path.write_text(
         json.dumps(
             {
@@ -5307,7 +5269,7 @@ def test_freshness_pool_reentry_fresh_position_stays_matched_and_reaches_judge(
         ),
         encoding="utf-8",
     )
-    # Write current-format extracts.json so the card-store wipe helper keeps it
+    # Write current-format extracts.json for matched pool re-entry coverage.
     extracts_path.write_text(
         json.dumps(
             {

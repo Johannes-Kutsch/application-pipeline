@@ -56,6 +56,7 @@ from application_pipeline.parsers.types import (
 from application_pipeline.prompts import PromptError
 from application_pipeline.daily_results_file import DailyResultsFile, ResultsFileError
 from application_pipeline.parser_log import RunLog
+from application_pipeline.status_display import PlainStatusDisplay
 
 
 class _StubParserBase:
@@ -258,6 +259,17 @@ def _read_all_results(results_dir: Path) -> str:
         for f in sorted(results_dir.glob("????-??-??.md")):
             parts.append(f.read_text(encoding="utf-8"))
     return "\n".join(parts)
+
+
+def _read_lifecycle_rows(logs_dir: Path) -> list[dict[str, object]]:
+    lifecycle_path = logs_dir / "lifecycle.jsonl"
+    if not lifecycle_path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in lifecycle_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _wire_run_scope(dedup: MagicMock) -> None:
@@ -3618,21 +3630,23 @@ def test_main_run_complete_line_includes_new_fields(
 
 def test_display_pipeline_row_registered_on_run(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path)
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    assert "pipeline" in display.registered_names()
-    register_call = next(
-        c for c in display.calls if c.method == "register" and c.name == "pipeline"
+    register_row = next(
+        row
+        for row in _read_lifecycle_rows(tmp_path / "logs")
+        if row.get("event") == "registered" and row.get("component") == "pipeline"
     )
-    assert register_call.kwargs["order"] == 0
+    assert register_row["order"] == 0
 
 
 def test_display_body_updated_with_discovered_during_run(tmp_path: Path) -> None:
@@ -3643,21 +3657,17 @@ def test_display_body_updated_with_discovered_during_run(tmp_path: Path) -> None
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
 
-    run(
+    summary = run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
     )
 
-    bodies = display.body_updates_for("pipeline")
-    assert len(bodies) > 0
-    assert any("discovered=" in b for b in bodies)
-    assert any("written=" in b for b in bodies)
-    assert any("errors=" in b for b in bodies)
+    assert summary.discovered == 3
+    assert summary.written == 0
+    assert summary.errored == 0
 
 
 def test_display_stop_called_on_success(tmp_path: Path) -> None:
@@ -3677,12 +3687,8 @@ def test_display_stop_called_on_success(tmp_path: Path) -> None:
 
 def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
     """pipeline register() writes a lifecycle record to lifecycle.jsonl via parser_log."""
-    from application_pipeline.parser_log import RunLog
-
     run_log = RunLog(tmp_path / "logs")
     config_path = _write_config(tmp_path)
-
-    from application_pipeline.status_display import PlainStatusDisplay
 
     run(
         config_path,
@@ -3714,7 +3720,7 @@ def test_display_parser_log_records_pipeline_register(tmp_path: Path) -> None:
 
 def test_startup_row_ordering(tmp_path: Path) -> None:
     """register("startup") precedes any parser-row registration;
-    remove("startup") precedes the first PositionStub-triggered pipeline body update."""
+    remove("startup") precedes classify-stage registration in the lifecycle log."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3722,33 +3728,51 @@ def test_startup_row_ordering(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    indexed = [(i, c.method, c.name) for i, c in enumerate(display.calls)]
+    indexed = [
+        (i, row["event"], row["component"])
+        for i, row in enumerate(_read_lifecycle_rows(tmp_path / "logs"))
+    ]
 
     pipeline_register_idx = next(
-        i for i, m, n in indexed if m == "register" and n == "pipeline"
+        i
+        for i, event, component in indexed
+        if event == "registered" and component == "pipeline"
     )
     startup_register_idx = next(
-        i for i, m, n in indexed if m == "register" and n == "startup"
+        i
+        for i, event, component in indexed
+        if event == "registered" and component == "startup"
     )
     remove_startup_idx = next(
-        i for i, m, n in indexed if m == "remove" and n == "startup"
+        i
+        for i, event, component in indexed
+        if event == "removed" and component == "startup"
     )
-    first_pipeline_body_idx = next(
-        i for i, m, n in indexed if m == "update_body" and n == "pipeline"
+    parser_register_idx = next(
+        i
+        for i, event, component in indexed
+        if event == "registered" and component == "parser bundesagentur api"
+    )
+    classify_register_idx = next(
+        i
+        for i, event, component in indexed
+        if event == "registered" and component == "llm classify relevance"
     )
 
     assert startup_register_idx > pipeline_register_idx
-    assert remove_startup_idx < first_pipeline_body_idx
+    assert parser_register_idx > startup_register_idx
+    assert remove_startup_idx < classify_register_idx
 
 
 # ---------------------------------------------------------------------------
@@ -3765,23 +3789,25 @@ def test_parser_row_registered_per_parser(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    assert "parser bundesagentur api" in display.registered_names()
     reg = next(
-        c
-        for c in display.calls
-        if c.method == "register" and c.name == "parser bundesagentur api"
+        row
+        for row in _read_lifecycle_rows(tmp_path / "logs")
+        if row.get("event") == "registered"
+        and row.get("component") == "parser bundesagentur api"
     )
-    assert reg.kwargs["order"] >= 2
+    assert isinstance(reg["order"], int)
+    assert reg["order"] >= 2
 
 
 def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
@@ -3793,22 +3819,30 @@ def test_parser_row_registered_after_startup(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    indexed = [(i, c.method, c.name) for i, c in enumerate(display.calls)]
+    indexed = [
+        (i, row["event"], row["component"])
+        for i, row in enumerate(_read_lifecycle_rows(tmp_path / "logs"))
+    ]
     startup_reg_idx = next(
-        i for i, m, n in indexed if m == "register" and n == "startup"
+        i
+        for i, event, component in indexed
+        if event == "registered" and component == "startup"
     )
     parser_reg_idx = next(
-        i for i, m, n in indexed if m == "register" and n == "parser bundesagentur api"
+        i
+        for i, event, component in indexed
+        if event == "registered" and component == "parser bundesagentur api"
     )
     assert parser_reg_idx > startup_reg_idx
 
@@ -3822,33 +3856,35 @@ def test_parser_row_body_ends_with_done(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    phase_calls = [
-        c
-        for c in display.calls
-        if c.method == "update_phase" and c.name == "parser bundesagentur api"
+    lifecycle_rows = _read_lifecycle_rows(tmp_path / "logs")
+    phase_rows = [
+        row
+        for row in lifecycle_rows
+        if row.get("event") == "phase_changed"
+        and row.get("component") == "parser bundesagentur api"
     ]
-    assert phase_calls, "expected update_phase call for parser row"
-    assert phase_calls[-1].kwargs["phase"] == "done", (
-        f"last phase {phase_calls[-1].kwargs['phase']!r} must be 'done'"
-    )
+    assert phase_rows, "expected phase_changed lifecycle row for parser row"
+    assert phase_rows[-1]["phase"] == "done"
     assert not any(
-        c.method == "remove" and c.name == "parser bundesagentur api"
-        for c in display.calls
-    ), "parser row must not be removed during run"
+        row.get("event") == "removed"
+        and row.get("component") == "parser bundesagentur api"
+        for row in lifecycle_rows
+    )
 
 
 def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
-    """Parser row body uses new counter format: K discovered · F forwarded."""
+    """Single-query parser runs still surface the same aggregate outcomes."""
     config_path = _write_config(
         tmp_path,
         sources='[SourceEntry(parser_type="bundesagentur_api")]',
@@ -3856,31 +3892,21 @@ def test_parser_row_body_tracks_queries_stubs_enriched(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
 
-    run(
+    summary = run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
     )
 
-    bodies = display.body_updates_for("parser bundesagentur api")
-    # _StubParser returns 3 stubs per call; 1 keyword × 1 location = 1 query → 3 stubs
-    # bundesagentur_api has has_native_enrich=False → enrich_failed counter absent
-    final = bodies[-1]
-    assert "discovered" in final, f"unexpected body: {final!r}"
-    assert "forwarded" in final, f"unexpected body: {final!r}"
-    assert "queries" not in final, f"old format still present: {final!r}"
-    assert "stubs" not in final, f"old format still present: {final!r}"
-    assert "enrich_failed" not in final, (
-        f"enrich_failed must be absent without native enrich: {final!r}"
-    )
+    assert summary.discovered == 3
+    assert summary.classify_items == 3
+    assert summary.skipped == 0
 
 
 def test_parser_row_body_shows_native_enriched_counter(tmp_path: Path) -> None:
-    """Parser row shows M/N enriched for parsers with has_native_enrich=True."""
+    """Native-enrich parsers keep the same completed-run outcomes."""
 
     class _NativeParser(_StubParserBase):
         has_native_enrich = True
@@ -3911,26 +3937,20 @@ def test_parser_row_body_shows_native_enriched_counter(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
-
-    run(
+    summary = run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _NativeParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
     )
 
-    bodies = display.body_updates_for("parser bundesagentur api")
-    final = bodies[-1]
-    # All 3 stubs enriched natively → forwarded appears in body
-    assert "discovered" in final, f"expected 'discovered' in {final!r}"
-    assert "forwarded" in final, f"expected 'forwarded' in {final!r}"
-    assert "queries" not in final, f"old format still present: {final!r}"
+    assert summary.discovered == 3
+    assert summary.classify_items == 3
+    assert summary.skipped == 0
 
 
 def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -> None:
-    """Parser row shows M/N enriched with M<N when some stubs fall back."""
+    """Mixed native/fallback enrich still yields the same completed-run outcomes."""
     call_count = [0]
 
     class _MixedParser(_StubParserBase):
@@ -3963,22 +3983,16 @@ def test_parser_row_body_shows_partial_native_enriched_counter(tmp_path: Path) -
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
-
-    run(
+    summary = run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _MixedParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
     )
 
-    bodies = display.body_updates_for("parser bundesagentur api")
-    final = bodies[-1]
-    # 3 stubs discovered; forwarded counter present in new format
-    assert "discovered" in final, f"expected 'discovered' in {final!r}"
-    assert "forwarded" in final, f"expected 'forwarded' in {final!r}"
-    assert "queries" not in final, f"old format still present: {final!r}"
+    assert summary.discovered == 3
+    assert summary.classify_items == 3
+    assert summary.skipped == 0
 
 
 def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
@@ -4002,29 +4016,31 @@ def test_parser_row_body_shows_dead_on_crash(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _DeadParserForRow,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    phase_calls = [
-        c
-        for c in display.calls
-        if c.method == "update_phase" and c.name == "parser bundesagentur api"
+    lifecycle_rows = _read_lifecycle_rows(tmp_path / "logs")
+    phase_rows = [
+        row
+        for row in lifecycle_rows
+        if row.get("event") == "phase_changed"
+        and row.get("component") == "parser bundesagentur api"
     ]
-    assert phase_calls, "expected update_phase call for dead parser row"
-    assert phase_calls[-1].kwargs["phase"] == "dead", (
-        f"last phase {phase_calls[-1].kwargs['phase']!r} must be 'dead'"
-    )
+    assert phase_rows, "expected phase_changed lifecycle row for dead parser row"
+    assert phase_rows[-1]["phase"] == "dead"
     assert not any(
-        c.method == "remove" and c.name == "parser bundesagentur api"
-        for c in display.calls
-    ), "dead parser row must not be removed"
+        row.get("event") == "removed"
+        and row.get("component") == "parser bundesagentur api"
+        for row in lifecycle_rows
+    )
 
 
 def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
@@ -4048,30 +4064,33 @@ def test_multiple_parser_rows_each_registered(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _EmptyParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    registered = display.registered_names()
-    assert "parser bundesagentur api" in registered
-    assert "parser stellen hamburg api" in registered
+    lifecycle_rows = _read_lifecycle_rows(tmp_path / "logs")
 
     order_a = next(
-        c.kwargs["order"]
-        for c in display.calls
-        if c.method == "register" and c.name == "parser bundesagentur api"
+        row["order"]
+        for row in lifecycle_rows
+        if row.get("event") == "registered"
+        and row.get("component") == "parser bundesagentur api"
     )
     order_b = next(
-        c.kwargs["order"]
-        for c in display.calls
-        if c.method == "register" and c.name == "parser stellen hamburg api"
+        row["order"]
+        for row in lifecycle_rows
+        if row.get("event") == "registered"
+        and row.get("component") == "parser stellen hamburg api"
     )
+    assert isinstance(order_a, int)
+    assert isinstance(order_b, int)
     assert order_a >= 2
     assert order_b >= 2
     assert order_a != order_b
@@ -4091,17 +4110,22 @@ def test_dedup_and_prefilter_rows_not_registered(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    registered = display.registered_names()
+    registered = {
+        row["component"]
+        for row in _read_lifecycle_rows(tmp_path / "logs")
+        if row.get("event") == "registered"
+    }
     assert "pipeline_dedup" not in registered
     assert "pipeline_prefilter" not in registered
     assert "pipeline_freshness" not in registered
@@ -4142,18 +4166,25 @@ class _MixedLangParser199(_StubParserBase):
 
 def test_classify_and_judge_rows_registered(tmp_path: Path) -> None:
     """classify_relevance row is registered; judge_match row is retired."""
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         _write_config(tmp_path),
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
-    assert "llm classify relevance" in display.registered_names()
-    assert "llm_judge_match" not in display.registered_names()
+    registered = {
+        row["component"]
+        for row in _read_lifecycle_rows(tmp_path / "logs")
+        if row.get("event") == "registered"
+    }
+    assert "llm classify relevance" in registered
+    assert "llm judge match" not in registered
+    assert "llm_judge_match" not in registered
 
 
 def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
@@ -4165,20 +4196,22 @@ def test_classify_and_judge_rows_not_removed(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
     assert not any(
-        c.method == "remove" and c.name == "llm classify relevance"
-        for c in display.calls
-    ), "classify_relevance row must not be removed during run"
+        row.get("event") == "removed"
+        and row.get("component") == "llm classify relevance"
+        for row in _read_lifecycle_rows(tmp_path / "logs")
+    )
 
 
 def test_classify_row_transitions_to_done_after_workers_finish(
@@ -4192,52 +4225,48 @@ def test_classify_row_transitions_to_done_after_workers_finish(
         locations='["Hamburg"]',
         include_remote=False,
     )
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         config_path,
         extractor=_stub_extractor(),
         parser_registry=lambda _: _StubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
     phase_updates = [
-        c
-        for c in display.calls
-        if c.method == "update_phase" and c.name == "llm classify relevance"
+        row
+        for row in _read_lifecycle_rows(tmp_path / "logs")
+        if row.get("event") == "phase_changed"
+        and row.get("component") == "llm classify relevance"
     ]
-    assert phase_updates, (
-        "expected at least one phase update for 'llm classify relevance'"
-    )
-    assert phase_updates[-1].kwargs["phase"] == "done", (
-        "last phase update for classify row must be 'done'"
-    )
+    assert phase_updates
+    assert phase_updates[-1]["phase"] == "done"
 
 
 def test_classify_row_done_when_no_sources(tmp_path: Path) -> None:
     """classify_relevance row transitions to 'done' even when there are no sources."""
-    display = FakeStatusDisplay()
+    run_log = RunLog(tmp_path / "logs")
 
     run(
         _write_config(tmp_path),
         extractor=_stub_extractor(),
         parser_registry=lambda _: None,
         dedup_store=MagicMock(),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
+        run_log=run_log,
     )
 
     phase_updates = [
-        c
-        for c in display.calls
-        if c.method == "update_phase" and c.name == "llm classify relevance"
+        row
+        for row in _read_lifecycle_rows(tmp_path / "logs")
+        if row.get("event") == "phase_changed"
+        and row.get("component") == "llm classify relevance"
     ]
-    assert phase_updates, (
-        "expected phase update for 'llm classify relevance' even with no sources"
-    )
-    assert phase_updates[-1].kwargs["phase"] == "done", (
-        "classify row must show 'done' after classify shutdown even with no sources"
-    )
+    assert phase_updates
+    assert phase_updates[-1]["phase"] == "done"
 
 
 # ---------------------------------------------------------------------------
@@ -4537,10 +4566,8 @@ def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:
 
 
 def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
-    """judge_top_n success: a terminal print message is emitted with the card count."""
+    """judge_top_n success writes the expected cards to the daily results file."""
     card_store = _make_card_store(tmp_path)
-
-    display = FakeStatusDisplay()
 
     run(
         _two_stub_config(tmp_path),
@@ -4549,13 +4576,16 @@ def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
     )
 
-    print_calls = [c for c in display.calls if c.method == "print"]
-    assert any(
-        "judge_top_n" in str(c.kwargs.get("message", "")) for c in print_calls
-    ), "expected a judge_top_n terminal message"
+    results_files = sorted((tmp_path / "results").glob("????-??-??.md"))
+    assert len(results_files) == 1
+    cards = re.findall(
+        r"^# \*\*\d+:\*\* .+",
+        results_files[0].read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert len(cards) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -4781,7 +4811,6 @@ def test_run_reports_match_judge_completion_through_run_metrics(
 ) -> None:
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
-    display = FakeStatusDisplay()
     logs_dir = tmp_path / "synched" / "logs"
     run_log = RunLog(logs_dir)
 
@@ -4792,19 +4821,28 @@ def test_run_reports_match_judge_completion_through_run_metrics(
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
         run_log=run_log,
     )
 
     assert summary.written == 2
-    assert "llm judge match" not in display.registered_names()
-
-    judge_prints = [c for c in display.calls if c.method == "print"]
-    assert any(
-        c.name == "llm_judge_match"
-        and str(c.kwargs["message"]) == "judge_top_n complete: wrote 2 cards"
-        for c in judge_prints
+    lifecycle_rows = _read_lifecycle_rows(logs_dir)
+    assert not any(
+        row.get("event") == "registered" and row.get("component") == "llm judge match"
+        for row in lifecycle_rows
     )
+    assert not any(
+        row.get("event") == "registered" and row.get("component") == "llm_judge_match"
+        for row in lifecycle_rows
+    )
+
+    today = datetime.now().date().isoformat()
+    results_file = tmp_path / "results" / f"{today}.md"
+    assert results_file.exists()
+    cards = re.findall(
+        r"^# \*\*\d+:\*\* .+", results_file.read_text(encoding="utf-8"), re.MULTILINE
+    )
+    assert len(cards) == 2
 
     run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
     assert "judges_sent=1" in run_log_text
@@ -4818,7 +4856,6 @@ def test_run_reports_match_judge_failure_through_run_metrics(
 ) -> None:
     logs_dir = tmp_path / "synched" / "logs"
     run_log = RunLog(logs_dir)
-    display = FakeStatusDisplay()
 
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
@@ -4836,20 +4873,19 @@ def test_run_reports_match_judge_failure_through_run_metrics(
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
         dedup_store=dedup_module.load(seen_path),
-        status_display=display,
+        status_display=PlainStatusDisplay(run_log=run_log),
         run_log=run_log,
     )
 
     assert summary.written == 0
     assert summary.errored == 1
-    pipeline_updates = display.body_updates_for("pipeline")
-    assert pipeline_updates[-1] == "discovered=2 written=0 errors=1"
-    judge_phase_updates = [
-        c
-        for c in display.calls
-        if c.method == "update_phase" and c.name == "llm judge match"
-    ]
-    assert judge_phase_updates == []
+    lifecycle_rows = _read_lifecycle_rows(logs_dir)
+    assert not any(
+        row.get("event") == "phase_changed"
+        and row.get("component") == "llm judge match"
+        for row in lifecycle_rows
+    )
+    assert not any((tmp_path / "results").glob("*.md"))
 
     run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
     assert "judges_sent=0" in run_log_text

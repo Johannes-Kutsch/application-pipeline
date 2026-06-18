@@ -108,14 +108,13 @@ def test_url_keyed_extracts_raises_on_load(store_path: Path) -> None:
         load_card_store(store_path)
 
 
-def test_integer_keyed_extracts_loads_correctly(store_path: Path) -> None:
-    existing = {"5": {"header": "H", "summary": "S"}}
+def test_load_card_store_surfaces_persisted_card_through_get(store_path: Path) -> None:
+    existing = {"5": {"header": "H", "summary": "S", "body": "B"}}
     store_path.write_text(json.dumps(existing), encoding="utf-8")
-    mtime_before = store_path.stat().st_mtime
 
-    load_card_store(store_path)
+    store = load_card_store(store_path)
 
-    assert store_path.stat().st_mtime == mtime_before
+    assert store.get(5) == CardExtract(header="H", summary="S", body="B")
 
 
 def test_put_then_get_round_trips_body(store: CardStore) -> None:
@@ -143,6 +142,20 @@ def test_legacy_record_without_body_loads_with_empty_default(store_path: Path) -
     )
     card = load_card_store(store_path).get(1)
     assert card == CardExtract(header="H", summary="S", body="")
+
+
+def test_load_card_store_does_not_rewrite_bodyless_persisted_card_shape(
+    store_path: Path,
+) -> None:
+    existing = {"5": {"header": "H", "summary": "S"}}
+    store_path.write_text(json.dumps(existing), encoding="utf-8")
+    mtime_before = store_path.stat().st_mtime
+
+    store = load_card_store(store_path)
+
+    assert store.get(5) == CardExtract(header="H", summary="S", body="")
+    assert store_path.stat().st_mtime == mtime_before
+    assert json.loads(store_path.read_text(encoding="utf-8")) == existing
 
 
 def test_get_returns_equal_distinct_values_on_repeated_reads(store: CardStore) -> None:

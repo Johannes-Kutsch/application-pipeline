@@ -128,13 +128,13 @@ def test_load_rejects_card_like_integer_keyed_record_with_non_string_header_or_s
 def test_load_rejects_record_outside_documented_card_store_shapes(
     store_path: Path,
 ) -> None:
-    store_path.write_text(
-        json.dumps({"5": {"header": "H", "body": "B"}}),
-        encoding="utf-8",
-    )
+    original = json.dumps({"5": {"header": "H", "body": "B"}})
+    store_path.write_text(original, encoding="utf-8")
 
     with pytest.raises(ExtractStoreError, match="invalid card record"):
         load_card_store(store_path)
+
+    assert store_path.read_text(encoding="utf-8") == original
 
 
 def test_load_rejects_current_card_record_with_non_string_body(
@@ -156,6 +156,25 @@ def test_load_rejects_integer_keyed_record_that_is_neither_card_nor_retired_v1(
     store_path.write_text(original, encoding="utf-8")
 
     with pytest.raises(ExtractStoreError, match="invalid card record"):
+        load_card_store(store_path)
+
+    assert store_path.read_text(encoding="utf-8") == original
+
+
+def test_load_rejects_mixed_current_card_and_retired_v1_integer_keyed_records(
+    store_path: Path,
+) -> None:
+    original = json.dumps(
+        {
+            "5": {"header": "H", "summary": "S"},
+            "7": {"company": "Acme", "title": "Legacy extract"},
+        }
+    )
+    store_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(
+        ExtractStoreError, match="mixes current card records with retired v1 records"
+    ):
         load_card_store(store_path)
 
     assert store_path.read_text(encoding="utf-8") == original

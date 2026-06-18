@@ -107,11 +107,11 @@ def _wipe_extracts_if_v1(path: Path) -> None:
         return
     for raw_key, record in data.items():
         try:
-            key = int(raw_key)
+            int(raw_key)
         except (TypeError, ValueError):
             path.unlink(missing_ok=True)
             return
-        if _classify_persisted_record(record, path, key) != "retired_v1":
+        if not _is_retired_v1_record(record):
             return
     path.unlink(missing_ok=True)
 
@@ -139,6 +139,10 @@ def _decode_card_store_records(
                     f"card store at {path} has invalid card record for key {key}: "
                     "expected object with header, summary, and optional body"
                 )
+    if saw_retired_v1 and decoded_records:
+        raise ExtractStoreError(
+            f"card store at {path} mixes current card records with retired v1 records"
+        )
     return decoded_records, saw_retired_v1
 
 
@@ -157,6 +161,10 @@ def _record_presents_current_card_fields(record: Any) -> bool:
     return isinstance(record, dict) and any(
         field in record for field in ("header", "summary", "body")
     )
+
+
+def _is_retired_v1_record(record: Any) -> bool:
+    return isinstance(record, dict) and not _record_presents_current_card_fields(record)
 
 
 def _wipe_card_store_to_empty_object(path: Path) -> None:

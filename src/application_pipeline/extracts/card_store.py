@@ -35,8 +35,7 @@ class CardStore:
         with self._lock:
             new_records = dict(self._records)
             new_records[key] = _copy_card_extract(extract)
-            self._persist(new_records)
-            self._records = new_records
+            self._write_records(new_records)
 
     def replace_body_if_present(self, key: int, body: str) -> bool:
         with self._lock:
@@ -49,8 +48,7 @@ class CardStore:
                 summary=record.summary,
                 body=body,
             )
-            self._persist(new_records)
-            self._records = new_records
+            self._write_records(new_records)
             return True
 
     def delete(self, key: int) -> None:
@@ -58,23 +56,22 @@ class CardStore:
             if key not in self._records:
                 return
             new_records = {k: v for k, v in self._records.items() if k != key}
-            self._persist(new_records)
-            self._records = new_records
+            self._write_records(new_records)
 
-    def _persist(self, records: dict[int, CardExtract]) -> None:
-        payload = json.dumps(
-            {
-                key: {
-                    "header": record.header,
-                    "summary": record.summary,
-                    "body": record.body,
-                }
-                for key, record in records.items()
-            },
+    def _write_records(self, records: dict[int, CardExtract]) -> None:
+        payload = self._encode_records(records)
+        self._persist(payload)
+        self._records = records
+
+    def _encode_records(self, records: dict[int, CardExtract]) -> bytes:
+        return json.dumps(
+            _encode_card_store_records(records),
             indent=2,
             sort_keys=True,
             ensure_ascii=False,
         ).encode("utf-8")
+
+    def _persist(self, payload: bytes) -> None:
         try:
             write_atomic(self._path, payload)
         except OSError as exc:
@@ -100,6 +97,19 @@ def _decode_card_store_records(
             body=record.get("body", ""),
         )
         for key, record in parsed.items()
+    }
+
+
+def _encode_card_store_records(
+    records: dict[int, CardExtract],
+) -> dict[int, dict[str, str]]:
+    return {
+        key: {
+            "header": record.header,
+            "summary": record.summary,
+            "body": record.body,
+        }
+        for key, record in records.items()
     }
 
 

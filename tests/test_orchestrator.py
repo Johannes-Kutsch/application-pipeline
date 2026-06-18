@@ -3258,7 +3258,7 @@ def test_retired_v1_extracts_are_wiped_by_card_store_during_orchestrator_startup
     )
 
     assert summary.written == 0
-    assert json.loads(extracts_path.read_text(encoding="utf-8")) == {}
+    assert not extracts_path.exists()
 
 
 def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:

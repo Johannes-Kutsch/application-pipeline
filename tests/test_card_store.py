@@ -110,7 +110,36 @@ def test_load_card_store_wipes_retired_v1_integer_keyed_records(
     store = load_card_store(store_path)
 
     assert store.get(5) is None
-    assert json.loads(store_path.read_text(encoding="utf-8")) == {}
+    assert not store_path.exists()
+
+
+def test_put_after_retired_v1_wipe_writes_fresh_current_card_store(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "5": {
+                    "seniority": "senior",
+                    "work_model": "remote",
+                    "contract_type": "permanent",
+                    "key_skills": ["Python"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = load_card_store(store_path)
+    store.put(5, CardExtract(header="Header", summary="Summary", body="Body"))
+
+    assert json.loads(store_path.read_text(encoding="utf-8")) == {
+        "5": {
+            "header": "Header",
+            "summary": "Summary",
+            "body": "Body",
+        }
+    }
 
 
 def test_load_rejects_card_like_integer_keyed_record_with_non_string_header_or_summary(

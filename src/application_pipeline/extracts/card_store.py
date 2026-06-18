@@ -149,12 +149,12 @@ def _parse_listing_id_keys(data: dict[str, Any], path: Path) -> dict[int, Any]:
     return parsed
 
 
-def _wipe_card_store_to_empty_object(path: Path) -> None:
+def _remove_retired_v1_card_store(path: Path) -> None:
     try:
-        write_atomic(path, b"{}")
+        path.unlink()
     except OSError as exc:
         raise ExtractStoreError(
-            f"could not persist card store to {path}: {exc}"
+            f"could not remove retired v1 card store at {path}: {exc}"
         ) from exc
 
 
@@ -260,7 +260,7 @@ def load_card_store(
     parsed = _parse_listing_id_keys(data, path)
     records, saw_retired_v1 = _decode_card_store_records(parsed, path)
     if saw_retired_v1:
-        _wipe_card_store_to_empty_object(path)
+        _remove_retired_v1_card_store(path)
         return CardStore(path, {})
 
     return CardStore(path, records)

@@ -37,6 +37,13 @@ def _skeleton_template_bytes() -> bytes:
     return _ap_template_bytes("cv-template/cv_skeleton.tex")
 
 
+def _agent_skill_template_bytes(name: str) -> bytes:
+    node = importlib.resources.files("application_pipeline.templates") / "agent-skills"
+    for part in name.split("/"):
+        node = node / part
+    return node.read_bytes()
+
+
 def _skill_frontmatter(text: str) -> tuple[str, str]:
     match = re.match(
         r"^---\nname: (?P<name>[^\n]+)\ndescription: (?P<description>[^\n]+)\n---\n",
@@ -833,6 +840,22 @@ def test_seeded_tool_local_shared_support_files_reference_cv_template_path(
         _assert_seeded_shared_doc_affordances(slot_map)
 
 
+def test_fresh_init_materialises_byte_identical_agent_skill_runtime_files(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+
+    for rel in (
+        *(f"{skill}/SKILL.md" for skill in _SKILL_DIRS),
+        "_shared/CONVENTIONS.md",
+        "_shared/SLOT-MAP.md",
+    ):
+        claude_file = _claude(tmp_path) / "skills" / rel
+        codex_file = _codex(tmp_path) / "skills" / rel
+        assert claude_file.read_bytes() == codex_file.read_bytes()
+        assert claude_file.read_bytes() == _agent_skill_template_bytes(rel)
+
+
 def test_refresh_overwrites_inline_tool_skill_bodies_in_both_roots(
     tmp_path: Path,
 ) -> None:
@@ -1439,6 +1462,26 @@ def test_refresh_reports_changed_agent_skill_artifacts_with_bucketed_paths(
     assert not any("agent-skills/" in line for line in lines)
     assert not any("my-skill" in line for line in lines)
     assert not any("notes.md" in line for line in lines)
+
+
+def test_refresh_restores_byte_identical_agent_skill_runtime_files(
+    tmp_path: Path,
+) -> None:
+    init(tmp_path)
+    (_claude(tmp_path) / "skills" / "write-cv" / "SKILL.md").write_text(
+        "# tampered claude wrapper\n"
+    )
+    (_codex(tmp_path) / "skills" / "_shared" / "SLOT-MAP.md").write_text(
+        "# tampered codex shared\n"
+    )
+
+    init(tmp_path, refresh=True)
+
+    for rel in ("write-cv/SKILL.md", "_shared/SLOT-MAP.md"):
+        claude_file = _claude(tmp_path) / "skills" / rel
+        codex_file = _codex(tmp_path) / "skills" / rel
+        assert claude_file.read_bytes() == codex_file.read_bytes()
+        assert claude_file.read_bytes() == _agent_skill_template_bytes(rel)
 
 
 def test_init_creates_claude_dir_if_missing(tmp_path: Path) -> None:

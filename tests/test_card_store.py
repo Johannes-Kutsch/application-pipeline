@@ -41,6 +41,7 @@ def test_put_then_get_round_trips_header_and_summary(store: CardStore) -> None:
     store.put(42, card)
     result = store.get(42)
     assert result == card
+    assert result is not card
     assert result.header == "Role · Acme · Berlin"
     assert result.summary == "Strong fit for the role."
 
@@ -130,6 +131,36 @@ def test_legacy_record_without_body_loads_with_empty_default(store_path: Path) -
     )
     card = load_card_store(store_path).get(1)
     assert card == CardExtract(header="H", summary="S", body="")
+
+
+def test_get_returns_equal_distinct_values_on_repeated_reads(store: CardStore) -> None:
+    store.put(1, CardExtract(header="H", summary="S", body="B"))
+
+    first = store.get(1)
+    second = store.get(1)
+
+    assert first == CardExtract(header="H", summary="S", body="B")
+    assert second == first
+    assert second is not first
+
+
+def test_loaded_legacy_record_without_body_still_allows_body_replacement(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {"1": {"header": "Persisted header", "summary": "Persisted summary"}}
+        ),
+        encoding="utf-8",
+    )
+    store = load_card_store(store_path)
+
+    assert store.replace_body_if_present(1, "Fresh raw description") is True
+    assert store.get(1) == CardExtract(
+        header="Persisted header",
+        summary="Persisted summary",
+        body="Fresh raw description",
+    )
 
 
 def test_replace_body_if_present_keeps_header_and_summary_and_noops_for_empty_or_missing_input(

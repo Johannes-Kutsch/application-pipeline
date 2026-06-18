@@ -28,12 +28,13 @@ class CardStore:
 
     def get(self, key: int) -> CardExtract | None:
         with self._lock:
-            return self._records.get(key)
+            record = self._records.get(key)
+        return _copy_card_extract_or_none(record)
 
     def put(self, key: int, extract: CardExtract) -> None:
         with self._lock:
             new_records = dict(self._records)
-            new_records[key] = extract
+            new_records[key] = _copy_card_extract(extract)
             self._persist(new_records)
             self._records = new_records
 
@@ -100,6 +101,20 @@ def _decode_card_store_records(
         )
         for key, record in parsed.items()
     }
+
+
+def _copy_card_extract(record: CardExtract) -> CardExtract:
+    return CardExtract(
+        header=record.header,
+        summary=record.summary,
+        body=record.body,
+    )
+
+
+def _copy_card_extract_or_none(record: CardExtract | None) -> CardExtract | None:
+    if record is None:
+        return None
+    return _copy_card_extract(record)
 
 
 def load_card_store(

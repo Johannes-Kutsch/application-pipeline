@@ -42,7 +42,6 @@ from application_pipeline.dedup import (
 )
 from application_pipeline.extracts.card_store import (
     CardStore,
-    _wipe_extracts_if_v1,
     load_card_store,
 )
 from application_pipeline.failure_report import (
@@ -180,10 +179,8 @@ def run(
             source.parser_type: _has_native_enrich(cls) for cls, source in resolved
         }
 
-        # Step 7: Dedup store + CardStore (wipe v1 extracts if present)
-        # Load dedup store first so its URL index can seed card-store migration.
+        # Step 7: Dedup store + Card Store
         extracts_path = cfg.seen_store_path.parent / "extracts.json"
-        _wipe_extracts_if_v1(extracts_path)
         if dedup_store is None:
             try:
                 dedup_store = dedup_module.load(

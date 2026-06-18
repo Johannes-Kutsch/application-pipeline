@@ -91,31 +91,6 @@ class CardStore:
             ) from exc
 
 
-def _wipe_extracts_if_v1(path: Path) -> None:
-    """Delete extracts.json if it contains retired v1-format records."""
-    if not path.exists():
-        return
-    try:
-        data = json.loads(path.read_bytes())
-    except (json.JSONDecodeError, OSError):
-        path.unlink(missing_ok=True)
-        return
-    if not isinstance(data, dict):
-        path.unlink(missing_ok=True)
-        return
-    if not data:
-        return
-    for raw_key, record in data.items():
-        try:
-            int(raw_key)
-        except (TypeError, ValueError):
-            path.unlink(missing_ok=True)
-            return
-        if not _is_retired_v1_record(record):
-            return
-    path.unlink(missing_ok=True)
-
-
 def _decode_card_store_records(
     data: dict[str, Any], path: Path
 ) -> tuple[dict[int, CardExtract], bool]:
@@ -165,6 +140,21 @@ def _record_presents_current_card_fields(record: Any) -> bool:
 
 def _is_retired_v1_record(record: Any) -> bool:
     return isinstance(record, dict) and not _record_presents_current_card_fields(record)
+
+
+def _validate_listing_id_keys(data: dict[str, Any], path: Path) -> None:
+    for raw_key in data:
+        try:
+            int(raw_key)
+        except (TypeError, ValueError) as exc:
+            if isinstance(raw_key, str) and "://" in raw_key:
+                raise ExtractStoreError(
+                    f"card store at {path} uses legacy URL-keyed format; "
+                    f"delete the file to start fresh"
+                ) from exc
+            raise ExtractStoreError(
+                f"card store at {path} has non-integer key: {exc}"
+            ) from exc
 
 
 def _wipe_card_store_to_empty_object(path: Path) -> None:
@@ -275,12 +265,7 @@ def load_card_store(
             f"card store at {path} must be a JSON object, got {type(data).__name__}"
         )
 
-    if data and not next(iter(data)).lstrip("-").isdigit():
-        raise ExtractStoreError(
-            f"card store at {path} uses legacy URL-keyed format; "
-            f"delete the file to start fresh"
-        )
-
+    _validate_listing_id_keys(data, path)
     records, saw_retired_v1 = _decode_card_store_records(data, path)
     if saw_retired_v1:
         _wipe_card_store_to_empty_object(path)

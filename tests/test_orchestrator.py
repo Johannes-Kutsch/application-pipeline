@@ -3223,7 +3223,7 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     ]
 
 
-def test_retired_v1_extracts_are_wiped_before_orchestrator_loads_card_store(
+def test_retired_v1_extracts_are_wiped_by_card_store_during_orchestrator_startup(
     tmp_path: Path,
 ) -> None:
     runtime_dir = tmp_path / ".runtime-data"
@@ -3258,7 +3258,7 @@ def test_retired_v1_extracts_are_wiped_before_orchestrator_loads_card_store(
     )
 
     assert summary.written == 0
-    assert not extracts_path.exists()
+    assert json.loads(extracts_path.read_text(encoding="utf-8")) == {}
 
 
 def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:

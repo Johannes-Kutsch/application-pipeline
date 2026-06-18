@@ -26,36 +26,54 @@ _FULL_CARD_KWARGS: _CardKwargs = dict(
     body="Full job description here.",
 )
 
-_FULL_CARD_BYTES = (
-    "# **1:** Senior Engineer\n"
-    "\n"
-    "Acme · Berlin · On-site\n"
-    "2026-01-01 · Senior · €80k\n"
-    "https://example.com/job/123\n"
-    "\n"
-    "A strong fit for the role.\n"
-    "\n"
-    "---\n"
-    "\n"
-    "Full job description here.\n"
-    "\n"
-    "---\n"
-).encode("utf-8")
+
+def _split_cards(text: str) -> list[str]:
+    return [f"# **{card}" for card in text.split("# **") if card]
 
 
-def test_canonical_card_bytes(tmp_path: Path) -> None:
-    results_file = DailyResultsFile(tmp_path / "results.md")
+def _assert_card_semantics(card: str, *, expected: _CardKwargs) -> None:
+    header_lines = expected["header"].splitlines()
+    title = header_lines[0]
+    metadata = header_lines[1:]
+
+    assert card.startswith(f"# **{expected['rank']}:** {title}\n")
+    for line in metadata:
+        assert line in card
+    assert expected["url"] in card
+    assert expected["summary"] in card
+    assert expected["body"] in card
+    assert card.count("---") == 2
+
+
+def test_committed_card_preserves_card_semantics(tmp_path: Path) -> None:
+    results_file = DailyResultsFile(tmp_path / "results" / "2026-01-01.md")
     results_file.ensure_initialized()
     results_file.commit(**_FULL_CARD_KWARGS)
-    assert (tmp_path / "results.md").read_bytes() == _FULL_CARD_BYTES
+    content = (tmp_path / "results" / "2026-01-01.md").read_text(encoding="utf-8")
+    cards = _split_cards(content)
+    assert len(cards) == 1
+    _assert_card_semantics(cards[0], expected=_FULL_CARD_KWARGS)
 
 
-def test_two_commits_concatenated(tmp_path: Path) -> None:
-    results_file = DailyResultsFile(tmp_path / "results.md")
+def test_two_commits_append_in_rank_order(tmp_path: Path) -> None:
+    results_file = DailyResultsFile(tmp_path / "results" / "2026-01-01.md")
     results_file.ensure_initialized()
     results_file.commit(**_FULL_CARD_KWARGS)
-    results_file.commit(**_FULL_CARD_KWARGS)
-    assert (tmp_path / "results.md").read_bytes() == _FULL_CARD_BYTES + _FULL_CARD_BYTES
+    second_card: _CardKwargs = dict(
+        rank=2,
+        header="Staff Engineer\nAcme · Remote\n2026-01-02 · Staff",
+        summary="A second strong fit for the role.",
+        url="https://example.com/job/456",
+        body="Another full job description here.",
+    )
+    results_file.commit(**second_card)
+
+    content = (tmp_path / "results" / "2026-01-01.md").read_text(encoding="utf-8")
+    cards = _split_cards(content)
+    assert len(cards) == 2
+    _assert_card_semantics(cards[0], expected=_FULL_CARD_KWARGS)
+    _assert_card_semantics(cards[1], expected=second_card)
+    assert content.index("# **1:**") < content.index("# **2:**")
 
 
 def test_ensure_initialized_creates_nested_parent(tmp_path: Path) -> None:

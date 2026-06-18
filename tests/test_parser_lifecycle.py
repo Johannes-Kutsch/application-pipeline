@@ -48,10 +48,7 @@ class _ClassifyStageRunState:
         raise AssertionError(f"classify stage should not abort: {exc}")
 
 
-class _CollectingHandoff:
-    def __init__(self) -> None:
-        self.calls: list[tuple[int, PositionStub, str, str]] = []
-
+class _NoopHandoff:
     def submit_ready(
         self,
         *,
@@ -60,7 +57,7 @@ class _CollectingHandoff:
         raw_description: str,
         parser_id: str,
     ) -> None:
-        self.calls.append((listing_id, stub, raw_description, parser_id))
+        del listing_id, stub, raw_description, parser_id
 
 
 class _NoopClassifyMetrics:
@@ -322,9 +319,7 @@ def _make_plan(
                 parser=parser,
                 parser_id="test_parser",
                 classify_handoff=(
-                    _CollectingHandoff()
-                    if classify_handoff is None
-                    else classify_handoff
+                    _NoopHandoff() if classify_handoff is None else classify_handoff
                 ),
             )
         ],
@@ -365,7 +360,7 @@ def _make_plan_with_display(
             ParserLifecycleExecution(
                 parser=parser,
                 parser_id="test_parser",
-                classify_handoff=_CollectingHandoff(),
+                classify_handoff=_NoopHandoff(),
             )
         ],
         keywords=configured_keywords,
@@ -462,7 +457,7 @@ def test_query_heartbeats_wrap_each_query_with_keyword_and_location(
     ]
 
 
-def test_accepted_listing_reaches_classify_handoff_through_parser_lifecycle(
+def test_accepted_listing_reaches_classify_stage_through_parser_lifecycle(
     tmp_path: Path,
 ) -> None:
     parser = _ForwardingParser()
@@ -748,12 +743,12 @@ def test_parser_lifecycle_emits_one_parser_summary_section_per_parser(
                 ParserLifecycleExecution(
                     parser=_ImmediateParser(),
                     parser_id="parser_a",
-                    classify_handoff=_CollectingHandoff(),
+                    classify_handoff=_NoopHandoff(),
                 ),
                 ParserLifecycleExecution(
                     parser=_ImmediateParser(),
                     parser_id="parser_b",
-                    classify_handoff=_CollectingHandoff(),
+                    classify_handoff=_NoopHandoff(),
                 ),
             ],
             keywords=["python"],

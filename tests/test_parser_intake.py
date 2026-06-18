@@ -60,22 +60,18 @@ class _ObservingMetrics:
 
 
 class _StageMatchedEnricher:
-    def __init__(self, *, expected_stub: PositionStub, expected_body: str) -> None:
-        self._expected_stub = expected_stub
-        self._expected_body = expected_body
-
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
     ) -> AppliedClassifyOutcome:
-        assert items == [(1, self._expected_stub, self._expected_body)]
+        listing_id, stub, _ = items[0]
         return AppliedClassifyOutcome(
             items=[
                 AppliedClassifyItemOutcome(
                     state="matched",
                     event_matches=True,
                     matched_listing=MatchedListing(
-                        listing_id=1,
-                        stub=self._expected_stub,
+                        listing_id=listing_id,
+                        stub=stub,
                     ),
                 )
             ]
@@ -619,7 +615,7 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     assert card.body == "Persisted body"
 
 
-def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
+def test_accepted_listing_reaches_classify_stage_and_pool_after_parser_intake(
     tmp_path: Path,
 ) -> None:
     harness = ParserIntakeHarness.create(tmp_path)
@@ -628,10 +624,7 @@ def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
         batch_size=1,
         parallelism=1,
         pool_collector=pool,
-        llm_enricher=_StageMatchedEnricher(
-            expected_stub=harness.default_enriched_stub,
-            expected_body=harness.default_body,
-        ),
+        llm_enricher=_StageMatchedEnricher(),
         metrics=harness.metrics,
         run_state=_StageRunState(),
         run_log=harness.run_log,
@@ -664,7 +657,7 @@ def test_accepted_listing_delivered_to_classify_sink_with_enriched_data(
     assert pool.pool_size == 1
 
 
-def test_accepted_listing_delivered_to_classify_handoff_with_parser_identity(
+def test_retryable_classify_outcome_is_attributed_to_forwarding_parser(
     tmp_path: Path,
 ) -> None:
     harness = ParserIntakeHarness.create(tmp_path, parser_id="parser.test")

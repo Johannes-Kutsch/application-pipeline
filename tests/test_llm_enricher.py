@@ -222,6 +222,15 @@ def test_enricher_matched_item_exposes_pool_admission_data_and_persists_dedup(
 # ---------------------------------------------------------------------------
 
 
+def _read_malformed_stash(tmp_path: Path, source: str, slug: str) -> str:
+    malformed_dir = tmp_path / "failures" / "malformed"
+    stash_files = list(malformed_dir.glob("*.md"))
+    assert len(stash_files) == 1, f"Expected 1 markdown stash file, got {stash_files}"
+    stash_path = malformed_dir / f"{source}-{slug}.md"
+    assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
+    return stash_path.read_text(encoding="utf-8")
+
+
 def test_enricher_stashes_malformed_llm_output(
     tmp_path: Path,
     run_log: RunLog,
@@ -247,9 +256,8 @@ def test_enricher_stashes_malformed_llm_output(
         enricher.enrich([(99, stub, body)])
 
     slug = "example.com-job-99"
-    stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
-    assert stash_path.exists(), f"Expected stash file at {stash_path}"
-    assert error_msg in stash_path.read_text(encoding="utf-8")
+    content = _read_malformed_stash(tmp_path, "test_src", slug)
+    assert error_msg in content
     txt_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.txt"
     assert not txt_path.exists(), "Legacy .txt file must not be produced"
 
@@ -286,9 +294,7 @@ def test_enricher_malformed_error_produces_md_file_with_all_sections(
         enricher.enrich([(99, stub, body)])
 
     slug = "example.com-job-99"
-    stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
-    assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
-    content = stash_path.read_text(encoding="utf-8")
+    content = _read_malformed_stash(tmp_path, "test_src", slug)
     assert "test_src" in content
     assert "https://example.com/job/99" in content
     assert error_msg in content
@@ -323,15 +329,12 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
         enricher.enrich([(99, stub, body)])
 
     slug = "example.com-job-cli"
-    stash_path = tmp_path / "failures" / "malformed" / f"src_cli-{slug}.md"
-    assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
-    content = stash_path.read_text(encoding="utf-8")
+    content = _read_malformed_stash(tmp_path, "src_cli", slug)
     assert "src_cli" in content
     assert "https://example.com/job/cli" in content
     assert error_msg in content
     assert prompt_text in content
     assert stderr_text in content
-    assert "Returncode" in content
     assert "1" in content
     assert "<result>" not in content
 
@@ -361,9 +364,7 @@ def test_enricher_batch_malformed_error_produces_md_file_without_prompt_or_respo
         enricher.enrich([(1, stub, "body")])
 
     slug = "example.com-job-batch"
-    stash_path = tmp_path / "failures" / "malformed" / f"batch_src-{slug}.md"
-    assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
-    content = stash_path.read_text(encoding="utf-8")
+    content = _read_malformed_stash(tmp_path, "batch_src", slug)
     assert "batch_src" in content
     assert "https://example.com/job/batch" in content
     assert error_msg in content

@@ -25,7 +25,7 @@ class _SeedPolicy(NamedTuple):
 
 
 class _SeedEntry(NamedTuple):
-    template: importlib.resources.abc.Traversable
+    template_bytes: bytes
     dest_root: Path
     rel: Path
     policy: _SeedPolicy
@@ -89,17 +89,29 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
     pkg = importlib.resources.files("application_pipeline.templates")
     policies = _seed_policies(cwd)
     seed_entries: list[_SeedEntry] = []
-    for bucket in pkg.iterdir():
-        if bucket.name.startswith("__"):
-            continue
-        if not bucket.is_dir():
-            continue
-        policy = policies.get(bucket.name)
-        if policy is None:
-            continue
+    application_pipeline_bucket = pkg / "application-pipeline"
+    if application_pipeline_bucket.is_dir():
         seed_entries.extend(
-            _collect_seed_entries(bucket, policy.dest_root, Path(), policy)
+            _collect_seed_entries(
+                application_pipeline_bucket,
+                policies["application-pipeline"].dest_root,
+                Path(),
+                policies["application-pipeline"],
+            )
         )
+
+    agent_skills_bucket = pkg / "agent-skills"
+    if agent_skills_bucket.is_dir():
+        for bucket_name in ("claude", "codex"):
+            policy = policies[bucket_name]
+            seed_entries.extend(
+                _collect_seed_entries(
+                    agent_skills_bucket,
+                    policy.dest_root,
+                    Path("skills"),
+                    policy,
+                )
+            )
 
     actions = _plan_seed_actions(seed_entries, refresh=refresh)
 
@@ -225,7 +237,12 @@ def _collect_seed_entries(
         if len(rel.parts) == 0 and item.name in _EXCLUDE_FILES:
             continue
         entries.append(
-            _SeedEntry(template=item, dest_root=target_dir, rel=item_rel, policy=policy)
+            _SeedEntry(
+                template_bytes=item.read_bytes(),
+                dest_root=target_dir,
+                rel=item_rel,
+                policy=policy,
+            )
         )
     return entries
 
@@ -241,11 +258,10 @@ def _plan_seed_actions(
         overwrite = refresh and package_owned
         if dest.exists():
             if overwrite:
-                template_bytes = entry.template.read_bytes()
-                if dest.read_bytes() != template_bytes:
+                if dest.read_bytes() != entry.template_bytes:
                     actions.append(
                         _PlannedAction(
-                            "overwrote", "write", dest, display, template_bytes
+                            "overwrote", "write", dest, display, entry.template_bytes
                         )
                     )
                 else:
@@ -264,7 +280,7 @@ def _plan_seed_actions(
                 "write",
                 dest,
                 display,
-                entry.template.read_bytes(),
+                entry.template_bytes,
                 report,
             )
         )

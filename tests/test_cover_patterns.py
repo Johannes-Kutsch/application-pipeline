@@ -439,12 +439,17 @@ def test_load_tolerates_missing_or_empty_cover_patterns(
 def test_cover_pattern_library_loads_shipped_cover_patterns_template() -> None:
     library = CoverPatternLibrary.load(_COVER_PATTERNS_TEMPLATE)
 
-    assert [pattern.name for pattern in library.all_patterns()] == [
-        "Product Resonance Intro"
-    ]
-    assert [pattern.name for pattern in library.patterns_for_slot("cover_intro")] == [
-        "Product Resonance Intro"
-    ]
+    assert library.all_patterns()
+    assert library.patterns_for_slot("cover_intro")
+    assert all(
+        pattern.slot in COVER_PARAGRAPH_PATTERN_SLOTS
+        for pattern in library.all_patterns()
+    )
+    assert all(pattern.name for pattern in library.all_patterns())
+    assert all(pattern.argument_type for pattern in library.all_patterns())
+    assert all(pattern.use_when for pattern in library.all_patterns())
+    assert all(pattern.why_it_works for pattern in library.all_patterns())
+    assert all(pattern.text for pattern in library.all_patterns())
 
 
 def test_cover_pattern_library_parse_accepts_markdown_sections_between_patterns() -> (

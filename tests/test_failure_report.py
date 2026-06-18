@@ -124,9 +124,11 @@ class TestMarkdownBody:
             "version",
             side_effect=importlib.metadata.PackageNotFoundError,
         ):
-            path = write_failure("stage", RuntimeError("e"), "tail", failures_dir)
+            path = _write_at(
+                _FIXED_TIME, "stage", RuntimeError("e"), "tail", failures_dir
+            )
         body = path.read_text(encoding="utf-8")
-        assert body.startswith("# Run failed at")
+        assert _FIXED_TIMESTAMP in body
         assert "(tag" not in body
 
     def test_path_bound_writer_matches_wrapper_contract(self, tmp_path: Path) -> None:

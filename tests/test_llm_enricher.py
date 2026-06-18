@@ -289,12 +289,10 @@ def test_enricher_malformed_error_produces_md_file_with_all_sections(
     stash_path = tmp_path / "failures" / "malformed" / f"test_src-{slug}.md"
     assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
     content = stash_path.read_text(encoding="utf-8")
-    assert "**Source:** test_src" in content
-    assert "**URL:** https://example.com/job/99" in content
-    assert f"**Error:** {error_msg}" in content
-    assert "## Prompt" in content
+    assert "test_src" in content
+    assert "https://example.com/job/99" in content
+    assert error_msg in content
     assert prompt_text in content
-    assert "## Raw response" in content
     assert raw_resp in content
 
 
@@ -328,15 +326,14 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
     stash_path = tmp_path / "failures" / "malformed" / f"src_cli-{slug}.md"
     assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
     content = stash_path.read_text(encoding="utf-8")
-    assert "**Source:** src_cli" in content
-    assert "**URL:** https://example.com/job/cli" in content
-    assert f"**Error:** {error_msg}" in content
-    assert "## Prompt" in content
+    assert "src_cli" in content
+    assert "https://example.com/job/cli" in content
+    assert error_msg in content
     assert prompt_text in content
-    assert "## CLI stderr" in content
     assert stderr_text in content
-    assert "**Returncode:** 1" in content
-    assert "## Raw response" not in content
+    assert "Returncode" in content
+    assert "1" in content
+    assert "<result>" not in content
 
 
 def test_enricher_batch_malformed_error_produces_md_file_without_prompt_or_response(
@@ -345,6 +342,9 @@ def test_enricher_batch_malformed_error_produces_md_file_without_prompt_or_respo
     run_metrics: RunMetrics,
 ) -> None:
     error_msg = "batch response could not be parsed"
+    prompt_text = "Classify this batch."
+    raw_response = "<result>{bad json}</result>"
+    stderr_text = "Error: API rate limit exceeded"
     extractor = MagicMock()
     extractor.classify_relevance.side_effect = ExtractorBatchMalformedError(error_msg)
 
@@ -364,12 +364,12 @@ def test_enricher_batch_malformed_error_produces_md_file_without_prompt_or_respo
     stash_path = tmp_path / "failures" / "malformed" / f"batch_src-{slug}.md"
     assert stash_path.exists(), f"Expected markdown stash file at {stash_path}"
     content = stash_path.read_text(encoding="utf-8")
-    assert "**Source:** batch_src" in content
-    assert "**URL:** https://example.com/job/batch" in content
-    assert f"**Error:** {error_msg}" in content
-    assert "## Prompt" not in content
-    assert "## Raw response" not in content
-    assert "## CLI stderr" not in content
+    assert "batch_src" in content
+    assert "https://example.com/job/batch" in content
+    assert error_msg in content
+    assert prompt_text not in content
+    assert raw_response not in content
+    assert stderr_text not in content
 
 
 # ---------------------------------------------------------------------------

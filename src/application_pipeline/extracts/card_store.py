@@ -92,15 +92,8 @@ class CardStore:
 
 
 def _decode_card_store_records(
-    data: dict[str, Any], path: Path
+    parsed: dict[int, Any], path: Path
 ) -> tuple[dict[int, CardExtract], bool]:
-    try:
-        parsed = {int(k): v for k, v in data.items()}
-    except (ValueError, TypeError) as exc:
-        raise ExtractStoreError(
-            f"card store at {path} has non-integer key: {exc}"
-        ) from exc
-
     saw_retired_v1 = False
     decoded_records: dict[int, CardExtract] = {}
     for key, record in parsed.items():
@@ -138,14 +131,11 @@ def _record_presents_current_card_fields(record: Any) -> bool:
     )
 
 
-def _is_retired_v1_record(record: Any) -> bool:
-    return isinstance(record, dict) and not _record_presents_current_card_fields(record)
-
-
-def _validate_listing_id_keys(data: dict[str, Any], path: Path) -> None:
-    for raw_key in data:
+def _parse_listing_id_keys(data: dict[str, Any], path: Path) -> dict[int, Any]:
+    parsed: dict[int, Any] = {}
+    for raw_key, record in data.items():
         try:
-            int(raw_key)
+            key = int(raw_key)
         except (TypeError, ValueError) as exc:
             if isinstance(raw_key, str) and "://" in raw_key:
                 raise ExtractStoreError(
@@ -155,6 +145,8 @@ def _validate_listing_id_keys(data: dict[str, Any], path: Path) -> None:
             raise ExtractStoreError(
                 f"card store at {path} has non-integer key: {exc}"
             ) from exc
+        parsed[key] = record
+    return parsed
 
 
 def _wipe_card_store_to_empty_object(path: Path) -> None:
@@ -265,8 +257,8 @@ def load_card_store(
             f"card store at {path} must be a JSON object, got {type(data).__name__}"
         )
 
-    _validate_listing_id_keys(data, path)
-    records, saw_retired_v1 = _decode_card_store_records(data, path)
+    parsed = _parse_listing_id_keys(data, path)
+    records, saw_retired_v1 = _decode_card_store_records(parsed, path)
     if saw_retired_v1:
         _wipe_card_store_to_empty_object(path)
         return CardStore(path, {})

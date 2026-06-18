@@ -206,6 +206,23 @@ def test_load_rejects_url_keyed_legacy_data_even_when_not_first_top_level_key(
     assert store_path.read_text(encoding="utf-8") == original
 
 
+def test_load_rejects_url_keyed_legacy_data_before_any_retired_v1_wipe(
+    store_path: Path,
+) -> None:
+    original = json.dumps(
+        {
+            "5": {"company": "Acme", "title": "Legacy extract"},
+            "https://example.com/job": {"header": "Legacy", "summary": "Entry"},
+        }
+    )
+    store_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ExtractStoreError, match="legacy URL-keyed format"):
+        load_card_store(store_path)
+
+    assert store_path.read_text(encoding="utf-8") == original
+
+
 def test_load_card_store_surfaces_persisted_card_through_get(store_path: Path) -> None:
     existing = {"5": {"header": "H", "summary": "S", "body": "B"}}
     store_path.write_text(json.dumps(existing), encoding="utf-8")

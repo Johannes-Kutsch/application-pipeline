@@ -229,11 +229,12 @@ def test_classify_relevance_envelope_malformed_attaches_prompt_and_none_raw_resp
     )
     with pytest.raises(ExtractorMalformedJSONError) as excinfo:
         extractor.classify_relevance([_item()])
-    sent_prompt = invoker.call.call_args.args[0]
-    assert excinfo.value.prompt == sent_prompt
+    transcripts = _read_transcripts(run_log, "llm_classify_relevance")
+    assert excinfo.value.prompt == transcripts[0]["prompt"]
     assert excinfo.value.raw_response is None
     assert excinfo.value.returncode == 0
     assert excinfo.value.stderr == ""
+    assert transcripts[0]["status"] == "malformed_envelope"
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +255,7 @@ def test_classify_relevance_prompt_includes_company_and_location(
         _invoker=invoker,
     )
     extractor.classify_relevance([_item(company="TestCorp", location="Berlin")])
-    prompt_sent = invoker.call.call_args.args[0]
+    prompt_sent = _read_transcripts(run_log, "llm_classify_relevance")[0]["prompt"]
     assert "TestCorp" in prompt_sent
     assert "Berlin" in prompt_sent
 
@@ -320,7 +321,8 @@ def test_judge_top_n_empty_candidates_returns_empty_list(
     results, usage = extractor.judge_top_n([])
     assert results == []
     assert usage.cost_usd == pytest.approx(0.0)
-    invoker.call.assert_not_called()
+    assert _read_transcripts(run_log, "llm_judge_match") == []
+    assert _read_events(run_log, "llm_judge_match") == []
 
 
 def test_judge_top_n_candidates_appear_in_prompt(
@@ -336,7 +338,7 @@ def test_judge_top_n_candidates_appear_in_prompt(
         _invoker=invoker,
     )
     extractor.judge_top_n(candidates)
-    prompt_sent = invoker.call.call_args.args[0]
+    prompt_sent = _read_transcripts(run_log, "llm_judge_match")[0]["prompt"]
     assert "[Candidate id=0]" in prompt_sent
     assert "[Candidate id=1]" in prompt_sent
 
@@ -443,7 +445,7 @@ def test_classify_relevance_batch_prompt_includes_sequential_ids(
         _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
     )
     extractor.classify_relevance(items)
-    prompt_sent = invoker.call.call_args.args[0]
+    prompt_sent = _read_transcripts(run_log, "llm_classify_relevance")[0]["prompt"]
     assert "id=1" in prompt_sent
     assert "id=2" in prompt_sent
     assert "id=3" in prompt_sent
@@ -553,7 +555,9 @@ def test_classify_relevance_usage_reflects_single_call_tokens(
     assert usage.cost_usd == pytest.approx(0.01)
 
 
-def test_classify_relevance_batch_makes_single_call(run_log: RunLog) -> None:
+def test_classify_relevance_batch_logs_the_full_batch_prompt_and_response(
+    run_log: RunLog,
+) -> None:
     items = [_item(title=f"Job {i + 1}") for i in range(3)]
     response = _batch_classify_response(
         [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
@@ -563,4 +567,8 @@ def test_classify_relevance_batch_makes_single_call(run_log: RunLog) -> None:
         _config(), _batch_prompts(), run_log=run_log, _invoker=invoker
     )
     extractor.classify_relevance(items)
-    assert invoker.call.call_count == 1
+    transcript = _read_transcripts(run_log, "llm_classify_relevance")[-1]
+    assert "Job 1" in transcript["prompt"]
+    assert "Job 2" in transcript["prompt"]
+    assert "Job 3" in transcript["prompt"]
+    assert transcript["raw_response"] == response.raw_response

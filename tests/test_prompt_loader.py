@@ -167,6 +167,36 @@ def test_load_prompts_shipped_templates_render_runtime_payload_verbatim(
     assert candidates in judge_rendered
 
 
+def test_load_prompts_accepts_prompt_wording_edits_that_preserve_slot_contracts(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config_with_user_info(tmp_path)
+    prompt_pkg = tmp_path / "prompt-pkg"
+    prompt_pkg.mkdir()
+    (prompt_pkg / "classify_relevance.md").write_text(
+        "Pruefe nur Domain-Fit.\n\n{GATE_CRITERIA}\n\n{LISTINGS}\n"
+    )
+    (prompt_pkg / "judge_top_n.md").write_text(
+        "Rangfolge nach Profil und Skills.\n\n"
+        "{CANDIDATE_PROFILE}\n\n{SKILLS}\n\n{CANDIDATES}\n"
+    )
+
+    monkeypatch.setattr(importlib.resources, "files", lambda _: prompt_pkg)
+
+    prompts = load_prompts(config)
+    classify_rendered = prompts.classify_relevance.render(LISTINGS="listing")
+    judge_rendered = prompts.judge_top_n.render(CANDIDATES="candidate")
+
+    assert "Pruefe nur Domain-Fit." in classify_rendered
+    assert "Rangfolge nach Profil und Skills." in judge_rendered
+    assert "Hamburg, remote" in classify_rendered
+    assert "I am a developer" in judge_rendered
+    assert "Judge-only skill" in judge_rendered
+    assert "listing" in classify_rendered
+    assert "candidate" in judge_rendered
+
+
 @pytest.mark.parametrize(
     ("call_site", "template_text", "expected_slot"),
     [

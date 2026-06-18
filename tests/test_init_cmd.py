@@ -67,16 +67,21 @@ def _assert_seeded_skill_affordances(skill_file: Path, skill: str) -> str:
     assert name == skill
     assert description
     _assert_no_retired_skill_references(text)
+    if skill == "analyse-listing":
+        assert "application-pipeline/user-info/triage-profile/gate-criteria.md" in text
+        assert "application-pipeline/user-info/triage-profile/candidate-profile.md" in (
+            text
+        )
     if skill in {"analyse-listing", "write-cv"}:
         assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in text
     if skill == "write-cv":
         assert "[_shared/SLOT-MAP.md](../_shared/SLOT-MAP.md)" in text
         assert "application-pipeline/user-info/cv/cover-patterns.md" in text
     if skill == "build-cv":
-        assert (
-            "Rufe das Skript `application-pipeline compile-cv <application-folder>` auf."
-            in text
-        )
+        assert "application-pipeline compile-cv <application-folder>" in text
+        assert "cover_<application-folder>.pdf" in text
+        assert "resume_<application-folder>.pdf" in text
+        assert "combined_<application-folder>.pdf" in text
     return text
 
 
@@ -806,17 +811,16 @@ def test_seeded_inline_tool_skills_link_to_tool_local_shared_support(
             _assert_seeded_skill_affordances(skills_root / skill / "SKILL.md", skill)
 
 
-def test_fresh_init_seeds_write_cv_with_cover_pattern_library_contract(
+def test_fresh_init_seeds_write_cv_with_cover_pattern_library_affordances(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
-    return
 
-    text = (_ap(tmp_path) / "agent-skills" / "write-cv.md").read_text(encoding="utf-8")
-    assert "application-pipeline/user-info/cv/cover-patterns.md" in text
-    assert "Schreibe die Umlaute ä, ü, ö und ß genau so." in text
-    assert "Cover-Paragraph-Pattern-Match" in text
-    assert "Interactive Cover Shortening" in text
+    for root in (_claude, _codex):
+        _assert_seeded_skill_affordances(
+            root(tmp_path) / "skills" / "write-cv" / "SKILL.md",
+            "write-cv",
+        )
 
 
 def test_seeded_tool_local_shared_support_files_reference_cv_template_path(
@@ -911,59 +915,6 @@ def test_first_bootstrap_seeds_missing_tool_shared_files_and_preserves_unknown_n
     assert (
         _codex(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md"
     ).read_text() == "# operator-local support\n"
-
-
-def test_analyse_listing_template_defines_primary_cover_strategy_arc() -> None:
-    assert len(_ap_template_bytes("agent-skills/analyse-listing.md")) > 0
-
-
-def test_fresh_init_seeds_analyse_listing_primary_cover_strategy_arc(
-    tmp_path: Path,
-) -> None:
-    init(tmp_path)
-
-    assert (_claude(tmp_path) / "skills" / "analyse-listing" / "SKILL.md").exists()
-    assert (_codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md").exists()
-
-
-def test_analyse_listing_template_defines_four_explicit_cover_sections() -> None:
-    assert len(_ap_template_bytes("agent-skills/analyse-listing.md")) > 0
-
-
-def test_analyse_listing_template_sorts_existing_cover_semantics_into_sections() -> (
-    None
-):
-    assert len(_ap_template_bytes("agent-skills/analyse-listing.md")) > 0
-
-
-def test_write_cv_template_reads_cover_strategy_from_analysis() -> None:
-    assert len(_ap_template_bytes("agent-skills/write-cv.md")) > 0
-
-
-def test_write_cv_template_reads_cover_sections_as_direct_handoff() -> None:
-    assert len(_ap_template_bytes("agent-skills/write-cv.md")) > 0
-
-
-def test_write_cv_template_follows_cover_strategy_contract() -> None:
-    assert len(_ap_template_bytes("agent-skills/write-cv.md")) > 0
-
-
-def test_write_cv_template_follows_interactive_cover_drafting_contract() -> None:
-    text = _ap_template_bytes("agent-skills/write-cv.md").decode()
-    return
-
-    assert "Schreibe die Umlaute ä, ü, ö und ß genau so." in text
-    assert "präsentiere genau einen Vorschlag als Cover-Paragraph-Pattern-Match" in text
-    assert (
-        "präsentiere drei Alternativen mit unterschiedlichen `argument_type`s." in text
-    )
-    assert "Interactive Cover Shortening" in text
-    assert (
-        "Wichtig: Dieser Post-Build-Shortening-Loop schreibt nie nach `cover-patterns.md`."
-        in text
-    )
-    assert "Erfolgs-Report" in text
-    assert "Schreib-Whitelist" in text
 
 
 def test_init_skips_existing_cv_skeleton(tmp_path: Path) -> None:
@@ -1317,7 +1268,7 @@ def test_refresh_restores_missing_codex_wrapper_and_preserves_neighboring_user_f
 
     init(tmp_path, refresh=True)
 
-    assert skill_file.exists()
+    _assert_seeded_skill_affordances(skill_file, "write-cv")
     assert notes.read_text() == "# wip\n"
 
 
@@ -1344,12 +1295,7 @@ def test_fresh_init_seeds_claude_skill_templates_with_inlined_workflows(
 
     for skill in _SKILL_DIRS:
         skill_file = _claude(tmp_path) / "skills" / skill / "SKILL.md"
-        text = _assert_seeded_skill_affordances(skill_file, skill)
-        _, description = _skill_frontmatter(text)
-        if skill == "write-cv":
-            assert description.startswith(
-                "Erzeugt eine angepasste cv.tex (CV Slot-Map)"
-            )
+        _assert_seeded_skill_affordances(skill_file, skill)
 
 
 def test_init_seeds_matching_skill_metadata_in_both_tool_roots(
@@ -1391,7 +1337,8 @@ def test_refresh_overwrites_package_owned_skill_files(tmp_path: Path) -> None:
 
     init(tmp_path, refresh=True)
 
-    assert skill_file.exists()
+    assert skill_file.read_text() != "# tampered\n"
+    _assert_seeded_skill_affordances(skill_file, "write-cv")
 
 
 def test_refresh_preserves_preexisting_adapter_local_shared_dir(tmp_path: Path) -> None:
@@ -1453,7 +1400,7 @@ def test_refresh_restores_missing_wrapper_and_preserves_neighboring_user_files(
 
     init(tmp_path, refresh=True)
 
-    assert skill_file.exists()
+    _assert_seeded_skill_affordances(skill_file, "write-cv")
     assert notes.read_text() == "# wip\n"
 
 

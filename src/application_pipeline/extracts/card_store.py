@@ -11,7 +11,7 @@ import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from application_pipeline.atomic_write import write_atomic
 
@@ -103,18 +103,22 @@ def _wipe_extracts_if_v1(path: Path) -> None:
     if not isinstance(data, dict):
         path.unlink(missing_ok=True)
         return
-    for record in data.values():
-        if not isinstance(record, dict):
+    if not data:
+        return
+    for raw_key, record in data.items():
+        try:
+            key = int(raw_key)
+        except (TypeError, ValueError):
             path.unlink(missing_ok=True)
             return
-        if "header" not in record or "summary" not in record:
-            path.unlink(missing_ok=True)
+        if _classify_persisted_record(record, path, key) != "retired_v1":
             return
+    path.unlink(missing_ok=True)
 
 
 def _decode_card_store_records(
     data: dict[str, Any], path: Path
-) -> dict[int, CardExtract]:
+) -> tuple[dict[int, CardExtract], bool]:
     try:
         parsed = {int(k): v for k, v in data.items()}
     except (ValueError, TypeError) as exc:
@@ -122,9 +126,46 @@ def _decode_card_store_records(
             f"card store at {path} has non-integer key: {exc}"
         ) from exc
 
-    return {
-        key: _decode_card_record(record, path, key) for key, record in parsed.items()
-    }
+    saw_retired_v1 = False
+    decoded_records: dict[int, CardExtract] = {}
+    for key, record in parsed.items():
+        match _classify_persisted_record(record, path, key):
+            case "current_card":
+                decoded_records[key] = _decode_card_record(record, path, key)
+            case "retired_v1":
+                saw_retired_v1 = True
+            case "malformed":
+                raise ExtractStoreError(
+                    f"card store at {path} has invalid card record for key {key}: "
+                    "expected object with header, summary, and optional body"
+                )
+    return decoded_records, saw_retired_v1
+
+
+def _classify_persisted_record(
+    record: Any, path: Path, key: int
+) -> Literal["current_card", "retired_v1", "malformed"]:
+    if _record_presents_current_card_fields(record):
+        _validate_persisted_card_record(record, path, key)
+        return "current_card"
+    if isinstance(record, dict):
+        return "retired_v1"
+    return "malformed"
+
+
+def _record_presents_current_card_fields(record: Any) -> bool:
+    return isinstance(record, dict) and any(
+        field in record for field in ("header", "summary", "body")
+    )
+
+
+def _wipe_card_store_to_empty_object(path: Path) -> None:
+    try:
+        write_atomic(path, b"{}")
+    except OSError as exc:
+        raise ExtractStoreError(
+            f"could not persist card store to {path}: {exc}"
+        ) from exc
 
 
 def _decode_card_record(record: Any, path: Path, key: int) -> CardExtract:
@@ -232,4 +273,9 @@ def load_card_store(
             f"delete the file to start fresh"
         )
 
-    return CardStore(path, _decode_card_store_records(data, path))
+    records, saw_retired_v1 = _decode_card_store_records(data, path)
+    if saw_retired_v1:
+        _wipe_card_store_to_empty_object(path)
+        return CardStore(path, {})
+
+    return CardStore(path, records)

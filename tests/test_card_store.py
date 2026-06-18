@@ -87,6 +87,44 @@ def test_load_rejects_non_object_json(store_path: Path) -> None:
         load_card_store(store_path)
 
 
+def test_load_card_store_wipes_retired_v1_integer_keyed_records(
+    store_path: Path,
+) -> None:
+    store_path.write_text(
+        json.dumps(
+            {
+                "5": {
+                    "seniority": "senior",
+                    "work_model": "remote",
+                    "contract_type": "permanent",
+                    "key_skills": ["Python"],
+                    "key_responsibilities": ["Build systems"],
+                    "must_have_requirements": ["Distributed systems"],
+                    "notable_caveats": "",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = load_card_store(store_path)
+
+    assert store.get(5) is None
+    assert json.loads(store_path.read_text(encoding="utf-8")) == {}
+
+
+def test_load_rejects_card_like_integer_keyed_record_with_non_string_header_or_summary(
+    store_path: Path,
+) -> None:
+    original = json.dumps({"5": {"header": 7, "summary": "S"}})
+    store_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ExtractStoreError, match="invalid card record"):
+        load_card_store(store_path)
+
+    assert store_path.read_text(encoding="utf-8") == original
+
+
 def test_load_rejects_record_outside_documented_card_store_shapes(
     store_path: Path,
 ) -> None:
@@ -97,6 +135,30 @@ def test_load_rejects_record_outside_documented_card_store_shapes(
 
     with pytest.raises(ExtractStoreError, match="invalid card record"):
         load_card_store(store_path)
+
+
+def test_load_rejects_current_card_record_with_non_string_body(
+    store_path: Path,
+) -> None:
+    original = json.dumps({"5": {"header": "H", "summary": "S", "body": 99}})
+    store_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ExtractStoreError, match="invalid card record"):
+        load_card_store(store_path)
+
+    assert store_path.read_text(encoding="utf-8") == original
+
+
+def test_load_rejects_integer_keyed_record_that_is_neither_card_nor_retired_v1(
+    store_path: Path,
+) -> None:
+    original = json.dumps({"5": ["not", "a", "record"]})
+    store_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ExtractStoreError, match="invalid card record"):
+        load_card_store(store_path)
+
+    assert store_path.read_text(encoding="utf-8") == original
 
 
 def test_url_keyed_extracts_raises_on_load(store_path: Path) -> None:

@@ -6,6 +6,7 @@ import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from application_pipeline.atomic_write import write_atomic
 
@@ -20,30 +21,19 @@ class CardExtract:
 
 
 class CardStore:
-    def __init__(self, path: Path, records: dict[int, dict[str, str]]) -> None:
+    def __init__(self, path: Path, records: dict[int, CardExtract]) -> None:
         self._path = path
         self._records = records
         self._lock = threading.Lock()
 
     def get(self, key: int) -> CardExtract | None:
         with self._lock:
-            record = self._records.get(key)
-        if record is None:
-            return None
-        return CardExtract(
-            header=record["header"],
-            summary=record["summary"],
-            body=record.get("body", ""),
-        )
+            return self._records.get(key)
 
     def put(self, key: int, extract: CardExtract) -> None:
         with self._lock:
             new_records = dict(self._records)
-            new_records[key] = {
-                "header": extract.header,
-                "summary": extract.summary,
-                "body": extract.body,
-            }
+            new_records[key] = extract
             self._persist(new_records)
             self._records = new_records
 
@@ -53,11 +43,11 @@ class CardStore:
             if record is None or not body:
                 return False
             new_records = dict(self._records)
-            new_records[key] = {
-                "header": record["header"],
-                "summary": record["summary"],
-                "body": body,
-            }
+            new_records[key] = CardExtract(
+                header=record.header,
+                summary=record.summary,
+                body=body,
+            )
             self._persist(new_records)
             self._records = new_records
             return True
@@ -70,9 +60,19 @@ class CardStore:
             self._persist(new_records)
             self._records = new_records
 
-    def _persist(self, records: dict[int, dict[str, str]]) -> None:
+    def _persist(self, records: dict[int, CardExtract]) -> None:
         payload = json.dumps(
-            records, indent=2, sort_keys=True, ensure_ascii=False
+            {
+                key: {
+                    "header": record.header,
+                    "summary": record.summary,
+                    "body": record.body,
+                }
+                for key, record in records.items()
+            },
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
         ).encode("utf-8")
         try:
             write_atomic(self._path, payload)
@@ -80,6 +80,26 @@ class CardStore:
             raise ExtractStoreError(
                 f"could not persist card store to {self._path}: {exc}"
             ) from exc
+
+
+def _decode_card_store_records(
+    data: dict[str, Any], path: Path
+) -> dict[int, CardExtract]:
+    try:
+        parsed = {int(k): v for k, v in data.items()}
+    except (ValueError, TypeError) as exc:
+        raise ExtractStoreError(
+            f"card store at {path} has non-integer key: {exc}"
+        ) from exc
+
+    return {
+        key: CardExtract(
+            header=record["header"],
+            summary=record["summary"],
+            body=record.get("body", ""),
+        )
+        for key, record in parsed.items()
+    }
 
 
 def load_card_store(
@@ -116,11 +136,4 @@ def load_card_store(
             f"delete the file to start fresh"
         )
 
-    try:
-        records = {int(k): v for k, v in data.items()}
-    except (ValueError, TypeError) as exc:
-        raise ExtractStoreError(
-            f"card store at {path} has non-integer key: {exc}"
-        ) from exc
-
-    return CardStore(path, records)
+    return CardStore(path, _decode_card_store_records(data, path))

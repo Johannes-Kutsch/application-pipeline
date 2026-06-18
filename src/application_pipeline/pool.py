@@ -63,16 +63,15 @@ class Pool:
                 continue
             with self._lock:
                 stub = self._stubs.get(verdict.id)
-            if stub is None:
-                continue
             daily_results_file.commit(
                 rank=verdict.rank,
                 header=card.header,
                 summary=card.summary,
-                url=stub.url,
+                url="" if stub is None else stub.url,
                 body=card.body,
             )
-            dedup_store.mark_selected_by_judge(verdict.id, stub)
+            if stub is not None:
+                dedup_store.mark_selected_by_judge(verdict.id, stub)
             written += 1
         return written
 

@@ -407,7 +407,7 @@ def test_pool_uses_latest_admitted_stub_when_applying_match_verdicts(
     assert dedup_store.calls == [(606, "https://example.com/replacement")]
 
 
-def test_pool_skips_verdicts_when_stub_is_missing(tmp_path: Path) -> None:
+def test_pool_commits_fallback_url_when_stub_is_missing(tmp_path: Path) -> None:
     card_store = load_card_store(tmp_path / "extracts.json")
     pool = Pool()
     results_file = _RecordingDailyResultsFile()
@@ -429,12 +429,66 @@ def test_pool_skips_verdicts_when_stub_is_missing(tmp_path: Path) -> None:
         dedup_store=dedup_store,
     )
 
-    assert written == 0
-    assert results_file.commits == []
+    assert written == 1
+    assert results_file.commits == [
+        {
+            "rank": 1,
+            "header": "Header 505",
+            "summary": "Summary 505",
+            "url": "",
+            "body": "Raw description 505",
+        }
+    ]
     assert dedup_store.calls == []
 
 
-def test_pool_commits_only_pool_admitted_cards_in_rank_order(tmp_path: Path) -> None:
+def test_pool_writes_fallback_card_with_empty_url_when_stub_is_missing(
+    tmp_path: Path,
+) -> None:
+    pool = Pool()
+    card_store = load_card_store(tmp_path / "extracts.json")
+    dedup_store = load_dedup(tmp_path / ".seen.json", card_store=card_store)
+    daily_results_file = DailyResultsFile(tmp_path / "results" / "2026-06-17.md")
+    daily_results_file.ensure_initialized()
+
+    matched_stub = PositionStub(
+        url="https://example.com/matched-without-pool-stub",
+        title="Matched without pool stub role",
+        source="test",
+    )
+    dedup_store.mark_matched(505, matched_stub)
+    card_store.put(
+        505,
+        CardExtract(
+            header="Header 505",
+            summary="Summary 505",
+            body="Raw description 505",
+        ),
+    )
+
+    written = pool.apply_match_verdicts(
+        [MatchVerdict(id=505, rank=1)],
+        card_store=card_store,
+        daily_results_file=daily_results_file,
+        dedup_store=dedup_store,
+    )
+
+    assert written == 1
+    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
+        "# **1:** Header 505\n\n\n\n\nSummary 505\n\n---\n\nRaw description 505\n\n---\n"
+    )
+    on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
+    assert on_disk["505"]["status"] == "matched"
+    assert card_store.get(505) == CardExtract(
+        header="Header 505",
+        summary="Summary 505",
+        body="Raw description 505",
+    )
+
+
+def test_pool_commits_cards_in_rank_order_with_empty_url_fallbacks(
+    tmp_path: Path,
+) -> None:
     pool = Pool()
     card_store = load_card_store(tmp_path / "extracts.json")
     dedup_store = load_dedup(tmp_path / ".seen.json", card_store=card_store)
@@ -493,7 +547,7 @@ def test_pool_commits_only_pool_admitted_cards_in_rank_order(tmp_path: Path) -> 
         dedup_store=dedup_store,
     )
 
-    assert written == 2
+    assert written == 3
     assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
         "# **1:** Header 202\n"
         "\n"
@@ -517,6 +571,18 @@ def test_pool_commits_only_pool_admitted_cards_in_rank_order(tmp_path: Path) -> 
         "---\n"
         "\n"
         "Raw description 101\n"
+        "\n"
+        "---\n"
+        "# **3:** Header 303\n"
+        "\n"
+        "\n"
+        "\n"
+        "\n"
+        "Summary 303\n"
+        "\n"
+        "---\n"
+        "\n"
+        "Raw description 303\n"
         "\n"
         "---\n"
     )

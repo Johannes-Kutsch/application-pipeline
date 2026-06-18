@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import sys
 import threading
@@ -41,7 +40,11 @@ from application_pipeline.dedup import (
     DedupStoreError,
     DeduplicationStore,
 )
-from application_pipeline.extracts.card_store import CardStore, load_card_store
+from application_pipeline.extracts.card_store import (
+    CardStore,
+    _wipe_extracts_if_v1,
+    load_card_store,
+)
 from application_pipeline.failure_report import (
     FailureReportWriter,
 )
@@ -114,32 +117,6 @@ class _RunState:
         with self._lock:
             if self.fatal_exc is None:
                 self.fatal_exc = exc
-
-
-# ---------------------------------------------------------------------------
-# Extracts wipe helper (ADR-0024)
-# ---------------------------------------------------------------------------
-
-
-def _wipe_extracts_if_v1(path: Path) -> None:
-    """Delete extracts.json if it contains v1-format records (pre-upgrade data)."""
-    if not path.exists():
-        return
-    try:
-        data = json.loads(path.read_bytes())
-    except (json.JSONDecodeError, OSError):
-        path.unlink(missing_ok=True)
-        return
-    if not isinstance(data, dict):
-        path.unlink(missing_ok=True)
-        return
-    for record in data.values():
-        if not isinstance(record, dict):
-            path.unlink(missing_ok=True)
-            return
-        if "header" not in record or "summary" not in record:
-            path.unlink(missing_ok=True)
-            return
 
 
 def run(

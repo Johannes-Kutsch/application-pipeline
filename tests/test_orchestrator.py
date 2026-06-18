@@ -2262,7 +2262,7 @@ def test_judge_pending_appears_in_run_complete_event(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write a v2-format extracts.json so _wipe_extracts_if_v1 keeps it
+    # Write a current-format extracts.json so the card-store wipe helper keeps it
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(json.dumps({"1": _card}), encoding="utf-8")
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -2362,7 +2362,7 @@ def test_judge_pending_judge_failure_stays_matched_on_rerun(
         ),
         encoding="utf-8",
     )
-    # Write a v2-format extracts.json so _wipe_extracts_if_v1 keeps it
+    # Write a current-format extracts.json so the card-store wipe helper keeps it
     _card = {"header": "ML Engineer · ACME · Hamburg", "summary": "Good ML role."}
     (tmp_path / "extracts.json").write_text(json.dumps({"1": _card}), encoding="utf-8")
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -5068,7 +5068,7 @@ def test_freshness_pool_reentry_expired_deletes_extract(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    # Write a v2-format extract for the URL (so _wipe_extracts_if_v1 keeps it)
+    # Write a current-format extract for the URL so the card-store wipe helper keeps it
     extracts_path.write_text(
         json.dumps(
             {
@@ -5269,7 +5269,7 @@ def test_freshness_pool_reentry_fresh_position_stays_matched_and_reaches_judge(
         ),
         encoding="utf-8",
     )
-    # Write v2-format extracts.json so _wipe_extracts_if_v1 keeps it
+    # Write current-format extracts.json so the card-store wipe helper keeps it
     extracts_path.write_text(
         json.dumps(
             {

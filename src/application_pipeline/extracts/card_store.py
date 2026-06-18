@@ -80,6 +80,27 @@ class CardStore:
             ) from exc
 
 
+def _wipe_extracts_if_v1(path: Path) -> None:
+    """Delete extracts.json if it contains retired v1-format records."""
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_bytes())
+    except (json.JSONDecodeError, OSError):
+        path.unlink(missing_ok=True)
+        return
+    if not isinstance(data, dict):
+        path.unlink(missing_ok=True)
+        return
+    for record in data.values():
+        if not isinstance(record, dict):
+            path.unlink(missing_ok=True)
+            return
+        if "header" not in record or "summary" not in record:
+            path.unlink(missing_ok=True)
+            return
+
+
 def _decode_card_store_records(
     data: dict[str, Any], path: Path
 ) -> dict[int, CardExtract]:

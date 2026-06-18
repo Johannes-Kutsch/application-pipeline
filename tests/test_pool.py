@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,35 @@ class _BoomResultsFile:
         self, *, rank: int, header: str, summary: str, url: str, body: str
     ) -> None:
         raise RuntimeError("disk full")
+
+
+def _read_committed_cards(path: Path) -> list[dict[str, str | int]]:
+    if not path.exists():
+        return []
+    pattern = re.compile(
+        r"# \*\*(?P<rank>\d+):\*\* (?P<title>[^\n]+)\n\n"
+        r"(?P<metadata>[^\n]*)\n"
+        r"(?P<url>[^\n]*)\n\n"
+        r"(?P<summary>.*?)\n\n---\n\n"
+        r"(?P<body>.*?)\n\n---\n",
+        re.S,
+    )
+    cards: list[dict[str, str | int]] = []
+    for match in pattern.finditer(path.read_text(encoding="utf-8")):
+        metadata = match.group("metadata")
+        header = match.group("title")
+        if metadata:
+            header = f"{header}\n{metadata}"
+        cards.append(
+            {
+                "rank": int(match.group("rank")),
+                "header": header,
+                "summary": match.group("summary"),
+                "url": match.group("url"),
+                "body": match.group("body"),
+            }
+        )
+    return cards
 
 
 def test_pool_projects_judge_candidates_from_admitted_listings(
@@ -101,20 +131,15 @@ def test_pool_completes_judge_selection_without_exposing_stub_storage(
     )
 
     assert written == 1
-    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
-        "# **1:** Header 21\n"
-        "\n"
-        "\n"
-        "https://example.com/selected\n"
-        "\n"
-        "Summary 21\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 21\n"
-        "\n"
-        "---\n"
-    )
+    assert _read_committed_cards(tmp_path / "results" / "2026-06-17.md") == [
+        {
+            "rank": 1,
+            "header": "Header 21",
+            "summary": "Summary 21",
+            "url": "https://example.com/selected",
+            "body": "Raw description 21",
+        }
+    ]
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["21"]["status"] == "selected_by_judge"
     assert card_store.get(21) is None
@@ -155,20 +180,15 @@ def test_pool_applies_match_verdicts_through_real_local_collaborators(
     )
 
     assert written == 1
-    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
-        "# **1:** Header 22\n"
-        "\n"
-        "Acme · Hamburg\n"
-        "https://example.com/selected\n"
-        "\n"
-        "Summary 22\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 22\n"
-        "\n"
-        "---\n"
-    )
+    assert _read_committed_cards(tmp_path / "results" / "2026-06-17.md") == [
+        {
+            "rank": 1,
+            "header": "Header 22\nAcme · Hamburg",
+            "summary": "Summary 22",
+            "url": "https://example.com/selected",
+            "body": "Raw description 22",
+        }
+    ]
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["22"]["status"] == "selected_by_judge"
     assert card_store.get(22) is None
@@ -220,32 +240,22 @@ def test_pool_applies_match_verdicts_in_rank_order(tmp_path: Path) -> None:
     )
 
     assert written == 2
-    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
-        "# **1:** Header 202\n"
-        "\n"
-        "\n"
-        "https://example.com/second\n"
-        "\n"
-        "Summary 202\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 202\n"
-        "\n"
-        "---\n"
-        "# **2:** Header 101\n"
-        "\n"
-        "\n"
-        "https://example.com/first\n"
-        "\n"
-        "Summary 101\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 101\n"
-        "\n"
-        "---\n"
-    )
+    assert _read_committed_cards(tmp_path / "results" / "2026-06-17.md") == [
+        {
+            "rank": 1,
+            "header": "Header 202",
+            "summary": "Summary 202",
+            "url": "https://example.com/second",
+            "body": "Raw description 202",
+        },
+        {
+            "rank": 2,
+            "header": "Header 101",
+            "summary": "Summary 101",
+            "url": "https://example.com/first",
+            "body": "Raw description 101",
+        },
+    ]
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["202"]["status"] == "selected_by_judge"
     assert on_disk["101"]["status"] == "selected_by_judge"
@@ -401,20 +411,15 @@ def test_pool_uses_latest_admitted_stub_when_applying_match_verdicts(
     )
 
     assert written == 1
-    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
-        "# **1:** Header 606\n"
-        "\n"
-        "\n"
-        "https://example.com/replacement\n"
-        "\n"
-        "Summary 606\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 606\n"
-        "\n"
-        "---\n"
-    )
+    assert _read_committed_cards(tmp_path / "results" / "2026-06-17.md") == [
+        {
+            "rank": 1,
+            "header": "Header 606",
+            "summary": "Summary 606",
+            "url": "https://example.com/replacement",
+            "body": "Raw description 606",
+        }
+    ]
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["606"]["status"] == "selected_by_judge"
     assert card_store.get(606) is None
@@ -444,9 +449,15 @@ def test_pool_commits_fallback_url_when_stub_is_missing(tmp_path: Path) -> None:
     )
 
     assert written == 1
-    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
-        "# **1:** Header 505\n\n\n\n\nSummary 505\n\n---\n\nRaw description 505\n\n---\n"
-    )
+    assert _read_committed_cards(tmp_path / "results" / "2026-06-17.md") == [
+        {
+            "rank": 1,
+            "header": "Header 505",
+            "summary": "Summary 505",
+            "url": "",
+            "body": "Raw description 505",
+        }
+    ]
     assert not (tmp_path / ".seen.json").exists()
     assert card_store.get(505) == CardExtract(
         header="Header 505",
@@ -487,9 +498,15 @@ def test_pool_writes_fallback_card_with_empty_url_when_stub_is_missing(
     )
 
     assert written == 1
-    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
-        "# **1:** Header 505\n\n\n\n\nSummary 505\n\n---\n\nRaw description 505\n\n---\n"
-    )
+    assert _read_committed_cards(tmp_path / "results" / "2026-06-17.md") == [
+        {
+            "rank": 1,
+            "header": "Header 505",
+            "summary": "Summary 505",
+            "url": "",
+            "body": "Raw description 505",
+        }
+    ]
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["505"]["status"] == "matched"
     assert card_store.get(505) == CardExtract(
@@ -561,44 +578,29 @@ def test_pool_commits_cards_in_rank_order_with_empty_url_fallbacks(
     )
 
     assert written == 3
-    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
-        "# **1:** Header 202\n"
-        "\n"
-        "\n"
-        "https://example.com/202\n"
-        "\n"
-        "Summary 202\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 202\n"
-        "\n"
-        "---\n"
-        "# **2:** Header 101\n"
-        "\n"
-        "\n"
-        "https://example.com/101\n"
-        "\n"
-        "Summary 101\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 101\n"
-        "\n"
-        "---\n"
-        "# **3:** Header 303\n"
-        "\n"
-        "\n"
-        "\n"
-        "\n"
-        "Summary 303\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 303\n"
-        "\n"
-        "---\n"
-    )
+    assert _read_committed_cards(tmp_path / "results" / "2026-06-17.md") == [
+        {
+            "rank": 1,
+            "header": "Header 202",
+            "summary": "Summary 202",
+            "url": "https://example.com/202",
+            "body": "Raw description 202",
+        },
+        {
+            "rank": 2,
+            "header": "Header 101",
+            "summary": "Summary 101",
+            "url": "https://example.com/101",
+            "body": "Raw description 101",
+        },
+        {
+            "rank": 3,
+            "header": "Header 303",
+            "summary": "Summary 303",
+            "url": "",
+            "body": "Raw description 303",
+        },
+    ]
 
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["101"]["status"] == "selected_by_judge"
@@ -648,20 +650,15 @@ def test_pool_skips_admitted_winner_without_card_and_preserves_dedup_status(
     )
 
     assert written == 1
-    assert (tmp_path / "results" / "2026-06-17.md").read_text(encoding="utf-8") == (
-        "# **2:** Header 707\n"
-        "\n"
-        "\n"
-        "https://example.com/selected\n"
-        "\n"
-        "Summary 707\n"
-        "\n"
-        "---\n"
-        "\n"
-        "Raw description 707\n"
-        "\n"
-        "---\n"
-    )
+    assert _read_committed_cards(tmp_path / "results" / "2026-06-17.md") == [
+        {
+            "rank": 2,
+            "header": "Header 707",
+            "summary": "Summary 707",
+            "url": "https://example.com/selected",
+            "body": "Raw description 707",
+        }
+    ]
     on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
     assert on_disk["707"]["status"] == "selected_by_judge"
     assert on_disk["808"]["status"] == "matched"

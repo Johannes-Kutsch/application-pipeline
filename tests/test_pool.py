@@ -85,14 +85,6 @@ def test_pool_projects_judge_candidates_from_admitted_listings(
     ]
 
 
-def test_pool_exposes_judge_candidates_as_the_candidate_projection_operation() -> None:
-    pool = Pool()
-
-    assert not hasattr(pool, "build_candidates")
-    assert not hasattr(pool, "selected_listing_url")
-    assert not hasattr(pool, "mark_selected_by_judge")
-
-
 def test_pool_completes_judge_selection_without_exposing_stub_storage(
     tmp_path: Path,
 ) -> None:

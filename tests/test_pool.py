@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from application_pipeline.dedup import load as load_dedup
+from application_pipeline.daily_results_file import ResultsFileError
 from application_pipeline.daily_results_file import DailyResultsFile
 from application_pipeline.extracts import CardExtract, load_card_store
 from application_pipeline.llm import JudgeCandidate, MatchVerdict
@@ -286,6 +288,49 @@ def test_pool_does_not_transition_winner_when_commit_fails(tmp_path: Path) -> No
         )
 
     assert dedup_store.calls == []
+
+
+def test_pool_propagates_daily_results_commit_failure_without_selecting_or_deleting_card(
+    tmp_path: Path,
+) -> None:
+    pool = Pool()
+    card_store = load_card_store(tmp_path / "extracts.json")
+    dedup_store = load_dedup(tmp_path / ".seen.json", card_store=card_store)
+    daily_results_file = DailyResultsFile(tmp_path / "results" / "2026-06-17.md")
+    daily_results_file.ensure_initialized()
+    stub = PositionStub(
+        url="https://example.com/failing-real",
+        title="Failing real role",
+        source="test",
+    )
+
+    pool.add_matched(stub, listing_id=313)
+    dedup_store.mark_matched(313, stub)
+    card_store.put(
+        313,
+        CardExtract(
+            header="Header 313",
+            summary="Summary 313",
+            body="Raw description 313",
+        ),
+    )
+
+    with patch("builtins.open", side_effect=OSError("disk full")):
+        with pytest.raises(ResultsFileError, match="append failed"):
+            pool.apply_match_verdicts(
+                [MatchVerdict(id=313, rank=1)],
+                card_store=card_store,
+                daily_results_file=daily_results_file,
+                dedup_store=dedup_store,
+            )
+
+    on_disk = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
+    assert on_disk["313"]["status"] == "matched"
+    assert card_store.get(313) == CardExtract(
+        header="Header 313",
+        summary="Summary 313",
+        body="Raw description 313",
+    )
 
 
 def test_pool_skips_verdicts_without_cards(tmp_path: Path) -> None:

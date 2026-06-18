@@ -3223,6 +3223,44 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     ]
 
 
+def test_retired_v1_extracts_are_wiped_before_orchestrator_loads_card_store(
+    tmp_path: Path,
+) -> None:
+    runtime_dir = tmp_path / ".runtime-data"
+    extracts_path = runtime_dir / "extracts.json"
+    extracts_path.parent.mkdir(parents=True, exist_ok=True)
+    extracts_path.write_text(
+        json.dumps({"1": {"company": "Acme", "title": "Legacy extract"}}),
+        encoding="utf-8",
+    )
+
+    class _EmptyParser(_StubParserBase):
+        def __enter__(self) -> "_EmptyParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return []
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+        ),
+        llm_enricher=_make_fake_llm_enricher(load_card_store(tmp_path / "unused.json")),
+        extractor=_stub_extractor(),
+        parser_registry=lambda _: _EmptyParser,  # type: ignore[return-value, arg-type]
+    )
+
+    assert summary.written == 0
+    assert not extracts_path.exists()
+
+
 def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
     """ExtractorError from llm_enricher.enrich(): the failing position is not marked seen; run continues."""
     seen_path = tmp_path / ".seen.json"

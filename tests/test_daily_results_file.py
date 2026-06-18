@@ -28,28 +28,45 @@ _FULL_CARD_KWARGS: _CardKwargs = dict(
 
 
 def _split_cards(text: str) -> list[str]:
-    return [f"# **{card}" for card in text.split("# **") if card]
+    lines = text.splitlines(keepends=True)
+    card_start_indexes = [
+        index for index, line in enumerate(lines) if line.startswith("# **")
+    ]
+    return [
+        "".join(lines[start:end])
+        for start, end in zip(card_start_indexes, [*card_start_indexes[1:], len(lines)])
+    ]
 
 
 def _assert_card_semantics(card: str, *, expected: _CardKwargs) -> None:
     header_lines = expected["header"].splitlines()
     title = header_lines[0]
-    metadata = header_lines[1:]
+    meaningful_lines = [line for line in card.splitlines() if line]
 
-    assert card.startswith(f"# **{expected['rank']}:** {title}\n")
-    for line in metadata:
-        assert line in card
-    assert expected["url"] in card
-    assert expected["summary"] in card
-    assert expected["body"] in card
-    assert card.count("---") == 2
+    assert meaningful_lines == [
+        f"# **{expected['rank']}:** {title}",
+        *header_lines[1:],
+        expected["url"],
+        expected["summary"],
+        "---",
+        expected["body"],
+        "---",
+    ]
 
 
-def test_committed_card_preserves_card_semantics(tmp_path: Path) -> None:
-    results_file = DailyResultsFile(tmp_path / "results" / "2026-01-01.md")
+@pytest.mark.parametrize(
+    "relative_path",
+    [Path("results.md"), Path("results/2026-01-01.md")],
+    ids=["non_dated_file", "dated_file"],
+)
+def test_committed_card_preserves_card_semantics(
+    tmp_path: Path, relative_path: Path
+) -> None:
+    results_path = tmp_path / relative_path
+    results_file = DailyResultsFile(results_path)
     results_file.ensure_initialized()
     results_file.commit(**_FULL_CARD_KWARGS)
-    content = (tmp_path / "results" / "2026-01-01.md").read_text(encoding="utf-8")
+    content = results_path.read_text(encoding="utf-8")
     cards = _split_cards(content)
     assert len(cards) == 1
     _assert_card_semantics(cards[0], expected=_FULL_CARD_KWARGS)

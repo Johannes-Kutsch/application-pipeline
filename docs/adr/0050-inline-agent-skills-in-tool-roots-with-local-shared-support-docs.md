@@ -1,6 +1,8 @@
 # Inline tool SKILLs with tool-local shared support docs
 
 Supersedes ADR-0048.
+Amended by ADR-0052: package templates now use one canonical Agent Skills source tree
+that `init` materialises into both tool-local runtime roots.
 
 Tool-consumed agent workflows are now seeded as complete workflow content directly inside
 `.claude/skills/<workflow>/SKILL.md` and `.codex/skills/<workflow>/SKILL.md`.
@@ -51,9 +53,8 @@ or `init --refresh`.
 
 - `src/application_pipeline/templates/application-pipeline/agent-skills/...` becomes a
   retired bootstrap path rather than a materialised runtime destination.
-- Tool skill templates under `src/application_pipeline/templates/claude/skills/...` and
-  `src/application_pipeline/templates/codex/skills/...` now carry the complete workflow
-  body.
+- Tool skill runtime files under `.claude/skills/...` and `.codex/skills/...` carry the
+  complete workflow body; ADR-0052 consolidates their package template source.
 - Tool-local `_shared` folders are first-class package-owned template destinations.
 - ADR-0048 remains historical context only for the earlier shared-body indirection
   strategy.

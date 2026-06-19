@@ -170,18 +170,20 @@ def test_register_parser_and_gate_rows_write_lifecycle_artifacts(
     metrics.observe_parser_intake_content_drop("jobs_beim_staat", "empty_body")
 
     rows = _lifecycle_rows(tmp_path)
-    assert any(
-        row["component"] == "parser jobs beim staat"
-        and row["event"] == "registered"
-        and row["order"] == 4
-        for row in rows
-    )
-    assert any(
-        row["component"] == "parser jobs beim staat gates"
-        and row["event"] == "registered"
-        and row["order"] == 5
-        for row in rows
-    )
+    assert [{k: v for k, v in row.items() if k != "ts"} for row in rows] == [
+        {
+            "component": "parser jobs beim staat",
+            "event": "registered",
+            "order": 4,
+            "phase": "running",
+        },
+        {
+            "component": "parser jobs beim staat gates",
+            "event": "registered",
+            "order": 5,
+            "phase": "running",
+        },
+    ]
 
 
 def test_parser_done_and_dead_write_phase_changes_to_lifecycle_log(
@@ -1089,7 +1091,7 @@ def test_parser_row_body_keeps_native_enrich_failed_and_forwarded_semantics(
     ]
 
 
-def test_parser_row_body_exposes_query_progress_alongside_parser_activity(
+def test_parser_row_body_preserves_query_progress_discovered_and_forwarded_activity(
     tmp_path: Path,
 ) -> None:
     metrics, display = _make_fake_display_metrics(tmp_path)
@@ -1115,6 +1117,49 @@ def test_parser_row_body_exposes_query_progress_alongside_parser_activity(
         "1/3 queries · 1 discovered · 0 forwarded",
         "1/3 queries · 1 discovered · 1 forwarded",
     ]
+
+
+def test_parser_activity_reconciles_parser_summary_and_run_summary_totals(
+    run_log: RunLog,
+) -> None:
+    metrics = _make_metrics(run_log)
+    metrics.register_parser("alpha", order=0, total_queries=2, has_native_enrich=True)
+    metrics.register_parser("beta", order=2, total_queries=1, has_native_enrich=False)
+
+    metrics.observe_parser_lifecycle(
+        ParserLifecycleObservation(parser_id="alpha", event="discovered")
+    )
+    metrics.observe_parser_intake_enrich_failure("alpha")
+    metrics.observe_parser_lifecycle(
+        ParserLifecycleObservation(parser_id="beta", event="discovered")
+    )
+    metrics.observe_parser_lifecycle(
+        ParserLifecycleObservation(parser_id="beta", event="parser_dead")
+    )
+
+    alpha_summary = metrics.parser_summary(
+        "alpha", end_monotonic=1.0, started_monotonic=0.0
+    )
+    beta_summary = metrics.parser_summary(
+        "beta", end_monotonic=1.0, started_monotonic=0.0
+    )
+    run_summary = metrics.to_run_summary(
+        duration_s=1.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+
+    assert run_summary.discovered == (
+        alpha_summary["discovered"] + beta_summary["discovered"]
+    )
+    assert run_summary.enrich_failed == (
+        alpha_summary["enrich_failed"] + beta_summary["enrich_failed"]
+    )
+    assert run_summary.parsers_dead == (
+        alpha_summary["parsers_dead"] + beta_summary["parsers_dead"]
+    )
 
 
 @pytest.mark.parametrize(

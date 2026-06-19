@@ -67,17 +67,9 @@ class RunSummary:
 
 
 ClassifyItemState = Literal["matched", "rejected", "retryable", "expired"]
-ParserIntakeDropOutcome = Literal[
-    "freshness_discover",
-    "freshness_post_enrich",
-    "dedup_url_hit",
-    "dedup_tuple_hit",
-    "dedup_fuzzy_hit",
-    "dedup_run_hit",
-    "prefilter",
-    "content_empty_body",
-    "content_too_short",
-]
+ParserIntakeFreshnessDropStage = Literal["discover", "post_enrich"]
+ParserIntakeDedupDropKind = Literal["url_hit", "tuple_hit", "fuzzy_hit", "run_hit"]
+ParserIntakeContentDropReason = Literal["empty_body", "too_short"]
 
 
 @dataclass(frozen=True)
@@ -104,23 +96,6 @@ class ClassifyBatchStartObservation:
 @dataclass(frozen=True)
 class ClassifyStageCompletionObservation:
     pass
-
-
-@dataclass(frozen=True)
-class ParserIntakeDropObservation:
-    parser_id: str
-    outcome: ParserIntakeDropOutcome
-
-
-@dataclass(frozen=True)
-class ParserIntakeEnrichFailureObservation:
-    parser_id: str
-
-
-@dataclass(frozen=True)
-class ParserIntakeForwardedObservation:
-    parser_id: str
-    mode: Literal["native", "fallback"]
 
 
 @dataclass(frozen=True)
@@ -354,51 +329,49 @@ class RunMetrics:
         else:
             self._display.update_body(self._gates_row(parser_id), body=gates_body)
 
-    def observe_parser_intake_enrich_failure(
-        self, observation: ParserIntakeEnrichFailureObservation
+    def observe_parser_intake_freshness_drop(
+        self, parser_id: str, stage: ParserIntakeFreshnessDropStage
     ) -> None:
+        del stage
+        self._observe_gate_drop(parser_id, "freshness_dropped")
+
+    def observe_parser_intake_dedup_drop(
+        self, parser_id: str, kind: ParserIntakeDedupDropKind
+    ) -> None:
+        del kind
+        self._observe_gate_drop(parser_id, "dedup_dropped")
+
+    def observe_parser_intake_prefilter_drop(self, parser_id: str) -> None:
+        self._observe_gate_drop(parser_id, "prefilter_dropped")
+
+    def observe_parser_intake_content_drop(
+        self, parser_id: str, reason: ParserIntakeContentDropReason
+    ) -> None:
+        del reason
+        self._observe_gate_drop(parser_id, "content_dropped")
+
+    def observe_parser_intake_enrich_failure(self, parser_id: str) -> None:
         with self._lock:
             self._enrich_failed += 1
-            entry = self._parser_entry(observation.parser_id)
+            entry = self._parser_entry(parser_id)
             entry.enrich_failed += 1
             entry.enrich_failed_count += 1
             pipeline_body = self._pipeline_body()
-            parser_body = self._parser_body(observation.parser_id)
+            parser_body = self._parser_body(parser_id)
         self._display.update_body("pipeline", body=pipeline_body)
-        self._display.update_body(
-            self._parser_row(observation.parser_id), body=parser_body
-        )
-
-    def observe_parser_intake_drop(
-        self, observation: ParserIntakeDropObservation
-    ) -> None:
-        if observation.outcome in ("freshness_discover", "freshness_post_enrich"):
-            self._observe_gate_drop(observation.parser_id, "freshness_dropped")
-            return
-        if observation.outcome in (
-            "dedup_url_hit",
-            "dedup_tuple_hit",
-            "dedup_fuzzy_hit",
-            "dedup_run_hit",
-        ):
-            self._observe_gate_drop(observation.parser_id, "dedup_dropped")
-            return
-        if observation.outcome == "prefilter":
-            self._observe_gate_drop(observation.parser_id, "prefilter_dropped")
-            return
-        self._observe_gate_drop(observation.parser_id, "content_dropped")
+        self._display.update_body(self._parser_row(parser_id), body=parser_body)
 
     def observe_parser_intake_forwarded(
-        self, observation: ParserIntakeForwardedObservation
+        self, parser_id: str, mode: Literal["native", "fallback"]
     ) -> None:
         with self._lock:
-            entry = self._parser_entry(observation.parser_id)
+            entry = self._parser_entry(parser_id)
             entry.enriched += 1
-            if observation.mode == "native":
+            if mode == "native":
                 entry.native_enriched += 1
             entry.forwarded += 1
-            body = self._parser_body(observation.parser_id)
-        self._display.update_body(self._parser_row(observation.parser_id), body=body)
+            body = self._parser_body(parser_id)
+        self._display.update_body(self._parser_row(parser_id), body=body)
 
     def parser_summary(
         self, parser_id: str, end_monotonic: float, started_monotonic: float

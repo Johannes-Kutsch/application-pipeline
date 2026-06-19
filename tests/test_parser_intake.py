@@ -21,11 +21,6 @@ from application_pipeline.parser_intake import ParserIntake
 from application_pipeline.parsers import PositionStub
 from application_pipeline.pool import Pool
 from application_pipeline.prefilter_gate import PreFilterGate
-from application_pipeline.run_metrics import (
-    ParserIntakeDropObservation,
-    ParserIntakeEnrichFailureObservation,
-    ParserIntakeForwardedObservation,
-)
 from tests.parser_intake_harness import (
     CountingPreFilter,
     FailOnPostEnrichFreshnessGate,
@@ -43,20 +38,25 @@ class _ObservingMetrics:
         self.parser_enrich_failures: list[str] = []
         self.parser_forwarded: list[tuple[str, str]] = []
 
-    def observe_parser_intake_drop(
-        self, observation: ParserIntakeDropObservation
+    def observe_parser_intake_freshness_drop(
+        self, parser_id: str, gate_arm: str
     ) -> None:
-        self.parser_drops.append((observation.parser_id, observation.outcome))
+        self.parser_drops.append((parser_id, f"freshness_{gate_arm}"))
 
-    def observe_parser_intake_enrich_failure(
-        self, observation: ParserIntakeEnrichFailureObservation
-    ) -> None:
-        self.parser_enrich_failures.append(observation.parser_id)
+    def observe_parser_intake_dedup_drop(self, parser_id: str, kind: str) -> None:
+        self.parser_drops.append((parser_id, f"dedup_{kind}"))
 
-    def observe_parser_intake_forwarded(
-        self, observation: ParserIntakeForwardedObservation
-    ) -> None:
-        self.parser_forwarded.append((observation.parser_id, observation.mode))
+    def observe_parser_intake_prefilter_drop(self, parser_id: str) -> None:
+        self.parser_drops.append((parser_id, "prefilter"))
+
+    def observe_parser_intake_content_drop(self, parser_id: str, reason: str) -> None:
+        self.parser_drops.append((parser_id, f"content_{reason}"))
+
+    def observe_parser_intake_enrich_failure(self, parser_id: str) -> None:
+        self.parser_enrich_failures.append(parser_id)
+
+    def observe_parser_intake_forwarded(self, parser_id: str, mode: str) -> None:
+        self.parser_forwarded.append((parser_id, mode))
 
 
 class _StageMatchedEnricher:

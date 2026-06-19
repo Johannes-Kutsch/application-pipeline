@@ -25,25 +25,11 @@ from application_pipeline.run_metrics import (
     JudgeLifecycleFailureObservation,
     JudgeLifecycleOutcomeObservation,
     JudgeLifecycleStartObservation,
-    ParserIntakeDropObservation,
-    ParserIntakeDropOutcome,
-    ParserIntakeEnrichFailureObservation,
-    ParserIntakeForwardedObservation,
     RunCompleteObservation,
     RunMetrics,
     RunSummary,
 )
 from application_pipeline.status_display import PlainStatusDisplay
-
-ParserDropOutcome = Literal[
-    "dedup_url_hit",
-    "dedup_tuple_hit",
-    "dedup_fuzzy_hit",
-    "dedup_run_hit",
-    "prefilter",
-    "content_empty_body",
-    "content_too_short",
-]
 
 
 @pytest.fixture
@@ -82,26 +68,14 @@ def _make_usage(
     )
 
 
-def _observe_parser_drop(
-    metrics: RunMetrics, parser_id: str, outcome: ParserIntakeDropOutcome
-) -> None:
-    metrics.observe_parser_intake_drop(
-        ParserIntakeDropObservation(parser_id=parser_id, outcome=outcome)
-    )
-
-
 def _observe_parser_enrich_failure(metrics: RunMetrics, parser_id: str) -> None:
-    metrics.observe_parser_intake_enrich_failure(
-        ParserIntakeEnrichFailureObservation(parser_id=parser_id)
-    )
+    metrics.observe_parser_intake_enrich_failure(parser_id)
 
 
 def _observe_parser_forwarded(
     metrics: RunMetrics, parser_id: str, mode: Literal["native", "fallback"]
 ) -> None:
-    metrics.observe_parser_intake_forwarded(
-        ParserIntakeForwardedObservation(parser_id=parser_id, mode=mode)
-    )
+    metrics.observe_parser_intake_forwarded(parser_id, mode)
 
 
 def _observe_classify_outcome(
@@ -182,7 +156,7 @@ def test_register_parser_and_gate_rows_write_lifecycle_artifacts(
     metrics = _make_metrics(run_log)
 
     metrics.register_parser("jobs_beim_staat", order=4, total_queries=5)
-    _observe_parser_drop(metrics, "jobs_beim_staat", "content_empty_body")
+    metrics.observe_parser_intake_content_drop("jobs_beim_staat", "empty_body")
 
     rows = _lifecycle_rows(tmp_path)
     assert any(
@@ -206,11 +180,11 @@ def test_parser_done_and_dead_write_phase_changes_to_lifecycle_log(
     metrics = _make_metrics(run_log)
 
     metrics.register_parser("alpha", order=2, total_queries=1)
-    _observe_parser_drop(metrics, "alpha", "freshness_discover")
+    metrics.observe_parser_intake_freshness_drop("alpha", "discover")
     metrics.parser_done("alpha")
 
     metrics.register_parser("beta", order=6, total_queries=1)
-    _observe_parser_drop(metrics, "beta", "dedup_url_hit")
+    metrics.observe_parser_intake_dedup_drop("beta", "url_hit")
     metrics.parser_dead("beta")
 
     rows = _lifecycle_rows(tmp_path)
@@ -943,27 +917,41 @@ def test_parser_intake_observations_roll_up_into_public_counters(
 
 
 @pytest.mark.parametrize(
-    ("outcome", "expected_component"),
+    ("kind", "detail", "expected_component"),
     [
-        ("dedup_url_hit", "parser jobs beim staat gates"),
-        ("dedup_tuple_hit", "parser jobs beim staat gates"),
-        ("dedup_fuzzy_hit", "parser jobs beim staat gates"),
-        ("dedup_run_hit", "parser jobs beim staat gates"),
-        ("prefilter", "parser jobs beim staat gates"),
-        ("content_empty_body", "parser jobs beim staat gates"),
-        ("content_too_short", "parser jobs beim staat gates"),
+        ("dedup", "url_hit", "parser jobs beim staat gates"),
+        ("dedup", "tuple_hit", "parser jobs beim staat gates"),
+        ("dedup", "fuzzy_hit", "parser jobs beim staat gates"),
+        ("dedup", "run_hit", "parser jobs beim staat gates"),
+        ("prefilter", None, "parser jobs beim staat gates"),
+        ("content", "empty_body", "parser jobs beim staat gates"),
+        ("content", "too_short", "parser jobs beim staat gates"),
     ],
 )
 def test_parser_drop_observations_register_gate_lifecycle_rows(
     tmp_path: Path,
-    outcome: ParserDropOutcome,
+    kind: str,
+    detail: str | None,
     expected_component: str,
 ) -> None:
     run_log = RunLog(tmp_path)
     metrics = _make_metrics(run_log)
     metrics.register_parser("jobs_beim_staat", order=4, total_queries=5)
 
-    _observe_parser_drop(metrics, "jobs_beim_staat", outcome)
+    if kind == "dedup":
+        assert detail is not None
+        metrics.observe_parser_intake_dedup_drop(
+            "jobs_beim_staat",
+            cast(Literal["url_hit", "tuple_hit", "fuzzy_hit", "run_hit"], detail),
+        )
+    elif kind == "prefilter":
+        metrics.observe_parser_intake_prefilter_drop("jobs_beim_staat")
+    else:
+        assert detail is not None
+        metrics.observe_parser_intake_content_drop(
+            "jobs_beim_staat",
+            cast(Literal["empty_body", "too_short"], detail),
+        )
 
     rows = _lifecycle_rows(tmp_path)
     assert any(

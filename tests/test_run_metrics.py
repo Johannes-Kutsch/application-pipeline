@@ -30,6 +30,7 @@ from application_pipeline.run_metrics import (
     RunSummary,
 )
 from application_pipeline.status_display import PlainStatusDisplay
+from tests.fake_status_display import FakeStatusDisplay
 
 
 @pytest.fixture
@@ -39,6 +40,11 @@ def run_log(tmp_path: Path) -> RunLog:
 
 def _make_metrics(run_log: RunLog) -> RunMetrics:
     return RunMetrics(PlainStatusDisplay(run_log=run_log), run_log=run_log)
+
+
+def _make_fake_display_metrics(tmp_path: Path) -> tuple[RunMetrics, FakeStatusDisplay]:
+    display = FakeStatusDisplay()
+    return RunMetrics(display, run_log=RunLog(tmp_path)), display
 
 
 def _lifecycle_rows(tmp_path: Path) -> list[dict[str, object]]:
@@ -914,6 +920,41 @@ def test_parser_intake_observations_roll_up_into_public_counters(
     assert summary.enrich_failed == 2
     assert summary.errored == 1
     assert summary.classify_items == 1
+
+
+def test_parser_gate_rows_sum_freshness_stages_and_hide_zero_counters(
+    tmp_path: Path,
+) -> None:
+    metrics, display = _make_fake_display_metrics(tmp_path)
+    metrics.register_parser("jobs_beim_staat", order=4, total_queries=5)
+
+    metrics.observe_parser_intake_freshness_drop("jobs_beim_staat", "discover")
+    metrics.observe_parser_intake_freshness_drop("jobs_beim_staat", "post_enrich")
+    metrics.observe_parser_intake_content_drop("jobs_beim_staat", "too_short")
+
+    assert display.body_updates_for("parser jobs beim staat gates") == [
+        "1 freshness",
+        "2 freshness",
+        "2 freshness · 1 content",
+    ]
+
+
+def test_parser_row_body_keeps_native_enrich_failed_and_forwarded_semantics(
+    tmp_path: Path,
+) -> None:
+    metrics, display = _make_fake_display_metrics(tmp_path)
+    metrics.register_parser(
+        "jobs_beim_staat", order=4, total_queries=5, has_native_enrich=True
+    )
+
+    metrics.observe_parser_intake_enrich_failure("jobs_beim_staat")
+    metrics.observe_parser_intake_forwarded("jobs_beim_staat", "native")
+
+    assert display.body_updates_for("parser jobs beim staat") == [
+        "0 discovered · 0 forwarded",
+        "0 discovered · 1 enrich_failed · 0 forwarded",
+        "0 discovered · 1 enrich_failed · 1 forwarded",
+    ]
 
 
 @pytest.mark.parametrize(

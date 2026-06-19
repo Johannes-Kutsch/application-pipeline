@@ -27,9 +27,6 @@ from application_pipeline.parser_lifecycle import (
     run_parser_lifecycle,
 )
 from application_pipeline.run_metrics import (
-    JudgeLifecycleFailureObservation,
-    JudgeLifecycleOutcomeObservation,
-    JudgeLifecycleStartObservation,
     RunCompleteObservation,
     RunMetrics,
     RunSummary,
@@ -341,9 +338,7 @@ def run(
 
         daily_top_5_count = 0
         if candidates and not no_judge:
-            metrics.observe_judge_start(
-                JudgeLifecycleStartObservation(candidate_count=len(candidates))
-            )
+            metrics.judge_started(len(candidates))
             verdicts: list[MatchVerdict] | None = None
             judge_usage = None
             assert isinstance(extractor, _LLMJudge), (
@@ -383,7 +378,7 @@ def run(
                         error=exc,
                         log_tail="",
                     )
-                    metrics.observe_judge_failure(JudgeLifecycleFailureObservation())
+                    metrics.judge_failed_lifecycle()
                     break
 
             if verdicts is not None and judge_usage is not None:
@@ -397,11 +392,9 @@ def run(
                 except ResultsFileError as exc:
                     _log.error("daily file append failed: %s", exc)
                     raise
-                metrics.observe_judge_outcome(
-                    JudgeLifecycleOutcomeObservation(
-                        usage=judge_usage,
-                        card_count=daily_top_5_count,
-                    )
+                metrics.judge_succeeded(
+                    judge_usage,
+                    card_count=daily_top_5_count,
                 )
                 run_log.event(
                     "pipeline_orchestrator",

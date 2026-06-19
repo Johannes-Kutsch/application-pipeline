@@ -129,22 +129,6 @@ class ClassifyRetryableObservation:
 
 
 @dataclass(frozen=True)
-class JudgeLifecycleStartObservation:
-    candidate_count: int
-
-
-@dataclass(frozen=True)
-class JudgeLifecycleOutcomeObservation:
-    usage: CallUsage
-    card_count: int
-
-
-@dataclass(frozen=True)
-class JudgeLifecycleFailureObservation:
-    pass
-
-
-@dataclass(frozen=True)
 class RunCompleteObservation:
     dedup: DedupSnapshot
     pool_size: int
@@ -546,26 +530,21 @@ class RunMetrics:
         self._judge_errored += 1
         return self._pipeline_body()
 
-    def observe_judge_start(self, observation: JudgeLifecycleStartObservation) -> None:
-        del observation
+    def judge_started(self, candidate_count: int) -> None:
+        del candidate_count
         with self._lock:
             self._judge_started += 1
 
-    def observe_judge_outcome(
-        self, observation: JudgeLifecycleOutcomeObservation
-    ) -> None:
+    def judge_succeeded(self, usage: CallUsage, *, card_count: int) -> None:
         with self._lock:
-            self._record_judge_usage(observation.usage)
-            self._written += observation.card_count
+            self._record_judge_usage(usage)
+            self._written += card_count
         self._display.print(
             caller="llm_judge_match",
-            message=f"judge_top_n complete: wrote {observation.card_count} cards",
+            message=f"judge_top_n complete: wrote {card_count} cards",
         )
 
-    def observe_judge_failure(
-        self, observation: JudgeLifecycleFailureObservation
-    ) -> None:
-        del observation
+    def judge_failed_lifecycle(self) -> None:
         with self._lock:
             pipeline_body = self._record_judge_failure()
         self._display.update_body("pipeline", body=pipeline_body)

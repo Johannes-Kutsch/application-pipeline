@@ -29,7 +29,6 @@ from application_pipeline.run_metrics import (
     ClassifyStageCompletionObservation,
     ClassifySubmissionObservation,
     ParserLifecycleObservation,
-    RunCompleteObservation,
     RunMetrics,
     RunSummary,
 )
@@ -740,17 +739,15 @@ def test_emit_run_complete_writes_pipeline_orchestrator_row_from_metrics(
     metrics = _build_populated_metrics(run_log)
 
     metrics.emit_run_complete(
-        RunCompleteObservation(
-            dedup=DedupSnapshot(
-                dedup_url_hits=2,
-                dedup_tuple_hits=3,
-                dedup_run_hits=4,
-                dedup_misses=5,
-            ),
-            pool_size=6,
-            daily_top_5_count=1,
-            elapsed_s=12.34,
-        )
+        dedup=DedupSnapshot(
+            dedup_url_hits=2,
+            dedup_tuple_hits=3,
+            dedup_run_hits=4,
+            dedup_misses=5,
+        ),
+        pool_size=6,
+        daily_top_5_count=1,
+        elapsed_s=12.34,
     )
 
     rows = [

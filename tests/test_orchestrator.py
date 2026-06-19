@@ -4588,6 +4588,25 @@ def test_judge_body_shows_finished_calls(tmp_path: Path) -> None:
     assert len(cards) == 2
 
 
+def test_plain_status_display_emits_match_judge_terminal_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    card_store = _make_card_store(tmp_path)
+
+    run(
+        _two_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=_stub_extractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+        status_display=PlainStatusDisplay(run_log=None),
+    )
+
+    stdout = capsys.readouterr().out
+    assert "judge_top_n complete: wrote 2 cards" in stdout
+
+
 # ---------------------------------------------------------------------------
 # Issue #230 â€" live pending-depth signal
 # ---------------------------------------------------------------------------

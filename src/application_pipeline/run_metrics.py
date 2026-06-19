@@ -671,10 +671,17 @@ class RunMetrics:
             classify_output_tokens = self._classify_output_tokens
             classify_cache_read_tokens = self._classify_cache_read_tokens
             classify_cost_usd = self._classify_cost_usd
-            classify_batches_failed = self._classify_failed
-            classify_items_abandoned = (
+            classify_dropped = self._classifier_dropped
+            classify_malformed = (
                 self._classify_items_errored + self._classify_items_retryable
             )
+            classify_forwarded = (
+                self._classify_items
+                - self._classifier_dropped
+                - self._classify_items_retryable
+            )
+            classify_batches_failed = self._classify_failed
+            classify_items_abandoned = classify_malformed
 
         with self._lock:
             sources = dict(self._written_per_source)
@@ -715,6 +722,9 @@ class RunMetrics:
                 f"classify_calls={classify_calls}",
                 f"classify_items={classify_items}",
                 f"classify_total_s={classify_total_s:.1f}",
+                f"classify_malformed={classify_malformed}",
+                f"classify_dropped={classify_dropped}",
+                f"classify_forwarded={classify_forwarded}",
                 f"judge_calls={judge_calls}",
                 f"judge_total_s={judge_total_s:.1f}",
                 f"classify_input_tokens={classify_input_tokens}",
@@ -832,6 +842,14 @@ class RunMetrics:
             classifier_dropped = self._classifier_dropped
             classify_failed = self._classify_failed
             classify_retryable = self._classify_items_retryable
+            classify_malformed = (
+                self._classify_items_errored + self._classify_items_retryable
+            )
+            classify_forwarded = (
+                self._classify_items
+                - self._classifier_dropped
+                - self._classify_items_retryable
+            )
             classify_input_tokens = self._classify_input_tokens
             classify_output_tokens = self._classify_output_tokens
             classify_cache_read_tokens = self._classify_cache_read_tokens
@@ -854,6 +872,10 @@ class RunMetrics:
                 "items_classified": classify_items,
                 "matched": classify_items - classifier_dropped - classify_retryable,
                 "off_domain": classifier_dropped,
+                "malformed": classify_malformed,
+                "dropped": classifier_dropped,
+                "forwarded": classify_forwarded,
+                "items_abandoned": classify_malformed,
                 "batches_failed": classify_failed,
                 "input_tokens": classify_input_tokens,
                 "output_tokens": classify_output_tokens,

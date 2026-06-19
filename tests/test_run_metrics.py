@@ -346,6 +346,8 @@ def test_classify_outcome_observation_updates_summary_divider_and_log(
     assert "classify_output_tokens=200" in divider
     assert "classify_cache_read_tokens=100" in divider
     assert "classify_cost_usd=0.002000" in divider
+    assert "classify_dropped=2" in divider
+    assert "classify_forwarded=2" in divider
     assert "errors=1" in divider
     assert "classify_items_abandoned=1" in divider
 
@@ -356,6 +358,8 @@ def test_classify_outcome_observation_updates_summary_divider_and_log(
     assert "items_classified=5" in run_log_text
     assert "matched=2" in run_log_text
     assert "off_domain=2" in run_log_text
+    assert "dropped=2" in run_log_text
+    assert "forwarded=2" in run_log_text
     assert "batches_failed=0" in run_log_text
     assert "input_tokens=500" in run_log_text
 
@@ -494,6 +498,7 @@ def test_classify_success_seam_updates_counters_parser_rows_and_outputs(
     assert "classify_output_tokens=200" in divider
     assert "classify_cache_read_tokens=100" in divider
     assert "classify_cost_usd=0.002000" in divider
+    assert "classify_malformed=2" in divider
     assert "errors=2" in divider
     assert "classify_items_abandoned=2" in divider
 
@@ -504,6 +509,8 @@ def test_classify_success_seam_updates_counters_parser_rows_and_outputs(
     assert "items_classified=5" in run_log_text
     assert "matched=1" in run_log_text
     assert "off_domain=2" in run_log_text
+    assert "malformed=2" in run_log_text
+    assert "items_abandoned=2" in run_log_text
     assert "batches_failed=0" in run_log_text
     assert "input_tokens=500" in run_log_text
 
@@ -664,6 +671,7 @@ def test_format_run_divider_no_degraded_no_failures(run_log: RunLog) -> None:
         "<!-- run 2026-01-01T12:00:00Z tag=v1.2.3 sources=linkedin:1"
         " kept=1 errors=0 dedup_url_hits=1 dedup_tuple_hits=1 dedup_run_hits=1"
         " dedup_misses=2 classify_calls=1 classify_items=2 classify_total_s=2.5"
+        " classify_malformed=0 classify_dropped=1 classify_forwarded=1"
         " judge_calls=1 judge_total_s=1.5 classify_input_tokens=500"
         " classify_output_tokens=200 classify_cache_read_tokens=100"
         " classify_cost_usd=0.002000 judge_input_tokens=300"

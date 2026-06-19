@@ -166,9 +166,8 @@ def _build_populated_metrics(run_log: RunLog) -> RunMetrics:
         cost_usd=0.003,
         duration_s=1.5,
     )
-    metrics.judge_enqueued()
-    metrics.judge_dequeued()
-    metrics.judge_complete(judge_usage, source="linkedin")
+    metrics.judge_started()
+    metrics.judge_succeeded(judge_usage, card_count=1)
 
     return metrics
 
@@ -732,8 +731,8 @@ def test_format_run_divider_no_degraded_no_failures(run_log: RunLog) -> None:
     )
 
     assert result == (
-        "<!-- run 2026-01-01T12:00:00Z tag=v1.2.3 sources=linkedin:1"
-        " kept=1 errors=0 dedup_url_hits=1 dedup_tuple_hits=1 dedup_run_hits=1"
+        "<!-- run 2026-01-01T12:00:00Z tag=v1.2.3 kept=1"
+        " errors=0 dedup_url_hits=1 dedup_tuple_hits=1 dedup_run_hits=1"
         " dedup_misses=2 classify_calls=1 classify_items=2 classify_total_s=2.5"
         " classify_malformed=0 classify_dropped=1 classify_forwarded=1"
         " judge_calls=1 judge_total_s=1.5 classify_input_tokens=500"
@@ -750,9 +749,8 @@ def test_format_run_divider_conditional_fields(run_log: RunLog) -> None:
     metrics.classify_submitted(2)
     metrics.classify_batch_started(2)
     metrics.classify_batch_failed(2)
-    metrics.judge_enqueued()
-    metrics.judge_dequeued()
-    metrics.judge_failed()
+    metrics.judge_started()
+    metrics.judge_failed_lifecycle()
 
     result = metrics.format_run_divider(
         "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot(judge_resumed=2)
@@ -1218,9 +1216,8 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
             metrics.classify_submitted(1)
             metrics.classify_batch_started(1)
             _observe_classify_outcome(metrics, usage, items=1, classifier_dropped=0)
-            metrics.judge_enqueued()
-            metrics.judge_dequeued()
-            metrics.judge_complete(usage, "src")
+            metrics.judge_started()
+            metrics.judge_succeeded(usage, card_count=1)
 
     threads = [threading.Thread(target=worker) for _ in range(n_threads)]
     for thread in threads:

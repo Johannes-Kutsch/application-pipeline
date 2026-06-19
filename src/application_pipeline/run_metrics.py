@@ -465,26 +465,6 @@ class RunMetrics:
             self._pending_judge -= 1
             self._judge_started += 1
 
-    def judge_complete(self, usage: CallUsage, source: str) -> None:
-        with self._lock:
-            self._judge_calls += 1
-            self._judge_input_tokens += usage.input_tokens
-            self._judge_output_tokens += usage.output_tokens
-            self._judge_cache_read_tokens += usage.cache_read_tokens
-            self._judge_cost_usd += usage.cost_usd
-            self._judge_total_s += usage.duration_s
-            self._written += 1
-            self._written_per_source[source] = (
-                self._written_per_source.get(source, 0) + 1
-            )
-
-    def judge_failed(self) -> None:
-        with self._lock:
-            self._judge_failed += 1
-            self._judge_errored += 1
-            pipeline_body = self._pipeline_body()
-        self._display.update_body("pipeline", body=pipeline_body)
-
     def _record_judge_usage(self, usage: CallUsage) -> None:
         self._judge_calls += 1
         self._judge_input_tokens += usage.input_tokens

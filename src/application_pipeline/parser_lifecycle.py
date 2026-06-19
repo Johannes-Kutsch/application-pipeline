@@ -31,7 +31,6 @@ from application_pipeline.parsers.types import City, Location
 from application_pipeline.pool import Pool
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.run_metrics import RunMetrics
-from application_pipeline.run_metrics import ParserLifecycleObservation
 
 _log = logging.getLogger("application_pipeline.orchestrator")
 
@@ -172,12 +171,7 @@ class _ParserThread(threading.Thread):
             self._outbound.put((self._parser_id, _PARSER_DONE))
 
     def _process_position_stub(self, position_stub: PositionStub) -> None:
-        self._metrics.observe_parser_lifecycle(
-            ParserLifecycleObservation(
-                parser_id=self._parser_id,
-                event="discovered",
-            )
-        )
+        self._metrics.discovered(self._parser_id)
         self._parser_intake.process_position_stub(position_stub)
         self._outbound.put((self._parser_id, _PARSER_PROGRESS))
 
@@ -205,35 +199,15 @@ class _OutboundDispatcher:
 
     def dispatch(self, parser_id: str, payload: object) -> bool:
         if payload is _NOT_SERVED_QUERY:
-            self._metrics.observe_parser_lifecycle(
-                ParserLifecycleObservation(
-                    parser_id=parser_id,
-                    event="not_served_query",
-                )
-            )
+            self._metrics.not_served_query(parser_id)
         elif payload is _QUERY_DONE:
-            self._metrics.observe_parser_lifecycle(
-                ParserLifecycleObservation(
-                    parser_id=parser_id,
-                    event="query_done",
-                )
-            )
+            self._metrics.query_done(parser_id)
         elif payload is _PARSER_DONE:
-            self._metrics.observe_parser_lifecycle(
-                ParserLifecycleObservation(
-                    parser_id=parser_id,
-                    event="parser_done",
-                )
-            )
+            self._metrics.parser_done(parser_id)
             return True
         elif isinstance(payload, _ParserDead):
             self._run_log.traceback("parser_" + parser_id, payload.traceback_str)
-            self._metrics.observe_parser_lifecycle(
-                ParserLifecycleObservation(
-                    parser_id=parser_id,
-                    event="parser_dead",
-                )
-            )
+            self._metrics.parser_dead(parser_id)
             self._failure_report_writer.record_parser_dead(
                 parser_id=parser_id,
                 error=payload.exc,

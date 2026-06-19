@@ -5,7 +5,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, assert_never
+from typing import Literal
 
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -72,68 +72,6 @@ ClassifyItemState = Literal["matched", "rejected", "retryable", "expired"]
 ParserIntakeFreshnessDropStage = Literal["discover", "post_enrich"]
 ParserIntakeDedupDropKind = Literal["url_hit", "tuple_hit", "fuzzy_hit", "run_hit"]
 ParserIntakeContentDropReason = Literal["empty_body", "too_short"]
-
-
-@dataclass(frozen=True)
-class ClassifyBatchOutcomeObservation:
-    usage: CallUsage
-    item_states: tuple[ClassifyItemState, ...]
-
-
-@dataclass(frozen=True)
-class ClassifyBatchFailureObservation:
-    items: int
-
-
-@dataclass(frozen=True)
-class ClassifySubmissionObservation:
-    count: int
-
-
-@dataclass(frozen=True)
-class ClassifyBatchStartObservation:
-    count: int
-
-
-@dataclass(frozen=True)
-class ClassifyStageCompletionObservation:
-    pass
-
-
-ParserLifecycleEvent = Literal[
-    "discovered",
-    "not_served_query",
-    "query_done",
-    "parser_done",
-    "parser_dead",
-]
-
-
-@dataclass(frozen=True)
-class ParserLifecycleObservation:
-    parser_id: str
-    event: ParserLifecycleEvent
-
-
-@dataclass(frozen=True)
-class ClassifyRetryableObservation:
-    parser_id: str
-
-
-@dataclass(frozen=True)
-class JudgeLifecycleStartObservation:
-    candidate_count: int
-
-
-@dataclass(frozen=True)
-class JudgeLifecycleOutcomeObservation:
-    usage: CallUsage
-    card_count: int
-
-
-@dataclass(frozen=True)
-class JudgeLifecycleFailureObservation:
-    pass
 
 
 class RunMetrics:
@@ -263,26 +201,6 @@ class RunMetrics:
     # -----------------------------------------------------------------------
     # Parser-side events
     # -----------------------------------------------------------------------
-
-    def observe_parser_lifecycle(self, observation: ParserLifecycleObservation) -> None:
-        event = observation.event
-        parser_id = observation.parser_id
-        if event == "discovered":
-            self._observe_parser_discovered(parser_id)
-            return
-        if event == "not_served_query":
-            self._observe_not_served_query(parser_id)
-            return
-        if event == "query_done":
-            self._observe_query_done(parser_id)
-            return
-        if event == "parser_done":
-            self._observe_parser_done(parser_id)
-            return
-        if event == "parser_dead":
-            self._observe_parser_dead(parser_id)
-            return
-        assert_never(event)
 
     def discovered(self, parser_id: str = "") -> None:
         self._observe_parser_discovered(parser_id)
@@ -445,26 +363,12 @@ class RunMetrics:
     # Classify-stage events
     # -----------------------------------------------------------------------
 
-    def observe_classify_submission(
-        self, observation: ClassifySubmissionObservation | int
-    ) -> None:
-        if isinstance(observation, int):
-            observation = ClassifySubmissionObservation(count=observation)
-        self.classify_submitted(observation.count)
-
     def classify_submitted(self, count: int) -> None:
         with self._classify_lock:
             self._pending_classify += count
             self._classify_queued += count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
-
-    def observe_classify_batch_start(
-        self, observation: ClassifyBatchStartObservation | int
-    ) -> None:
-        if isinstance(observation, int):
-            observation = ClassifyBatchStartObservation(count=observation)
-        self.classify_batch_started(observation.count)
 
     def classify_batch_started(self, count: int) -> None:
         with self._classify_lock:
@@ -473,15 +377,6 @@ class RunMetrics:
             self._classifying += count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
-
-    def observe_classify_batch_outcome(
-        self, observation: ClassifyBatchOutcomeObservation
-    ) -> None:
-        self._record_classify_batch_success(
-            usage=observation.usage,
-            item_states=observation.item_states,
-            parser_ids=(),
-        )
 
     def classify_batch_succeeded(
         self,
@@ -527,11 +422,6 @@ class RunMetrics:
         self._display.update_body("llm classify relevance", body=body)
         self._record_retryable_parser_ids(retryable_parser_ids)
 
-    def observe_classify_batch_failure(
-        self, observation: ClassifyBatchFailureObservation
-    ) -> None:
-        self.classify_batch_failed(observation.items)
-
     def classify_batch_failed(self, items: int) -> None:
         with self._classify_lock:
             self._classify_failed += 1
@@ -540,19 +430,8 @@ class RunMetrics:
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
-    def observe_classify_stage_completion(
-        self, observation: ClassifyStageCompletionObservation
-    ) -> None:
-        del observation
-        self.classify_stage_completed()
-
     def classify_stage_completed(self) -> None:
         self._display.update_phase("llm classify relevance", phase="done")
-
-    def observe_classify_retryable(
-        self, observation: ClassifyRetryableObservation
-    ) -> None:
-        self._record_retryable_parser_ids((observation.parser_id,))
 
     def _record_retryable_parser_ids(self, parser_ids: tuple[str, ...]) -> None:
         if not parser_ids:

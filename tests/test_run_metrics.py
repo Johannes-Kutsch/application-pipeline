@@ -25,17 +25,7 @@ from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prefilter_gate import PreFilterSnapshot
-from application_pipeline.run_metrics import (
-    ClassifyBatchFailureObservation,
-    ClassifyBatchOutcomeObservation,
-    ClassifyBatchStartObservation,
-    ClassifyRetryableObservation,
-    ClassifyStageCompletionObservation,
-    ClassifySubmissionObservation,
-    ParserLifecycleObservation,
-    RunMetrics,
-    RunSummary,
-)
+from application_pipeline.run_metrics import RunMetrics, RunSummary
 from application_pipeline.status_display import PlainStatusDisplay
 from tests.fake_status_display import FakeStatusDisplay
 
@@ -116,14 +106,36 @@ def _observe_classify_outcome(
     retryable_items: int = 0,
 ) -> None:
     forwarded = items - classifier_dropped - retryable_items
-    item_states = cast(
-        tuple[Literal["matched", "rejected", "retryable", "expired"], ...],
-        ("matched",) * forwarded
-        + ("rejected",) * classifier_dropped
-        + ("retryable",) * retryable_items,
+    matched_stub = PositionStub(
+        url="https://example.com/matched",
+        title="Platform Engineer",
+        source="example",
     )
-    metrics.observe_classify_batch_outcome(
-        ClassifyBatchOutcomeObservation(usage=usage, item_states=item_states)
+    outcomes = [
+        AppliedClassifyItemOutcome(
+            state="matched",
+            event_matches=True,
+            matched_listing=MatchedListing(listing_id=index + 1, stub=matched_stub),
+        )
+        for index in range(forwarded)
+    ]
+    outcomes.extend(
+        AppliedClassifyItemOutcome(
+            state="rejected",
+            event_matches=False,
+        )
+        for _ in range(classifier_dropped)
+    )
+    outcomes.extend(
+        AppliedClassifyItemOutcome(
+            state="retryable",
+            event_matches=None,
+        )
+        for _ in range(retryable_items)
+    )
+    metrics.classify_batch_succeeded(
+        AppliedClassifyOutcome(items=outcomes, usage=usage),
+        parser_ids=(),
     )
 
 
@@ -143,8 +155,8 @@ def _build_populated_metrics(run_log: RunLog) -> RunMetrics:
         cost_usd=0.002,
         duration_s=2.5,
     )
-    metrics.observe_classify_submission(2)
-    metrics.observe_classify_batch_start(2)
+    metrics.classify_submitted(2)
+    metrics.classify_batch_started(2)
     _observe_classify_outcome(metrics, classify_usage, items=2, classifier_dropped=1)
 
     judge_usage = _make_usage(
@@ -245,15 +257,15 @@ def test_parser_done_and_dead_write_phase_changes_to_lifecycle_log(
     )
 
 
-def test_classify_observation_objects_update_public_counters(tmp_path: Path) -> None:
+def test_classify_public_methods_update_public_counters(tmp_path: Path) -> None:
     run_log = RunLog(tmp_path)
     metrics = _make_metrics(run_log)
     metrics.register_rows()
 
-    metrics.observe_classify_submission(ClassifySubmissionObservation(count=2))
-    metrics.observe_classify_batch_start(ClassifyBatchStartObservation(count=2))
-    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=2))
-    metrics.observe_classify_stage_completion(ClassifyStageCompletionObservation())
+    metrics.classify_submitted(2)
+    metrics.classify_batch_started(2)
+    metrics.classify_batch_failed(2)
+    metrics.classify_stage_completed()
 
     summary = metrics.to_run_summary(
         duration_s=1.0,
@@ -291,11 +303,11 @@ def test_classify_count_seam_preserves_queue_depth_in_flight_and_done_phase(
         == "1 queued · 2 classifying"
     )
 
-    metrics.observe_classify_batch_outcome(
-        ClassifyBatchOutcomeObservation(
-            usage=_make_usage(),
-            item_states=("matched", "rejected"),
-        )
+    _observe_classify_outcome(
+        metrics,
+        _make_usage(),
+        items=2,
+        classifier_dropped=1,
     )
     assert (
         display.body_updates_for("llm classify relevance")[-1]
@@ -325,12 +337,49 @@ def test_classify_outcome_observation_updates_summary_divider_and_log(
         cost_usd=0.002,
         duration_s=2.5,
     )
-    metrics.observe_classify_submission(5)
-    metrics.observe_classify_batch_start(5)
-    metrics.observe_classify_batch_outcome(
-        ClassifyBatchOutcomeObservation(
+    metrics.classify_submitted(5)
+    metrics.classify_batch_started(5)
+    metrics.classify_batch_succeeded(
+        AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(
+                        listing_id=1,
+                        stub=PositionStub(
+                            url="https://example.com/matched-1",
+                            title="Platform Engineer",
+                            source="example",
+                        ),
+                    ),
+                ),
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(
+                        listing_id=2,
+                        stub=PositionStub(
+                            url="https://example.com/matched-2",
+                            title="Data Engineer",
+                            source="example",
+                        ),
+                    ),
+                ),
+                AppliedClassifyItemOutcome(
+                    state="rejected",
+                    event_matches=False,
+                ),
+                AppliedClassifyItemOutcome(
+                    state="retryable",
+                    event_matches=None,
+                ),
+                AppliedClassifyItemOutcome(
+                    state="expired",
+                    event_matches=None,
+                ),
+            ],
             usage=usage,
-            item_states=("matched", "matched", "rejected", "retryable", "expired"),
         )
     )
 
@@ -384,9 +433,9 @@ def test_classify_failure_observation_updates_summary_divider_and_log(
     metrics = _make_metrics(run_log)
     metrics.register_rows()
 
-    metrics.observe_classify_submission(3)
-    metrics.observe_classify_batch_start(3)
-    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=3))
+    metrics.classify_submitted(3)
+    metrics.classify_batch_started(3)
+    metrics.classify_batch_failed(3)
 
     summary = metrics.to_run_summary(
         duration_s=1.0,
@@ -698,9 +747,9 @@ def test_format_run_divider_no_degraded_no_failures(run_log: RunLog) -> None:
 def test_format_run_divider_conditional_fields(run_log: RunLog) -> None:
     metrics = _make_metrics(run_log)
     metrics.set_degraded_reason("usage_limit")
-    metrics.observe_classify_submission(2)
-    metrics.observe_classify_batch_start(2)
-    metrics.observe_classify_batch_failure(ClassifyBatchFailureObservation(items=2))
+    metrics.classify_submitted(2)
+    metrics.classify_batch_started(2)
+    metrics.classify_batch_failed(2)
     metrics.judge_enqueued()
     metrics.judge_dequeued()
     metrics.judge_failed()
@@ -1166,8 +1215,8 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
         for _ in range(iters):
             metrics.discovered()
             metrics.enrich_failed()
-            metrics.observe_classify_submission(1)
-            metrics.observe_classify_batch_start(1)
+            metrics.classify_submitted(1)
+            metrics.classify_batch_started(1)
             _observe_classify_outcome(metrics, usage, items=1, classifier_dropped=0)
             metrics.judge_enqueued()
             metrics.judge_dequeued()
@@ -1217,19 +1266,38 @@ def test_concurrent_classify_observations_produce_correct_final_counts(
 
     def worker() -> None:
         for _ in range(iters):
-            metrics.observe_classify_submission(3)
-            metrics.observe_classify_batch_start(3)
-            metrics.observe_classify_batch_outcome(
-                ClassifyBatchOutcomeObservation(
+            metrics.classify_submitted(3)
+            metrics.classify_batch_started(3)
+            metrics.classify_batch_succeeded(
+                AppliedClassifyOutcome(
+                    items=[
+                        AppliedClassifyItemOutcome(
+                            state="matched",
+                            event_matches=True,
+                            matched_listing=MatchedListing(
+                                listing_id=1,
+                                stub=PositionStub(
+                                    url="https://example.com/matched",
+                                    title="Platform Engineer",
+                                    source="example",
+                                ),
+                            ),
+                        ),
+                        AppliedClassifyItemOutcome(
+                            state="rejected",
+                            event_matches=False,
+                        ),
+                        AppliedClassifyItemOutcome(
+                            state="retryable",
+                            event_matches=None,
+                        ),
+                    ],
                     usage=usage,
-                    item_states=("matched", "rejected", "retryable"),
                 )
             )
-            metrics.observe_classify_submission(2)
-            metrics.observe_classify_batch_start(2)
-            metrics.observe_classify_batch_failure(
-                ClassifyBatchFailureObservation(items=2)
-            )
+            metrics.classify_submitted(2)
+            metrics.classify_batch_started(2)
+            metrics.classify_batch_failed(2)
 
     threads = [threading.Thread(target=worker) for _ in range(n_threads)]
     for thread in threads:
@@ -1344,7 +1412,7 @@ def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
     assert summary["duration"] >= 0.0
 
 
-def test_parser_lifecycle_observations_preserve_parser_summary_fields(
+def test_parser_lifecycle_methods_preserve_parser_summary_fields(
     run_log: RunLog,
 ) -> None:
     display = FakeStatusDisplay()
@@ -1352,16 +1420,11 @@ def test_parser_lifecycle_observations_preserve_parser_summary_fields(
     metrics.register_parser("p", order=0, total_queries=2, has_native_enrich=False)
 
     started = time.monotonic()
-    for event in (
-        "discovered",
-        "not_served_query",
-        "query_done",
-        "query_done",
-        "parser_dead",
-    ):
-        metrics.observe_parser_lifecycle(
-            ParserLifecycleObservation(parser_id="p", event=event)
-        )
+    metrics.discovered("p")
+    metrics.not_served_query("p")
+    metrics.query_done("p")
+    metrics.query_done("p")
+    metrics.parser_dead("p")
     end = time.monotonic()
 
     summary = metrics.parser_summary("p", end, started)
@@ -1374,7 +1437,7 @@ def test_parser_lifecycle_observations_preserve_parser_summary_fields(
     assert isinstance(summary["duration"], float)
 
 
-def test_parser_lifecycle_observations_preserve_done_and_dead_phase_updates(
+def test_parser_lifecycle_methods_preserve_done_and_dead_phase_updates(
     run_log: RunLog,
 ) -> None:
     display = FakeStatusDisplay()
@@ -1388,12 +1451,8 @@ def test_parser_lifecycle_observations_preserve_done_and_dead_phase_updates(
     _observe_parser_drop(metrics, "done_parser", "prefilter")
     _observe_parser_drop(metrics, "dead_parser", "prefilter")
 
-    metrics.observe_parser_lifecycle(
-        ParserLifecycleObservation(parser_id="done_parser", event="parser_done")
-    )
-    metrics.observe_parser_lifecycle(
-        ParserLifecycleObservation(parser_id="dead_parser", event="parser_dead")
-    )
+    metrics.parser_done("done_parser")
+    metrics.parser_dead("dead_parser")
 
     done_phase_calls = [
         call
@@ -1489,13 +1548,19 @@ def test_parser_intake_observations_roll_up_into_public_counters(
 
     _observe_parser_enrich_failure(metrics, "parser.test")
     _observe_parser_forwarded(metrics, "parser.test", "native")
-    metrics.observe_classify_submission(1)
-    metrics.observe_classify_batch_start(1)
-    metrics.observe_classify_batch_outcome(
-        ClassifyBatchOutcomeObservation(usage=_make_usage(), item_states=("retryable",))
-    )
-    metrics.observe_classify_retryable(
-        ClassifyRetryableObservation(parser_id="parser.test")
+    metrics.classify_submitted(1)
+    metrics.classify_batch_started(1)
+    metrics.classify_batch_succeeded(
+        AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="retryable",
+                    event_matches=None,
+                )
+            ],
+            usage=_make_usage(),
+        ),
+        parser_ids=("parser.test",),
     )
 
     summary = metrics.to_run_summary(
@@ -1551,18 +1616,8 @@ def test_parser_row_body_preserves_query_progress_discovered_and_forwarded_activ
     metrics, display = _make_fake_display_metrics(tmp_path)
     metrics.register_parser("jobs_beim_staat", order=4, total_queries=3)
 
-    metrics.observe_parser_lifecycle(
-        ParserLifecycleObservation(
-            parser_id="jobs_beim_staat",
-            event="query_done",
-        )
-    )
-    metrics.observe_parser_lifecycle(
-        ParserLifecycleObservation(
-            parser_id="jobs_beim_staat",
-            event="discovered",
-        )
-    )
+    metrics.query_done("jobs_beim_staat")
+    metrics.discovered("jobs_beim_staat")
     metrics.observe_parser_intake_forwarded("jobs_beim_staat", "fallback")
 
     assert display.body_updates_for("parser jobs beim staat") == [
@@ -1580,16 +1635,10 @@ def test_parser_activity_reconciles_parser_summary_and_run_summary_totals(
     metrics.register_parser("alpha", order=0, total_queries=2, has_native_enrich=True)
     metrics.register_parser("beta", order=2, total_queries=1, has_native_enrich=False)
 
-    metrics.observe_parser_lifecycle(
-        ParserLifecycleObservation(parser_id="alpha", event="discovered")
-    )
+    metrics.discovered("alpha")
     metrics.observe_parser_intake_enrich_failure("alpha")
-    metrics.observe_parser_lifecycle(
-        ParserLifecycleObservation(parser_id="beta", event="discovered")
-    )
-    metrics.observe_parser_lifecycle(
-        ParserLifecycleObservation(parser_id="beta", event="parser_dead")
-    )
+    metrics.discovered("beta")
+    metrics.parser_dead("beta")
 
     alpha_summary = metrics.parser_summary(
         "alpha", end_monotonic=1.0, started_monotonic=0.0

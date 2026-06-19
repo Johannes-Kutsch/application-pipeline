@@ -931,6 +931,146 @@ def test_final_projections_preserve_gate_and_dedup_run_complete_filesystem_state
     assert run_complete_rows[-1]["elapsed_s"] == 12.3
 
 
+def test_final_projections_ignore_preexisting_local_filesystem_rows(
+    tmp_path: Path,
+) -> None:
+    old_run_log = RunLog(tmp_path)
+    dedup_store = _NoopDedupStore()
+
+    old_prefilter = PreFilterGate(
+        blacklist=["blocked"],
+        dedup=dedup_store,
+        run_log=old_run_log,
+    )
+    old_prefilter.admit(
+        PositionStub(
+            url="https://example.com/old-blocked",
+            title="Blocked old role",
+            source="example",
+        )
+    )
+    old_prefilter.emit_run_complete()
+
+    old_content = ContentGate(run_log=old_run_log)
+    old_content.inspect(
+        "",
+        PositionStub(
+            url="https://example.com/old-empty",
+            title="Old empty body",
+            source="example",
+        ),
+    )
+    old_content.emit_run_complete()
+
+    old_dedup = DedupCounters(display=FakeStatusDisplay(), run_log=old_run_log)
+    old_dedup.record("url_hit")
+    old_dedup.record("miss")
+    old_dedup.emit_run_complete()
+
+    run_log = RunLog(tmp_path)
+    metrics = _build_populated_metrics(run_log)
+
+    prefilter = PreFilterGate(
+        blacklist=["blocked"],
+        dedup=dedup_store,
+        run_log=run_log,
+    )
+    prefilter.admit(
+        PositionStub(
+            url="https://example.com/current-passed",
+            title="Allowed current role",
+            source="example",
+        )
+    )
+    prefilter.emit_run_complete()
+
+    content = ContentGate(run_log=run_log)
+    content.inspect(
+        "x" * 120,
+        PositionStub(
+            url="https://example.com/current-full",
+            title="Current full body",
+            source="example",
+        ),
+    )
+    content.emit_run_complete()
+
+    dedup = DedupCounters(display=FakeStatusDisplay(), run_log=run_log)
+    dedup.record("tuple_hit")
+    dedup.record("judge_pending")
+    dedup.emit_run_complete()
+
+    summary = metrics.to_run_summary(
+        duration_s=55.5,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+
+    assert summary.prefilter_considered == 1
+    assert summary.prefilter_passed == 1
+    assert summary.prefilter_dropped == 0
+    assert summary.prefilter_blacklist_hits == 0
+    assert summary.content_considered == 1
+    assert summary.content_passed == 1
+    assert summary.content_dropped_empty_body == 0
+    assert summary.content_dropped_too_short == 0
+    assert summary.dedup_url_hits == 0
+    assert summary.dedup_tuple_hits == 1
+    assert summary.dedup_run_hits == 0
+    assert summary.dedup_misses == 0
+    assert summary.judge_resumed == 1
+    assert summary.skipped == 1
+
+
+def test_final_projections_preserve_passed_dedup_snapshot_without_local_run_complete(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    metrics = _build_populated_metrics(run_log)
+
+    run_log.event("pipeline_dedup", "still_running", dedup_url_hits=99)
+
+    divider = metrics.format_run_divider(
+        "2026-01-01T12:00:00Z",
+        None,
+        42.7,
+        dedup=DedupSnapshot(
+            dedup_url_hits=2,
+            dedup_tuple_hits=3,
+            dedup_run_hits=4,
+            dedup_misses=5,
+            judge_resumed=6,
+        ),
+    )
+    assert "dedup_url_hits=2" in divider
+    assert "dedup_tuple_hits=3" in divider
+    assert "dedup_run_hits=4" in divider
+    assert "dedup_misses=5" in divider
+    assert "judge_resumed=6" in divider
+
+    summary = metrics.to_run_summary(
+        duration_s=55.5,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(
+            dedup_url_hits=2,
+            dedup_tuple_hits=3,
+            dedup_run_hits=4,
+            dedup_misses=5,
+            judge_resumed=6,
+        ),
+    )
+    assert summary.dedup_url_hits == 2
+    assert summary.dedup_tuple_hits == 3
+    assert summary.dedup_run_hits == 4
+    assert summary.dedup_misses == 5
+    assert summary.judge_resumed == 6
+    assert summary.skipped == 5
+
+
 def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
     metrics = _build_populated_metrics(run_log)
     prefilter = PreFilterSnapshot(

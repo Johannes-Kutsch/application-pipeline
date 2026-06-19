@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 import pytest
+from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -29,6 +30,7 @@ from application_pipeline.run_metrics import (
     ParserIntakeDropOutcome,
     ParserIntakeEnrichFailureObservation,
     ParserIntakeForwardedObservation,
+    ParserLifecycleObservation,
     RunCompleteObservation,
     RunMetrics,
     RunSummary,
@@ -852,6 +854,84 @@ def test_parser_summary_all_events_tracked(run_log: RunLog) -> None:
     assert summary["unparseable_dates"] == 1
     assert isinstance(summary["duration"], float)
     assert summary["duration"] >= 0.0
+
+
+def test_parser_lifecycle_observations_preserve_parser_summary_fields(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser("p", order=0, total_queries=2, has_native_enrich=False)
+
+    started = time.monotonic()
+    for event in (
+        "discovered",
+        "not_served_query",
+        "query_done",
+        "query_done",
+        "parser_dead",
+    ):
+        metrics.observe_parser_lifecycle(
+            ParserLifecycleObservation(parser_id="p", event=event)
+        )
+    end = time.monotonic()
+
+    summary = metrics.parser_summary("p", end, started)
+    assert summary["discovered"] == 1
+    assert summary["enrich_failed"] == 0
+    assert summary["not_served_queries"] == 1
+    assert summary["queries_done"] == 2
+    assert summary["parsers_dead"] == 1
+    assert summary["unparseable_dates"] == 0
+    assert isinstance(summary["duration"], float)
+
+
+def test_parser_lifecycle_observations_preserve_done_and_dead_phase_updates(
+    run_log: RunLog,
+) -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_parser(
+        "done_parser", order=0, total_queries=1, has_native_enrich=False
+    )
+    metrics.register_parser(
+        "dead_parser", order=2, total_queries=1, has_native_enrich=False
+    )
+    _observe_parser_drop(metrics, "done_parser", "prefilter")
+    _observe_parser_drop(metrics, "dead_parser", "prefilter")
+
+    metrics.observe_parser_lifecycle(
+        ParserLifecycleObservation(parser_id="done_parser", event="parser_done")
+    )
+    metrics.observe_parser_lifecycle(
+        ParserLifecycleObservation(parser_id="dead_parser", event="parser_dead")
+    )
+
+    done_phase_calls = [
+        call
+        for call in display.calls
+        if call.method == "update_phase" and call.name == "parser done parser"
+    ]
+    dead_phase_calls = [
+        call
+        for call in display.calls
+        if call.method == "update_phase" and call.name == "parser dead parser"
+    ]
+
+    assert done_phase_calls[-1].kwargs["phase"] == "done"
+    assert dead_phase_calls[-1].kwargs["phase"] == "dead"
+    assert any(
+        call.method == "update_phase"
+        and call.name == "parser done parser gates"
+        and call.kwargs["phase"] == "done"
+        for call in display.calls
+    )
+    assert any(
+        call.method == "update_phase"
+        and call.name == "parser dead parser gates"
+        and call.kwargs["phase"] == "dead"
+        for call in display.calls
+    )
 
 
 def test_parser_summary_duration_rounded_to_one_decimal(run_log: RunLog) -> None:

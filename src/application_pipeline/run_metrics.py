@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, assert_never
 
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -302,7 +302,10 @@ class RunMetrics:
         if event == "parser_done":
             self._observe_parser_done(parser_id)
             return
-        self._observe_parser_dead(parser_id)
+        if event == "parser_dead":
+            self._observe_parser_dead(parser_id)
+            return
+        assert_never(event)
 
     def discovered(self, parser_id: str = "") -> None:
         self._observe_parser_discovered(parser_id)

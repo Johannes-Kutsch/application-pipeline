@@ -12,8 +12,14 @@ import pytest
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
 from application_pipeline.freshness_gate import FreshnessSnapshot
-from application_pipeline.llm.types import CallUsage
+from application_pipeline.llm.types import (
+    AppliedClassifyItemOutcome,
+    AppliedClassifyOutcome,
+    CallUsage,
+    MatchedListing,
+)
 from application_pipeline.parser_log import RunLog
+from application_pipeline.parsers import PositionStub
 from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.run_metrics import (
     ClassifyBatchFailureObservation,
@@ -373,6 +379,152 @@ def test_classify_failure_observation_updates_summary_divider_and_log(
     )
     assert summary.classify_items == 0
     assert summary.errored == 3
+
+    divider = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
+    )
+    assert "errors=3" in divider
+    assert "classify_batches_failed=1" in divider
+    assert "classify_items_abandoned=3" in divider
+
+    started_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    metrics.summarize_to_parser_log(started_at)
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "batches_sent=0" in run_log_text
+    assert "items_classified=0" in run_log_text
+    assert "matched=0" in run_log_text
+    assert "off_domain=0" in run_log_text
+    assert "batches_failed=1" in run_log_text
+
+
+def test_classify_success_seam_updates_counters_parser_rows_and_outputs(
+    tmp_path: Path,
+) -> None:
+    metrics, display = _make_fake_display_metrics(tmp_path)
+    metrics.register_rows()
+    metrics.register_parser(
+        "parser.alpha", order=1, total_queries=1, has_native_enrich=True
+    )
+    metrics.register_parser(
+        "parser.beta", order=3, total_queries=1, has_native_enrich=True
+    )
+    matched_stub = PositionStub(
+        url="https://example.com/matched",
+        title="Platform Engineer",
+        source="example",
+    )
+
+    metrics.classify_submitted(5)
+    metrics.classify_batch_started(5)
+    metrics.classify_batch_succeeded(
+        AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(
+                    state="matched",
+                    event_matches=True,
+                    matched_listing=MatchedListing(listing_id=1, stub=matched_stub),
+                ),
+                AppliedClassifyItemOutcome(
+                    state="rejected",
+                    event_matches=False,
+                ),
+                AppliedClassifyItemOutcome(
+                    state="retryable",
+                    event_matches=None,
+                ),
+                AppliedClassifyItemOutcome(
+                    state="expired",
+                    event_matches=None,
+                ),
+                AppliedClassifyItemOutcome(
+                    state="retryable",
+                    event_matches=None,
+                ),
+            ],
+            usage=_make_usage(
+                input_tokens=500,
+                output_tokens=200,
+                cache_read_tokens=100,
+                cost_usd=0.002,
+                duration_s=2.5,
+            ),
+        ),
+        parser_ids=(
+            "parser.alpha",
+            "parser.alpha",
+            "parser.alpha",
+            "parser.beta",
+            "parser.beta",
+        ),
+    )
+
+    summary = metrics.to_run_summary(
+        duration_s=1.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+    assert summary.classify_items == 5
+    assert summary.classifier_dropped == 2
+    assert summary.enrich_failed == 2
+    assert summary.errored == 2
+    assert summary.claude_input_tokens == 500
+    assert summary.claude_output_tokens == 200
+    assert summary.claude_cache_read_tokens == 100
+    assert abs(summary.claude_cost_usd - 0.002) < 1e-9
+
+    assert display.body_updates_for("llm classify relevance")[-1] == (
+        "2 malformed · 2 dropped · 1 forwarded"
+    )
+    assert display.body_updates_for("pipeline")[-1] == "discovered=0 written=0 errors=2"
+    alpha_summary = metrics.parser_summary("parser.alpha", 0.0, 0.0)
+    beta_summary = metrics.parser_summary("parser.beta", 0.0, 0.0)
+    assert alpha_summary["enrich_failed"] == 1
+    assert beta_summary["enrich_failed"] == 1
+
+    divider = metrics.format_run_divider(
+        "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
+    )
+    assert "classify_calls=1" in divider
+    assert "classify_items=5" in divider
+    assert "classify_total_s=2.5" in divider
+    assert "classify_input_tokens=500" in divider
+    assert "classify_output_tokens=200" in divider
+    assert "classify_cache_read_tokens=100" in divider
+    assert "classify_cost_usd=0.002000" in divider
+    assert "errors=2" in divider
+    assert "classify_items_abandoned=2" in divider
+
+    started_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    metrics.summarize_to_parser_log(started_at)
+    run_log_text = (tmp_path / "run.log").read_text()
+    assert "batches_sent=1" in run_log_text
+    assert "items_classified=5" in run_log_text
+    assert "matched=1" in run_log_text
+    assert "off_domain=2" in run_log_text
+    assert "batches_failed=0" in run_log_text
+    assert "input_tokens=500" in run_log_text
+
+
+def test_classify_failure_seam_updates_summary_divider_and_log(tmp_path: Path) -> None:
+    metrics, display = _make_fake_display_metrics(tmp_path)
+    metrics.register_rows()
+
+    metrics.classify_submitted(3)
+    metrics.classify_batch_started(3)
+    metrics.classify_batch_failed(3)
+
+    summary = metrics.to_run_summary(
+        duration_s=1.0,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+    assert summary.classify_items == 0
+    assert summary.errored == 3
+    assert display.body_updates_for("llm classify relevance")[-1] == "3 malformed"
 
     divider = metrics.format_run_divider(
         "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()

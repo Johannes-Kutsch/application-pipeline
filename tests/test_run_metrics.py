@@ -399,6 +399,8 @@ def test_classify_failure_observation_updates_summary_divider_and_log(
     assert "items_classified=0" in run_log_text
     assert "matched=0" in run_log_text
     assert "off_domain=0" in run_log_text
+    assert "malformed=3" in run_log_text
+    assert "items_abandoned=3" in run_log_text
     assert "batches_failed=1" in run_log_text
 
 
@@ -974,8 +976,22 @@ def test_concurrent_classify_observations_produce_correct_final_counts(
     assert f"errors={batches * 3}" in result
     assert f"classify_calls={batches}" in result
     assert f"classify_items={batches * 3}" in result
+    assert f"classify_malformed={batches * 3}" in result
+    assert f"classify_dropped={batches}" in result
+    assert f"classify_forwarded={batches}" in result
     assert f"classify_batches_failed={batches}" in result
     assert f"classify_items_abandoned={batches * 3}" in result
+
+    metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
+    run_log_text = (run_log.logs_dir / "run.log").read_text()
+    assert f"items_classified={batches * 3}" in run_log_text
+    assert f"matched={batches}" in run_log_text
+    assert f"off_domain={batches}" in run_log_text
+    assert f"malformed={batches * 3}" in run_log_text
+    assert f"dropped={batches}" in run_log_text
+    assert f"forwarded={batches}" in run_log_text
+    assert f"items_abandoned={batches * 3}" in run_log_text
+    assert f"batches_failed={batches}" in run_log_text
 
 
 def test_parser_summary_reflects_events_for_that_parser_id(run_log: RunLog) -> None:

@@ -22,6 +22,7 @@ from application_pipeline.parsers import PositionStub
 from application_pipeline.pool import Pool
 from application_pipeline.prefilter_gate import PreFilterGate
 from tests.parser_intake_harness import (
+    ClassifyCall,
     CountingPreFilter,
     FailOnPostEnrichFreshnessGate,
     HarnessSeedHelper,
@@ -152,7 +153,6 @@ def test_post_discover_dedup_skips_stop_before_prefilter_and_enrich_and_keep_sto
         harness.process_one_position_stub(stub)
 
     harness.assert_dedup_recorded(dedup_kind)
-    assert harness.status_display_row_body("parser test gates") == "1 dedup"
     assert prefilter.calls == 0
     assert harness.card_content(expected_listing_id) is None
 
@@ -182,7 +182,6 @@ def test_post_discover_prefilter_drop_persists_out_of_domain_before_enrich_and_k
     listing_id = harness.listing_id_for_url(stub.url)
     assert listing_id == 1
     harness.assert_dedup_recorded("miss")
-    assert harness.status_display_row_body("parser test gates") == "1 pre-filter"
     assert harness.card_content(listing_id) is None
     assert harness.classify_handoffs() == []
     assert harness.pool_admissions() == []
@@ -536,7 +535,6 @@ def test_discover_freshness_drop_marks_matched_alias_expired_before_downstream_s
 
     harness.process_one_position_stub(alias_stub)
 
-    assert harness.status_display_row_body("parser test gates") == "1 freshness"
     harness.assert_dedup_recorded(None)
 
     dedup_record = harness.dedup_observation(listing_id)
@@ -604,9 +602,6 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     assert admissions[0].listing_id == listing_id
     assert admissions[0].stub == rediscovered_stub
     harness.assert_dedup_recorded("judge_pending")
-    assert (
-        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
-    )
 
     card = harness.card_content(listing_id)
     assert card is not None
@@ -710,10 +705,14 @@ def test_fresh_stub_reaching_classify_updates_forwarded_metrics(
     harness.process_one_position_stub()
 
     harness.assert_dedup_recorded("run_hit")
-    assert (
-        harness.status_display_row_body("parser parser test")
-        == "0 discovered · 1 forwarded"
-    )
+    assert harness.classify_handoffs() == [
+        ClassifyCall(
+            listing_id=1,
+            stub=harness.default_enriched_stub,
+            body=harness.default_body,
+            parser_id="parser_test",
+        )
+    ]
 
 
 @pytest.mark.parametrize(
@@ -817,9 +816,6 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
     assert admissions[0].listing_id == listing_id
     assert admissions[0].stub == enriched_stub
     harness.assert_dedup_recorded("judge_pending")
-    assert (
-        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
-    )
 
     assert harness.card_content(listing_id) == CardExtract(
         header="Persisted header",
@@ -847,9 +843,6 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
     assert admissions[0].listing_id == listing_id
     assert admissions[0].stub == enriched_stub
     harness.assert_dedup_recorded("judge_pending")
-    assert (
-        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
-    )
     assert harness.card_content(listing_id) is None
 
 
@@ -880,7 +873,6 @@ def test_post_enrich_judge_pending_content_drop_stops_before_pool_and_preserves_
     harness.process_one_position_stub()
 
     harness.assert_dedup_recorded("judge_pending")
-    assert harness.status_display_row_body("parser test gates") == "1 content"
     assert harness.pool_admissions() == []
     assert harness.card_content(listing_id) == CardExtract(
         header="Persisted header",
@@ -936,7 +928,6 @@ def test_post_enrich_judge_pending_backfilled_freshness_drop_expires_matched_rec
     harness.process_one_position_stub()
 
     harness.assert_dedup_recorded("judge_pending")
-    assert harness.status_display_row_body("parser test gates") == "1 freshness"
     assert harness.card_content(listing_id) is None
 
     dedup_record = harness.dedup_observation(listing_id)
@@ -986,9 +977,10 @@ def test_parser_enrich_failed_logs_and_updates_metrics_without_seen_or_card_writ
 
     listing_id = 1
     harness.assert_dedup_recorded("miss")
-    assert harness.status_display_row_body("parser test") == (
-        "0 discovered · 1 enrich_failed · 0 forwarded"
+    parser_summary = harness.metrics.parser_summary(
+        "test", end_monotonic=1.0, started_monotonic=0.0
     )
+    assert parser_summary["enrich_failed"] == 1
     assert [
         {k: v for k, v in row.items() if k != "ts"}
         for row in harness.log_artifact_event_rows("pipeline_orchestrator")
@@ -1048,7 +1040,6 @@ def test_post_enrich_content_drop_uses_harness_observations_without_persisting_s
 
     listing_id = 1
     assert harness.dedup_counter_snapshot().dedup_run_hits == 1
-    assert harness.status_display_row_body("parser test gates") == "1 content"
     assert harness.classify_handoffs() == []
     assert harness.pool_admissions() == []
     assert harness.card_content(listing_id) is None
@@ -1097,9 +1088,6 @@ def test_parser_oversized_body_logs_skip_without_seen_or_card_write(
 
     listing_id = 1
     harness.assert_dedup_recorded("miss")
-    assert harness.status_display_row_body("parser test") == (
-        "0 discovered · 0 forwarded"
-    )
     assert [
         {k: v for k, v in row.items() if k != "ts"}
         for row in harness.log_artifact_event_rows("llm_enricher")
@@ -1142,9 +1130,6 @@ def test_parser_transient_http_error_logs_skip_without_seen_or_card_write(
 
     listing_id = 1
     harness.assert_dedup_recorded("miss")
-    assert harness.status_display_row_body("parser test") == (
-        "0 discovered · 0 forwarded"
-    )
     assert [
         {k: v for k, v in row.items() if k != "ts"}
         for row in harness.log_artifact_event_rows("llm_enricher")

@@ -883,7 +883,10 @@ class RunMetrics:
 
     def _parser_body(self, parser_id: str) -> str:
         c = self._per_parser.get(parser_id, _ParserCounters())
-        parts = [f"{c.discovered} discovered"]
+        parts = []
+        if c.total_queries > 0:
+            parts.append(f"{c.queries_done}/{c.total_queries} queries")
+        parts.append(f"{c.discovered} discovered")
         if c.has_native_enrich and c.enrich_failed_count:
             parts.append(f"{c.enrich_failed_count} enrich_failed")
         parts.append(f"{c.forwarded} forwarded")

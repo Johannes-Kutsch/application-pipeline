@@ -85,6 +85,7 @@ def test_pool_projects_judge_candidates_from_admitted_listings(
         JudgeCandidate(id=12, header="Header 12", summary="Summary 12"),
     ]
 
+
 def test_pool_exposes_judge_candidates_as_the_candidate_projection_operation(
     tmp_path: Path,
 ) -> None:

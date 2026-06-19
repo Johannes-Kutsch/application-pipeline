@@ -25,7 +25,7 @@ def test_parser_intake_harness_observes_classify_handoff_and_deduplication_miss(
     assert parser_intake_harness.dedup_counter_snapshot().dedup_run_hits == 1
     assert (
         parser_intake_harness.status_display_row_body("parser parser test")
-        == "0 discovered · 1 forwarded"
+        == "0/1 queries · 0 discovered · 1 forwarded"
     )
 
 

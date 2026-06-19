@@ -1083,9 +1083,37 @@ def test_parser_row_body_keeps_native_enrich_failed_and_forwarded_semantics(
     metrics.observe_parser_intake_forwarded("jobs_beim_staat", "native")
 
     assert display.body_updates_for("parser jobs beim staat") == [
-        "0 discovered · 0 forwarded",
-        "0 discovered · 1 enrich_failed · 0 forwarded",
-        "0 discovered · 1 enrich_failed · 1 forwarded",
+        "0/5 queries · 0 discovered · 0 forwarded",
+        "0/5 queries · 0 discovered · 1 enrich_failed · 0 forwarded",
+        "0/5 queries · 0 discovered · 1 enrich_failed · 1 forwarded",
+    ]
+
+
+def test_parser_row_body_exposes_query_progress_alongside_parser_activity(
+    tmp_path: Path,
+) -> None:
+    metrics, display = _make_fake_display_metrics(tmp_path)
+    metrics.register_parser("jobs_beim_staat", order=4, total_queries=3)
+
+    metrics.observe_parser_lifecycle(
+        ParserLifecycleObservation(
+            parser_id="jobs_beim_staat",
+            event="query_done",
+        )
+    )
+    metrics.observe_parser_lifecycle(
+        ParserLifecycleObservation(
+            parser_id="jobs_beim_staat",
+            event="discovered",
+        )
+    )
+    metrics.observe_parser_intake_forwarded("jobs_beim_staat", "fallback")
+
+    assert display.body_updates_for("parser jobs beim staat") == [
+        "0/3 queries · 0 discovered · 0 forwarded",
+        "1/3 queries · 0 discovered · 0 forwarded",
+        "1/3 queries · 1 discovered · 0 forwarded",
+        "1/3 queries · 1 discovered · 1 forwarded",
     ]
 
 

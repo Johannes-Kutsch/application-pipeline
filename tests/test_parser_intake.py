@@ -605,7 +605,8 @@ def test_post_discover_judge_pending_routes_to_pool_with_original_stub_and_keeps
     assert admissions[0].stub == rediscovered_stub
     harness.assert_dedup_recorded("judge_pending")
     assert (
-        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
+        harness.status_display_row_body("parser test")
+        == "0/1 queries · 0 discovered · 0 forwarded"
     )
 
     card = harness.card_content(listing_id)
@@ -712,7 +713,7 @@ def test_fresh_stub_reaching_classify_updates_forwarded_metrics(
     harness.assert_dedup_recorded("run_hit")
     assert (
         harness.status_display_row_body("parser parser test")
-        == "0 discovered · 1 forwarded"
+        == "0/1 queries · 0 discovered · 1 forwarded"
     )
 
 
@@ -818,7 +819,8 @@ def test_post_enrich_judge_pending_admits_to_pool_with_enriched_stub_and_refresh
     assert admissions[0].stub == enriched_stub
     harness.assert_dedup_recorded("judge_pending")
     assert (
-        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
+        harness.status_display_row_body("parser test")
+        == "0/1 queries · 0 discovered · 0 forwarded"
     )
 
     assert harness.card_content(listing_id) == CardExtract(
@@ -848,7 +850,8 @@ def test_post_enrich_judge_pending_without_existing_card_does_not_synthesize_ext
     assert admissions[0].stub == enriched_stub
     harness.assert_dedup_recorded("judge_pending")
     assert (
-        harness.status_display_row_body("parser test") == "0 discovered · 0 forwarded"
+        harness.status_display_row_body("parser test")
+        == "0/1 queries · 0 discovered · 0 forwarded"
     )
     assert harness.card_content(listing_id) is None
 
@@ -987,7 +990,7 @@ def test_parser_enrich_failed_logs_and_updates_metrics_without_seen_or_card_writ
     listing_id = 1
     harness.assert_dedup_recorded("miss")
     assert harness.status_display_row_body("parser test") == (
-        "0 discovered · 1 enrich_failed · 0 forwarded"
+        "0/1 queries · 0 discovered · 1 enrich_failed · 0 forwarded"
     )
     assert [
         {k: v for k, v in row.items() if k != "ts"}
@@ -1098,7 +1101,7 @@ def test_parser_oversized_body_logs_skip_without_seen_or_card_write(
     listing_id = 1
     harness.assert_dedup_recorded("miss")
     assert harness.status_display_row_body("parser test") == (
-        "0 discovered · 0 forwarded"
+        "0/1 queries · 0 discovered · 0 forwarded"
     )
     assert [
         {k: v for k, v in row.items() if k != "ts"}
@@ -1143,7 +1146,7 @@ def test_parser_transient_http_error_logs_skip_without_seen_or_card_write(
     listing_id = 1
     harness.assert_dedup_recorded("miss")
     assert harness.status_display_row_body("parser test") == (
-        "0 discovered · 0 forwarded"
+        "0/1 queries · 0 discovered · 0 forwarded"
     )
     assert [
         {k: v for k, v in row.items() if k != "ts"}

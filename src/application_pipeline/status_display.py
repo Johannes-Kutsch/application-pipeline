@@ -121,6 +121,10 @@ class PlainStatusDisplay(_StatusDisplay):
     def _on_removed(self, name: str) -> None:
         print(f"{name}: removed")
 
+    def print(self, *, caller: str, message: str) -> None:
+        del caller
+        print(message)
+
 
 class RichStatusDisplay(_StatusDisplay):
     def __init__(self, *, run_log: RunLog | None) -> None:

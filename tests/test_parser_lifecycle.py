@@ -61,11 +61,11 @@ class _NoopHandoff:
 
 
 class _NoopClassifyMetrics:
-    def observe_classify_submission(self, observation: object) -> None:
-        del observation
+    def classify_submitted(self, count: int) -> None:
+        del count
 
-    def observe_classify_batch_start(self, observation: object) -> None:
-        del observation
+    def classify_batch_started(self, count: int) -> None:
+        del count
 
     def observe_classify_batch_outcome(self, observation: object) -> None:
         del observation
@@ -76,8 +76,8 @@ class _NoopClassifyMetrics:
     def observe_classify_retryable(self, observation: object) -> None:
         del observation
 
-    def observe_classify_stage_completion(self, observation: object) -> None:
-        del observation
+    def classify_stage_completed(self) -> None:
+        pass
 
 
 class _ExplosiveTruthinessHandoff:

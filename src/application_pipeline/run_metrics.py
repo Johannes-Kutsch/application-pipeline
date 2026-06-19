@@ -475,9 +475,12 @@ class RunMetrics:
     ) -> None:
         if isinstance(observation, int):
             observation = ClassifySubmissionObservation(count=observation)
+        self.classify_submitted(observation.count)
+
+    def classify_submitted(self, count: int) -> None:
         with self._classify_lock:
-            self._pending_classify += observation.count
-            self._classify_queued += observation.count
+            self._pending_classify += count
+            self._classify_queued += count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
@@ -486,10 +489,13 @@ class RunMetrics:
     ) -> None:
         if isinstance(observation, int):
             observation = ClassifyBatchStartObservation(count=observation)
+        self.classify_batch_started(observation.count)
+
+    def classify_batch_started(self, count: int) -> None:
         with self._classify_lock:
             self._total_batches += 1
-            self._pending_classify -= observation.count
-            self._classifying += observation.count
+            self._pending_classify -= count
+            self._classifying += count
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
@@ -531,6 +537,9 @@ class RunMetrics:
         self, observation: ClassifyStageCompletionObservation
     ) -> None:
         del observation
+        self.classify_stage_completed()
+
+    def classify_stage_completed(self) -> None:
         self._display.update_phase("llm classify relevance", phase="done")
 
     def observe_classify_retryable(

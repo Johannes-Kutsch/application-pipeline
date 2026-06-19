@@ -10,9 +10,6 @@ from application_pipeline.run_metrics import (
     ClassifyBatchFailureObservation,
     ClassifyBatchOutcomeObservation,
     ClassifyRetryableObservation,
-    ClassifyBatchStartObservation,
-    ClassifyStageCompletionObservation,
-    ClassifySubmissionObservation,
 )
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -146,15 +143,11 @@ class _FakeMetrics:
         self.batch_starts: list[int] = []
         self.done = 0
 
-    def observe_classify_submission(
-        self, observation: ClassifySubmissionObservation
-    ) -> None:
-        self.buffered += observation.count
+    def classify_submitted(self, count: int) -> None:
+        self.buffered += count
 
-    def observe_classify_batch_start(
-        self, observation: ClassifyBatchStartObservation
-    ) -> None:
-        self.batch_starts.append(observation.count)
+    def classify_batch_started(self, count: int) -> None:
+        self.batch_starts.append(count)
 
     def observe_classify_batch_outcome(
         self, observation: ClassifyBatchOutcomeObservation
@@ -171,10 +164,7 @@ class _FakeMetrics:
     ) -> None:
         del observation
 
-    def observe_classify_stage_completion(
-        self, observation: ClassifyStageCompletionObservation
-    ) -> None:
-        del observation
+    def classify_stage_completed(self) -> None:
         self.done += 1
 
 

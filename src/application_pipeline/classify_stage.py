@@ -17,9 +17,6 @@ from application_pipeline.run_metrics import (
     ClassifyBatchFailureObservation,
     ClassifyBatchOutcomeObservation,
     ClassifyRetryableObservation,
-    ClassifyBatchStartObservation,
-    ClassifyStageCompletionObservation,
-    ClassifySubmissionObservation,
 )
 from application_pipeline.parser_log import RunLog
 
@@ -86,9 +83,7 @@ class _ClaimedDispatchItem:
 
 @runtime_checkable
 class ClassifyAccumulatorMetrics(Protocol):
-    def observe_classify_batch_start(
-        self, observation: ClassifyBatchStartObservation
-    ) -> None: ...
+    def classify_batch_started(self, count: int) -> None: ...
 
 
 @runtime_checkable
@@ -146,7 +141,7 @@ class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
     def _submit_request(self, request: _ClassifyRequest) -> None:
         assert request.parser_id == self._parser_id
         self._classify_queue.put(request)
-        self._metrics.observe_classify_submission(ClassifySubmissionObservation(1))
+        self._metrics.classify_submitted(1)
 
     def submit_ready(
         self,
@@ -170,13 +165,9 @@ class _QueueBackedClassifyStageHandoff(ClassifyStageHandoff):
 
 @runtime_checkable
 class ClassifyStageMetrics(ClassifyAccumulatorMetrics, ClassifyWorkerMetrics, Protocol):
-    def observe_classify_submission(
-        self, observation: ClassifySubmissionObservation
-    ) -> None: ...
+    def classify_submitted(self, count: int) -> None: ...
 
-    def observe_classify_stage_completion(
-        self, observation: ClassifyStageCompletionObservation
-    ) -> None: ...
+    def classify_stage_completed(self) -> None: ...
 
 
 @runtime_checkable
@@ -256,9 +247,7 @@ class ClassifyStage:
             worker.join()
             if first_failure is None and worker.exc is not None:
                 first_failure = worker.exc
-        self._metrics.observe_classify_stage_completion(
-            ClassifyStageCompletionObservation()
-        )
+        self._metrics.classify_stage_completed()
         return ClassifyStageCompletion(first_failure=first_failure)
 
 
@@ -292,9 +281,7 @@ class _ClassifyAccumulator(threading.Thread):
                 item = self._classify_queue.get()
                 if item is _CLASSIFY_SHUTDOWN:
                     if batch:
-                        self._metrics.observe_classify_batch_start(
-                            ClassifyBatchStartObservation(len(batch))
-                        )
+                        self._metrics.classify_batch_started(len(batch))
                         self._dispatch.submit(batch)
                     for _ in range(self._num_workers):
                         self._dispatch.submit(_CLASSIFY_SHUTDOWN)
@@ -302,9 +289,7 @@ class _ClassifyAccumulator(threading.Thread):
                 assert isinstance(item, _ClassifyRequest)
                 batch.append(item)
                 if len(batch) >= self._batch_size:
-                    self._metrics.observe_classify_batch_start(
-                        ClassifyBatchStartObservation(len(batch))
-                    )
+                    self._metrics.classify_batch_started(len(batch))
                     self._dispatch.submit(batch)
                     batch = []
         except BaseException as exc:

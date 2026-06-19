@@ -36,6 +36,7 @@ from application_pipeline.run_metrics import (
     RunSummary,
 )
 from application_pipeline.status_display import PlainStatusDisplay
+from fake_status_display import FakeStatusDisplay
 
 ParserDropOutcome = Literal[
     "dedup_url_hit",
@@ -269,6 +270,43 @@ def test_classify_observation_objects_update_public_counters(tmp_path: Path) -> 
         and row["phase"] == "done"
         for row in rows
     )
+
+
+def test_classify_count_seam_preserves_queue_depth_in_flight_and_done_phase(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=run_log)
+    metrics.register_rows()
+
+    metrics.classify_submitted(3)
+    assert display.body_updates_for("llm classify relevance")[-1] == "3 queued"
+
+    metrics.classify_batch_started(2)
+    assert (
+        display.body_updates_for("llm classify relevance")[-1]
+        == "1 queued · 2 classifying"
+    )
+
+    metrics.observe_classify_batch_outcome(
+        ClassifyBatchOutcomeObservation(
+            usage=_make_usage(),
+            item_states=("matched", "rejected"),
+        )
+    )
+    assert (
+        display.body_updates_for("llm classify relevance")[-1]
+        == "1 queued · 1 dropped · 1 forwarded"
+    )
+
+    metrics.classify_stage_completed()
+    phase_updates = [
+        call
+        for call in display.calls
+        if call.method == "update_phase" and call.name == "llm classify relevance"
+    ]
+    assert phase_updates[-1].kwargs["phase"] == "done"
 
 
 def test_classify_outcome_observation_updates_summary_divider_and_log(

@@ -33,7 +33,6 @@ from application_pipeline.run_metrics import (
     RunSummary,
 )
 from application_pipeline.status_display import PlainStatusDisplay
-from fake_status_display import FakeStatusDisplay
 
 ParserDropOutcome = Literal[
     "dedup_url_hit",

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Literal, assert_never
 
 from application_pipeline.content_gate import ContentSnapshot
@@ -185,6 +187,14 @@ class RunMetrics:
 
         # Per-parser counters (lazily allocated on first event)
         self._per_parser: dict[str, _ParserCounters] = {}
+        self._local_state_offsets = {
+            path: len(self._read_jsonl_rows(path))
+            for path in (
+                self._run_log.logs_dir / "pipeline" / "dedup.events.jsonl",
+                self._run_log.logs_dir / "pipeline" / "prefilter.transcripts.jsonl",
+                self._run_log.logs_dir / "pipeline" / "content.transcripts.jsonl",
+            )
+        }
 
     # -----------------------------------------------------------------------
     # Row registration
@@ -660,6 +670,115 @@ class RunMetrics:
     # Output methods
     # -----------------------------------------------------------------------
 
+    def _read_jsonl_rows(self, path: Path) -> list[dict[str, object]]:
+        if not path.exists():
+            return []
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def _new_jsonl_rows(self, path: Path) -> list[dict[str, object]]:
+        rows = self._read_jsonl_rows(path)
+        return rows[self._local_state_offsets.get(path, 0) :]
+
+    @staticmethod
+    def _int_field(row: dict[str, object], key: str) -> int:
+        value = row.get(key, 0)
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            return int(value)
+        return 0
+
+    def _local_dedup_snapshot(self) -> DedupSnapshot | None:
+        rows = self._new_jsonl_rows(
+            self._run_log.logs_dir / "pipeline" / "dedup.events.jsonl"
+        )
+        for row in reversed(rows):
+            if row.get("event") == "run_complete":
+                return DedupSnapshot(
+                    dedup_url_hits=self._int_field(row, "dedup_url_hits"),
+                    dedup_tuple_hits=self._int_field(row, "dedup_tuple_hits"),
+                    dedup_fuzzy_hits=self._int_field(row, "dedup_fuzzy_hits"),
+                    dedup_run_hits=self._int_field(row, "dedup_run_hits"),
+                    dedup_misses=self._int_field(row, "dedup_misses"),
+                    judge_resumed=self._int_field(row, "judge_resumed"),
+                )
+        return None
+
+    def _resolve_dedup_snapshot(self, dedup: DedupSnapshot) -> DedupSnapshot:
+        local = self._local_dedup_snapshot()
+        return local if local is not None else dedup
+
+    def _local_prefilter_snapshot(self) -> PreFilterSnapshot | None:
+        rows = self._new_jsonl_rows(
+            self._run_log.logs_dir / "pipeline" / "prefilter.transcripts.jsonl"
+        )
+        if not rows:
+            return None
+
+        considered = len(rows)
+        passed = 0
+        dropped = 0
+        blacklist_hits = 0
+        for row in rows:
+            passes = bool(row.get("passes"))
+            if passes:
+                passed += 1
+            else:
+                dropped += 1
+                blacklist_matches = row.get("blacklist_matches", [])
+                if isinstance(blacklist_matches, list) and blacklist_matches:
+                    blacklist_hits += 1
+        return PreFilterSnapshot(
+            prefilter_considered=considered,
+            prefilter_passed=passed,
+            prefilter_dropped=dropped,
+            prefilter_blacklist_hits=blacklist_hits,
+        )
+
+    def _resolve_prefilter_snapshot(
+        self, prefilter: PreFilterSnapshot
+    ) -> PreFilterSnapshot:
+        local = self._local_prefilter_snapshot()
+        return local if local is not None else prefilter
+
+    def _local_content_snapshot(self) -> ContentSnapshot | None:
+        rows = self._new_jsonl_rows(
+            self._run_log.logs_dir / "pipeline" / "content.transcripts.jsonl"
+        )
+        if not rows:
+            return None
+
+        considered = len(rows)
+        passed = 0
+        dropped_empty = 0
+        dropped_short = 0
+        for row in rows:
+            reason = row.get("reason")
+            if reason == "passed":
+                passed += 1
+            elif reason == "too_short":
+                dropped_short += 1
+            elif reason == "empty_body":
+                dropped_empty += 1
+        return ContentSnapshot(
+            content_considered=considered,
+            content_passed=passed,
+            content_dropped_empty_body=dropped_empty,
+            content_dropped_too_short=dropped_short,
+        )
+
+    def _resolve_content_snapshot(self, content: ContentSnapshot) -> ContentSnapshot:
+        local = self._local_content_snapshot()
+        return local if local is not None else content
+
     def format_run_divider(
         self, timestamp: str, tag: str | None, elapsed_s: float, *, dedup: DedupSnapshot
     ) -> str:
@@ -699,6 +818,7 @@ class RunMetrics:
             judge_items_abandoned = self._judge_errored + classify_items_abandoned
             errors = judge_items_abandoned
 
+        dedup = self._resolve_dedup_snapshot(dedup)
         dedup_url_hits = dedup.dedup_url_hits
         dedup_tuple_hits = dedup.dedup_tuple_hits
         dedup_run_hits = dedup.dedup_run_hits
@@ -758,6 +878,10 @@ class RunMetrics:
         content: ContentSnapshot,
         dedup: DedupSnapshot,
     ) -> RunSummary:
+        del freshness
+        prefilter = self._resolve_prefilter_snapshot(prefilter)
+        content = self._resolve_content_snapshot(content)
+        dedup = self._resolve_dedup_snapshot(dedup)
         with self._classify_lock:
             classify_input_tokens = self._classify_input_tokens
             classify_output_tokens = self._classify_output_tokens
@@ -809,6 +933,7 @@ class RunMetrics:
         daily_top_5_count: int,
         elapsed_s: float,
     ) -> None:
+        dedup = self._resolve_dedup_snapshot(dedup)
         with self._classify_lock:
             classify_calls = self._classify_calls
             classify_input_tokens = self._classify_input_tokens

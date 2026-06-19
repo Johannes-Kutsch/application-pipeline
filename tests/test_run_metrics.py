@@ -9,8 +9,11 @@ from typing import Literal, cast
 
 import pytest
 
+from application_pipeline.content_gate import ContentGate
 from application_pipeline.content_gate import ContentSnapshot
+from application_pipeline.dedup_counters import DedupCounters
 from application_pipeline.dedup_counters import DedupSnapshot
+from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.freshness_gate import FreshnessSnapshot
 from application_pipeline.llm.types import (
     AppliedClassifyItemOutcome,
@@ -20,6 +23,7 @@ from application_pipeline.llm.types import (
 )
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import PositionStub
+from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.run_metrics import (
     ClassifyBatchFailureObservation,
@@ -48,6 +52,15 @@ def _make_metrics(run_log: RunLog) -> RunMetrics:
 def _make_fake_display_metrics(tmp_path: Path) -> tuple[RunMetrics, FakeStatusDisplay]:
     display = FakeStatusDisplay()
     return RunMetrics(display, run_log=RunLog(tmp_path)), display
+
+
+class _NoopDedupStore:
+    def mark_expired(self, key: object) -> None:
+        del key
+        return None
+
+    def mark_out_of_domain(self, key: object) -> None:
+        del key
 
 
 def _lifecycle_rows(tmp_path: Path) -> list[dict[str, object]]:
@@ -788,6 +801,134 @@ def test_emit_run_complete_writes_pipeline_orchestrator_row_from_metrics(
             "elapsed_s": 12.3,
         }
     ]
+
+
+def test_final_projections_preserve_gate_and_dedup_run_complete_filesystem_state(
+    tmp_path: Path,
+) -> None:
+    run_log = RunLog(tmp_path)
+    metrics = _build_populated_metrics(run_log)
+    dedup_store = _NoopDedupStore()
+
+    prefilter = PreFilterGate(
+        blacklist=["blocked"],
+        dedup=dedup_store,
+        run_log=run_log,
+    )
+    prefilter.admit(
+        PositionStub(
+            url="https://example.com/blocked",
+            title="Blocked role",
+            source="example",
+        )
+    )
+    prefilter.admit(
+        PositionStub(
+            url="https://example.com/passed",
+            title="Allowed role",
+            source="example",
+        )
+    )
+    prefilter.emit_run_complete()
+
+    freshness = FreshnessGate(
+        anchored_today=datetime(2026, 1, 2, tzinfo=timezone.utc).date(),
+        max_listing_age_days=30,
+        dedup=dedup_store,
+        run_log=run_log,
+    )
+    freshness.admit(
+        PositionStub(
+            url="https://example.com/old",
+            title="Old role",
+            source="example",
+            posted_date=datetime(2025, 11, 1, tzinfo=timezone.utc).date(),
+        ),
+        gate_arm="discover",
+    )
+    freshness.emit_run_complete()
+
+    content = ContentGate(run_log=run_log)
+    content.inspect(
+        "",
+        PositionStub(
+            url="https://example.com/empty",
+            title="Empty body",
+            source="example",
+        ),
+    )
+    content.inspect(
+        "x" * 120,
+        PositionStub(
+            url="https://example.com/full",
+            title="Full body",
+            source="example",
+        ),
+    )
+    content.emit_run_complete()
+
+    dedup = DedupCounters(display=FakeStatusDisplay(), run_log=run_log)
+    dedup.record("url_hit")
+    dedup.record("tuple_hit")
+    dedup.record("run_hit")
+    dedup.record("judge_pending")
+    dedup.record("miss")
+    dedup.emit_run_complete()
+
+    summary = metrics.to_run_summary(
+        duration_s=55.5,
+        prefilter=PreFilterSnapshot(),
+        freshness=FreshnessSnapshot(),
+        content=ContentSnapshot(),
+        dedup=DedupSnapshot(),
+    )
+
+    assert summary.prefilter_considered == 2
+    assert summary.prefilter_passed == 1
+    assert summary.prefilter_dropped == 1
+    assert summary.prefilter_blacklist_hits == 1
+    assert summary.content_considered == 2
+    assert summary.content_passed == 1
+    assert summary.content_dropped_empty_body == 1
+    assert summary.content_dropped_too_short == 0
+    assert summary.dedup_url_hits == 1
+    assert summary.dedup_tuple_hits == 1
+    assert summary.dedup_run_hits == 1
+    assert summary.dedup_misses == 1
+    assert summary.judge_resumed == 1
+    assert summary.skipped == 2
+
+    divider = metrics.format_run_divider(
+        "2026-01-01T12:00:00Z",
+        None,
+        42.7,
+        dedup=DedupSnapshot(),
+    )
+    assert "dedup_url_hits=1" in divider
+    assert "dedup_tuple_hits=1" in divider
+    assert "dedup_run_hits=1" in divider
+    assert "dedup_misses=1" in divider
+    assert "judge_resumed=1" in divider
+
+    metrics.emit_run_complete(
+        dedup=DedupSnapshot(),
+        pool_size=6,
+        daily_top_5_count=1,
+        elapsed_s=12.34,
+    )
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "pipeline" / "orchestrator.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    run_complete_rows = [row for row in rows if row.get("event") == "run_complete"]
+    assert run_complete_rows[-1]["dedup_url_hits"] == 1
+    assert run_complete_rows[-1]["dedup_tuple_hits"] == 1
+    assert run_complete_rows[-1]["dedup_run_hits"] == 1
+    assert run_complete_rows[-1]["dedup_misses"] == 1
+    assert run_complete_rows[-1]["elapsed_s"] == 12.3
 
 
 def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:

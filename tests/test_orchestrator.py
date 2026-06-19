@@ -2586,9 +2586,13 @@ def test_run_complete_event_logged_to_pipeline_orchestrator_events(
         "dedup_tuple_hits",
         "dedup_run_hits",
         "dedup_misses",
+        "pool_size",
+        "daily_top_5_count",
         "elapsed_s",
     ):
         assert key in row, f"key {key!r} missing from run_complete event"
+    assert row["pool_size"] == 4
+    assert row["daily_top_5_count"] == 4
 
 
 def test_run_complete_event_carries_dedup_run_hits(tmp_path: Path) -> None:

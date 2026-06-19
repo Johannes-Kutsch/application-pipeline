@@ -27,7 +27,6 @@ from application_pipeline.parser_lifecycle import (
     run_parser_lifecycle,
 )
 from application_pipeline.run_metrics import (
-    RunCompleteObservation,
     RunMetrics,
     RunSummary,
 )
@@ -411,12 +410,10 @@ def run(
             metrics.set_degraded_reason(run_state.degraded_reason)
 
         metrics.emit_run_complete(
-            RunCompleteObservation(
-                dedup=dedup_snapshot,
-                pool_size=pool_size,
-                daily_top_5_count=daily_top_5_count,
-                elapsed_s=elapsed_s,
-            )
+            dedup=dedup_snapshot,
+            pool_size=pool_size,
+            daily_top_5_count=daily_top_5_count,
+            elapsed_s=elapsed_s,
         )
 
         summary = metrics.to_run_summary(

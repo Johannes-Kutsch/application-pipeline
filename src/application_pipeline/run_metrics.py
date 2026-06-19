@@ -123,6 +123,21 @@ class ParserIntakeForwardedObservation:
     mode: Literal["native", "fallback"]
 
 
+ParserLifecycleEvent = Literal[
+    "discovered",
+    "not_served_query",
+    "query_done",
+    "parser_done",
+    "parser_dead",
+]
+
+
+@dataclass(frozen=True)
+class ParserLifecycleObservation:
+    parser_id: str
+    event: ParserLifecycleEvent
+
+
 @dataclass(frozen=True)
 class ClassifyRetryableObservation:
     parser_id: str
@@ -272,7 +287,27 @@ class RunMetrics:
     # Parser-side events
     # -----------------------------------------------------------------------
 
+    def observe_parser_lifecycle(self, observation: ParserLifecycleObservation) -> None:
+        event = observation.event
+        parser_id = observation.parser_id
+        if event == "discovered":
+            self._observe_parser_discovered(parser_id)
+            return
+        if event == "not_served_query":
+            self._observe_not_served_query(parser_id)
+            return
+        if event == "query_done":
+            self._observe_query_done(parser_id)
+            return
+        if event == "parser_done":
+            self._observe_parser_done(parser_id)
+            return
+        self._observe_parser_dead(parser_id)
+
     def discovered(self, parser_id: str = "") -> None:
+        self._observe_parser_discovered(parser_id)
+
+    def _observe_parser_discovered(self, parser_id: str) -> None:
         with self._lock:
             self._discovered += 1
             if parser_id:
@@ -295,6 +330,9 @@ class RunMetrics:
             self._display.update_body(self._parser_row(parser_id), body=parser_body)
 
     def parser_dead(self, parser_id: str = "") -> None:
+        self._observe_parser_dead(parser_id)
+
+    def _observe_parser_dead(self, parser_id: str) -> None:
         with self._lock:
             self._parsers_dead += 1
             if parser_id:
@@ -313,6 +351,9 @@ class RunMetrics:
                 self._display.update_phase(self._gates_row(parser_id), phase="dead")
 
     def parser_done(self, parser_id: str) -> None:
+        self._observe_parser_done(parser_id)
+
+    def _observe_parser_done(self, parser_id: str) -> None:
         with self._lock:
             entry = self._parser_entry(parser_id)
             body = self._parser_body(parser_id)
@@ -323,6 +364,9 @@ class RunMetrics:
             self._display.update_phase(self._gates_row(parser_id), phase="done")
 
     def not_served_query(self, parser_id: str) -> None:
+        self._observe_not_served_query(parser_id)
+
+    def _observe_not_served_query(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).not_served_queries += 1
             body = self._parser_body(parser_id)
@@ -335,6 +379,9 @@ class RunMetrics:
         self._display.update_body(self._parser_row(parser_id), body=body)
 
     def query_done(self, parser_id: str) -> None:
+        self._observe_query_done(parser_id)
+
+    def _observe_query_done(self, parser_id: str) -> None:
         with self._lock:
             self._parser_entry(parser_id).queries_done += 1
             body = self._parser_body(parser_id)

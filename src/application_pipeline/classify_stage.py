@@ -13,11 +13,6 @@ from application_pipeline.llm import ExtractorBatchMalformedError, ExtractorErro
 from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import AppliedClassifyOutcome
-from application_pipeline.run_metrics import (
-    ClassifyBatchFailureObservation,
-    ClassifyBatchOutcomeObservation,
-    ClassifyRetryableObservation,
-)
 from application_pipeline.parser_log import RunLog
 
 from application_pipeline.parsers.types import PositionStub
@@ -101,16 +96,13 @@ class ClassifyWorkerRunState(Protocol):
 
 @runtime_checkable
 class ClassifyWorkerMetrics(Protocol):
-    def observe_classify_batch_failure(
-        self, observation: ClassifyBatchFailureObservation
-    ) -> None: ...
+    def classify_batch_failed(self, items: int) -> None: ...
 
-    def observe_classify_batch_outcome(
-        self, observation: ClassifyBatchOutcomeObservation
-    ) -> None: ...
-
-    def observe_classify_retryable(
-        self, observation: ClassifyRetryableObservation
+    def classify_batch_succeeded(
+        self,
+        outcome: AppliedClassifyOutcome,
+        *,
+        parser_ids: tuple[str, ...] = (),
     ) -> None: ...
 
 
@@ -440,9 +432,7 @@ class _ClassifyWorker(threading.Thread):
         if from_retry:
             self._dispatch.finish_retry()
         _log.warning("llm_enricher.enrich failed: %s", exc)
-        self._metrics.observe_classify_batch_failure(
-            ClassifyBatchFailureObservation(items=len(batch))
-        )
+        self._metrics.classify_batch_failed(len(batch))
         self._run_log.event(
             "llm_classify_relevance",
             "classify_relevance",
@@ -476,14 +466,7 @@ class _ClassifyWorker(threading.Thread):
                 "classify_relevance",
                 matches=item_outcome.event_matches,
             )
-            if item_outcome.state == "retryable":
-                self._metrics.observe_classify_retryable(
-                    ClassifyRetryableObservation(parser_id=req.parser_id)
-                )
-                continue
-            if item_outcome.state in ("expired", "rejected"):
-                continue
-            if item_outcome.state == "matched":
+            if item_outcome.matched_listing is not None:
                 matched_submissions.append(
                     (req.submission.listing_id, req.submission.stub)
                 )
@@ -491,11 +474,9 @@ class _ClassifyWorker(threading.Thread):
         for listing_id, stub in matched_submissions:
             self._pool_collector.add_matched(stub, listing_id)
 
-        self._metrics.observe_classify_batch_outcome(
-            ClassifyBatchOutcomeObservation(
-                usage=outcome.usage,
-                item_states=tuple(item.state for item in outcome.items),
-            )
+        self._metrics.classify_batch_succeeded(
+            outcome,
+            parser_ids=tuple(req.parser_id for req in batch),
         )
 
 

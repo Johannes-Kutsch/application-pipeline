@@ -8,7 +8,7 @@ from typing import Literal, assert_never
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
 from application_pipeline.freshness_gate import FreshnessSnapshot
-from application_pipeline.llm.types import CallUsage
+from application_pipeline.llm.types import AppliedClassifyOutcome, CallUsage
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prefilter_gate import PreFilterSnapshot
 from application_pipeline.status_display import StatusDisplay
@@ -475,34 +475,66 @@ class RunMetrics:
     def observe_classify_batch_outcome(
         self, observation: ClassifyBatchOutcomeObservation
     ) -> None:
-        items = len(observation.item_states)
+        self._record_classify_batch_success(
+            usage=observation.usage,
+            item_states=observation.item_states,
+            parser_ids=(),
+        )
+
+    def classify_batch_succeeded(
+        self,
+        outcome: AppliedClassifyOutcome,
+        *,
+        parser_ids: tuple[str, ...] = (),
+    ) -> None:
+        self._record_classify_batch_success(
+            usage=outcome.usage,
+            item_states=tuple(item.state for item in outcome.items),
+            parser_ids=parser_ids,
+        )
+
+    def _record_classify_batch_success(
+        self,
+        *,
+        usage: CallUsage,
+        item_states: tuple[ClassifyItemState, ...],
+        parser_ids: tuple[str, ...],
+    ) -> None:
+        items = len(item_states)
         classifier_dropped = sum(
-            1 for state in observation.item_states if state in ("rejected", "expired")
+            1 for state in item_states if state in ("rejected", "expired")
         )
-        retryable_items = sum(
-            1 for state in observation.item_states if state == "retryable"
+        retryable_parser_ids = tuple(
+            parser_id
+            for parser_id, state in zip(parser_ids, item_states)
+            if state == "retryable"
         )
+        retryable_items = sum(1 for state in item_states if state == "retryable")
         with self._classify_lock:
             self._classify_calls += 1
             self._classify_items += items
-            self._classify_input_tokens += observation.usage.input_tokens
-            self._classify_output_tokens += observation.usage.output_tokens
-            self._classify_cache_read_tokens += observation.usage.cache_read_tokens
-            self._classify_cost_usd += observation.usage.cost_usd
-            self._classify_total_s += observation.usage.duration_s
+            self._classify_input_tokens += usage.input_tokens
+            self._classify_output_tokens += usage.output_tokens
+            self._classify_cache_read_tokens += usage.cache_read_tokens
+            self._classify_cost_usd += usage.cost_usd
+            self._classify_total_s += usage.duration_s
             self._classifier_dropped += classifier_dropped
             self._classify_items_retryable += retryable_items
             self._classifying -= items
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
+        self._record_retryable_parser_ids(retryable_parser_ids)
 
     def observe_classify_batch_failure(
         self, observation: ClassifyBatchFailureObservation
     ) -> None:
+        self.classify_batch_failed(observation.items)
+
+    def classify_batch_failed(self, items: int) -> None:
         with self._classify_lock:
             self._classify_failed += 1
-            self._classify_items_errored += observation.items
-            self._classifying -= observation.items
+            self._classify_items_errored += items
+            self._classifying -= items
             body = self._classify_body()
         self._display.update_body("llm classify relevance", body=body)
 
@@ -518,19 +550,26 @@ class RunMetrics:
     def observe_classify_retryable(
         self, observation: ClassifyRetryableObservation
     ) -> None:
+        self._record_retryable_parser_ids((observation.parser_id,))
+
+    def _record_retryable_parser_ids(self, parser_ids: tuple[str, ...]) -> None:
+        if not parser_ids:
+            return
         with self._lock:
-            self._enrich_failed += 1
-            if observation.parser_id:
-                self._parser_entry(observation.parser_id).enrich_failed += 1
-                parser_body = self._parser_body(observation.parser_id)
-            else:
-                parser_body = None
+            parser_rows_to_update: list[str] = []
+            for parser_id in parser_ids:
+                self._enrich_failed += 1
+                if parser_id:
+                    self._parser_entry(parser_id).enrich_failed += 1
+                    parser_rows_to_update.append(parser_id)
             pipeline_body = self._pipeline_body()
+            parser_bodies = {
+                parser_id: self._parser_body(parser_id)
+                for parser_id in dict.fromkeys(parser_rows_to_update)
+            }
         self._display.update_body("pipeline", body=pipeline_body)
-        if parser_body is not None:
-            self._display.update_body(
-                self._parser_row(observation.parser_id), body=parser_body
-            )
+        for parser_id, body in parser_bodies.items():
+            self._display.update_body(self._parser_row(parser_id), body=body)
 
     # -----------------------------------------------------------------------
     # Judge-stage events

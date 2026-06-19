@@ -6,11 +6,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from application_pipeline.run_metrics import RunMetrics, RunSummary
-from application_pipeline.run_metrics import (
-    ClassifyBatchFailureObservation,
-    ClassifyBatchOutcomeObservation,
-    ClassifyRetryableObservation,
-)
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
 from application_pipeline.freshness_gate import FreshnessSnapshot
@@ -149,20 +144,16 @@ class _FakeMetrics:
     def classify_batch_started(self, count: int) -> None:
         self.batch_starts.append(count)
 
-    def observe_classify_batch_outcome(
-        self, observation: ClassifyBatchOutcomeObservation
+    def classify_batch_succeeded(
+        self,
+        outcome: AppliedClassifyOutcome,
+        *,
+        parser_ids: tuple[str, ...] = (),
     ) -> None:
-        del observation
+        del outcome, parser_ids
 
-    def observe_classify_batch_failure(
-        self, observation: ClassifyBatchFailureObservation
-    ) -> None:
-        del observation
-
-    def observe_classify_retryable(
-        self, observation: ClassifyRetryableObservation
-    ) -> None:
-        del observation
+    def classify_batch_failed(self, items: int) -> None:
+        del items
 
     def classify_stage_completed(self) -> None:
         self.done += 1

@@ -67,14 +67,13 @@ class _NoopClassifyMetrics:
     def classify_batch_started(self, count: int) -> None:
         del count
 
-    def observe_classify_batch_outcome(self, observation: object) -> None:
-        del observation
+    def classify_batch_succeeded(
+        self, outcome: object, *, parser_ids: tuple[str, ...] = ()
+    ) -> None:
+        del outcome, parser_ids
 
-    def observe_classify_batch_failure(self, observation: object) -> None:
-        del observation
-
-    def observe_classify_retryable(self, observation: object) -> None:
-        del observation
+    def classify_batch_failed(self, items: int) -> None:
+        del items
 
     def classify_stage_completed(self) -> None:
         pass

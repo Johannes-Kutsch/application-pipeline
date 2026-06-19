@@ -530,8 +530,7 @@ class RunMetrics:
         self._judge_errored += 1
         return self._pipeline_body()
 
-    def judge_started(self, candidate_count: int) -> None:
-        del candidate_count
+    def judge_started(self) -> None:
         with self._lock:
             self._judge_started += 1
 

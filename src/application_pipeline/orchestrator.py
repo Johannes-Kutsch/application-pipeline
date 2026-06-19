@@ -338,7 +338,7 @@ def run(
 
         daily_top_5_count = 0
         if candidates and not no_judge:
-            metrics.judge_started(len(candidates))
+            metrics.judge_started()
             verdicts: list[MatchVerdict] | None = None
             judge_usage = None
             assert isinstance(extractor, _LLMJudge), (

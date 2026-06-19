@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 import pytest
+from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.content_gate import ContentSnapshot
 from application_pipeline.dedup_counters import DedupSnapshot
@@ -381,7 +382,7 @@ def test_judge_lifecycle_outcome_updates_summary_divider_and_log(
         duration_s=1.5,
     )
 
-    metrics.judge_started(5)
+    metrics.judge_started()
     metrics.judge_succeeded(usage, card_count=3)
 
     summary = metrics.to_run_summary(
@@ -420,6 +421,20 @@ def test_judge_lifecycle_outcome_updates_summary_divider_and_log(
     assert "duration_s=1.5" in run_log_text
 
 
+def test_judge_success_prints_match_judge_terminal_message() -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(Path("/tmp")))
+
+    metrics.judge_started()
+    metrics.judge_succeeded(_make_usage(), card_count=3)
+
+    assert display.calls[-1].method == "print"
+    assert display.calls[-1].name == "llm_judge_match"
+    assert display.calls[-1].kwargs == {
+        "message": "judge_top_n complete: wrote 3 cards"
+    }
+
+
 def test_judge_lifecycle_failure_updates_summary_divider_and_log(
     tmp_path: Path,
 ) -> None:
@@ -427,7 +442,7 @@ def test_judge_lifecycle_failure_updates_summary_divider_and_log(
     metrics = _make_metrics(run_log)
     metrics.register_rows()
 
-    metrics.judge_started(5)
+    metrics.judge_started()
     metrics.judge_failed_lifecycle()
 
     summary = metrics.to_run_summary(

@@ -23,9 +23,6 @@ from application_pipeline.run_metrics import (
     ClassifyRetryableObservation,
     ClassifyStageCompletionObservation,
     ClassifySubmissionObservation,
-    JudgeLifecycleFailureObservation,
-    JudgeLifecycleOutcomeObservation,
-    JudgeLifecycleStartObservation,
     ParserIntakeDropObservation,
     ParserIntakeDropOutcome,
     ParserIntakeEnrichFailureObservation,
@@ -424,10 +421,8 @@ def test_judge_lifecycle_outcome_updates_summary_divider_and_log(
         duration_s=1.5,
     )
 
-    metrics.observe_judge_start(JudgeLifecycleStartObservation(candidate_count=5))
-    metrics.observe_judge_outcome(
-        JudgeLifecycleOutcomeObservation(usage=usage, card_count=3)
-    )
+    metrics.judge_started()
+    metrics.judge_succeeded(usage, card_count=3)
 
     summary = metrics.to_run_summary(
         duration_s=1.0,
@@ -465,6 +460,20 @@ def test_judge_lifecycle_outcome_updates_summary_divider_and_log(
     assert "duration_s=1.5" in run_log_text
 
 
+def test_judge_success_prints_match_judge_terminal_message() -> None:
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(Path("/tmp")))
+
+    metrics.judge_started()
+    metrics.judge_succeeded(_make_usage(), card_count=3)
+
+    assert display.calls[-1].method == "print"
+    assert display.calls[-1].name == "llm_judge_match"
+    assert display.calls[-1].kwargs == {
+        "message": "judge_top_n complete: wrote 3 cards"
+    }
+
+
 def test_judge_lifecycle_failure_updates_summary_divider_and_log(
     tmp_path: Path,
 ) -> None:
@@ -472,8 +481,8 @@ def test_judge_lifecycle_failure_updates_summary_divider_and_log(
     metrics = _make_metrics(run_log)
     metrics.register_rows()
 
-    metrics.observe_judge_start(JudgeLifecycleStartObservation(candidate_count=5))
-    metrics.observe_judge_failure(JudgeLifecycleFailureObservation())
+    metrics.judge_started()
+    metrics.judge_failed_lifecycle()
 
     summary = metrics.to_run_summary(
         duration_s=1.0,

@@ -13,11 +13,6 @@ from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, PositionStub
 from application_pipeline.parsers.body_fetch import OversizedBodyError
 from application_pipeline.parsers.types import EnrichFailedError
-from application_pipeline.run_metrics import (
-    ParserIntakeDropObservation,
-    ParserIntakeEnrichFailureObservation,
-    ParserIntakeForwardedObservation,
-)
 
 
 @runtime_checkable
@@ -59,30 +54,27 @@ class _NullClassifyStageHandoff:
 
 @runtime_checkable
 class ParserMetrics(Protocol):
-    def observe_parser_intake_drop(
-        self, observation: ParserIntakeDropObservation
+    def observe_parser_intake_freshness_drop(
+        self, parser_id: str, gate_arm: Literal["discover", "post_enrich"]
     ) -> None: ...
 
-    def observe_parser_intake_enrich_failure(
-        self, observation: ParserIntakeEnrichFailureObservation
+    def observe_parser_intake_dedup_drop(
+        self,
+        parser_id: str,
+        kind: Literal["url_hit", "tuple_hit", "fuzzy_hit", "run_hit"],
     ) -> None: ...
+
+    def observe_parser_intake_prefilter_drop(self, parser_id: str) -> None: ...
+
+    def observe_parser_intake_content_drop(
+        self, parser_id: str, reason: Literal["empty_body", "too_short"]
+    ) -> None: ...
+
+    def observe_parser_intake_enrich_failure(self, parser_id: str) -> None: ...
 
     def observe_parser_intake_forwarded(
-        self, observation: ParserIntakeForwardedObservation
+        self, parser_id: str, mode: Literal["native", "fallback"]
     ) -> None: ...
-
-
-DropReason = Literal[
-    "freshness_discover",
-    "dedup_url_hit",
-    "dedup_tuple_hit",
-    "dedup_fuzzy_hit",
-    "dedup_run_hit",
-    "prefilter",
-    "freshness_post_enrich",
-    "content_empty_body",
-    "content_too_short",
-]
 
 
 class ParserIntake:
@@ -125,7 +117,7 @@ class ParserIntake:
             gate_arm="discover",
             deadline=position_stub.deadline,
         ):
-            self._observe_drop_metric("freshness_discover")
+            self._observe_freshness_drop_metric("discover")
             return
 
         discover_dedup = self._deduplication.is_seen(position_stub)
@@ -138,12 +130,12 @@ class ParserIntake:
             return
         if discover_dedup.kind != "miss":
             self._record_dedup(discover_dedup.kind)
-            self._observe_drop_metric(_drop_reason_for_dedup(discover_dedup.kind))
+            self._observe_dedup_drop_metric(discover_dedup.kind)
             return
 
         if not self._domain_pre_filter.admit(position_stub):
             self._record_dedup("miss")
-            self._observe_drop_metric("prefilter")
+            self._observe_prefilter_drop_metric()
             return
 
         try:
@@ -185,7 +177,7 @@ class ParserIntake:
         post_enrich_dedup = self._deduplication.is_seen(stub)
         if post_enrich_dedup.kind not in ("miss", "run_hit", "judge_pending"):
             self._record_dedup(post_enrich_dedup.kind)
-            self._observe_drop_metric(_drop_reason_for_dedup(post_enrich_dedup.kind))
+            self._observe_dedup_drop_metric(post_enrich_dedup.kind)
             return
 
         if not self._freshness_gate.admit(
@@ -194,13 +186,15 @@ class ParserIntake:
             deadline=stub.deadline,
         ):
             self._record_dedup(post_enrich_dedup.kind)
-            self._observe_drop_metric("freshness_post_enrich")
+            self._observe_freshness_drop_metric("post_enrich")
             return
 
         content_decision = self._content_gate.inspect(body, stub)
         if not content_decision.passes:
             self._record_dedup(post_enrich_dedup.kind)
-            self._observe_drop_metric(_drop_reason_for_content(content_decision.reason))
+            self._observe_content_drop_metric(
+                _content_drop_reason(content_decision.reason)
+            )
             return
 
         if post_enrich_dedup.kind == "judge_pending":
@@ -234,45 +228,48 @@ class ParserIntake:
     def _record_dedup(self, kind: RunScopedSeenKind) -> None:
         self._dedup_counters.record(kind)
 
-    def _observe_drop_metric(self, reason: DropReason) -> None:
+    def _observe_freshness_drop_metric(
+        self, gate_arm: Literal["discover", "post_enrich"]
+    ) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        self._metrics.observe_parser_intake_drop(
-            ParserIntakeDropObservation(parser_id=self._parser_id, outcome=reason)
-        )
+        self._metrics.observe_parser_intake_freshness_drop(self._parser_id, gate_arm)
+
+    def _observe_dedup_drop_metric(self, kind: RunScopedSeenKind) -> None:
+        if self._metrics is None or not self._parser_id:
+            return
+        if kind not in ("url_hit", "tuple_hit", "fuzzy_hit", "run_hit"):
+            raise ValueError(f"unsupported dedup drop kind: {kind}")
+        self._metrics.observe_parser_intake_dedup_drop(self._parser_id, kind)
+
+    def _observe_prefilter_drop_metric(self) -> None:
+        if self._metrics is None or not self._parser_id:
+            return
+        self._metrics.observe_parser_intake_prefilter_drop(self._parser_id)
+
+    def _observe_content_drop_metric(
+        self, reason: Literal["empty_body", "too_short"]
+    ) -> None:
+        if self._metrics is None or not self._parser_id:
+            return
+        self._metrics.observe_parser_intake_content_drop(self._parser_id, reason)
 
     def _observe_enrich_failed_metric(self) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        self._metrics.observe_parser_intake_enrich_failure(
-            ParserIntakeEnrichFailureObservation(parser_id=self._parser_id)
-        )
+        self._metrics.observe_parser_intake_enrich_failure(self._parser_id)
 
     def _observe_forwarded_metric(self, mode: Literal["native", "fallback"]) -> None:
         if self._metrics is None or not self._parser_id:
             return
-        self._metrics.observe_parser_intake_forwarded(
-            ParserIntakeForwardedObservation(parser_id=self._parser_id, mode=mode)
-        )
+        self._metrics.observe_parser_intake_forwarded(self._parser_id, mode)
 
 
-def _drop_reason_for_dedup(kind: RunScopedSeenKind) -> DropReason:
-    if kind == "url_hit":
-        return "dedup_url_hit"
-    if kind == "tuple_hit":
-        return "dedup_tuple_hit"
-    if kind == "fuzzy_hit":
-        return "dedup_fuzzy_hit"
-    if kind == "run_hit":
-        return "dedup_run_hit"
-    raise ValueError(f"unsupported dedup drop kind: {kind}")
-
-
-def _drop_reason_for_content(
+def _content_drop_reason(
     reason: Literal["passed", "empty_body", "too_short"],
-) -> DropReason:
+) -> Literal["empty_body", "too_short"]:
     if reason == "empty_body":
-        return "content_empty_body"
+        return "empty_body"
     if reason == "too_short":
-        return "content_too_short"
+        return "too_short"
     raise ValueError(f"unsupported content drop reason: {reason}")

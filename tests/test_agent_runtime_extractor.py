@@ -13,7 +13,6 @@ from agent_runtime.runtime import ProviderAuth
 from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
     AgentRuntimeExtractor,
-    CallUsage,
     ExtractorBatchMalformedError,
     ExtractorMalformedJSONError,
     ExtractorUnreachableError,
@@ -22,6 +21,7 @@ from application_pipeline.llm import (
 from application_pipeline.llm.agent_runtime_invocation import (
     AgentRuntimeInvocationResult,
 )
+from application_pipeline.llm.agent_runtime_types import AgentRuntimeUsage
 from application_pipeline.llm.types import (
     JudgeCandidate,
     MatchVerdict,
@@ -70,29 +70,25 @@ def _prompts() -> Prompts:
     )
 
 
-def _usage() -> CallUsage:
-    return CallUsage(
+def _usage() -> AgentRuntimeUsage:
+    return AgentRuntimeUsage(
         input_tokens=100,
         output_tokens=20,
         cache_read_tokens=0,
-        cost_usd=0.001,
-        duration_s=0.5,
     )
 
 
-def _judge_usage() -> CallUsage:
-    return CallUsage(
+def _judge_usage() -> AgentRuntimeUsage:
+    return AgentRuntimeUsage(
         input_tokens=100,
         output_tokens=20,
         cache_read_tokens=0,
-        cost_usd=0.003,
-        duration_s=2.0,
     )
 
 
 def _runtime_result(
     output: str,
-    usage: CallUsage | None = None,
+    usage: AgentRuntimeUsage | None = None,
     log_path: Path | None = None,
 ) -> AgentRuntimeInvocationResult:
     return AgentRuntimeInvocationResult(
@@ -152,9 +148,7 @@ def test_classify_relevance_matched_returns_header_and_summary(
         ),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, usage = extractor.classify_relevance(
-        [_item(company="Acme", location="Hamburg")]
-    )
+    results = extractor.classify_relevance([_item(company="Acme", location="Hamburg")])
     result = results[0]
     assert isinstance(result, RelevanceVerdict)
     assert result.matches is True
@@ -162,8 +156,6 @@ def test_classify_relevance_matched_returns_header_and_summary(
         result.header == "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01"
     )
     assert result.summary == "Great role for ML engineers."
-    assert usage.input_tokens == 100
-    assert usage.cost_usd == pytest.approx(0.001)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +169,7 @@ def test_classify_relevance_out_of_domain_returns_none_header_and_summary(
 ) -> None:
     _patch_runtime(monkeypatch, _runtime_result(_classify_output({"matches": False})))
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance([_item()])
+    results = extractor.classify_relevance([_item()])
     result = results[0]
     assert isinstance(result, RelevanceVerdict)
     assert result.matches is False
@@ -199,7 +191,7 @@ def test_classify_relevance_matched_missing_header_returns_none(
         _runtime_result(_classify_output({"matches": True, "summary": "ok"})),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance([_item()])
+    results = extractor.classify_relevance([_item()])
     assert results[0] is None
 
 
@@ -212,7 +204,7 @@ def test_classify_relevance_matched_missing_summary_returns_none(
         _runtime_result(_classify_output({"matches": True, "header": "some header"})),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance([_item()])
+    results = extractor.classify_relevance([_item()])
     assert results[0] is None
 
 
@@ -227,7 +219,7 @@ def test_classify_relevance_matched_empty_header_returns_none(
         ),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance([_item()])
+    results = extractor.classify_relevance([_item()])
     assert results[0] is None
 
 
@@ -269,7 +261,7 @@ def test_classify_relevance_legacy_in_domain_field_returns_none(
         ),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance([_item()])
+    results = extractor.classify_relevance([_item()])
     assert results[0] is None
 
 
@@ -296,21 +288,19 @@ def test_judge_top_n_returns_match_verdict_with_id_and_rank(
         _runtime_result(_judge_output(verdicts_raw), usage=_judge_usage()),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, usage = extractor.judge_top_n(candidates)
+    results = extractor.judge_top_n(candidates)
     assert len(results) == 5
     assert all(isinstance(v, MatchVerdict) for v in results)
     assert {v.rank for v in results} == {1, 2, 3, 4, 5}
     assert all(v.id in {c.id for c in candidates} for v in results)
-    assert usage.cost_usd == pytest.approx(0.003)
 
 
 def test_judge_top_n_empty_candidates_returns_empty_list(
     run_log: RunLog,
 ) -> None:
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, usage = extractor.judge_top_n([])
+    results = extractor.judge_top_n([])
     assert results == []
-    assert usage.cost_usd == pytest.approx(0.0)
     assert _read_transcripts(run_log, "llm_judge_match") == []
     assert _read_events(run_log, "llm_judge_match") == []
 
@@ -344,7 +334,7 @@ def test_judge_top_n_coerces_string_id_to_int(
         ),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    verdicts, _ = extractor.judge_top_n(candidates)
+    verdicts = extractor.judge_top_n(candidates)
     assert len(verdicts) == 1
     assert verdicts[0].id == 0
     assert verdicts[0].rank == 1
@@ -389,12 +379,10 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
                 '<verdicts>[{"id": 0, "rank": 1}, {"id": 1, "rank": 2}]</verdicts>'
             ),
             log_path=runtime_log,
-            usage=CallUsage(
+            usage=AgentRuntimeUsage(
                 input_tokens=15,
                 output_tokens=3,
                 cache_read_tokens=1,
-                cost_usd=0.002,
-                duration_s=0.9,
             ),
             reset_time=None,
             message=None,
@@ -414,7 +402,7 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
         ),
     ]
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
-    results, usage = extractor.judge_top_n(candidates)
+    results = extractor.judge_top_n(candidates)
 
     assert captured["call_site"] == "judge"
     prompt = str(captured["prompt"])
@@ -431,8 +419,27 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
         runtime_log_path.parent == run_log.logs_dir / "llm" / "agent-runtime" / "judge"
     )
     assert len(results) == 2
-    assert usage.input_tokens == 15
-    assert usage.output_tokens == 3
+
+
+def test_judge_top_n_success_logs_verdicts_without_usage_fields(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_runtime(
+        monkeypatch,
+        _runtime_result(_judge_output([{"id": 0, "rank": 1}]), usage=_judge_usage()),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+
+    results = extractor.judge_top_n(_make_candidates(1))
+
+    assert results == [MatchVerdict(id=0, rank=1)]
+    transcript = _read_transcripts(run_log, "llm_judge_match")[-1]
+    event = _read_events(run_log, "llm_judge_match")[-1]
+    assert "usage" not in transcript
+    assert "cost_usd" not in transcript
+    assert "duration_s" not in transcript
+    assert "cost_usd" not in event
+    assert "duration_s" not in event
 
 
 def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
@@ -449,12 +456,10 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
             / "agent-runtime"
             / "judge"
             / "llm-judge-quota.log",
-            usage=CallUsage(
+            usage=AgentRuntimeUsage(
                 input_tokens=11,
                 output_tokens=0,
                 cache_read_tokens=0,
-                cost_usd=0.0,
-                duration_s=0.0,
             ),
             reset_time=None,
             message=None,
@@ -588,7 +593,7 @@ def test_classify_relevance_out_of_order_verdicts_map_to_correct_positions(
     )
     _patch_runtime(monkeypatch, _runtime_result(output))
     extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance(items)
+    results = extractor.classify_relevance(items)
     assert len(results) == 3
     assert results[0] is not None and results[0].header == "h1"
     assert results[1] is not None and results[1].matches is False
@@ -604,7 +609,7 @@ def test_classify_relevance_missing_verdict_tag_produces_none(
     output = _batch_classify_output([(1, {"matches": False})])
     _patch_runtime(monkeypatch, _runtime_result(output))
     extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance(items)
+    results = extractor.classify_relevance(items)
     assert results[0] is not None and results[0].matches is False
     assert results[1] is None
 
@@ -620,7 +625,7 @@ def test_classify_relevance_malformed_verdict_json_produces_none(
     )
     _patch_runtime(monkeypatch, _runtime_result(output))
     extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance(items)
+    results = extractor.classify_relevance(items)
     assert results[0] is not None and results[0].matches is False
     assert results[1] is None
 
@@ -632,39 +637,8 @@ def test_classify_relevance_all_verdicts_missing_returns_all_none_no_error(
     items = [_item(), _item()]
     _patch_runtime(monkeypatch, _runtime_result("no verdict tags here"))
     extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
-    results, _ = extractor.classify_relevance(items)
+    results = extractor.classify_relevance(items)
     assert results == [None, None]
-
-
-def test_classify_relevance_usage_reflects_single_call_tokens(
-    run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    items = [_item() for _ in range(3)]
-    output = (
-        '<verdict id="1">{"matches": false}</verdict>'
-        '<verdict id="2">{"matches": false}</verdict>'
-        '<verdict id="3">{"matches": false}</verdict>'
-    )
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(
-            output,
-            usage=CallUsage(
-                input_tokens=500,
-                output_tokens=60,
-                cache_read_tokens=200,
-                cost_usd=0.01,
-                duration_s=2.5,
-            ),
-        ),
-    )
-    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
-    _, usage = extractor.classify_relevance(items)
-    assert usage.input_tokens == 500
-    assert usage.output_tokens == 60
-    assert usage.cache_read_tokens == 200
-    assert usage.cost_usd == pytest.approx(0.01)
 
 
 def test_classify_relevance_batch_logs_the_full_batch_prompt_and_response(
@@ -683,6 +657,28 @@ def test_classify_relevance_batch_logs_the_full_batch_prompt_and_response(
     assert "Job 2" in transcript["prompt"]
     assert "Job 3" in transcript["prompt"]
     assert transcript["raw_response"] == output
+
+
+def test_classify_relevance_success_logs_verdicts_without_usage_fields(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_runtime(
+        monkeypatch,
+        _runtime_result(_classify_output({"matches": False})),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+
+    results = extractor.classify_relevance([_item()])
+
+    assert results[0] is not None and results[0].matches is False
+    transcript = _read_transcripts(run_log, "llm_classify_relevance")[-1]
+    event = _read_events(run_log, "llm_classify_relevance")[-1]
+    assert "usage" not in transcript
+    assert "cost_usd" not in transcript
+    assert "duration_s" not in transcript
+    assert "cost_usd" not in event
+    assert "duration_s" not in event
 
 
 def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
@@ -714,12 +710,10 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
                 "</verdict>"
             ),
             log_path=runtime_log,
-            usage=CallUsage(
+            usage=AgentRuntimeUsage(
                 input_tokens=11,
                 output_tokens=7,
                 cache_read_tokens=3,
-                cost_usd=0.25,
-                duration_s=1.5,
             ),
             reset_time=None,
             message=None,
@@ -736,7 +730,7 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
         _batch_prompts(),
         run_log=run_log,
     )
-    results, usage = extractor.classify_relevance(items)
+    results = extractor.classify_relevance(items)
 
     assert captured["call_site"] == "classify"
     assert "id=1" in str(captured["prompt"])
@@ -752,9 +746,6 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
     assert results[0] is not None and results[0].matches is True
     assert results[1] is not None and results[1].matches is False
     assert results[2] is None
-    assert usage.input_tokens == 11
-    assert usage.output_tokens == 7
-    assert usage.cache_read_tokens == 3
 
 
 def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
@@ -773,12 +764,10 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
             kind="usage_limit",
             output="limit reached",
             log_path=runtime_log,
-            usage=CallUsage(
+            usage=AgentRuntimeUsage(
                 input_tokens=11,
                 output_tokens=7,
                 cache_read_tokens=3,
-                cost_usd=0.25,
-                duration_s=1.5,
             ),
             reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
             message=None,
@@ -817,12 +806,10 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
             kind="retryable_provider_failure",
             output="provider flake",
             log_path=runtime_log,
-            usage=CallUsage(
+            usage=AgentRuntimeUsage(
                 input_tokens=5,
                 output_tokens=1,
                 cache_read_tokens=0,
-                cost_usd=0.01,
-                duration_s=0.3,
             ),
             reset_time=None,
             message=None,
@@ -838,13 +825,9 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
         _batch_prompts(),
         run_log=run_log,
     )
-    results, usage = extractor.classify_relevance([_item(), _item()])
+    results = extractor.classify_relevance([_item(), _item()])
 
     assert results == [None, None]
-    assert usage.input_tokens == 5
-    assert usage.output_tokens == 1
-    assert usage.cache_read_tokens == 0
-    assert usage.cost_usd == pytest.approx(0.01)
 
 
 def test_classify_relevance_via_agent_runtime_missing_usage_is_malformed(

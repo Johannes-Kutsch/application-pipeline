@@ -18,7 +18,6 @@ from application_pipeline.freshness_gate import FreshnessSnapshot
 from application_pipeline.llm.types import (
     AppliedClassifyItemOutcome,
     AppliedClassifyOutcome,
-    CallUsage,
     MatchedListing,
 )
 from application_pipeline.parser_log import RunLog
@@ -63,23 +62,6 @@ def _lifecycle_rows(tmp_path: Path) -> list[dict[str, object]]:
     ]
 
 
-def _make_usage(
-    *,
-    input_tokens: int = 100,
-    output_tokens: int = 50,
-    cache_read_tokens: int = 20,
-    cost_usd: float = 0.001,
-    duration_s: float = 1.0,
-) -> CallUsage:
-    return CallUsage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cache_read_tokens=cache_read_tokens,
-        cost_usd=cost_usd,
-        duration_s=duration_s,
-    )
-
-
 def _observe_parser_enrich_failure(metrics: RunMetrics, parser_id: str) -> None:
     metrics.observe_parser_intake_enrich_failure(parser_id)
 
@@ -99,7 +81,6 @@ def _observe_parser_drop(metrics: RunMetrics, parser_id: str, outcome: str) -> N
 
 def _observe_classify_outcome(
     metrics: RunMetrics,
-    usage: CallUsage,
     *,
     items: int,
     classifier_dropped: int,
@@ -134,7 +115,7 @@ def _observe_classify_outcome(
         for _ in range(retryable_items)
     )
     metrics.classify_batch_succeeded(
-        AppliedClassifyOutcome(items=outcomes, usage=usage),
+        AppliedClassifyOutcome(items=outcomes),
         parser_ids=(),
     )
 
@@ -148,26 +129,12 @@ def _build_populated_metrics(run_log: RunLog) -> RunMetrics:
     metrics.enrich_failed()
     metrics.parser_dead()
 
-    classify_usage = _make_usage(
-        input_tokens=500,
-        output_tokens=200,
-        cache_read_tokens=100,
-        cost_usd=0.002,
-        duration_s=2.5,
-    )
     metrics.classify_submitted(2)
     metrics.classify_batch_started(2)
-    _observe_classify_outcome(metrics, classify_usage, items=2, classifier_dropped=1)
+    _observe_classify_outcome(metrics, items=2, classifier_dropped=1)
 
-    judge_usage = _make_usage(
-        input_tokens=300,
-        output_tokens=150,
-        cache_read_tokens=50,
-        cost_usd=0.003,
-        duration_s=1.5,
-    )
     metrics.judge_started()
-    metrics.judge_succeeded(judge_usage, card_count=1)
+    metrics.judge_succeeded(card_count=1)
 
     return metrics
 
@@ -304,7 +271,6 @@ def test_classify_count_seam_preserves_queue_depth_in_flight_and_done_phase(
 
     _observe_classify_outcome(
         metrics,
-        _make_usage(),
         items=2,
         classifier_dropped=1,
     )
@@ -329,13 +295,6 @@ def test_classify_outcome_observation_updates_summary_divider_and_log(
     metrics = _make_metrics(run_log)
     metrics.register_rows()
 
-    usage = _make_usage(
-        input_tokens=500,
-        output_tokens=200,
-        cache_read_tokens=100,
-        cost_usd=0.002,
-        duration_s=2.5,
-    )
     metrics.classify_submitted(5)
     metrics.classify_batch_started(5)
     metrics.classify_batch_succeeded(
@@ -377,8 +336,7 @@ def test_classify_outcome_observation_updates_summary_divider_and_log(
                     state="expired",
                     event_matches=None,
                 ),
-            ],
-            usage=usage,
+            ]
         )
     )
 
@@ -392,21 +350,12 @@ def test_classify_outcome_observation_updates_summary_divider_and_log(
     assert summary.classify_items == 5
     assert summary.classifier_dropped == 2
     assert summary.errored == 1
-    assert summary.claude_input_tokens == 500
-    assert summary.claude_output_tokens == 200
-    assert summary.claude_cache_read_tokens == 100
-    assert abs(summary.claude_cost_usd - 0.002) < 1e-9
 
     divider = metrics.format_run_divider(
         "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
     )
     assert "classify_calls=1" in divider
     assert "classify_items=5" in divider
-    assert "classify_total_s=2.5" in divider
-    assert "classify_input_tokens=500" in divider
-    assert "classify_output_tokens=200" in divider
-    assert "classify_cache_read_tokens=100" in divider
-    assert "classify_cost_usd=0.002000" in divider
     assert "classify_dropped=2" in divider
     assert "classify_forwarded=2" in divider
     assert "errors=1" in divider
@@ -422,7 +371,6 @@ def test_classify_outcome_observation_updates_summary_divider_and_log(
     assert "dropped=2" in run_log_text
     assert "forwarded=2" in run_log_text
     assert "batches_failed=0" in run_log_text
-    assert "input_tokens=500" in run_log_text
 
 
 def test_classify_failure_observation_updates_summary_divider_and_log(
@@ -508,14 +456,7 @@ def test_classify_success_seam_updates_counters_parser_rows_and_outputs(
                     state="retryable",
                     event_matches=None,
                 ),
-            ],
-            usage=_make_usage(
-                input_tokens=500,
-                output_tokens=200,
-                cache_read_tokens=100,
-                cost_usd=0.002,
-                duration_s=2.5,
-            ),
+            ]
         ),
         parser_ids=(
             "parser.alpha",
@@ -537,10 +478,6 @@ def test_classify_success_seam_updates_counters_parser_rows_and_outputs(
     assert summary.classifier_dropped == 2
     assert summary.enrich_failed == 2
     assert summary.errored == 2
-    assert summary.claude_input_tokens == 500
-    assert summary.claude_output_tokens == 200
-    assert summary.claude_cache_read_tokens == 100
-    assert abs(summary.claude_cost_usd - 0.002) < 1e-9
 
     assert display.body_updates_for("llm classify relevance")[-1] == (
         "2 malformed · 2 dropped · 1 forwarded"
@@ -556,11 +493,6 @@ def test_classify_success_seam_updates_counters_parser_rows_and_outputs(
     )
     assert "classify_calls=1" in divider
     assert "classify_items=5" in divider
-    assert "classify_total_s=2.5" in divider
-    assert "classify_input_tokens=500" in divider
-    assert "classify_output_tokens=200" in divider
-    assert "classify_cache_read_tokens=100" in divider
-    assert "classify_cost_usd=0.002000" in divider
     assert "classify_malformed=2" in divider
     assert "errors=2" in divider
     assert "classify_items_abandoned=2" in divider
@@ -573,9 +505,8 @@ def test_classify_success_seam_updates_counters_parser_rows_and_outputs(
     assert "matched=1" in run_log_text
     assert "off_domain=2" in run_log_text
     assert "malformed=2" in run_log_text
-    assert "items_abandoned=2" in run_log_text
+    assert "dropped=2" in run_log_text
     assert "batches_failed=0" in run_log_text
-    assert "input_tokens=500" in run_log_text
 
 
 def test_classify_failure_seam_updates_summary_divider_and_log(tmp_path: Path) -> None:
@@ -621,16 +552,8 @@ def test_judge_lifecycle_outcome_updates_summary_divider_and_log(
     metrics = _make_metrics(run_log)
     metrics.register_rows()
 
-    usage = _make_usage(
-        input_tokens=300,
-        output_tokens=150,
-        cache_read_tokens=50,
-        cost_usd=0.003,
-        duration_s=1.5,
-    )
-
     metrics.judge_started()
-    metrics.judge_succeeded(usage, card_count=3)
+    metrics.judge_succeeded(card_count=3)
 
     summary = metrics.to_run_summary(
         duration_s=1.0,
@@ -641,31 +564,17 @@ def test_judge_lifecycle_outcome_updates_summary_divider_and_log(
     )
     assert summary.written == 3
     assert summary.errored == 0
-    assert summary.claude_input_tokens == 300
-    assert summary.claude_output_tokens == 150
-    assert summary.claude_cache_read_tokens == 50
-    assert abs(summary.claude_cost_usd - 0.003) < 1e-9
 
     divider = metrics.format_run_divider(
         "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
     )
     assert "kept=3" in divider
     assert "judge_calls=1" in divider
-    assert "judge_total_s=1.5" in divider
-    assert "judge_input_tokens=300" in divider
-    assert "judge_output_tokens=150" in divider
-    assert "judge_cache_read_tokens=50" in divider
-    assert "judge_cost_usd=0.003000" in divider
 
     metrics.summarize_to_parser_log(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
     run_log_text = (tmp_path / "run.log").read_text()
     assert "judges_sent=1" in run_log_text
     assert "judges_failed=0" in run_log_text
-    assert "input_tokens=300" in run_log_text
-    assert "output_tokens=150" in run_log_text
-    assert "cache_read_tokens=50" in run_log_text
-    assert "cost_usd=0.003" in run_log_text
-    assert "duration_s=1.5" in run_log_text
 
 
 def test_judge_success_prints_match_judge_terminal_message() -> None:
@@ -673,7 +582,7 @@ def test_judge_success_prints_match_judge_terminal_message() -> None:
     metrics = RunMetrics(display, run_log=RunLog(Path("/tmp")))
 
     metrics.judge_started()
-    metrics.judge_succeeded(_make_usage(), card_count=3)
+    metrics.judge_succeeded(card_count=3)
 
     assert display.calls[-1].method == "print"
     assert display.calls[-1].name == "llm_judge_match"
@@ -733,13 +642,9 @@ def test_format_run_divider_no_degraded_no_failures(run_log: RunLog) -> None:
     assert result == (
         "<!-- run 2026-01-01T12:00:00Z tag=v1.2.3 kept=1"
         " errors=0 dedup_url_hits=1 dedup_tuple_hits=1 dedup_run_hits=1"
-        " dedup_misses=2 classify_calls=1 classify_items=2 classify_total_s=2.5"
-        " classify_malformed=0 classify_dropped=1 classify_forwarded=1"
-        " judge_calls=1 judge_total_s=1.5 classify_input_tokens=500"
-        " classify_output_tokens=200 classify_cache_read_tokens=100"
-        " classify_cost_usd=0.002000 judge_input_tokens=300"
-        " judge_output_tokens=150 judge_cache_read_tokens=50"
-        " judge_cost_usd=0.003000 elapsed_s=42.7 -->\n"
+        " dedup_misses=2 classify_calls=1 classify_items=2 classify_malformed=0"
+        " classify_dropped=1 classify_forwarded=1 judge_calls=1"
+        " elapsed_s=42.7 -->\n"
     )
 
 
@@ -766,42 +671,32 @@ def test_format_run_divider_conditional_fields(run_log: RunLog) -> None:
     assert "errors=3" in result
 
 
-def test_format_run_divider_contains_per_callsite_token_fields(run_log: RunLog) -> None:
+def test_format_run_divider_contains_callsite_fields(run_log: RunLog) -> None:
     metrics = _build_populated_metrics(run_log)
 
     result = metrics.format_run_divider(
         "2026-01-01T12:00:00Z", "v1", 10.0, dedup=DedupSnapshot()
     )
 
-    assert "classify_input_tokens=500" in result
-    assert "classify_output_tokens=200" in result
-    assert "classify_cache_read_tokens=100" in result
-    assert "classify_cost_usd=0.002000" in result
-    assert "judge_input_tokens=300" in result
-    assert "judge_output_tokens=150" in result
-    assert "judge_cache_read_tokens=50" in result
-    assert "judge_cost_usd=0.003000" in result
+    assert "classify_calls=1" in result
+    assert "classify_items=2" in result
+    assert "judge_calls=1" in result
     assert "claude_input_tokens" not in result
     assert "claude_output_tokens" not in result
     assert "claude_cache_read_tokens" not in result
     assert "claude_cost_usd" not in result
 
 
-def test_format_run_divider_zero_callsite_tokens_when_no_calls(run_log: RunLog) -> None:
+def test_format_run_divider_zero_callsite_fields_when_no_calls(run_log: RunLog) -> None:
     metrics = _make_metrics(run_log)
 
     result = metrics.format_run_divider(
         "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
     )
 
-    assert "classify_input_tokens=0" in result
-    assert "classify_output_tokens=0" in result
-    assert "classify_cache_read_tokens=0" in result
-    assert "classify_cost_usd=0.000000" in result
-    assert "judge_input_tokens=0" in result
-    assert "judge_output_tokens=0" in result
-    assert "judge_cache_read_tokens=0" in result
-    assert "judge_cost_usd=0.000000" in result
+    assert "classify_calls=0" in result
+    assert "classify_items=0" in result
+    assert "judge_calls=0" in result
 
 
 def test_emit_run_complete_writes_pipeline_orchestrator_row_from_metrics(
@@ -835,10 +730,6 @@ def test_emit_run_complete_writes_pipeline_orchestrator_row_from_metrics(
             "ts": run_complete_rows[0]["ts"],
             "event": "run_complete",
             "classify_calls": 1,
-            "classify_input_tokens": 500,
-            "classify_output_tokens": 200,
-            "judge_input_tokens": 300,
-            "judge_output_tokens": 150,
             "dedup_url_hits": 2,
             "dedup_tuple_hits": 3,
             "dedup_run_hits": 4,
@@ -1147,10 +1038,6 @@ def test_to_run_summary_shape_matches_runsummary(run_log: RunLog) -> None:
     assert summary.errored == 0
     assert summary.parsers_dead == 1
     assert summary.classify_items == 2
-    assert summary.claude_input_tokens == 800
-    assert summary.claude_output_tokens == 350
-    assert summary.claude_cache_read_tokens == 150
-    assert abs(summary.claude_cost_usd - 0.005) < 1e-9
 
 
 def test_to_run_summary_is_frozen(run_log: RunLog) -> None:
@@ -1201,13 +1088,6 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
 
     n_threads = 8
     iters = 50
-    usage = _make_usage(
-        input_tokens=10,
-        output_tokens=5,
-        cache_read_tokens=2,
-        cost_usd=0.001,
-        duration_s=0.1,
-    )
 
     def worker() -> None:
         for _ in range(iters):
@@ -1215,9 +1095,9 @@ def test_concurrent_events_produce_correct_final_counts(run_log: RunLog) -> None
             metrics.enrich_failed()
             metrics.classify_submitted(1)
             metrics.classify_batch_started(1)
-            _observe_classify_outcome(metrics, usage, items=1, classifier_dropped=0)
+            _observe_classify_outcome(metrics, items=1, classifier_dropped=0)
             metrics.judge_started()
-            metrics.judge_succeeded(usage, card_count=1)
+            metrics.judge_succeeded(card_count=1)
 
     threads = [threading.Thread(target=worker) for _ in range(n_threads)]
     for thread in threads:
@@ -1253,13 +1133,6 @@ def test_concurrent_classify_observations_produce_correct_final_counts(
 
     n_threads = 6
     iters = 40
-    usage = _make_usage(
-        input_tokens=10,
-        output_tokens=5,
-        cache_read_tokens=2,
-        cost_usd=0.001,
-        duration_s=0.1,
-    )
 
     def worker() -> None:
         for _ in range(iters):
@@ -1288,8 +1161,7 @@ def test_concurrent_classify_observations_produce_correct_final_counts(
                             state="retryable",
                             event_matches=None,
                         ),
-                    ],
-                    usage=usage,
+                    ]
                 )
             )
             metrics.classify_submitted(2)
@@ -1313,8 +1185,6 @@ def test_concurrent_classify_observations_produce_correct_final_counts(
     assert summary.classify_items == batches * 3
     assert summary.classifier_dropped == batches
     assert summary.errored == batches * 3
-    assert summary.claude_input_tokens == batches * usage.input_tokens
-    assert summary.claude_output_tokens == batches * usage.output_tokens
 
     result = metrics.format_run_divider(
         "2026-01-01T00:00:00Z", None, 1.0, dedup=DedupSnapshot()
@@ -1554,8 +1424,7 @@ def test_parser_intake_observations_roll_up_into_public_counters(
                     state="retryable",
                     event_matches=None,
                 )
-            ],
-            usage=_make_usage(),
+            ]
         ),
         parser_ids=("parser.test",),
     )

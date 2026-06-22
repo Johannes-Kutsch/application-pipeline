@@ -17,7 +17,6 @@ from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
-    CallUsage,
     ExtractorBatchMalformedError,
     ExtractorMalformedError,
     ExtractorMalformedJSONError,
@@ -47,16 +46,6 @@ def run_metrics(tmp_path: Path, run_log: RunLog) -> RunMetrics:
     from fake_status_display import FakeStatusDisplay
 
     return RunMetrics(FakeStatusDisplay(), run_log=run_log)
-
-
-def _call_usage() -> CallUsage:
-    return CallUsage(
-        input_tokens=100,
-        output_tokens=20,
-        cache_read_tokens=0,
-        cost_usd=0.001,
-        duration_s=0.5,
-    )
 
 
 def _make_enricher(
@@ -135,16 +124,13 @@ def test_enricher_matched_returns_applied_outcome_and_writes_card_store(
     body = "Senior Python Engineer – remote ML role."
 
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [
-            RelevanceVerdict(
-                matches=True,
-                header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
-                summary="Great ML role.",
-            )
-        ],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(
+            matches=True,
+            header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+            summary="Great ML role.",
+        )
+    ]
 
     enricher = _make_enricher(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -178,16 +164,13 @@ def test_enricher_matched_item_exposes_pool_admission_data_and_persists_dedup(
     body = "Senior Python Engineer – remote ML role."
 
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [
-            RelevanceVerdict(
-                matches=True,
-                header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
-                summary="Great ML role.",
-            )
-        ],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(
+            matches=True,
+            header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+            summary="Great ML role.",
+        )
+    ]
 
     enricher, dedup = _make_enricher_with_dedup(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -444,16 +427,13 @@ def test_enricher_drops_listing_when_llm_infers_stale_posted_date(
         "Python Engineer\nAcme · Hamburg · remote\n2025-12-15 · senior · €80k"
     )
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [
-            RelevanceVerdict(
-                matches=True,
-                header=stale_header,
-                summary="Old ML role.",
-            )
-        ],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(
+            matches=True,
+            header=stale_header,
+            summary="Old ML role.",
+        )
+    ]
 
     gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -488,10 +468,9 @@ def test_enricher_freshness_drop_records_post_llm_transcript(
     body = "Old role."
     stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2025-12-15 · mid · —"
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [RelevanceVerdict(matches=True, header=stale_header, summary="Stale role.")],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(matches=True, header=stale_header, summary="Stale role.")
+    ]
 
     gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -529,16 +508,13 @@ def test_enricher_fresh_inferred_date_renders_card_normally(
     # posted_date 5 days ago – within MAX_AGE=30
     fresh_header = "Data Scientist\nAcme · Hamburg · remote\n2026-01-10 · senior · €90k"
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [
-            RelevanceVerdict(
-                matches=True,
-                header=fresh_header,
-                summary="Good ML role.",
-            )
-        ],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(
+            matches=True,
+            header=fresh_header,
+            summary="Good ML role.",
+        )
+    ]
 
     gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -575,16 +551,13 @@ def test_enricher_no_parseable_date_in_header_passes_post_llm_gate(
     # Header line 3 has no date (LLM dropped the segment)
     no_date_header = "Backend Engineer\nCorp · Munich · on-site\nseniority: mid · —"
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [
-            RelevanceVerdict(
-                matches=True,
-                header=no_date_header,
-                summary="Undated backend role.",
-            )
-        ],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(
+            matches=True,
+            header=no_date_header,
+            summary="Undated backend role.",
+        )
+    ]
 
     gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")
@@ -621,16 +594,13 @@ def test_enrich_accepts_list_of_items_and_returns_structured_outcome(
 ) -> None:
     body = "Senior Python Engineer – remote ML role."
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [
-            RelevanceVerdict(
-                matches=True,
-                header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
-                summary="Great ML role.",
-            )
-        ],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(
+            matches=True,
+            header="Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+            summary="Great ML role.",
+        )
+    ]
 
     enricher = _make_enricher(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -665,18 +635,15 @@ def test_enrich_batch_routes_match_reject_none_independently(
 ) -> None:
     """Matches write card store + mark_matched; rejections expose a rejected outcome; None untouched."""
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [
-            RelevanceVerdict(
-                matches=True,
-                header="ML Engineer\nAcme · Berlin · remote\n2024-06-01",
-                summary="Good role.",
-            ),
-            RelevanceVerdict(matches=False),
-            None,
-        ],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(
+            matches=True,
+            header="ML Engineer\nAcme · Berlin · remote\n2024-06-01",
+            summary="Good role.",
+        ),
+        RelevanceVerdict(matches=False),
+        None,
+    ]
 
     enricher, dedup = _make_enricher_with_dedup(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -752,13 +719,10 @@ def test_enrich_per_item_freshness_gate_stale_does_not_block_fresh(
     fresh_header = "Fresh Role\nCorp · Berlin · remote\n2026-01-10 · mid · —"
 
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = (
-        [
-            RelevanceVerdict(matches=True, header=stale_header, summary="Old."),
-            RelevanceVerdict(matches=True, header=fresh_header, summary="Fresh."),
-        ],
-        _call_usage(),
-    )
+    extractor.classify_relevance.return_value = [
+        RelevanceVerdict(matches=True, header=stale_header, summary="Old."),
+        RelevanceVerdict(matches=True, header=fresh_header, summary="Fresh."),
+    ]
 
     gate = _make_freshness_gate(tmp_path, run_log)
     card_store = load_card_store(tmp_path / "extracts.json")

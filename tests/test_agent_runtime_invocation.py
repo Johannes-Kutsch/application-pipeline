@@ -95,8 +95,6 @@ def test_invoke_agent_runtime_completes_with_pinned_project_decisions(
     assert result.usage.input_tokens == 11
     assert result.usage.output_tokens == 7
     assert result.usage.cache_read_tokens == 3
-    assert result.usage.cost_usd == 0.25
-    assert result.usage.duration_s == 1.5
     assert result.log_path.parent == logs_root / "llm" / "agent-runtime" / "classify"
     assert result.log_path.suffix == ".log"
     assert result.log_path.exists()

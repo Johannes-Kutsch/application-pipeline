@@ -12,7 +12,6 @@ from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
     AppliedClassifyItemOutcome,
     AppliedClassifyOutcome,
-    CallUsage,
     ClassifyItem,
     ExtractorBatchMalformedError,
     ExtractorMalformedError,
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
 class LLMExtractor(Protocol):
     def classify_relevance(
         self, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict | None], CallUsage]: ...
+    ) -> list[RelevanceVerdict | None]: ...
 
 
 def _parse_header_date(header: str) -> date | None:
@@ -89,7 +88,7 @@ class LLMEnricher:
         ]
 
         try:
-            raw_verdicts, usage = self._extractor.classify_relevance(classify_items)
+            raw_verdicts = self._extractor.classify_relevance(classify_items)
         except (
             ExtractorBatchMalformedError,
             ExtractorMalformedError,
@@ -163,7 +162,7 @@ class LLMEnricher:
                     )
                 )
 
-        return AppliedClassifyOutcome(items=outcome_items, usage=usage)
+        return AppliedClassifyOutcome(items=outcome_items)
 
     def _stash_failure(
         self, kind: str, stub: PositionStub, content: str, *, ext: str = "html"

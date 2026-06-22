@@ -17,11 +17,9 @@ from .agent_output import (
 from .agent_runtime_invocation import invoke_agent_runtime
 from .agent_runtime_types import (
     AgentRuntimeResponse,
-    AgentRuntimeUsage,
     UsageLimitError,
 )
 from .types import (
-    CallUsage,
     ClassifyItem,
     ExtractorBatchMalformedError,
     ExtractorError,
@@ -35,9 +33,8 @@ from .types import (
 
 
 class _RetryableProviderFailureError(Exception):
-    def __init__(self, usage: CallUsage | None) -> None:
+    def __init__(self) -> None:
         super().__init__("classify_relevance: retryable provider failure")
-        self.usage = usage
 
 
 _GERMAN_BOILERPLATE_SENTINELS: list[str] = [
@@ -138,32 +135,16 @@ class AgentRuntimeExtractor:
 
     def classify_relevance(
         self, items: list[ClassifyItem]
-    ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
+    ) -> list[RelevanceVerdict | None]:
         if not items:
-            return [], CallUsage(
-                input_tokens=0,
-                output_tokens=0,
-                cache_read_tokens=0,
-                cost_usd=0.0,
-                duration_s=0.0,
-            )
+            return []
         prompt = self._prompts.classify_relevance.render(
             LISTINGS=_build_listings_block(items)
         )
         try:
             response = self._invoke_runtime(prompt)
-        except _RetryableProviderFailureError as exc:
-            return (
-                [None for _ in items],
-                exc.usage
-                or CallUsage(
-                    input_tokens=0,
-                    output_tokens=0,
-                    cache_read_tokens=0,
-                    cost_usd=0.0,
-                    duration_s=0.0,
-                ),
-            )
+        except _RetryableProviderFailureError:
+            return [None for _ in items]
 
         verdicts_by_id = extract_id_tagged_verdicts(response.raw_response)
         results: list[RelevanceVerdict | None] = []
@@ -184,39 +165,21 @@ class AgentRuntimeExtractor:
                 except ExtractorMalformedError:
                     results.append(None)
 
-        usage = self._usage_from(response)
         transcript_entry: dict[str, object] = {
             "call": _CLASSIFY_SITE.call,
             "prompt": prompt,
             "raw_response": response.raw_response,
-            "usage": {
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-                "cache_read_tokens": response.usage.cache_read_tokens,
-            },
-            "cost_usd": response.cost_usd,
-            "duration_s": response.duration_s,
         }
         self._run_log.transcript(_CLASSIFY_SITE.component_id, transcript_entry)
         self._run_log.event(
             _CLASSIFY_SITE.component_id,
             _CLASSIFY_SITE.call,
-            cost_usd=response.cost_usd,
-            duration_s=f"{response.duration_s:.3f}",
         )
-        return results, usage
+        return results
 
-    def judge_top_n(
-        self, candidates: list[JudgeCandidate]
-    ) -> tuple[list[MatchVerdict], CallUsage]:
+    def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
         if not candidates:
-            return [], CallUsage(
-                input_tokens=0,
-                output_tokens=0,
-                cache_read_tokens=0,
-                cost_usd=0.0,
-                duration_s=0.0,
-            )
+            return []
         candidates_block = self._format_candidates(candidates)
         prompt = self._prompts.judge_top_n.render(CANDIDATES=candidates_block)
         data, response = self._invoke_runtime_protocol(
@@ -224,8 +187,7 @@ class AgentRuntimeExtractor:
             prompt,
             {"candidate_count": len(candidates)},
         )
-        usage = self._usage_from(response)
-        return self._parse_top_n_response(data, candidates), usage
+        return self._parse_top_n_response(data, candidates)
 
     def _invoke_runtime_protocol(
         self,
@@ -249,13 +211,9 @@ class AgentRuntimeExtractor:
                 )
             response = AgentRuntimeResponse(
                 raw_response=result.output,
-                usage=AgentRuntimeUsage(
-                    input_tokens=result.usage.input_tokens,
-                    output_tokens=result.usage.output_tokens,
-                    cache_read_tokens=result.usage.cache_read_tokens,
-                ),
-                cost_usd=result.usage.cost_usd,
-                duration_s=result.usage.duration_s,
+                usage=result.usage,
+                cost_usd=0.0,
+                duration_s=0.0,
                 session_id=str(result.log_path),
             )
             try:
@@ -296,20 +254,11 @@ class AgentRuntimeExtractor:
                 "call": site.call,
                 "prompt": prompt,
                 "raw_response": response.raw_response,
-                "usage": {
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens,
-                    "cache_read_tokens": response.usage.cache_read_tokens,
-                },
-                "cost_usd": response.cost_usd,
-                "duration_s": response.duration_s,
             }
             self._run_log.transcript(site.component_id, transcript_entry)
             self._run_log.event(
                 site.component_id,
                 site.call,
-                cost_usd=response.cost_usd,
-                duration_s=f"{response.duration_s:.3f}",
             )
 
             return parsed, response
@@ -368,16 +317,6 @@ class AgentRuntimeExtractor:
         )
 
     @staticmethod
-    def _usage_from(response: AgentRuntimeResponse) -> CallUsage:
-        return CallUsage(
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            cache_read_tokens=response.usage.cache_read_tokens,
-            cost_usd=response.cost_usd,
-            duration_s=response.duration_s,
-        )
-
-    @staticmethod
     def _format_candidates(candidates: list[JudgeCandidate]) -> str:
         parts: list[str] = []
         for c in candidates:
@@ -400,13 +339,9 @@ class AgentRuntimeExtractor:
                 )
             return AgentRuntimeResponse(
                 raw_response=result.output,
-                usage=AgentRuntimeUsage(
-                    input_tokens=result.usage.input_tokens,
-                    output_tokens=result.usage.output_tokens,
-                    cache_read_tokens=result.usage.cache_read_tokens,
-                ),
-                cost_usd=result.usage.cost_usd,
-                duration_s=result.usage.duration_s,
+                usage=result.usage,
+                cost_usd=0.0,
+                duration_s=0.0,
                 session_id=str(result.log_path),
             )
         if result.kind == "usage_limit":
@@ -419,7 +354,7 @@ class AgentRuntimeExtractor:
                 reset_time=result.reset_time,
             )
         if result.kind == "retryable_provider_failure":
-            raise _RetryableProviderFailureError(result.usage)
+            raise _RetryableProviderFailureError()
         if result.kind == "missing_usage":
             raise ExtractorMalformedJSONError(
                 "classify_relevance: missing usage in completed runtime response",

@@ -27,6 +27,21 @@ def test_load_operator_credential_from_settings_dir_env(tmp_path: Path) -> None:
     assert credential == ProviderAuth(opencode_api_key="local-key-from-env")
 
 
+def test_load_operator_credential_from_utf8_sig_settings_dir_env(
+    tmp_path: Path,
+) -> None:
+    """A UTF-8 BOM in <settings-dir>/.env does not hide the Operator Credential key."""
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir()
+    (settings_dir / ".env").write_text(
+        "OPENCODE_GO_API_KEY=local-key-from-env\n", encoding="utf-8-sig"
+    )
+
+    credential = load_operator_credential(settings_dir)
+
+    assert credential == ProviderAuth(opencode_api_key="local-key-from-env")
+
+
 def test_load_operator_credential_ignores_shell_env_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

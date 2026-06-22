@@ -1,5 +1,5 @@
 from .claude import ClaudeExtractor
-from .claude_cli import ClaudeUsageLimitError
+from .claude_types import ClaudeUsageLimitError
 from .types import (
     AppliedClassifyItemOutcome,
     AppliedClassifyOutcome,

@@ -3,51 +3,17 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Protocol
 
 from application_pipeline.llm import quota as _quota
+from .claude_types import (
+    ClaudeResponse,
+    ClaudeUsage,
+    ClaudeUsageLimitError,
+    _ClaudeCliForensicsError,
+)
 
 _USAGE_LIMIT_PHRASES = ("usage limit", "rate limit")
-
-
-class _ClaudeCliForensicsError(Exception):
-    def __init__(
-        self,
-        message: str,
-        *,
-        returncode: int,
-        stdout: str,
-        stderr: str,
-        envelope: dict[str, Any] | None,
-    ) -> None:
-        super().__init__(message)
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-        self.envelope = envelope
-
-
-class ClaudeUsageLimitError(_ClaudeCliForensicsError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        returncode: int,
-        stdout: str,
-        stderr: str,
-        envelope: dict[str, Any] | None,
-        reset_time: datetime | None = None,
-    ) -> None:
-        super().__init__(
-            message,
-            returncode=returncode,
-            stdout=stdout,
-            stderr=stderr,
-            envelope=envelope,
-        )
-        self.reset_time = reset_time
 
 
 class _ClaudeClassifiedError(_ClaudeCliForensicsError):
@@ -77,22 +43,6 @@ class ClaudeCliError(_ClaudeClassifiedError):
 
 class ClaudeMalformedEnvelopeError(_ClaudeClassifiedError):
     pass
-
-
-@dataclass(frozen=True)
-class ClaudeUsage:
-    input_tokens: int
-    output_tokens: int
-    cache_read_tokens: int
-
-
-@dataclass(frozen=True)
-class ClaudeResponse:
-    raw_response: str
-    usage: ClaudeUsage
-    cost_usd: float
-    duration_s: float
-    session_id: str
 
 
 class SubprocessRunner(Protocol):

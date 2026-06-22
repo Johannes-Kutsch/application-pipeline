@@ -946,3 +946,38 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
 
     assert captured["call_site"] == "classify"
     assert captured["provider_auth"] == provider_auth
+
+
+def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usage(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed Agent Runtime classifier response with valid output and no usage
+    metadata is applied normally.
+    """
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        lambda *args, **kwargs: AgentRuntimeInvocationResult(
+            kind="completed",
+            output=_classify_output(
+                {
+                    "matches": True,
+                    "header": "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+                    "summary": "Great role for ML engineers.",
+                }
+            ),
+            log_path=Path("llm-classify.log"),
+            usage=None,
+            reset_time=None,
+            message=None,
+        ),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+
+    results = extractor.classify_relevance([_item(company="Acme", location="Hamburg")])
+
+    result = results[0]
+    assert isinstance(result, RelevanceVerdict)
+    assert result.matches is True
+    assert result.header is not None
+    assert result.summary is not None

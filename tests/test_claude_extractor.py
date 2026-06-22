@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -12,11 +13,16 @@ from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
     ClaudeCliInvoker,
     ClaudeExtractor,
+    CallUsage,
+    ClaudeUsageLimitError,
     ClaudeMalformedEnvelopeError,
     ClaudeResponse,
     ClaudeUsage,
     ExtractorBatchMalformedError,
     ExtractorMalformedJSONError,
+)
+from application_pipeline.llm.agent_runtime_invocation import (
+    AgentRuntimeInvocationResult,
 )
 from application_pipeline.llm.types import (
     JudgeCandidate,
@@ -572,3 +578,165 @@ def test_classify_relevance_batch_logs_the_full_batch_prompt_and_response(
     assert "Job 2" in transcript["prompt"]
     assert "Job 3" in transcript["prompt"]
     assert transcript["raw_response"] == response.raw_response
+
+
+def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        captured["prompt"] = prompt
+        captured["call_site"] = call_site
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+        )
+        captured["runtime_log_path"] = runtime_log
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("runtime output\n", encoding="utf-8")
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output=(
+                '<verdict id="1">'
+                '{ "matches": true, "header": "Header", "summary": "Match" }'
+                "</verdict>"
+                '<verdict id="2">{ "matches": false }</verdict>'
+                '<verdict id="3">'
+                '{ "matches": true, "header": "", "summary": "Missing header" }'
+                "</verdict>"
+            ),
+            log_path=runtime_log,
+            usage=CallUsage(
+                input_tokens=11,
+                output_tokens=7,
+                cache_read_tokens=3,
+                cost_usd=0.25,
+                duration_s=1.5,
+            ),
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    items = [_item(title=f"Job {i + 1}") for i in range(3)]
+    extractor = ClaudeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+    )
+    results, usage = extractor.classify_relevance(items)
+
+    assert captured["call_site"] == "classify"
+    assert "id=1" in str(captured["prompt"])
+    assert "id=2" in str(captured["prompt"])
+    assert "id=3" in str(captured["prompt"])
+    runtime_log_path = captured["runtime_log_path"]
+    assert isinstance(runtime_log_path, Path)
+    assert (
+        runtime_log_path.parent
+        == run_log.logs_dir / "llm" / "agent-runtime" / "classify"
+    )
+    assert runtime_log_path.exists()
+    assert results[0] is not None and results[0].matches is True
+    assert results[1] is not None and results[1].matches is False
+    assert results[2] is None
+    assert usage.input_tokens == 11
+    assert usage.output_tokens == 7
+    assert usage.cache_read_tokens == 3
+
+
+def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        assert call_site == "classify"
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("usage limited\n", encoding="utf-8")
+        return AgentRuntimeInvocationResult(
+            kind="usage_limit",
+            output="limit reached",
+            log_path=runtime_log,
+            usage=CallUsage(
+                input_tokens=11,
+                output_tokens=7,
+                cache_read_tokens=3,
+                cost_usd=0.25,
+                duration_s=1.5,
+            ),
+            reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    extractor = ClaudeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+    )
+
+    with pytest.raises(ClaudeUsageLimitError) as excinfo:
+        extractor.classify_relevance([_item()])
+
+    assert excinfo.value.reset_time == datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc)
+
+
+def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retryable(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        assert call_site == "classify"
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("provider flake\n", encoding="utf-8")
+        return AgentRuntimeInvocationResult(
+            kind="retryable_provider_failure",
+            output="provider flake",
+            log_path=runtime_log,
+            usage=CallUsage(
+                input_tokens=5,
+                output_tokens=1,
+                cache_read_tokens=0,
+                cost_usd=0.01,
+                duration_s=0.3,
+            ),
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    extractor = ClaudeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+    )
+    results, usage = extractor.classify_relevance([_item(), _item()])
+
+    assert results == [None, None]
+    assert usage.input_tokens == 5
+    assert usage.output_tokens == 1
+    assert usage.cache_read_tokens == 0
+    assert usage.cost_usd == pytest.approx(0.01)

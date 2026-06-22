@@ -15,9 +15,12 @@ from .agent_output import (
 from .claude_cli import (
     ClaudeCliError,
     ClaudeCliInvoker,
+    ClaudeUsageLimitError,
     ClaudeMalformedEnvelopeError,
     ClaudeResponse,
+    ClaudeUsage,
 )
+from .agent_runtime_invocation import invoke_agent_runtime
 from .types import (
     CallUsage,
     ClassifyItem,
@@ -30,6 +33,13 @@ from .types import (
     MatchVerdict,
     RelevanceVerdict,
 )
+
+
+class _RetryableProviderFailureError(Exception):
+    def __init__(self, usage: CallUsage | None) -> None:
+        super().__init__("classify_relevance: retryable provider failure")
+        self.usage = usage
+
 
 _GERMAN_BOILERPLATE_SENTINELS: list[str] = [
     "wir bieten",
@@ -136,7 +146,10 @@ class ClaudeExtractor:
         self._config = config
         self._prompts = prompts
         self._run_log = run_log
-        self._invoker = _invoker or ClaudeCliInvoker(cli_path=config.claude_cli_path)
+        self._invoker = _invoker
+        self._cli_invoker = _invoker or ClaudeCliInvoker(
+            cli_path=config.claude_cli_path
+        )
 
     def classify_relevance(
         self, items: list[ClassifyItem]
@@ -153,35 +166,53 @@ class ClaudeExtractor:
             LISTINGS=_build_listings_block(items)
         )
         t0 = time.monotonic()
-        try:
-            response = self._invoker.call(
-                prompt,
-                model=_CLASSIFY_SITE.model,
-                effort=_CLASSIFY_SITE.effort,
-            )
-        except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
-            status = (
-                "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"
-            )
-            self._write_transcript(
-                site=_CLASSIFY_SITE,
-                prompt=prompt,
-                status=status,
-                duration_s=time.monotonic() - t0,
-                extra={},
-                exc=exc,
-            )
-            if isinstance(exc, ClaudeCliError):
-                raise ExtractorUnreachableError(
-                    str(exc), returncode=exc.returncode, stderr=exc.stderr
+        if self._invoker is None:
+            try:
+                response = self._invoke_runtime(prompt)
+            except _RetryableProviderFailureError as exc:
+                return (
+                    [None for _ in items],
+                    exc.usage
+                    or CallUsage(
+                        input_tokens=0,
+                        output_tokens=0,
+                        cache_read_tokens=0,
+                        cost_usd=0.0,
+                        duration_s=0.0,
+                    ),
+                )
+        else:
+            try:
+                response = self._cli_invoker.call(
+                    prompt,
+                    model=_CLASSIFY_SITE.model,
+                    effort=_CLASSIFY_SITE.effort,
+                )
+            except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
+                status = (
+                    "cli_error"
+                    if isinstance(exc, ClaudeCliError)
+                    else "malformed_envelope"
+                )
+                self._write_transcript(
+                    site=_CLASSIFY_SITE,
+                    prompt=prompt,
+                    status=status,
+                    duration_s=time.monotonic() - t0,
+                    extra={},
+                    exc=exc,
+                )
+                if isinstance(exc, ClaudeCliError):
+                    raise ExtractorUnreachableError(
+                        str(exc), returncode=exc.returncode, stderr=exc.stderr
+                    ) from exc
+                raise ExtractorMalformedJSONError(
+                    str(exc),
+                    returncode=exc.returncode,
+                    stderr=exc.stderr,
+                    prompt=prompt,
+                    raw_response=None,
                 ) from exc
-            raise ExtractorMalformedJSONError(
-                str(exc),
-                returncode=exc.returncode,
-                stderr=exc.stderr,
-                prompt=prompt,
-                raw_response=None,
-            ) from exc
 
         verdicts_by_id = extract_id_tagged_verdicts(response.raw_response)
         results: list[RelevanceVerdict | None] = []
@@ -251,7 +282,7 @@ class ClaudeExtractor:
     ) -> tuple[Any, ClaudeResponse]:
         t0 = time.monotonic()
         try:
-            response = self._invoker.call(
+            response = self._cli_invoker.call(
                 prompt,
                 model=site.model,
                 effort=site.effort,
@@ -388,6 +419,53 @@ class ClaudeExtractor:
         for c in candidates:
             parts.append(f"[Candidate id={c.id}]\n{c.header}\n\n{c.summary}")
         return "\n\n".join(parts)
+
+    def _invoke_runtime(self, prompt: str) -> ClaudeResponse:
+        result = invoke_agent_runtime(
+            prompt,
+            logs_root=self._run_log.logs_dir,
+            call_site="classify",
+        )
+        if result.kind == "completed":
+            if result.usage is None:
+                raise ExtractorMalformedJSONError(
+                    "classify_relevance: completed runtime response missing usage",
+                    prompt=prompt,
+                    raw_response=result.output,
+                )
+            return ClaudeResponse(
+                raw_response=result.output,
+                usage=ClaudeUsage(
+                    input_tokens=result.usage.input_tokens,
+                    output_tokens=result.usage.output_tokens,
+                    cache_read_tokens=result.usage.cache_read_tokens,
+                ),
+                cost_usd=result.usage.cost_usd,
+                duration_s=result.usage.duration_s,
+                session_id=str(result.log_path),
+            )
+        if result.kind == "usage_limit":
+            raise ClaudeUsageLimitError(
+                "llm runtime usage limit reached",
+                returncode=0,
+                stdout=result.output,
+                stderr=result.output,
+                envelope={"result": result.output},
+                reset_time=result.reset_time,
+            )
+        if result.kind == "retryable_provider_failure":
+            raise _RetryableProviderFailureError(result.usage)
+        if result.kind == "missing_usage":
+            raise ExtractorMalformedJSONError(
+                "classify_relevance: missing usage in completed runtime response",
+                prompt=prompt,
+                raw_response=result.output,
+            )
+        raise ExtractorUnreachableError(
+            "classify_relevance: runtime provider failure",
+            returncode=0,
+            stderr=result.message or result.output,
+        )
 
     @staticmethod
     def _parse_relevance(

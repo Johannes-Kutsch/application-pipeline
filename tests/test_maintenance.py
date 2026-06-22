@@ -134,6 +134,26 @@ def test_agent_runtime_judge_log_older_than_30_days_is_deleted(
     assert not log_file.exists()
 
 
+def test_agent_runtime_classify_log_older_than_30_days_deletes_sibling_invocation_dir(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "old.log"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text("old runtime log\n" * 3)
+    invocation_dir = log_file.with_suffix("")
+    invocation_dir.mkdir(parents=True)
+    artifact_in_dir = invocation_dir / "artifact.txt"
+    artifact_in_dir.write_text("runtime internal file\n" * 3)
+    old_mtime = time.time() - 31 * 24 * 3600
+    os.utime(log_file, (old_mtime, old_mtime))
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert not log_file.exists()
+    assert not invocation_dir.exists()
+
+
 def test_agent_runtime_classify_log_newer_than_30_days_is_preserved_instead_of_truncated(
     dirs: tuple[Path, Path],
 ) -> None:

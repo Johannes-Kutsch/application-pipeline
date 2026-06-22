@@ -61,6 +61,7 @@ from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.prefilter_gate import PreFilterGate
 from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.daily_results_file import DailyResultsFile, ResultsFileError
+from application_pipeline.operator_credential import load_operator_credential
 from application_pipeline.search_terms import SearchTerms, load_search_terms
 
 _log = logging.getLogger(__name__)
@@ -160,7 +161,17 @@ def run(
                 _log.error("startup failed — prompts: %s", exc)
                 raise
             if extractor is None:
-                extractor = ClaudeExtractor(cfg, prompts, run_log=run_log)
+                provider_auth = (
+                    load_operator_credential(config_path.parent)
+                    if llm_enricher is None
+                    else None
+                )
+                extractor = ClaudeExtractor(
+                    cfg,
+                    prompts,
+                    run_log=run_log,
+                    provider_auth=provider_auth,
+                )
 
         # Step 6: Resolve parser classes
         _resolve = (

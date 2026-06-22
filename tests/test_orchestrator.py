@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from agent_runtime.runtime import ProviderAuth
 
 from fake_status_display import FakeStatusDisplay
 
@@ -2694,6 +2695,9 @@ def test_fatal_error_writes_failure_report_and_exits_one(
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     _write_config(tmp_path / "application-pipeline")
+    (tmp_path / "application-pipeline" / ".env").write_text(
+        "OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8"
+    )
     monkeypatch.setattr("sys.argv", ["app", "run"])
 
     def _raise(*a: object, **kw: object) -> None:
@@ -4288,6 +4292,9 @@ def test_non_quota_worker_exception_writes_failure_report(
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     _write_config(tmp_path / "application-pipeline")
+    (tmp_path / "application-pipeline" / ".env").write_text(
+        "OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8"
+    )
     monkeypatch.setattr("sys.argv", ["app", "run"])
 
     class _AbortingExtractor:
@@ -5147,6 +5154,86 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
     assert len(judge_calls) == 2
     assert judge_calls[0] == judge_calls[1]
     assert len(slept) >= 1
+
+
+def test_run_passes_local_operator_credential_to_agent_runtime_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = _one_stub_config(tmp_path)
+    (tmp_path / ".env").write_text(
+        "OPENCODE_GO_API_KEY=local-operator-key\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "shell-key")
+    call_auth: list[tuple[str, object | None]] = []
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        call_auth.append((call_site, provider_auth))
+        runtime_log = (
+            logs_root
+            / "llm"
+            / "agent-runtime"
+            / call_site
+            / f"{call_site}-{len(call_auth)}.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("runtime output", encoding="utf-8")
+        if call_site == "classify":
+            return AgentRuntimeInvocationResult(
+                kind="completed",
+                output=(
+                    '<verdict id="1">'
+                    '{"matches": true, "header": "Header\\nCompany\\nDate", '
+                    '"summary": "Summary"}'
+                    "</verdict>"
+                ),
+                log_path=runtime_log,
+                usage=_FAKE_CLASSIFY_USAGE,
+                reset_time=None,
+                message=None,
+            )
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
+            log_path=runtime_log,
+            usage=_FAKE_JUDGE_USAGE,
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+    )
+
+    class _OneStubParser(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://operator-credential.example/job",
+                    title="Job 1",
+                    source="stub",
+                )
+            ]
+
+    summary = run(
+        config_path,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+    )
+
+    assert summary.written == 1
+    assert [call_site for call_site, _ in call_auth] == ["classify", "judge"]
+    assert [auth for _, auth in call_auth] == [
+        ProviderAuth(opencode_api_key="local-operator-key"),
+        ProviderAuth(opencode_api_key="local-operator-key"),
+    ]
 
 
 def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_report(

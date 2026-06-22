@@ -381,7 +381,7 @@ def run(
                         error=str(exc),
                     )
                     failure_report_writer.write_failure(
-                        stage="judge_top_n",
+                        stage="llm_extractor:judge_match",
                         error=exc,
                         log_tail="",
                     )

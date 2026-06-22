@@ -21,7 +21,6 @@ from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
     AppliedClassifyItemOutcome,
-    ExtractorBatchMalformedError,
     MatchedListing,
 )
 from application_pipeline.parser_log import RunLog
@@ -1080,16 +1079,17 @@ def test_classify_stage_retryable_outcome_counts_malformed_on_registered_parser_
     assert parser_summary["enrich_failed"] == 1
 
 
-def test_classify_stage_batch_level_malformed_failure_skips_failed_batch_and_continues(
+def test_classify_stage_retryable_batch_outcome_skips_pool_and_continues(
     tmp_path: Path,
 ) -> None:
+    """A batch of retryable outcomes skips the pool and later batches proceed."""
     logs_dir = tmp_path / "logs"
     display = FakeStatusDisplay()
     metrics = RunMetrics(display, run_log=RunLog(logs_dir))
     metrics.register_rows()
     pool_collector = _CollectingPoolCollector()
 
-    class _MalformedThenMatchedEnricher:
+    class _RetryableThenMatchedEnricher:
         def __init__(self) -> None:
             self.calls = 0
 
@@ -1098,7 +1098,14 @@ def test_classify_stage_batch_level_malformed_failure_skips_failed_batch_and_con
         ) -> AppliedClassifyOutcome:
             self.calls += 1
             if self.calls == 1:
-                raise ExtractorBatchMalformedError("bad batch verdict")
+                return AppliedClassifyOutcome(
+                    items=[
+                        AppliedClassifyItemOutcome(
+                            state="retryable", event_matches=None
+                        )
+                        for _ in items
+                    ]
+                )
             return AppliedClassifyOutcome(
                 items=[
                     AppliedClassifyItemOutcome(
@@ -1116,7 +1123,7 @@ def test_classify_stage_batch_level_malformed_failure_skips_failed_batch_and_con
         batch_size=2,
         parallelism=1,
         pool_collector=pool_collector,
-        llm_enricher=_MalformedThenMatchedEnricher(),
+        llm_enricher=_RetryableThenMatchedEnricher(),
         metrics=metrics,
         run_state=_FakeRunState(),
         run_log=RunLog(logs_dir),
@@ -1140,11 +1147,15 @@ def test_classify_stage_batch_level_malformed_failure_skips_failed_batch_and_con
         {
             "ts": rows[0]["ts"],
             "event": "classify_relevance",
-            "status": "error",
-            "error": "bad batch verdict",
+            "matches": None,
         },
         {
             "ts": rows[1]["ts"],
+            "event": "classify_relevance",
+            "matches": None,
+        },
+        {
+            "ts": rows[2]["ts"],
             "event": "classify_relevance",
             "matches": True,
         },

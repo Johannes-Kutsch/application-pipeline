@@ -9,11 +9,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from application_pipeline._context import current_stage
-from application_pipeline.llm import (
-    ExtractorBatchMalformedError,
-    ExtractorError,
-    UsageLimitError,
-)
+from application_pipeline.llm import UsageLimitError
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import AppliedClassifyOutcome
 from application_pipeline.parser_log import RunLog
@@ -243,6 +239,8 @@ class ClassifyStage:
             if first_failure is None and worker.exc is not None:
                 first_failure = worker.exc
         self._metrics.classify_stage_completed()
+        if first_failure is not None:
+            current_stage.set("llm_extractor:classify_relevance")
         return ClassifyStageCompletion(first_failure=first_failure)
 
 
@@ -375,7 +373,7 @@ class _ClassifyWorker(threading.Thread):
         self.exc: BaseException | None = None
 
     def run(self) -> None:
-        current_stage.set("classify")
+        current_stage.set("llm_extractor:classify_relevance")
         claimed: _ClaimedDispatchItem | None = None
         try:
             while True:
@@ -414,34 +412,10 @@ class _ClassifyWorker(threading.Thread):
             self._dispatch.retry(batch, from_retry=from_retry)
             self._raise_quota_wall(err)
             return
-        except ExtractorBatchMalformedError as exc:
-            self._handle_failed_batch(batch, exc, from_retry=from_retry)
-            return
-        except ExtractorError as exc:
-            self._handle_failed_batch(batch, exc, from_retry=from_retry)
-            return
 
         self._apply_outcome(batch, outcome)
         if from_retry:
             self._dispatch.finish_retry()
-
-    def _handle_failed_batch(
-        self,
-        batch: list[_ClassifyRequest],
-        exc: ExtractorError,
-        *,
-        from_retry: bool,
-    ) -> None:
-        if from_retry:
-            self._dispatch.finish_retry()
-        _log.warning("llm_enricher.enrich failed: %s", exc)
-        self._metrics.classify_batch_failed(len(batch))
-        self._run_log.event(
-            "llm_classify_relevance",
-            "classify_relevance",
-            status="error",
-            error=str(exc),
-        )
 
     def _raise_quota_wall(self, err: UsageLimitError) -> None:
         now = datetime.now(timezone.utc)

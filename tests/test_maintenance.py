@@ -104,6 +104,70 @@ def test_root_lifecycle_jsonl_exceeding_10000_lines_is_truncated_to_last_10000(
     assert result_lines[-1] == '{"line": 14999}'
 
 
+def test_agent_runtime_classify_log_older_than_30_days_is_deleted(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "old.log"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text("old runtime log\n" * 3)
+    old_mtime = time.time() - 31 * 24 * 3600
+    os.utime(log_file, (old_mtime, old_mtime))
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert not log_file.exists()
+
+
+def test_agent_runtime_judge_log_older_than_30_days_is_deleted(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "judge" / "old.log"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text("old runtime log\n" * 3)
+    old_mtime = time.time() - 31 * 24 * 3600
+    os.utime(log_file, (old_mtime, old_mtime))
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert not log_file.exists()
+
+
+def test_agent_runtime_classify_log_newer_than_30_days_is_preserved_instead_of_truncated(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "new.log"
+    log_file.parent.mkdir(parents=True)
+    lines = [f"line {i}" for i in range(15_000)]
+    log_file.write_text("\n".join(lines) + "\n")
+
+    run_maintenance(logs_dir, failures_dir)
+
+    result_lines = log_file.read_text().splitlines()
+    assert len(result_lines) == 15_000
+    assert result_lines[0] == "line 0"
+    assert result_lines[-1] == "line 14999"
+
+
+def test_agent_runtime_judge_log_newer_than_30_days_is_preserved_instead_of_truncated(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "judge" / "new.log"
+    log_file.parent.mkdir(parents=True)
+    lines = [f"line {i}" for i in range(15_000)]
+    log_file.write_text("\n".join(lines) + "\n")
+
+    run_maintenance(logs_dir, failures_dir)
+
+    result_lines = log_file.read_text().splitlines()
+    assert len(result_lines) == 15_000
+    assert result_lines[0] == "line 0"
+    assert result_lines[-1] == "line 14999"
+
+
 def test_flat_log_artifact_exceeding_10000_lines_is_truncated_to_last_10000(
     dirs: tuple[Path, Path],
 ) -> None:

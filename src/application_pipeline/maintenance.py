@@ -5,8 +5,13 @@ import time
 from pathlib import Path
 
 _LOG_TAIL_LINES = 10_000
-_FAILURE_MAX_AGE_SECONDS = 30 * 24 * 3600
-_AGENT_RUNTIME_LOG_MAX_AGE_SECONDS = 30 * 24 * 3600
+_THIRTY_DAYS_SECONDS = 30 * 24 * 3600
+_FAILURE_MAX_AGE_SECONDS = _THIRTY_DAYS_SECONDS
+_AGENT_RUNTIME_LOG_MAX_AGE_SECONDS = _THIRTY_DAYS_SECONDS
+_AGENT_RUNTIME_LOG_SUBDIRS = (
+    Path("llm/agent-runtime/classify"),
+    Path("llm/agent-runtime/judge"),
+)
 
 
 def run_maintenance(logs_dir: Path, failures_dir: Path) -> None:
@@ -15,10 +20,8 @@ def run_maintenance(logs_dir: Path, failures_dir: Path) -> None:
 
 
 def _is_agent_runtime_log(logs_dir: Path, path: Path) -> bool:
-    runtime_root = logs_dir / "llm" / "agent-runtime"
-    return path.suffix == ".log" and (
-        path.parent == runtime_root / "classify"
-        or path.parent == runtime_root / "judge"
+    return path.suffix == ".log" and any(
+        path.parent == logs_dir / subdir for subdir in _AGENT_RUNTIME_LOG_SUBDIRS
     )
 
 

@@ -56,7 +56,6 @@ class Config:
     user_info_dir: pathlib.Path = field(
         default_factory=lambda: pathlib.Path("user-info")
     )
-    claude_cli_path: str | None = None
     max_listing_age_days: int = 180
     claude_classify_parallelism: int = 4
     claude_classify_batch_size: int = 10

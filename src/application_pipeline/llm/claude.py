@@ -147,9 +147,6 @@ class ClaudeExtractor:
         self._prompts = prompts
         self._run_log = run_log
         self._invoker = _invoker
-        self._cli_invoker = _invoker or ClaudeCliInvoker(
-            cli_path=config.claude_cli_path
-        )
 
     def classify_relevance(
         self, items: list[ClassifyItem]
@@ -183,7 +180,7 @@ class ClaudeExtractor:
                 )
         else:
             try:
-                response = self._cli_invoker.call(
+                response = self._invoker.call(
                     prompt,
                     model=_CLASSIFY_SITE.model,
                     effort=_CLASSIFY_SITE.effort,
@@ -287,9 +284,10 @@ class ClaudeExtractor:
         prompt: str,
         extra: dict[str, object],
     ) -> tuple[Any, ClaudeResponse]:
+        assert self._invoker is not None
         t0 = time.monotonic()
         try:
-            response = self._cli_invoker.call(
+            response = self._invoker.call(
                 prompt,
                 model=site.model,
                 effort=site.effort,

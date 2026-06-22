@@ -51,7 +51,6 @@ def _config() -> Config:
     return Config(
         sources=[SourceEntry(parser_type="bundesagentur")],
         locations=["Hamburg"],
-        claude_cli_path="claude",
     )
 
 

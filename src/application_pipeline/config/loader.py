@@ -24,6 +24,7 @@ _REMOVED_FIELDS = (
     "CLASSIFY_RELEVANCE_PROMPT",
     "JUDGE_MATCH_PROMPT",
     "USER_INFO_DIR",
+    "CLAUDE_CLI_PATH",
 )
 
 
@@ -86,7 +87,6 @@ def load(path: pathlib.Path) -> Config:
         failures_path=data_paths.failures_path,
         logs_path=data_paths.logs_path,
         user_info_dir=user_info_dir,
-        claude_cli_path=getattr(module, "CLAUDE_CLI_PATH", None),
         max_listing_age_days=max_listing_age_days,
         claude_classify_parallelism=raw_parallelism,
         claude_classify_batch_size=raw_batch_size,

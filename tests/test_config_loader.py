@@ -73,6 +73,22 @@ def test_source_entry_has_no_max_results_field() -> None:
     assert "max_results" not in field_names
 
 
+def test_config_has_no_claude_cli_path_field() -> None:
+    field_names = {f.name for f in dataclasses.fields(Config)}
+    assert "claude_cli_path" not in field_names
+
+
+def test_config_has_no_agent_runtime_fields() -> None:
+    field_names = {f.name for f in dataclasses.fields(Config)}
+    for name in (
+        "agent_runtime_service",
+        "agent_runtime_model",
+        "agent_runtime_effort",
+        "agent_runtime_tool_policy",
+    ):
+        assert name not in field_names
+
+
 def test_load_defaults_when_optional_fields_absent(tmp_path: pathlib.Path) -> None:
     path = write_config(tmp_path, REQUIRED_BODY)
 
@@ -288,6 +304,15 @@ def test_load_raises_when_ollama_field_present(
     path = write_config(tmp_path, REQUIRED_BODY + f'\n{field} = "anything"\n')
 
     with pytest.raises(ConfigError, match=field):
+        load(path)
+
+
+def test_load_raises_when_claude_cli_path_present(tmp_path: pathlib.Path) -> None:
+    path = write_config(
+        tmp_path, REQUIRED_BODY + '\nCLAUDE_CLI_PATH = "/usr/bin/claude"\n'
+    )
+
+    with pytest.raises(ConfigError, match="CLAUDE_CLI_PATH is no longer supported"):
         load(path)
 
 

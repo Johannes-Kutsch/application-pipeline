@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -36,6 +37,9 @@ def _truncate_logs(logs_dir: Path) -> None:
             if _is_agent_runtime_log(logs_dir=logs_dir, path=path):
                 if os.path.getmtime(path) < runtime_cutoff:
                     path.unlink()
+                    invocation_dir = path.with_suffix("")
+                    if invocation_dir.is_dir():
+                        shutil.rmtree(invocation_dir)
                 continue
             lines = path.read_bytes().splitlines(keepends=True)
             if len(lines) > _LOG_TAIL_LINES:

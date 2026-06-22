@@ -6,17 +6,17 @@ import time
 from typing import Any, Protocol
 
 from application_pipeline.llm import quota as _quota
-from .claude_types import (
-    ClaudeResponse,
-    ClaudeUsage,
-    ClaudeUsageLimitError,
-    _ClaudeCliForensicsError,
+from .agent_runtime_types import (
+    AgentRuntimeResponse,
+    AgentRuntimeUsage,
+    UsageLimitError,
+    _ProviderForensicsError,
 )
 
 _USAGE_LIMIT_PHRASES = ("usage limit", "rate limit")
 
 
-class _ClaudeClassifiedError(_ClaudeCliForensicsError):
+class _ClaudeClassifiedError(_ProviderForensicsError):
     def __init__(
         self,
         message: str,
@@ -96,7 +96,7 @@ class ClaudeCliInvoker:
         *,
         model: str,
         effort: str = "",
-    ) -> ClaudeResponse:
+    ) -> AgentRuntimeResponse:
         cli = self._cli_path or shutil.which("claude") or "claude"
         args = [
             cli,
@@ -144,7 +144,7 @@ class ClaudeCliInvoker:
 
         if _signals_usage_limit_envelope(envelope):
             result_text = str(envelope.get("result", ""))
-            raise ClaudeUsageLimitError(
+            raise UsageLimitError(
                 f"Claude subscription cap reached: {result_text}",
                 returncode=returncode,
                 stdout=stdout,
@@ -155,7 +155,7 @@ class ClaudeCliInvoker:
 
         if returncode != 0:
             if _signals_usage_limit_stderr(stderr):
-                raise ClaudeUsageLimitError(
+                raise UsageLimitError(
                     f"Claude usage limit signalled in stderr: {stderr.strip()[:200]}",
                     returncode=returncode,
                     stdout=stdout,
@@ -185,13 +185,13 @@ class ClaudeCliInvoker:
             )
 
         usage_raw = envelope.get("usage", {})
-        usage = ClaudeUsage(
+        usage = AgentRuntimeUsage(
             input_tokens=int(usage_raw.get("input_tokens", 0)),
             output_tokens=int(usage_raw.get("output_tokens", 0)),
             cache_read_tokens=int(usage_raw.get("cache_read_input_tokens", 0)),
         )
 
-        return ClaudeResponse(
+        return AgentRuntimeResponse(
             raw_response=raw_response,
             usage=usage,
             cost_usd=float(envelope.get("total_cost_usd", 0.0)),

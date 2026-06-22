@@ -44,12 +44,12 @@ from application_pipeline.failure_report import (
     FailureReportWriter,
 )
 from application_pipeline.llm import (
-    ClaudeExtractor,
+    AgentRuntimeExtractor,
     ExtractorError,
     JudgeCandidate,
     MatchVerdict,
 )
-from application_pipeline.llm import ClaudeUsageLimitError
+from application_pipeline.llm import UsageLimitError
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.llm_enricher import LLMEnricher, LLMExtractor
 from application_pipeline.pool import Pool
@@ -166,7 +166,7 @@ def run(
                     if llm_enricher is None
                     else None
                 )
-                extractor = ClaudeExtractor(
+                extractor = AgentRuntimeExtractor(
                     cfg,
                     prompts,
                     run_log=run_log,
@@ -358,7 +358,7 @@ def run(
                 try:
                     verdicts, judge_usage = extractor.judge_top_n(candidates)
                     break
-                except ClaudeUsageLimitError as err:
+                except UsageLimitError as err:
                     now_utc = datetime.now(timezone.utc)
                     wake = _quota.compute_wake_time(err.reset_time, now_utc)
                     duration_s = max(0.0, (wake - now_utc).total_seconds())

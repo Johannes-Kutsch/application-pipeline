@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 
 
-class _ClaudeCliForensicsError(Exception):
+class _ProviderForensicsError(Exception):
     def __init__(
         self,
         message: str,
@@ -20,7 +20,7 @@ class _ClaudeCliForensicsError(Exception):
         self.envelope = envelope
 
 
-class ClaudeUsageLimitError(_ClaudeCliForensicsError):
+class UsageLimitError(_ProviderForensicsError):
     def __init__(
         self,
         message: str,
@@ -42,16 +42,16 @@ class ClaudeUsageLimitError(_ClaudeCliForensicsError):
 
 
 @dataclass(frozen=True)
-class ClaudeUsage:
+class AgentRuntimeUsage:
     input_tokens: int
     output_tokens: int
     cache_read_tokens: int
 
 
 @dataclass(frozen=True)
-class ClaudeResponse:
+class AgentRuntimeResponse:
     raw_response: str
-    usage: ClaudeUsage
+    usage: AgentRuntimeUsage
     cost_usd: float
     duration_s: float
     session_id: str

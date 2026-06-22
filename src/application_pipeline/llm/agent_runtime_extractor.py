@@ -15,7 +15,11 @@ from .agent_output import (
     extract_json_block,
 )
 from .agent_runtime_invocation import invoke_agent_runtime
-from .claude_types import ClaudeResponse, ClaudeUsage, ClaudeUsageLimitError
+from .agent_runtime_types import (
+    AgentRuntimeResponse,
+    AgentRuntimeUsage,
+    UsageLimitError,
+)
 from .types import (
     CallUsage,
     ClassifyItem,
@@ -118,7 +122,7 @@ def _build_listings_block(items: list[ClassifyItem]) -> str:
     return "\n\n".join(parts)
 
 
-class ClaudeExtractor:
+class AgentRuntimeExtractor:
     def __init__(
         self,
         config: Config,
@@ -228,7 +232,7 @@ class ClaudeExtractor:
         site: _CallSite,
         prompt: str,
         extra: dict[str, object],
-    ) -> tuple[Any, ClaudeResponse]:
+    ) -> tuple[Any, AgentRuntimeResponse]:
         t0 = time.monotonic()
         result = invoke_agent_runtime(
             prompt,
@@ -243,9 +247,9 @@ class ClaudeExtractor:
                     prompt=prompt,
                     raw_response=result.output,
                 )
-            response = ClaudeResponse(
+            response = AgentRuntimeResponse(
                 raw_response=result.output,
-                usage=ClaudeUsage(
+                usage=AgentRuntimeUsage(
                     input_tokens=result.usage.input_tokens,
                     output_tokens=result.usage.output_tokens,
                     cache_read_tokens=result.usage.cache_read_tokens,
@@ -311,7 +315,7 @@ class ClaudeExtractor:
             return parsed, response
 
         if result.kind == "usage_limit":
-            raise ClaudeUsageLimitError(
+            raise UsageLimitError(
                 f"{site.call}: runtime usage limit reached",
                 returncode=0,
                 stdout=result.output,
@@ -364,7 +368,7 @@ class ClaudeExtractor:
         )
 
     @staticmethod
-    def _usage_from(response: ClaudeResponse) -> CallUsage:
+    def _usage_from(response: AgentRuntimeResponse) -> CallUsage:
         return CallUsage(
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
@@ -380,7 +384,7 @@ class ClaudeExtractor:
             parts.append(f"[Candidate id={c.id}]\n{c.header}\n\n{c.summary}")
         return "\n\n".join(parts)
 
-    def _invoke_runtime(self, prompt: str) -> ClaudeResponse:
+    def _invoke_runtime(self, prompt: str) -> AgentRuntimeResponse:
         result = invoke_agent_runtime(
             prompt,
             logs_root=self._run_log.logs_dir,
@@ -394,9 +398,9 @@ class ClaudeExtractor:
                     prompt=prompt,
                     raw_response=result.output,
                 )
-            return ClaudeResponse(
+            return AgentRuntimeResponse(
                 raw_response=result.output,
-                usage=ClaudeUsage(
+                usage=AgentRuntimeUsage(
                     input_tokens=result.usage.input_tokens,
                     output_tokens=result.usage.output_tokens,
                     cache_read_tokens=result.usage.cache_read_tokens,
@@ -406,7 +410,7 @@ class ClaudeExtractor:
                 session_id=str(result.log_path),
             )
         if result.kind == "usage_limit":
-            raise ClaudeUsageLimitError(
+            raise UsageLimitError(
                 "llm runtime usage limit reached",
                 returncode=0,
                 stdout=result.output,

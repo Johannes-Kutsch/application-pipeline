@@ -3,8 +3,8 @@ from .parsers import PositionStub
 from .search_terms import SearchTerms, SearchTermsError, load_search_terms
 from .dedup import DedupStoreError, DeduplicationStore, SeenResult, SeenStatus
 from .llm import (
+    AgentRuntimeExtractor,
     ClassifyItem,
-    ClaudeExtractor,
     ExtractorBatchMalformedError,
     ExtractorError,
     ExtractorMalformedJSONError,
@@ -21,8 +21,8 @@ from .daily_results_file import ResultsFileError
 from .user_settings import UserSettingsError, load_user_module
 
 __all__ = [
+    "AgentRuntimeExtractor",
     "ClassifyItem",
-    "ClaudeExtractor",
     "Config",
     "ConfigError",
     "DedupStoreError",

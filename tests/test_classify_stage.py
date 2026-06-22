@@ -16,7 +16,7 @@ from application_pipeline.classify_stage import (
     ClassifyStage,
     ClassifyStageHandoff,
 )
-from application_pipeline.llm import ClaudeUsageLimitError
+from application_pipeline.llm import UsageLimitError
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
@@ -313,7 +313,7 @@ class _UsageLimitThenMatchedEnricher:
         listing_ids = [listing_id for listing_id, _, _ in items]
         self.calls.append(listing_ids)
         if len(self.calls) == 1:
-            raise ClaudeUsageLimitError(
+            raise UsageLimitError(
                 "quota hit",
                 returncode=1,
                 stdout="",
@@ -372,7 +372,7 @@ class _ParallelQuotaWallEnricher:
             if listing_id == 1 and not self._quota_seen:
                 self._quota_seen = True
                 self.wall_raised.set()
-                raise ClaudeUsageLimitError(
+                raise UsageLimitError(
                     "quota hit",
                     returncode=1,
                     stdout="",
@@ -419,7 +419,7 @@ class _RetryBeforeLaterDispatchEnricher:
         if listing_id == 1 and attempt == 1:
             assert self.second_batch_started.wait(timeout=1)
             self.wall_raised.set()
-            raise ClaudeUsageLimitError(
+            raise UsageLimitError(
                 "quota hit",
                 returncode=1,
                 stdout="",
@@ -471,7 +471,7 @@ class _ParallelDoubleQuotaWallEnricher:
 
         if attempt == 1 and listing_id in {1, 2}:
             self.initial_quota_hits.wait(timeout=1)
-            raise ClaudeUsageLimitError(
+            raise UsageLimitError(
                 "quota hit",
                 returncode=1,
                 stdout="",

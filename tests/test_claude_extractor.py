@@ -20,6 +20,7 @@ from application_pipeline.llm import (
     ClaudeUsage,
     ExtractorBatchMalformedError,
     ExtractorMalformedJSONError,
+    ExtractorUnreachableError,
 )
 from application_pipeline.llm.agent_runtime_invocation import (
     AgentRuntimeInvocationResult,
@@ -740,3 +741,83 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
     assert usage.output_tokens == 1
     assert usage.cache_read_tokens == 0
     assert usage.cost_usd == pytest.approx(0.01)
+
+
+def test_classify_relevance_via_agent_runtime_missing_usage_is_malformed(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        assert prompt
+        assert call_site == "classify"
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("missing usage\n", encoding="utf-8")
+        return AgentRuntimeInvocationResult(
+            kind="missing_usage",
+            output='<verdict id="1">{ "matches": false }</verdict>',
+            log_path=runtime_log,
+            usage=None,
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    extractor = ClaudeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+    )
+
+    with pytest.raises(ExtractorMalformedJSONError) as excinfo:
+        extractor.classify_relevance([_item()])
+
+    assert (
+        excinfo.value.raw_response == '<verdict id="1">{ "matches": false }</verdict>'
+    )
+
+
+def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachable(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        assert prompt
+        assert call_site == "classify"
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("hard failure\n", encoding="utf-8")
+        return AgentRuntimeInvocationResult(
+            kind="hard_provider_failure",
+            output="runtime failed",
+            log_path=runtime_log,
+            usage=None,
+            reset_time=None,
+            message="provider exploded",
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    extractor = ClaudeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+    )
+
+    with pytest.raises(ExtractorUnreachableError) as excinfo:
+        extractor.classify_relevance([_item()])
+
+    assert excinfo.value.stderr == "provider exploded"

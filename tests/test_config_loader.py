@@ -89,6 +89,15 @@ def test_config_has_no_agent_runtime_fields() -> None:
         assert name not in field_names
 
 
+def test_config_uses_backend_neutral_classify_field_names() -> None:
+    field_names = {f.name for f in dataclasses.fields(Config)}
+
+    assert "classify_parallelism" in field_names
+    assert "classify_batch_size" in field_names
+    assert "claude_classify_parallelism" not in field_names
+    assert "claude_classify_batch_size" not in field_names
+
+
 def test_load_defaults_when_optional_fields_absent(tmp_path: pathlib.Path) -> None:
     path = write_config(tmp_path, REQUIRED_BODY)
 

@@ -12,7 +12,7 @@ from agent_runtime import (
 )
 from agent_runtime import ToolPolicy
 from agent_runtime.agent_log import AgentInvocationLog
-from agent_runtime.runtime import EphemeralRunRequest, ProviderUsage
+from agent_runtime.runtime import EphemeralRunRequest, ProviderAuth, ProviderUsage
 from agent_runtime.types import ProviderSelection
 
 from .types import CallUsage
@@ -61,7 +61,9 @@ def _reserve_runtime_log_path(
     return AgentInvocationLog().reserve(log_name=f"llm-{call_site}", logs_dir=log_dir)
 
 
-def _build_request(prompt: str, invocation_dir: Path) -> EphemeralRunRequest:
+def _build_request(
+    prompt: str, invocation_dir: Path, provider_auth: ProviderAuth | None
+) -> EphemeralRunRequest:
     return EphemeralRunRequest(
         prompt=prompt,
         invocation_dir=invocation_dir,
@@ -69,6 +71,7 @@ def _build_request(prompt: str, invocation_dir: Path) -> EphemeralRunRequest:
             service=_AGENT_RUNTIME_SERVICE,
             model=_AGENT_RUNTIME_MODEL,
             effort=_AGENT_RUNTIME_EFFORT,
+            auth=provider_auth,
         ),
         tool_policy=_AGENT_RUNTIME_TOOL_POLICY,
     )
@@ -159,11 +162,14 @@ def invoke_agent_runtime(
     *,
     logs_root: Path,
     call_site: AgentRuntimeCallSiteName,
+    provider_auth: ProviderAuth | None = None,
 ) -> AgentRuntimeInvocationResult:
     log_path = _reserve_runtime_log_path(logs_root=logs_root, call_site=call_site)
     invocation_dir = log_path.with_suffix("")
     invocation_dir.mkdir(parents=True, exist_ok=True)
-    request = _build_request(prompt=prompt, invocation_dir=invocation_dir)
+    request = _build_request(
+        prompt=prompt, invocation_dir=invocation_dir, provider_auth=provider_auth
+    )
     try:
         outcome = RuntimeClient().run_ephemeral(request)
     except AgentRuntimeError as exc:

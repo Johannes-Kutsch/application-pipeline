@@ -5066,7 +5066,7 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
         return [int(value) for value in re.findall(r"\[Candidate id=(\d+)\]", prompt)]
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "judge"
         ids = _extract_candidate_ids(prompt)
@@ -5159,7 +5159,7 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
     run_log = RunLog(logs_dir)
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "judge"
         runtime_log = (

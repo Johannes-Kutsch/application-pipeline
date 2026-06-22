@@ -360,7 +360,7 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
     captured: dict[str, object] = {}
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "judge"
         captured["prompt"] = prompt
@@ -426,7 +426,7 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
@@ -640,7 +640,7 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
     captured: dict[str, object] = {}
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         captured["prompt"] = prompt
         captured["call_site"] = call_site
@@ -709,7 +709,7 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "classify"
         runtime_log = (
@@ -753,7 +753,7 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "classify"
         runtime_log = (
@@ -799,7 +799,7 @@ def test_classify_relevance_via_agent_runtime_missing_usage_is_malformed(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert prompt
         assert call_site == "classify"
@@ -840,7 +840,7 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert prompt
         assert call_site == "classify"

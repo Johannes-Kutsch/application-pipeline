@@ -7,7 +7,6 @@ from typing import Final, Literal
 
 from agent_runtime import (
     AgentRuntimeError,
-    HardAgentError,
     RuntimeClient,
     RuntimeOutcome,
 )
@@ -167,7 +166,7 @@ def invoke_agent_runtime(
     request = _build_request(prompt=prompt, invocation_dir=invocation_dir)
     try:
         outcome = RuntimeClient().run_ephemeral(request)
-    except (HardAgentError, AgentRuntimeError) as exc:
+    except AgentRuntimeError as exc:
         return _build_result(
             kind="hard_provider_failure",
             output="",

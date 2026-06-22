@@ -19,6 +19,13 @@ def _package_data_globs() -> list[str]:
     return data["tool"]["setuptools"]["package-data"]["application_pipeline.templates"]
 
 
+def _project_dependencies() -> list[str]:
+    pyproject = _REPO_ROOT / "pyproject.toml"
+    with pyproject.open("rb") as f:
+        data = tomllib.load(f)
+    return data["project"]["dependencies"]
+
+
 def test_local_scheme_is_no_local_version():
     assert _scm_config().get("local_scheme") == "no-local-version"
 
@@ -60,3 +67,7 @@ def test_templates_keep_one_agent_skill_source_tree():
     assert (templates_root / "agent-skills").is_dir()
     assert not (templates_root / "claude/skills").exists()
     assert not (templates_root / "codex/skills").exists()
+
+
+def test_project_metadata_pins_agent_runtime_dependency():
+    assert "ruhken-agent-runtime == 0.0.1" in _project_dependencies()

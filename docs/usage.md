@@ -3,7 +3,9 @@
 ## Installation
 
 Requires Python >= 3.11 and a working `cron` daemon. The production LLM Extractor uses the Agent
-Runtime backend (`ruhken-agent-runtime`), which is installed automatically with the package.
+Runtime backend (`ruhken-agent-runtime`), which is installed automatically with the package. It is
+separate from the optional Agent Skills templates seeded by `init`. For background see
+ADR-0053 (backend decision) and ADR-0054 (runtime logging).
 
 ```bash
 python3 -m venv .venv

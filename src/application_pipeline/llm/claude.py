@@ -268,9 +268,16 @@ class ClaudeExtractor:
             )
         candidates_block = self._format_candidates(candidates)
         prompt = self._prompts.judge_top_n.render(CANDIDATES=candidates_block)
-        data, response = self._invoke(
-            _JUDGE_TOP_N_SITE, prompt, {"candidate_count": len(candidates)}
-        )
+        if self._invoker is None:
+            data, response = self._invoke_runtime_protocol(
+                _JUDGE_TOP_N_SITE,
+                prompt,
+                {"candidate_count": len(candidates)},
+            )
+        else:
+            data, response = self._invoke(
+                _JUDGE_TOP_N_SITE, prompt, {"candidate_count": len(candidates)}
+            )
         usage = self._usage_from(response)
         return self._parse_top_n_response(data, candidates), usage
 
@@ -363,6 +370,113 @@ class ClaudeExtractor:
         )
 
         return parsed, response
+
+    def _invoke_runtime_protocol(
+        self,
+        site: _CallSite,
+        prompt: str,
+        extra: dict[str, object],
+    ) -> tuple[Any, ClaudeResponse]:
+        t0 = time.monotonic()
+        result = invoke_agent_runtime(
+            prompt,
+            logs_root=self._run_log.logs_dir,
+            call_site="judge",
+        )
+        if result.kind == "completed":
+            if result.usage is None:
+                raise ExtractorMalformedJSONError(
+                    f"{site.call}: completed runtime response missing usage",
+                    prompt=prompt,
+                    raw_response=result.output,
+                )
+            response = ClaudeResponse(
+                raw_response=result.output,
+                usage=ClaudeUsage(
+                    input_tokens=result.usage.input_tokens,
+                    output_tokens=result.usage.output_tokens,
+                    cache_read_tokens=result.usage.cache_read_tokens,
+                ),
+                cost_usd=result.usage.cost_usd,
+                duration_s=result.usage.duration_s,
+                session_id=str(result.log_path),
+            )
+            try:
+                parsed, is_fallback = extract_json_block(
+                    response.raw_response, site.tag
+                )
+            except AgentOutputProtocolError as exc:
+                self._write_transcript(
+                    site=site,
+                    prompt=prompt,
+                    status="protocol_error",
+                    duration_s=time.monotonic() - t0,
+                    extra=extra,
+                    raw_response=response.raw_response,
+                    kind=exc.kind,
+                )
+                msg = (
+                    f"{site.call}: {exc.kind}: <{site.tag}> block missing or malformed"
+                )
+                if site.protocol_error_cls is ExtractorMalformedError:
+                    raise ExtractorMalformedError(
+                        msg, prompt=prompt, raw_response=response.raw_response
+                    ) from exc
+                raise site.protocol_error_cls(msg) from exc
+
+            if is_fallback:
+                self._write_transcript(
+                    site=site,
+                    prompt=prompt,
+                    status="protocol_fallback",
+                    duration_s=time.monotonic() - t0,
+                    extra=extra,
+                    raw_response=response.raw_response,
+                )
+                return parsed, response
+
+            transcript_entry: dict[str, object] = {
+                "call": site.call,
+                "prompt": prompt,
+                "raw_response": response.raw_response,
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "cache_read_tokens": response.usage.cache_read_tokens,
+                },
+                "cost_usd": response.cost_usd,
+                "duration_s": response.duration_s,
+            }
+            self._run_log.transcript(site.component_id, transcript_entry)
+            self._run_log.event(
+                site.component_id,
+                site.call,
+                cost_usd=response.cost_usd,
+                duration_s=f"{response.duration_s:.3f}",
+            )
+
+            return parsed, response
+
+        if result.kind == "usage_limit":
+            raise ClaudeUsageLimitError(
+                f"{site.call}: runtime usage limit reached",
+                returncode=0,
+                stdout=result.output,
+                stderr=result.output,
+                envelope={"result": result.output},
+                reset_time=result.reset_time,
+            )
+        if result.kind == "missing_usage":
+            raise ExtractorMalformedJSONError(
+                f"{site.call}: completed runtime response missing usage",
+                prompt=prompt,
+                raw_response=result.output,
+            )
+        raise ExtractorUnreachableError(
+            f"{site.call}: runtime provider failure",
+            returncode=0,
+            stderr=result.message or result.output,
+        )
 
     def _write_transcript(
         self,

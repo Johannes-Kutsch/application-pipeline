@@ -22,6 +22,9 @@ from application_pipeline.llm import (
     ExtractorError,
     ExtractorUnreachableError,
 )
+from application_pipeline.llm.agent_runtime_invocation import (
+    AgentRuntimeInvocationResult,
+)
 from application_pipeline.extracts.card_store import (
     CardExtract,
     CardStore,
@@ -5044,6 +5047,181 @@ def test_quota_judge_retries_and_completes(
     assert summary.written == 2
     assert len(slept) >= 1
     assert list((tmp_path / ".runtime-data" / "failures").glob("*.md")) == []
+
+
+def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+
+    slept: list[float] = []
+    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
+
+    judge_calls: list[list[int]] = []
+
+    def _extract_candidate_ids(prompt: str) -> list[int]:
+        return [int(value) for value in re.findall(r"\[Candidate id=(\d+)\]", prompt)]
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        assert call_site == "judge"
+        ids = _extract_candidate_ids(prompt)
+        assert ids
+        judge_calls.append(ids)
+        runtime_log = (
+            logs_root
+            / "llm"
+            / "agent-runtime"
+            / "judge"
+            / f"judge-{len(judge_calls)}.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("judge output", encoding="utf-8")
+        if len(judge_calls) == 1:
+            return AgentRuntimeInvocationResult(
+                kind="usage_limit",
+                output="quota reached",
+                log_path=runtime_log,
+                usage=CallUsage(
+                    input_tokens=10,
+                    output_tokens=1,
+                    cache_read_tokens=0,
+                    cost_usd=0.01,
+                    duration_s=0.2,
+                ),
+                reset_time=None,
+                message=None,
+            )
+
+        ranked = [
+            {"id": listing_id, "rank": rank}
+            for rank, listing_id in enumerate(judge_calls[-1], start=1)
+        ]
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
+            log_path=runtime_log,
+            usage=CallUsage(
+                input_tokens=11,
+                output_tokens=2,
+                cache_read_tokens=0,
+                cost_usd=0.01,
+                duration_s=0.4,
+            ),
+            reset_time=None,
+            message=None,
+        )
+
+    def _forbid_cli_call(self: object, *_: object, **__: object) -> None:  # type: ignore[override]
+        raise AssertionError("judge should use Agent Runtime")
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+    )
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.ClaudeCliInvoker.call", _forbid_cli_call
+    )
+
+    class _OneStubParser(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://judge.runtime/test", title="Job 1", source="stub"
+                )
+            ]
+
+    summary = run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        card_store=card_store,
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.written == 1
+    assert len(judge_calls) == 2
+    assert judge_calls[0] == judge_calls[1]
+    assert len(slept) >= 1
+
+
+def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = _one_stub_config(tmp_path)
+    card_store = _make_card_store(tmp_path)
+    seen_path = tmp_path / ".seen.json"
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        assert call_site == "judge"
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "judge" / "llm-judge-fail.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("judge failed\n", encoding="utf-8")
+        return AgentRuntimeInvocationResult(
+            kind="hard_provider_failure",
+            output="provider failed",
+            log_path=runtime_log,
+            usage=None,
+            reset_time=None,
+            message="provider failed",
+        )
+
+    def _forbid_cli_call(self: object, *_: object, **__: object) -> None:  # type: ignore[override]
+        raise AssertionError("judge should use Agent Runtime")
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+    )
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.ClaudeCliInvoker.call", _forbid_cli_call
+    )
+
+    class _OneStubParser(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://judge.runtime/fail", title="Job 1", source="stub"
+                )
+            ]
+
+    summary = run(
+        config_path,
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        card_store=card_store,
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.written == 0
+    reports = sorted((tmp_path / ".runtime-data" / "failures").glob("*.md"))
+    assert len(reports) == 1
+    assert "judge_top_n" in reports[0].read_text(encoding="utf-8")
+
+    today = datetime.now().date().isoformat()
+    assert not (tmp_path / "results" / f"{today}.md").exists()
 
 
 # ---------------------------------------------------------------------------

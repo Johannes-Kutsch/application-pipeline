@@ -388,6 +388,122 @@ def test_judge_top_n_rejects_non_numeric_string_verdict_id(run_log: RunLog) -> N
         extractor.judge_top_n(candidates)
 
 
+def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judge_runtime_file(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        assert call_site == "judge"
+        captured["prompt"] = prompt
+        captured["call_site"] = call_site
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "judge" / "llm-judge-complete.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("runtime judge output\n", encoding="utf-8")
+        captured["runtime_log_path"] = runtime_log
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output=(
+                '<verdicts>[{"id": 0, "rank": 1}, {"id": 1, "rank": 2}]</verdicts>'
+            ),
+            log_path=runtime_log,
+            usage=CallUsage(
+                input_tokens=15,
+                output_tokens=3,
+                cache_read_tokens=1,
+                cost_usd=0.002,
+                duration_s=0.9,
+            ),
+            reset_time=None,
+            message=None,
+        )
+
+    def _forbid_cli_call(self: object, *_: object, **__: object) -> CallUsage:  # type: ignore[override]
+        raise AssertionError("judge should not use ClaudeCliInvoker")
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+    )
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.ClaudeCliInvoker.call", _forbid_cli_call
+    )
+
+    candidates = [
+        JudgeCandidate(
+            id=0, header="Title 0\nACME · Hamburg · remote", summary="Summary 0"
+        ),
+        JudgeCandidate(
+            id=1, header="Title 1\nACME · Berlin · remote", summary="Summary 1"
+        ),
+    ]
+    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    results, usage = extractor.judge_top_n(candidates)
+
+    assert captured["call_site"] == "judge"
+    prompt = str(captured["prompt"])
+    assert "[Candidate id=0]" in prompt
+    assert "Title 0" in prompt
+    assert "Summary 0" in prompt
+    assert "[Candidate id=1]" in prompt
+    assert "Title 1" in prompt
+    assert "Summary 1" in prompt
+    runtime_log_path = captured["runtime_log_path"]
+    assert isinstance(runtime_log_path, Path)
+    assert runtime_log_path.exists()
+    assert (
+        runtime_log_path.parent == run_log.logs_dir / "llm" / "agent-runtime" / "judge"
+    )
+    assert len(results) == 2
+    assert usage.input_tokens == 15
+    assert usage.output_tokens == 3
+
+
+def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str
+    ) -> AgentRuntimeInvocationResult:
+        return AgentRuntimeInvocationResult(
+            kind="usage_limit",
+            output="quota reached",
+            log_path=logs_root
+            / "llm"
+            / "agent-runtime"
+            / "judge"
+            / "llm-judge-quota.log",
+            usage=CallUsage(
+                input_tokens=11,
+                output_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=0.0,
+                duration_s=0.0,
+            ),
+            reset_time=None,
+            message=None,
+        )
+
+    def _forbid_cli_call(self: object, *_: object, **__: object) -> CallUsage:  # type: ignore[override]
+        raise AssertionError("judge should not use ClaudeCliInvoker")
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+    )
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.ClaudeCliInvoker.call", _forbid_cli_call
+    )
+
+    with pytest.raises(ClaudeUsageLimitError) as excinfo:
+        extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+        extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
+
+    assert "usage limit" in str(excinfo.value).lower()
+
+
 def _read_transcripts(run_log: RunLog, component_id: str) -> list[dict]:  # type: ignore[type-arg]
     path = (
         run_log.logs_dir

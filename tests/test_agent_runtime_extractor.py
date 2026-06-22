@@ -421,6 +421,27 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
     assert len(results) == 2
 
 
+def test_judge_top_n_success_logs_verdicts_without_usage_fields(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_runtime(
+        monkeypatch,
+        _runtime_result(_judge_output([{"id": 0, "rank": 1}]), usage=_judge_usage()),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+
+    results = extractor.judge_top_n(_make_candidates(1))
+
+    assert results == [MatchVerdict(id=0, rank=1)]
+    transcript = _read_transcripts(run_log, "llm_judge_match")[-1]
+    event = _read_events(run_log, "llm_judge_match")[-1]
+    assert "usage" not in transcript
+    assert "cost_usd" not in transcript
+    assert "duration_s" not in transcript
+    assert "cost_usd" not in event
+    assert "duration_s" not in event
+
+
 def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -636,6 +657,28 @@ def test_classify_relevance_batch_logs_the_full_batch_prompt_and_response(
     assert "Job 2" in transcript["prompt"]
     assert "Job 3" in transcript["prompt"]
     assert transcript["raw_response"] == output
+
+
+def test_classify_relevance_success_logs_verdicts_without_usage_fields(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_runtime(
+        monkeypatch,
+        _runtime_result(_classify_output({"matches": False})),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+
+    results = extractor.classify_relevance([_item()])
+
+    assert results[0] is not None and results[0].matches is False
+    transcript = _read_transcripts(run_log, "llm_classify_relevance")[-1]
+    event = _read_events(run_log, "llm_classify_relevance")[-1]
+    assert "usage" not in transcript
+    assert "cost_usd" not in transcript
+    assert "duration_s" not in transcript
+    assert "cost_usd" not in event
+    assert "duration_s" not in event
 
 
 def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(

@@ -1702,3 +1702,11 @@ def test_refresh_removed_lines_still_appear(
     init(tmp_path, refresh=True)
 
     assert "removed layout.py" in capsys.readouterr().out
+
+
+def test_fresh_init_creates_env_placeholder(tmp_path: Path) -> None:
+    init(tmp_path)
+
+    env_path = _ap(tmp_path) / ".env"
+    assert env_path.exists()
+    assert env_path.read_text() == "OPENCODE_GO_API_KEY=\n"

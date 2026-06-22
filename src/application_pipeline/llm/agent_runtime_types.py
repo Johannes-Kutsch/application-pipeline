@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 
 
-class _ClaudeCliForensicsError(Exception):
+class _ProviderForensicsError(Exception):
     def __init__(
         self,
         message: str,
@@ -20,7 +20,7 @@ class _ClaudeCliForensicsError(Exception):
         self.envelope = envelope
 
 
-class UsageLimitError(_ClaudeCliForensicsError):
+class UsageLimitError(_ProviderForensicsError):
     def __init__(
         self,
         message: str,

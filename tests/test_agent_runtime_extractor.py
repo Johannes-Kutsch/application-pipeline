@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import application_pipeline
+import application_pipeline.llm as llm_module
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +37,15 @@ from application_pipeline.prompts import (
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
+
+def test_public_extractor_exports_use_agent_runtime_names() -> None:
+    assert application_pipeline.AgentRuntimeExtractor is AgentRuntimeExtractor
+    assert llm_module.AgentRuntimeExtractor is AgentRuntimeExtractor
+    assert llm_module.UsageLimitError is UsageLimitError
+    assert not hasattr(application_pipeline, "ClaudeExtractor")
+    assert not hasattr(llm_module, "ClaudeExtractor")
+    assert not hasattr(llm_module, "ClaudeUsageLimitError")
 
 
 @pytest.fixture

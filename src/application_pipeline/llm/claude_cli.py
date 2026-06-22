@@ -10,13 +10,13 @@ from .agent_runtime_types import (
     AgentRuntimeResponse,
     AgentRuntimeUsage,
     UsageLimitError,
-    _ClaudeCliForensicsError,
+    _ProviderForensicsError,
 )
 
 _USAGE_LIMIT_PHRASES = ("usage limit", "rate limit")
 
 
-class _ClaudeClassifiedError(_ClaudeCliForensicsError):
+class _ClaudeClassifiedError(_ProviderForensicsError):
     def __init__(
         self,
         message: str,

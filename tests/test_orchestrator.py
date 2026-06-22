@@ -93,7 +93,7 @@ def _write_config(
     """Write a minimal valid config.py and a user-info dir into tmp_path."""
     config_path = tmp_path / "config.py"
     parallelism_line = (
-        f"CLAUDE_CLASSIFY_PARALLELISM = {classify_parallelism}\n"
+        f"CLASSIFY_PARALLELISM = {classify_parallelism}\n"
         if classify_parallelism is not None
         else ""
     )
@@ -106,7 +106,7 @@ def _write_config(
             LOCATIONS = {locations}
             INCLUDE_REMOTE = {include_remote!r}
             NEGATIVE_KEYWORDS = {negative_keywords}
-            CLAUDE_CLASSIFY_BATCH_SIZE = {classify_batch_size}
+            CLASSIFY_BATCH_SIZE = {classify_batch_size}
         """)
         + parallelism_line,
         encoding="utf-8",

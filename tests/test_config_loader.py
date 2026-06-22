@@ -325,6 +325,28 @@ def test_load_raises_when_claude_cli_path_present(tmp_path: pathlib.Path) -> Non
         load(path)
 
 
+def test_load_raises_when_claude_classify_parallelism_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLAUDE_CLASSIFY_PARALLELISM = 4\n")
+
+    with pytest.raises(
+        ConfigError, match="CLAUDE_CLASSIFY_PARALLELISM is no longer supported"
+    ):
+        load(path)
+
+
+def test_load_raises_when_claude_classify_batch_size_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 10\n")
+
+    with pytest.raises(
+        ConfigError, match="CLAUDE_CLASSIFY_BATCH_SIZE is no longer supported"
+    ):
+        load(path)
+
+
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:
     path = write_config(
         tmp_path,
@@ -653,16 +675,24 @@ def test_classify_parallelism_defaults_to_4(tmp_path: pathlib.Path) -> None:
 def test_classify_parallelism_raises_when_less_than_1(
     tmp_path: pathlib.Path, value: int
 ) -> None:
-    path = write_config(
-        tmp_path, REQUIRED_BODY + f"\nCLAUDE_CLASSIFY_PARALLELISM = {value}\n"
-    )
+    path = write_config(tmp_path, REQUIRED_BODY + f"\nCLASSIFY_PARALLELISM = {value}\n")
 
-    with pytest.raises(ConfigError, match="CLAUDE_CLASSIFY_PARALLELISM"):
+    with pytest.raises(ConfigError, match="CLASSIFY_PARALLELISM"):
+        load(path)
+
+
+@pytest.mark.parametrize("value", ['"4"', "4.0", "True", "False"])
+def test_classify_parallelism_raises_when_non_int(
+    tmp_path: pathlib.Path, value: str
+) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + f"\nCLASSIFY_PARALLELISM = {value}\n")
+
+    with pytest.raises(ConfigError, match="CLASSIFY_PARALLELISM"):
         load(path)
 
 
 def test_classify_parallelism_accepts_1(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY + "\nCLAUDE_CLASSIFY_PARALLELISM = 1\n")
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLASSIFY_PARALLELISM = 1\n")
 
     config = load(path)
 
@@ -683,7 +713,7 @@ def test_classify_batch_size_defaults_to_10(tmp_path: pathlib.Path) -> None:
 def test_classify_batch_size_reads_configured_value(
     tmp_path: pathlib.Path,
 ) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 5\n")
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLASSIFY_BATCH_SIZE = 5\n")
 
     config = load(path)
 
@@ -691,7 +721,7 @@ def test_classify_batch_size_reads_configured_value(
 
 
 def test_classify_batch_size_accepts_1(tmp_path: pathlib.Path) -> None:
-    path = write_config(tmp_path, REQUIRED_BODY + "\nCLAUDE_CLASSIFY_BATCH_SIZE = 1\n")
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLASSIFY_BATCH_SIZE = 1\n")
 
     config = load(path)
 
@@ -702,11 +732,9 @@ def test_classify_batch_size_accepts_1(tmp_path: pathlib.Path) -> None:
 def test_classify_batch_size_raises_when_less_than_1(
     tmp_path: pathlib.Path, value: int
 ) -> None:
-    path = write_config(
-        tmp_path, REQUIRED_BODY + f"\nCLAUDE_CLASSIFY_BATCH_SIZE = {value}\n"
-    )
+    path = write_config(tmp_path, REQUIRED_BODY + f"\nCLASSIFY_BATCH_SIZE = {value}\n")
 
-    with pytest.raises(ConfigError, match="CLAUDE_CLASSIFY_BATCH_SIZE"):
+    with pytest.raises(ConfigError, match="CLASSIFY_BATCH_SIZE"):
         load(path)
 
 
@@ -714,11 +742,9 @@ def test_classify_batch_size_raises_when_less_than_1(
 def test_classify_batch_size_raises_when_not_int(
     tmp_path: pathlib.Path, value: str
 ) -> None:
-    path = write_config(
-        tmp_path, REQUIRED_BODY + f"\nCLAUDE_CLASSIFY_BATCH_SIZE = {value}\n"
-    )
+    path = write_config(tmp_path, REQUIRED_BODY + f"\nCLASSIFY_BATCH_SIZE = {value}\n")
 
-    with pytest.raises(ConfigError, match="CLAUDE_CLASSIFY_BATCH_SIZE"):
+    with pytest.raises(ConfigError, match="CLASSIFY_BATCH_SIZE"):
         load(path)
 
 

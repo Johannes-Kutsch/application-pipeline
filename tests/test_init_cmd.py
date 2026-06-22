@@ -143,11 +143,14 @@ def test_first_bootstrap_writes_config(tmp_path: Path) -> None:
     assert not (_ap(tmp_path) / "layout.py").exists()
 
 
-def test_config_template_contains_classify_parallelism(tmp_path: Path) -> None:
+def test_config_template_contains_classify_keys(tmp_path: Path) -> None:
     init(tmp_path)
 
     config_text = (_ap(tmp_path) / "config.py").read_text(encoding="utf-8")
-    assert "CLAUDE_CLASSIFY_PARALLELISM = 4" in config_text
+    assert "CLASSIFY_PARALLELISM = 4" in config_text
+    assert "CLASSIFY_BATCH_SIZE = 10" in config_text
+    assert "CLAUDE_CLASSIFY_PARALLELISM" not in config_text
+    assert "CLAUDE_CLASSIFY_BATCH_SIZE" not in config_text
 
 
 def test_first_bootstrap_prints_wrote_config(

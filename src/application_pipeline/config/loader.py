@@ -25,6 +25,8 @@ _REMOVED_FIELDS = (
     "JUDGE_MATCH_PROMPT",
     "USER_INFO_DIR",
     "CLAUDE_CLI_PATH",
+    "CLAUDE_CLASSIFY_PARALLELISM",
+    "CLAUDE_CLASSIFY_BATCH_SIZE",
 )
 
 
@@ -55,17 +57,17 @@ def load(path: pathlib.Path) -> Config:
     if max_listing_age_days < 1:
         raise ConfigError("MAX_LISTING_AGE_DAYS must be >= 1")
 
-    raw_parallelism = getattr(module, "CLAUDE_CLASSIFY_PARALLELISM", 4)
+    raw_parallelism = getattr(module, "CLASSIFY_PARALLELISM", 4)
     if isinstance(raw_parallelism, bool) or not isinstance(raw_parallelism, int):
-        raise ConfigError("CLAUDE_CLASSIFY_PARALLELISM must be an integer")
+        raise ConfigError("CLASSIFY_PARALLELISM must be an integer")
     if raw_parallelism < 1:
-        raise ConfigError("CLAUDE_CLASSIFY_PARALLELISM must be >= 1")
+        raise ConfigError("CLASSIFY_PARALLELISM must be >= 1")
 
-    raw_batch_size = getattr(module, "CLAUDE_CLASSIFY_BATCH_SIZE", 10)
+    raw_batch_size = getattr(module, "CLASSIFY_BATCH_SIZE", 10)
     if isinstance(raw_batch_size, bool) or not isinstance(raw_batch_size, int):
-        raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be an integer")
+        raise ConfigError("CLASSIFY_BATCH_SIZE must be an integer")
     if raw_batch_size < 1:
-        raise ConfigError("CLAUDE_CLASSIFY_BATCH_SIZE must be >= 1")
+        raise ConfigError("CLASSIFY_BATCH_SIZE must be >= 1")
 
     raw_cooldown = getattr(module, "DEDUP_COOLDOWN_DAYS", 30)
     if isinstance(raw_cooldown, bool) or not isinstance(raw_cooldown, int):

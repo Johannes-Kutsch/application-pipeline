@@ -12,7 +12,9 @@ INCLUDE_REMOTE = True
 
 MAX_LISTING_AGE_DAYS = 180  # Freshness Gate threshold: listings older than this (in days) are dropped (>= 1).
 
-CLAUDE_CLASSIFY_PARALLELISM = 4  # Relevance Classifier parallel worker pool size (>= 1); increase to classify faster, decrease to reduce Claude API concurrency.
+CLASSIFY_PARALLELISM = 4  # Relevance Classifier parallel worker pool size (>= 1); increase to classify faster, decrease to reduce API concurrency.
+
+CLASSIFY_BATCH_SIZE = 10  # Listings per classifier LLM call (>= 1).
 
 DEDUP_COOLDOWN_DAYS = 30  # How long (in days) a seen entry in state "selected_by_judge" or "expired" suppresses duplicate detection before decaying (>= 1).
 

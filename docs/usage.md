@@ -103,8 +103,8 @@ Plain Python literals for pipeline mechanics. Search terms and skills do not liv
 | `LOCATIONS` | City names to search. Must be supported by the configured parsers. |
 | `INCLUDE_REMOTE` | Set `True` to also query remote/homeoffice slots where parsers support them. |
 | `MAX_LISTING_AGE_DAYS` | Freshness Gate threshold in days. Listings older than this are dropped. |
-| `CLAUDE_CLASSIFY_PARALLELISM` | Relevance Classifier worker pool size. |
-| `CLAUDE_CLASSIFY_BATCH_SIZE` | Listings per classifier LLM call, if present in your config. |
+| `CLASSIFY_PARALLELISM` | Relevance Classifier worker pool size. |
+| `CLASSIFY_BATCH_SIZE` | Listings per classifier LLM call, if present in your config. |
 | `DEDUP_COOLDOWN_DAYS` | Days before selected/expired seen entries stop suppressing duplicates. |
 
 ### `user-info/search-terms/keywords.md`

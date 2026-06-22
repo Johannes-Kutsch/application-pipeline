@@ -1,5 +1,5 @@
-from .claude import ClaudeExtractor
-from .claude_types import ClaudeUsageLimitError
+from .agent_runtime_extractor import AgentRuntimeExtractor
+from .agent_runtime_types import UsageLimitError
 from .types import (
     AppliedClassifyItemOutcome,
     AppliedClassifyOutcome,
@@ -23,8 +23,8 @@ __all__ = [
     "AppliedClassifyState",
     "CallUsage",
     "ClassifyItem",
-    "ClaudeExtractor",
-    "ClaudeUsageLimitError",
+    "AgentRuntimeExtractor",
+    "UsageLimitError",
     "ExtractorBatchMalformedError",
     "ExtractorError",
     "ExtractorMalformedError",

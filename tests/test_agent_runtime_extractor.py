@@ -1,4 +1,4 @@
-"""Tests for ClaudeExtractor v2 call shapes - classify_relevance and judge_top_n."""
+"""Tests for AgentRuntimeExtractor call shapes - classify_relevance and judge_top_n."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from agent_runtime.runtime import ProviderAuth
 
 from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
-    ClaudeExtractor,
+    AgentRuntimeExtractor,
     CallUsage,
-    ClaudeUsageLimitError,
     ExtractorBatchMalformedError,
     ExtractorMalformedJSONError,
     ExtractorUnreachableError,
+    UsageLimitError,
 )
 from application_pipeline.llm.agent_runtime_invocation import (
     AgentRuntimeInvocationResult,
@@ -106,7 +106,7 @@ def _patch_runtime(
     monkeypatch: pytest.MonkeyPatch, result: AgentRuntimeInvocationResult
 ) -> None:
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime",
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
         lambda *args, **kwargs: result,
     )
 
@@ -140,7 +140,7 @@ def test_classify_relevance_matched_returns_header_and_summary(
             )
         ),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, usage = extractor.classify_relevance(
         [_item(company="Acme", location="Hamburg")]
     )
@@ -165,7 +165,7 @@ def test_classify_relevance_out_of_domain_returns_none_header_and_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_runtime(monkeypatch, _runtime_result(_classify_output({"matches": False})))
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance([_item()])
     result = results[0]
     assert isinstance(result, RelevanceVerdict)
@@ -187,7 +187,7 @@ def test_classify_relevance_matched_missing_header_returns_none(
         monkeypatch,
         _runtime_result(_classify_output({"matches": True, "summary": "ok"})),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance([_item()])
     assert results[0] is None
 
@@ -200,7 +200,7 @@ def test_classify_relevance_matched_missing_summary_returns_none(
         monkeypatch,
         _runtime_result(_classify_output({"matches": True, "header": "some header"})),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance([_item()])
     assert results[0] is None
 
@@ -215,7 +215,7 @@ def test_classify_relevance_matched_empty_header_returns_none(
             _classify_output({"matches": True, "header": "", "summary": "ok"})
         ),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance([_item()])
     assert results[0] is None
 
@@ -240,7 +240,7 @@ def test_classify_relevance_prompt_includes_company_and_location(
             _classify_output({"matches": True, "header": "h", "summary": "s"})
         ),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.classify_relevance([_item(company="TestCorp", location="Berlin")])
     prompt_sent = _read_transcripts(run_log, "llm_classify_relevance")[0]["prompt"]
     assert "TestCorp" in prompt_sent
@@ -257,7 +257,7 @@ def test_classify_relevance_legacy_in_domain_field_returns_none(
             _classify_output({"in_domain": True, "header": "h", "summary": "s"})
         ),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance([_item()])
     assert results[0] is None
 
@@ -284,7 +284,7 @@ def test_judge_top_n_returns_match_verdict_with_id_and_rank(
         monkeypatch,
         _runtime_result(_judge_output(verdicts_raw), usage=_judge_usage()),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, usage = extractor.judge_top_n(candidates)
     assert len(results) == 5
     assert all(isinstance(v, MatchVerdict) for v in results)
@@ -296,7 +296,7 @@ def test_judge_top_n_returns_match_verdict_with_id_and_rank(
 def test_judge_top_n_empty_candidates_returns_empty_list(
     run_log: RunLog,
 ) -> None:
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, usage = extractor.judge_top_n([])
     assert results == []
     assert usage.cost_usd == pytest.approx(0.0)
@@ -314,7 +314,7 @@ def test_judge_top_n_candidates_appear_in_prompt(
         monkeypatch,
         _runtime_result(_judge_output(verdicts_raw), usage=_judge_usage()),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.judge_top_n(candidates)
     prompt_sent = _read_transcripts(run_log, "llm_judge_match")[0]["prompt"]
     assert "[Candidate id=0]" in prompt_sent
@@ -332,7 +332,7 @@ def test_judge_top_n_coerces_string_id_to_int(
             usage=_judge_usage(),
         ),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     verdicts, _ = extractor.judge_top_n(candidates)
     assert len(verdicts) == 1
     assert verdicts[0].id == 0
@@ -350,7 +350,7 @@ def test_judge_top_n_rejects_non_numeric_string_verdict_id(
             usage=_judge_usage(),
         ),
     )
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.judge_top_n(candidates)
 
@@ -390,7 +390,8 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
     )
 
     candidates = [
@@ -401,7 +402,7 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
             id=1, header="Title 1\nACME · Berlin · remote", summary="Summary 1"
         ),
     ]
-    extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results, usage = extractor.judge_top_n(candidates)
 
     assert captured["call_site"] == "judge"
@@ -449,11 +450,12 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
     )
 
-    with pytest.raises(ClaudeUsageLimitError) as excinfo:
-        extractor = ClaudeExtractor(_config(), _prompts(), run_log=run_log)
+    with pytest.raises(UsageLimitError) as excinfo:
+        extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
         extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
 
     assert "usage limit" in str(excinfo.value).lower()
@@ -481,10 +483,11 @@ def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
     )
 
-    extractor = ClaudeExtractor(
+    extractor = AgentRuntimeExtractor(
         _config(),
         _prompts(),
         run_log=run_log,
@@ -551,7 +554,7 @@ def test_classify_relevance_batch_prompt_includes_sequential_ids(
         [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
     )
     _patch_runtime(monkeypatch, _runtime_result(output))
-    extractor = ClaudeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     extractor.classify_relevance(items)
     prompt_sent = _read_transcripts(run_log, "llm_classify_relevance")[0]["prompt"]
     assert "id=1" in prompt_sent
@@ -573,7 +576,7 @@ def test_classify_relevance_out_of_order_verdicts_map_to_correct_positions(
         ]
     )
     _patch_runtime(monkeypatch, _runtime_result(output))
-    extractor = ClaudeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance(items)
     assert len(results) == 3
     assert results[0] is not None and results[0].header == "h1"
@@ -589,7 +592,7 @@ def test_classify_relevance_missing_verdict_tag_produces_none(
     # only id=1 present; id=2 missing
     output = _batch_classify_output([(1, {"matches": False})])
     _patch_runtime(monkeypatch, _runtime_result(output))
-    extractor = ClaudeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance(items)
     assert results[0] is not None and results[0].matches is False
     assert results[1] is None
@@ -605,7 +608,7 @@ def test_classify_relevance_malformed_verdict_json_produces_none(
         '<verdict id="2">not valid json</verdict>'
     )
     _patch_runtime(monkeypatch, _runtime_result(output))
-    extractor = ClaudeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance(items)
     assert results[0] is not None and results[0].matches is False
     assert results[1] is None
@@ -617,7 +620,7 @@ def test_classify_relevance_all_verdicts_missing_returns_all_none_no_error(
 ) -> None:
     items = [_item(), _item()]
     _patch_runtime(monkeypatch, _runtime_result("no verdict tags here"))
-    extractor = ClaudeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     results, _ = extractor.classify_relevance(items)
     assert results == [None, None]
 
@@ -645,7 +648,7 @@ def test_classify_relevance_usage_reflects_single_call_tokens(
             ),
         ),
     )
-    extractor = ClaudeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     _, usage = extractor.classify_relevance(items)
     assert usage.input_tokens == 500
     assert usage.output_tokens == 60
@@ -662,7 +665,7 @@ def test_classify_relevance_batch_logs_the_full_batch_prompt_and_response(
         [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
     )
     _patch_runtime(monkeypatch, _runtime_result(output))
-    extractor = ClaudeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     extractor.classify_relevance(items)
     transcript = _read_transcripts(run_log, "llm_classify_relevance")[-1]
     assert "Job 1" in transcript["prompt"]
@@ -712,12 +715,12 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime",
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
         _fake_invoke,
     )
 
     items = [_item(title=f"Job {i + 1}") for i in range(3)]
-    extractor = ClaudeExtractor(
+    extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
@@ -771,17 +774,17 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime",
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
         _fake_invoke,
     )
 
-    extractor = ClaudeExtractor(
+    extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
     )
 
-    with pytest.raises(ClaudeUsageLimitError) as excinfo:
+    with pytest.raises(UsageLimitError) as excinfo:
         extractor.classify_relevance([_item()])
 
     assert excinfo.value.reset_time == datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc)
@@ -815,11 +818,11 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime",
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
         _fake_invoke,
     )
 
-    extractor = ClaudeExtractor(
+    extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
@@ -856,11 +859,11 @@ def test_classify_relevance_via_agent_runtime_missing_usage_is_malformed(
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime",
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
         _fake_invoke,
     )
 
-    extractor = ClaudeExtractor(
+    extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
@@ -897,11 +900,11 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime",
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
         _fake_invoke,
     )
 
-    extractor = ClaudeExtractor(
+    extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
@@ -935,11 +938,11 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime",
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
         _fake_invoke,
     )
 
-    extractor = ClaudeExtractor(
+    extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,

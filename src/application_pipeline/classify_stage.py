@@ -9,8 +9,11 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from application_pipeline._context import current_stage
-from application_pipeline.llm import ExtractorBatchMalformedError, ExtractorError
-from application_pipeline.llm import ClaudeUsageLimitError
+from application_pipeline.llm import (
+    ExtractorBatchMalformedError,
+    ExtractorError,
+    UsageLimitError,
+)
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import AppliedClassifyOutcome
 from application_pipeline.parser_log import RunLog
@@ -407,7 +410,7 @@ class _ClassifyWorker(threading.Thread):
 
         try:
             outcome = self._llm_enricher.enrich(items)
-        except ClaudeUsageLimitError as err:
+        except UsageLimitError as err:
             self._dispatch.retry(batch, from_retry=from_retry)
             self._raise_quota_wall(err)
             return
@@ -440,7 +443,7 @@ class _ClassifyWorker(threading.Thread):
             error=str(exc),
         )
 
-    def _raise_quota_wall(self, err: ClaudeUsageLimitError) -> None:
+    def _raise_quota_wall(self, err: UsageLimitError) -> None:
         now = datetime.now(timezone.utc)
         wake = _quota.compute_wake_time(err.reset_time, now)
         duration_s = max(0.0, (wake - now).total_seconds())

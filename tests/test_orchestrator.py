@@ -42,7 +42,7 @@ from application_pipeline.llm.types import (
     MatchedListing,
     RelevanceVerdict,
 )
-from application_pipeline.llm import ClaudeUsageLimitError
+from application_pipeline.llm import UsageLimitError
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import (
     Parser,
@@ -4327,7 +4327,7 @@ def test_non_quota_worker_exception_writes_failure_report(
             return _matched_outcome(items)
 
     monkeypatch.setattr(
-        "application_pipeline.orchestrator.ClaudeExtractor",
+        "application_pipeline.orchestrator.AgentRuntimeExtractor",
         lambda *a, **kw: _AbortingExtractor(),
     )
     monkeypatch.setattr(
@@ -5023,7 +5023,7 @@ def _make_advancing_quota_wall():  # type: ignore[return]
 def test_quota_judge_retries_and_completes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ClaudeUsageLimitError on judge_top_n â†' orchestrator sleeps and retries; run completes."""
+    """UsageLimitError on judge_top_n â†' orchestrator sleeps and retries; run completes."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
@@ -5038,7 +5038,7 @@ def test_quota_judge_retries_and_completes(
         ) -> "tuple[list[MatchVerdict], CallUsage]":
             judge_call_count[0] += 1
             if judge_call_count[0] == 1:
-                raise ClaudeUsageLimitError(
+                raise UsageLimitError(
                     "quota", returncode=1, stdout="", stderr="quota", envelope=None
                 )
             return [
@@ -5127,7 +5127,8 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
     )
 
     class _OneStubParser(_StubParserBase):
@@ -5206,7 +5207,8 @@ def test_run_passes_local_operator_credential_to_agent_runtime_calls(
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
     )
 
     class _OneStubParser(_StubParserBase):
@@ -5267,7 +5269,8 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
         )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
     )
 
     class _OneStubParser(_StubParserBase):

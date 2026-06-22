@@ -12,6 +12,7 @@ dependencies = [
     "trafilatura",
     "python-dotenv",
     "rich",
+    "ruhken-agent-runtime == 0.0.1",
 ]
 
 [project.scripts]

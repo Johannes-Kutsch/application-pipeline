@@ -1,8 +1,9 @@
 # application-pipeline
 
 A personal job-discovery and triage pipeline. It fetches listings from configured sources, filters
-out noise, classifies each position's relevance with Claude, accumulates a rolling pool of in-domain
-candidates, and emits one dated results file per day ranking the top five matches.
+out noise, classifies each position's relevance via the LLM Extractor (Agent Runtime backend),
+accumulates a rolling pool of in-domain candidates, and emits one dated results file per day ranking
+the top five matches.
 
 ## Why
 
@@ -28,10 +29,11 @@ Position through the following phases in order:
 3. **Domain Pre-Filter** — drops any Position whose title matches a Negative Keyword (configured in
    `config.py` as `NEGATIVE_KEYWORDS`).
 4. **Freshness Gate** — drops listings older than `MAX_LISTING_AGE_DAYS` or past their deadline.
-5. **Relevance Classifier** — a batched Claude call decides `in_domain: true/false`; in-domain
-   positions receive a Structured Extract and enter the Pool.
-6. **Match Judge** — a single Claude call at end-of-run picks the Daily Top-5 from the Pool,
-   returning a Match Verdict (rank, matched skills, missing skills, summary) for each winner.
+5. **Relevance Classifier** — a batched LLM Extractor call (Agent Runtime backend) decides
+   `in_domain: true/false`; in-domain positions receive a Structured Extract and enter the Pool.
+6. **Match Judge** — a single LLM Extractor call (Agent Runtime backend) at end-of-run picks the
+   Daily Top-5 from the Pool, returning a Match Verdict (rank, matched skills, missing skills,
+   summary) for each winner.
 7. **Daily Results File** — the five Cards are written to `<settings-dir>/results/YYYY-MM-DD.md` in
    rank order.
 
@@ -46,8 +48,10 @@ Position through the following phases in order:
 
 ## Requirements
 
-The `claude` CLI must support the `--bare` flag (introduced in Claude Code 1.0.14 or later).
-Run `claude --version` to verify.
+The production LLM Extractor uses **Agent Runtime** (`ruhken-agent-runtime`) as its backend. It is
+installed automatically as a package dependency and is not the same as the optional **Agent Skills**
+workflows seeded by `init`. For background see ADR-0053 (backend decision) and ADR-0054 (runtime
+logging).
 
 ## Acknowledgements
 

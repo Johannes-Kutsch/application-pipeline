@@ -2,7 +2,8 @@
 
 ## Installation
 
-Requires Python >= 3.11, a working `cron` daemon, and the Claude CLI on `$PATH`.
+Requires Python >= 3.11 and a working `cron` daemon. The production LLM Extractor uses the Agent
+Runtime backend (`ruhken-agent-runtime`), which is installed automatically with the package.
 
 ```bash
 python3 -m venv .venv

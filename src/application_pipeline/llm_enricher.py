@@ -94,20 +94,35 @@ class LLMEnricher:
             ExtractorMalformedError,
             ExtractorMalformedJSONError,
         ) as exc:
-            first_stub = items[0][1]
-            self._stash_malformed(first_stub, exc)
+            # Treat a malformed response as retryable for every item in the batch,
+            # stashing one malformed file per listing.
             self._run_log.event(
                 "llm_enricher",
                 "classify_malformed",
-                url=first_stub.url,
-                source=first_stub.source,
+                url=items[0][1].url,
+                source=items[0][1].source,
                 error=str(exc),
             )
-            raise
+            for _, stub, _ in items:
+                self._stash_malformed(stub, exc)
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(state="retryable", event_matches=None)
+                    for _ in items
+                ]
+            )
 
         outcome_items: list[AppliedClassifyItemOutcome] = []
         for (listing_id, stub, body), verdict in zip(items, raw_verdicts):
             if verdict is None:
+                self._stash_malformed_listing(stub)
+                self._run_log.event(
+                    "llm_enricher",
+                    "classify_malformed",
+                    url=stub.url,
+                    source=stub.source,
+                    error="malformed classifier verdict",
+                )
                 outcome_items.append(
                     AppliedClassifyItemOutcome(
                         state="retryable",
@@ -172,6 +187,14 @@ class LLMEnricher:
         slug = stub.url.replace("https://", "").replace("http://", "").replace("/", "-")
         path = stash_dir / f"{stub.source}-{slug}.{ext}"
         path.write_text(content, encoding="utf-8")
+
+    def _stash_malformed_listing(self, stub: PositionStub) -> None:
+        lines: list[str] = [
+            f"**Source:** {stub.source}",
+            f"**URL:** {stub.url}",
+            "**Error:** malformed classifier verdict",
+        ]
+        self._stash_failure("malformed", stub, "\n".join(lines), ext="md")
 
     def _stash_malformed(
         self,

@@ -1479,38 +1479,38 @@ def _two_stub_config(tmp_path: Path) -> Path:
     )
 
 
-def test_extractor_error_on_classify_leaves_position_unseen(tmp_path: Path) -> None:
-    """ExtractorError from llm_enricher.enrich(): the failing position is not marked seen; run continues."""
+def test_retryable_classify_outcome_leaves_position_unseen(tmp_path: Path) -> None:
+    """A retryable classify outcome leaves the position unmarked and the run continues."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
     call_count = [0]
 
-    class _FailFirstEnricher(_FakeLLMEnricherHelper):
+    class _RetryableFirstEnricher(_FakeLLMEnricherHelper):
         def enrich(
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
             listing_id, stub, body = items[0]
             call_count[0] += 1
             if call_count[0] == 1:
-                raise ExtractorError("classify boom")
+                return _retryable_outcome(items)
             return super().enrich(items)
 
     summary = run(
         _two_stub_config(tmp_path),
-        llm_enricher=_FailFirstEnricher(card_store),
+        llm_enricher=_RetryableFirstEnricher(card_store),
         extractor=_stub_extractor(),
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # First position errored, second succeeded (1 position written)
-    assert summary.errored == 1
+    # First position retryable, second succeeded (1 position written)
+    assert summary.enrich_failed == 1
     assert summary.written == 1
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
-    # First position must NOT be in seen store (left un-seen for retry)
+    # First position must NOT be in seen store (left unmarked for retry)
     assert not any(_ERR_URLS[0] in r.get("urls", []) for r in seen_data.values())
 
 
@@ -1573,9 +1573,44 @@ def test_match_judge_failure_writes_one_failure_report(tmp_path: Path) -> None:
     assert len(reports) == 1
 
     body = reports[0].read_text(encoding="utf-8")
-    assert "**Stage:** judge_top_n" in body
+    assert "**Stage:** llm_extractor:judge_match" in body
     assert "ExtractorError" in body
     assert "judge boom" in body
+
+
+def test_fatal_judge_provider_failure_writes_failure_report_with_judge_stage_and_no_daily_file(
+    tmp_path: Path,
+) -> None:
+    """ExtractorUnreachableError from judge_top_n writes a Failure Report at an explicit judge stage and produces no daily file."""
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+    results_dir = tmp_path / "results"
+
+    ext = MagicMock()
+    ext.judge_top_n.side_effect = ExtractorUnreachableError(
+        "judge provider unreachable"
+    )
+
+    run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(
+            card_store, dedup_store=dedup_module.load(seen_path)
+        ),
+        extractor=ext,
+        card_store=card_store,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    reports = sorted((tmp_path / ".runtime-data" / "failures").glob("*.md"))
+    assert len(reports) == 1
+
+    body = reports[0].read_text(encoding="utf-8")
+    assert "**Stage:** llm_extractor:judge_match" in body
+    assert "ExtractorUnreachableError" in body
+    assert "judge provider unreachable" in body
+
+    assert not _read_all_results(results_dir)
 
 
 def test_parser_error_on_enrich_skips_stub_and_increments_metric(
@@ -1631,6 +1666,45 @@ def test_parser_error_on_enrich_skips_stub_and_increments_metric(
     assert not any(_ERR_URLS[1] in r.get("urls", []) for r in seen_data.values()), (
         "verdict=None must not write to seen.json — URL stays unrecorded for retry next run"
     )
+
+
+def test_malformed_per_listing_classifier_verdict_stashes_malformed_and_leaves_unmarked(
+    tmp_path: Path,
+) -> None:
+    """A None per-listing classify verdict from the real LLMEnricher stashes a malformed
+    file and leaves the listing unmarked so it is eligible for rediscovery."""
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+
+    class _MalformedPerListingExtractor:
+        def classify_relevance(
+            self, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict | None]:
+            return [None] * len(items)
+
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
+            return []
+
+    summary = run(
+        _two_stub_config(tmp_path),
+        extractor=_MalformedPerListingExtractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+    )
+
+    assert summary.enrich_failed == 2
+    assert summary.written == 0
+
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert not any(_ERR_URLS[0] in r.get("urls", []) for r in seen_data.values())
+    assert not any(_ERR_URLS[1] in r.get("urls", []) for r in seen_data.values())
+
+    malformed_dir = tmp_path / ".runtime-data" / "failures" / "malformed"
+    malformed_files = list(malformed_dir.glob("*.md"))
+    assert len(malformed_files) == 2
 
 
 def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
@@ -2687,6 +2761,64 @@ def test_fatal_error_writes_failure_report_and_exits_one(
     assert "startup failed" in body  # log tail captured before exception propagated
 
 
+def test_fatal_classify_provider_failure_writes_failure_report_with_explicit_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ExtractorUnreachableError from classify_relevance aborts the run and writes a Failure Report at an explicit LLM/classify stage."""
+    monkeypatch.chdir(tmp_path)
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    _write_config(home)
+    (home / ".env").write_text("OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["app", "run"])
+
+    class _StubParser(_StubParserBase):
+        def __enter__(self) -> "_StubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(url="https://example.com/job", title="Job", source="stub")
+            ]
+
+    class _FatalClassifyExtractor:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def classify_relevance(
+            self, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict | None]:
+            raise ExtractorUnreachableError("provider unreachable")
+
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
+            return []
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator._default_registry.get",
+        lambda _: _StubParser,  # type: ignore[arg-type, return-value]
+    )
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.AgentRuntimeExtractor",
+        _FatalClassifyExtractor,
+    )
+
+    from application_pipeline.__main__ import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+
+    reports = sorted((home / ".runtime-data" / "failures").glob("*.md"))
+    assert len(reports) == 1
+    body = reports[0].read_text(encoding="utf-8")
+    assert "**Stage:** llm_extractor:classify_relevance" in body
+    assert "ExtractorUnreachableError" in body
+
+
 def test_results_write_error_propagates_from_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3210,22 +3342,20 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
 
 
 def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
-    """ExtractorError from llm_enricher.enrich(): the failing position is not marked seen; run continues."""
+    """A malformed per-listing verdict leaves the position unmarked and the run continues."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
     call_count = [0]
 
-    class _FailFirstEnricher:
+    class _RetryableFirstEnricher:
         def enrich(
             self, items: list[tuple[int, PositionStub, str]]
         ) -> AppliedClassifyOutcome:
             listing_id, stub, body = items[0]
             call_count[0] += 1
             if call_count[0] == 1:
-                from application_pipeline.llm import ExtractorMalformedError
-
-                raise ExtractorMalformedError("bad verdict")
+                return _retryable_outcome(items)
             card_store.put(
                 listing_id,
                 CardExtract(header=_FAKE_ENRICH_HEADER, summary=_FAKE_ENRICH_SUMMARY),
@@ -3234,15 +3364,15 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
 
     summary = run(
         _two_stub_config(tmp_path),
-        llm_enricher=_FailFirstEnricher(),
+        llm_enricher=_RetryableFirstEnricher(),
         extractor=_stub_extractor(),
         card_store=card_store,
         parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
         dedup_store=dedup_module.load(seen_path),
     )
 
-    # First call failed (1 item errored), second succeeded (1 item written)
-    assert summary.errored == 1
+    # First call retryable (1 enrich_failed), second succeeded (1 item written)
+    assert summary.enrich_failed == 1
     assert summary.written == 1
 
     seen_data = (
@@ -5240,7 +5370,7 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
     assert summary.written == 0
     reports = sorted((tmp_path / ".runtime-data" / "failures").glob("*.md"))
     assert len(reports) == 1
-    assert "judge_top_n" in reports[0].read_text(encoding="utf-8")
+    assert "llm_extractor:judge_match" in reports[0].read_text(encoding="utf-8")
 
     today = datetime.now().date().isoformat()
     assert not (tmp_path / "results" / f"{today}.md").exists()

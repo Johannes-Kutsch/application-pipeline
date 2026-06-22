@@ -16,7 +16,9 @@ class OperatorCredentialError(UserSettingsError):
 def load_operator_credential(settings_dir: Path) -> ProviderAuth:
     env_path = settings_dir / ".env"
     if not env_path.exists():
-        raise OperatorCredentialError(f"File does not exist: {env_path.resolve()}")
+        raise OperatorCredentialError(
+            f"{env_path.resolve()}: missing non-empty OPENCODE_GO_API_KEY"
+        )
     if not env_path.is_file():
         raise OperatorCredentialError(
             f"Path is not a regular file: {env_path.resolve()}"

@@ -67,6 +67,7 @@ def test_startup_failure_writes_to_home_failures_dir(tmp_path: Path) -> None:
     home = tmp_path / "application-pipeline"
     home.mkdir()
     (home / "config.py").write_text(_MALFORMED_CONFIG)
+    (home / ".env").write_text("OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8")
 
     _run_main(tmp_path)
 

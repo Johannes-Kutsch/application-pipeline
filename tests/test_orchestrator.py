@@ -3600,6 +3600,9 @@ def test_main_run_complete_line_includes_new_fields(
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     (tmp_path / "application-pipeline" / "config.py").write_text("")
+    (tmp_path / "application-pipeline" / ".env").write_text(
+        "OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8"
+    )
     monkeypatch.setattr("sys.argv", ["app", "run"])
 
     fake_summary = RunSummary(

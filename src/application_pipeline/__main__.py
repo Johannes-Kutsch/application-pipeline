@@ -62,6 +62,7 @@ def main() -> None:
             sys.exit(2)
         no_judge = "--no-judge" in cron_flags
         config_path = _require_config_path()
+        _require_operator_credential(config_path.parent)
         failure_report_writer = _bind_failure_report_writer(config_path.parent)
 
         from application_pipeline.init_cmd import init as _init
@@ -90,6 +91,7 @@ def main() -> None:
             sys.exit(2)
         no_judge = "--no-judge" in run_flags
         config_path = _require_config_path()
+        _require_operator_credential(config_path.parent)
         _execute_run(
             config_path,
             no_judge=no_judge,
@@ -117,6 +119,19 @@ def _require_config_path() -> Path:
         print(missing_config_message(cwd), file=sys.stderr)
         sys.exit(2)
     return config_path
+
+
+def _require_operator_credential(settings_dir: Path) -> None:
+    from application_pipeline.operator_credential import (
+        OperatorCredentialError,
+        load_operator_credential,
+    )
+
+    try:
+        load_operator_credential(settings_dir)
+    except OperatorCredentialError as exc:
+        print(f"startup failed — operator credential: {exc}", file=sys.stderr)
+        sys.exit(2)
 
 
 def _bind_failure_report_writer(home: Path):

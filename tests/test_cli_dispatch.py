@@ -135,6 +135,7 @@ def test_run_exits_nonzero_on_bad_config(
     home = tmp_path / "application-pipeline"
     home.mkdir()
     (home / "config.py").write_text("KEYWORDS = ['python']\n")  # missing SOURCES
+    (home / ".env").write_text("OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as exc_info:
@@ -227,6 +228,7 @@ def _make_config(home: Path) -> Path:
     home.mkdir(parents=True, exist_ok=True)
     config_path = home / "config.py"
     config_path.write_text("# stub\n")
+    (home / ".env").write_text("OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8")
     return config_path
 
 

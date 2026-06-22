@@ -88,8 +88,8 @@ def load(path: pathlib.Path) -> Config:
         logs_path=data_paths.logs_path,
         user_info_dir=user_info_dir,
         max_listing_age_days=max_listing_age_days,
-        claude_classify_parallelism=raw_parallelism,
-        claude_classify_batch_size=raw_batch_size,
+        classify_parallelism=raw_parallelism,
+        classify_batch_size=raw_batch_size,
         dedup_cooldown_days=raw_cooldown,
     )
     _validate(config)

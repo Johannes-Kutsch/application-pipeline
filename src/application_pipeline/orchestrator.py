@@ -284,8 +284,8 @@ def run(
             content_gate = ContentGate(run_log=run_log)
             assert isinstance(llm_enricher, BatchLLMEnricher)
             classify_stage = ClassifyStage(
-                batch_size=cfg.claude_classify_batch_size,
-                parallelism=cfg.claude_classify_parallelism,
+                batch_size=cfg.classify_batch_size,
+                parallelism=cfg.classify_parallelism,
                 pool_collector=pool,
                 llm_enricher=llm_enricher,
                 metrics=metrics,

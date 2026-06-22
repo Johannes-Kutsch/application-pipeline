@@ -87,14 +87,14 @@ def _write_config(
     locations: str = '["Hamburg"]',
     include_remote: bool = True,
     negative_keywords: str = "[]",
-    claude_classify_parallelism: int | None = None,
-    claude_classify_batch_size: int = 1,
+    classify_parallelism: int | None = None,
+    classify_batch_size: int = 1,
 ) -> Path:
     """Write a minimal valid config.py and a user-info dir into tmp_path."""
     config_path = tmp_path / "config.py"
     parallelism_line = (
-        f"CLAUDE_CLASSIFY_PARALLELISM = {claude_classify_parallelism}\n"
-        if claude_classify_parallelism is not None
+        f"CLAUDE_CLASSIFY_PARALLELISM = {classify_parallelism}\n"
+        if classify_parallelism is not None
         else ""
     )
     config_path.write_text(
@@ -106,7 +106,7 @@ def _write_config(
             LOCATIONS = {locations}
             INCLUDE_REMOTE = {include_remote!r}
             NEGATIVE_KEYWORDS = {negative_keywords}
-            CLAUDE_CLASSIFY_BATCH_SIZE = {claude_classify_batch_size}
+            CLAUDE_CLASSIFY_BATCH_SIZE = {classify_batch_size}
         """)
         + parallelism_line,
         encoding="utf-8",
@@ -2948,7 +2948,7 @@ def _batch_size_config(tmp_path: Path, batch_size: int = 1) -> Path:
         keywords='["python"]',
         locations='["Hamburg"]',
         include_remote=False,
-        claude_classify_batch_size=batch_size,
+        classify_batch_size=batch_size,
     )
 
 
@@ -3335,7 +3335,7 @@ def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
-            claude_classify_batch_size=2,
+            classify_batch_size=2,
         ),
         llm_enricher=_BatchMalformedThenMatchedEnricher(),
         extractor=_stub_extractor(),
@@ -5652,7 +5652,7 @@ def test_freshness_pool_reentry_fresh_position_stays_matched_and_reaches_judge(
 
 
 def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
-    """With claude_classify_parallelism=4 and 4 positions, at least 2 enrich calls run concurrently."""
+    """With classify_parallelism=4 and 4 positions, at least 2 enrich calls run concurrently."""
     import threading
     import time as _time
 
@@ -5698,7 +5698,7 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
-            claude_classify_parallelism=4,
+            classify_parallelism=4,
         ),
         llm_enricher=_TimedEnricher(),
         extractor=_stub_extractor(),
@@ -5721,7 +5721,7 @@ def test_parallel_classify_pool_executes_concurrently(tmp_path: Path) -> None:
 
 
 def test_parallel_classify_n1_recovers_serial_results(tmp_path: Path) -> None:
-    """With claude_classify_parallelism=1, outcomes match a serial single-worker baseline."""
+    """With classify_parallelism=1, outcomes match a serial single-worker baseline."""
     seen_path = tmp_path / ".seen.json"
     results_dir = tmp_path / "results"
     card_store = _make_card_store(tmp_path)
@@ -5733,7 +5733,7 @@ def test_parallel_classify_n1_recovers_serial_results(tmp_path: Path) -> None:
         locations='["Hamburg"]',
         include_remote=False,
         negative_keywords='["excluded"]',
-        claude_classify_parallelism=1,
+        classify_parallelism=1,
     )
 
     dedup_store = dedup_module.load(seen_path)
@@ -5797,7 +5797,7 @@ def test_parallel_classify_worker_exception_propagates(tmp_path: Path) -> None:
                 keywords='["python"]',
                 locations='["Hamburg"]',
                 include_remote=False,
-                claude_classify_parallelism=2,
+                classify_parallelism=2,
             ),
             llm_enricher=_CrashingEnricher(),
             extractor=_stub_extractor(),
@@ -6427,7 +6427,7 @@ def test_post_llm_stale_outcome_is_dropped_and_fresh_batch_peer_reaches_judge(
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
-            claude_classify_batch_size=2,
+            classify_batch_size=2,
         ),
         extractor=_TrackingExtractor(),
         card_store=card_store,
@@ -6677,7 +6677,7 @@ def test_enrich_failed_error_on_parser_enrich_increments_counter_run_continues(
     )
 
 
-def test_classify_workers_sized_by_claude_classify_parallelism(tmp_path: Path) -> None:
+def test_classify_workers_sized_by_classify_parallelism(tmp_path: Path) -> None:
     """classify workers are named 'classify-worker-N', and enrich-worker-N no longer exists."""
     import threading as _threading
 
@@ -6709,7 +6709,7 @@ def test_classify_workers_sized_by_claude_classify_parallelism(tmp_path: Path) -
             keywords='["python"]',
             locations='["Hamburg"]',
             include_remote=False,
-            claude_classify_parallelism=2,
+            classify_parallelism=2,
         ),
         llm_enricher=_CapturingEnricher(),
         extractor=_stub_extractor(),

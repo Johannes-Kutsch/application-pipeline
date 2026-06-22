@@ -57,6 +57,6 @@ class Config:
         default_factory=lambda: pathlib.Path("user-info")
     )
     max_listing_age_days: int = 180
-    claude_classify_parallelism: int = 4
-    claude_classify_batch_size: int = 10
+    classify_parallelism: int = 4
+    classify_batch_size: int = 10
     dedup_cooldown_days: int = 30

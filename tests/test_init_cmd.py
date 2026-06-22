@@ -143,7 +143,7 @@ def test_first_bootstrap_writes_config(tmp_path: Path) -> None:
     assert not (_ap(tmp_path) / "layout.py").exists()
 
 
-def test_config_template_contains_claude_classify_parallelism(tmp_path: Path) -> None:
+def test_config_template_contains_classify_parallelism(tmp_path: Path) -> None:
     init(tmp_path)
 
     config_text = (_ap(tmp_path) / "config.py").read_text(encoding="utf-8")

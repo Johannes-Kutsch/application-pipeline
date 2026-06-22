@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 import pytest
+from agent_runtime.runtime import ProviderAuth
 
 from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
@@ -360,7 +361,7 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
     captured: dict[str, object] = {}
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "judge"
         captured["prompt"] = prompt
@@ -426,7 +427,7 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
@@ -456,6 +457,43 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
         extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
 
     assert "usage limit" in str(excinfo.value).lower()
+
+
+def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+    provider_auth = ProviderAuth(opencode_api_key="test-key")
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        captured["prompt"] = prompt
+        captured["call_site"] = call_site
+        captured["provider_auth"] = provider_auth
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output='<verdicts>[{"id": 0, "rank": 1}]</verdicts>',
+            log_path=logs_root / "judge.log",
+            usage=_judge_usage(),
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
+    )
+
+    extractor = ClaudeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        provider_auth=provider_auth,
+    )
+    extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
+
+    assert captured["call_site"] == "judge"
+    assert captured["provider_auth"] == provider_auth
 
 
 def _read_transcripts(run_log: RunLog, component_id: str) -> list[dict]:  # type: ignore[type-arg]
@@ -640,7 +678,7 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
     captured: dict[str, object] = {}
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         captured["prompt"] = prompt
         captured["call_site"] = call_site
@@ -709,7 +747,7 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "classify"
         runtime_log = (
@@ -753,7 +791,7 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "classify"
         runtime_log = (
@@ -799,7 +837,7 @@ def test_classify_relevance_via_agent_runtime_missing_usage_is_malformed(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert prompt
         assert call_site == "classify"
@@ -840,7 +878,7 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
     ) -> AgentRuntimeInvocationResult:
         assert prompt
         assert call_site == "classify"
@@ -873,3 +911,41 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
         extractor.classify_relevance([_item()])
 
     assert excinfo.value.stderr == "provider exploded"
+
+
+def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+    provider_auth = ProviderAuth(opencode_api_key="test-key")
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        captured["prompt"] = prompt
+        captured["call_site"] = call_site
+        captured["provider_auth"] = provider_auth
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output='<verdict id="1">{"matches": false}</verdict>',
+            log_path=logs_root / "classify.log",
+            usage=_usage(),
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.claude.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    extractor = ClaudeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        provider_auth=provider_auth,
+    )
+    extractor.classify_relevance([_item()])
+
+    assert captured["call_site"] == "classify"
+    assert captured["provider_auth"] == provider_auth

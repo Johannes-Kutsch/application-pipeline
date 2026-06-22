@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 from agent_runtime import AgentRuntimeError, ToolPolicy
-from agent_runtime.runtime import EphemeralRunRequest, ProviderUsage, RuntimeOutcome
+from agent_runtime.runtime import (
+    EphemeralRunRequest,
+    ProviderAuth,
+    ProviderUsage,
+    RuntimeOutcome,
+)
 
 from application_pipeline.llm.agent_runtime_invocation import invoke_agent_runtime
 
@@ -18,6 +23,7 @@ class _CapturedRequest:
     service: str
     model: str
     effort: str
+    auth: ProviderAuth | None
     tool_policy: ToolPolicy | object
 
 
@@ -34,6 +40,7 @@ class _FakeRuntimeClient:
                 service=request.provider_selection.service,
                 model=request.provider_selection.model,
                 effort=request.provider_selection.effort,
+                auth=request.provider_selection.auth,
                 tool_policy=request.tool_policy,
             )
         )
@@ -100,10 +107,41 @@ def test_invoke_agent_runtime_completes_with_pinned_project_decisions(
             service="opencode",
             model="deepseek-v4-flash",
             effort="medium",
+            auth=None,
             tool_policy=ToolPolicy.NONE,
         )
     ]
     assert result.log_path.with_suffix("").is_dir()
+
+
+def test_invoke_agent_runtime_forwards_explicit_provider_auth(
+    monkeypatch: pytest.MonkeyPatch, logs_root: Path
+) -> None:
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_invocation.RuntimeClient",
+        _FakeRuntimeClient,
+    )
+    _FakeRuntimeClient.outcome = RuntimeOutcome(
+        kind="completed",
+        output="[]",
+        usage=ProviderUsage(
+            input_tokens=2,
+            output_tokens=3,
+            cache_read_input_tokens=0,
+            cost_usd=0.02,
+            duration_seconds=0.4,
+        ),
+    )
+    provider_auth = ProviderAuth(opencode_api_key="test-key")
+
+    invoke_agent_runtime(
+        "judge prompt",
+        logs_root=logs_root,
+        call_site="judge",
+        provider_auth=provider_auth,
+    )
+
+    assert _FakeRuntimeClient.requests[0].auth == provider_auth
 
 
 def test_invoke_agent_runtime_reserves_one_judge_log_path_per_invocation(

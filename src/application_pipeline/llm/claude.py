@@ -7,6 +7,8 @@ from application_pipeline.config import Config
 from application_pipeline.parser_log import RunLog
 from application_pipeline.prompts import Prompts
 
+from agent_runtime.runtime import ProviderAuth
+
 from .agent_output import (
     AgentOutputProtocolError,
     extract_id_tagged_verdicts,
@@ -123,10 +125,12 @@ class ClaudeExtractor:
         prompts: Prompts,
         *,
         run_log: RunLog,
+        provider_auth: ProviderAuth | None = None,
     ) -> None:
         self._config = config
         self._prompts = prompts
         self._run_log = run_log
+        self._provider_auth = provider_auth
 
     def classify_relevance(
         self, items: list[ClassifyItem]
@@ -230,6 +234,7 @@ class ClaudeExtractor:
             prompt,
             logs_root=self._run_log.logs_dir,
             call_site="judge",
+            provider_auth=self._provider_auth,
         )
         if result.kind == "completed":
             if result.usage is None:
@@ -380,6 +385,7 @@ class ClaudeExtractor:
             prompt,
             logs_root=self._run_log.logs_dir,
             call_site="classify",
+            provider_auth=self._provider_auth,
         )
         if result.kind == "completed":
             if result.usage is None:

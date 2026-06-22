@@ -6,7 +6,7 @@ import re
 import textwrap
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -5091,6 +5091,214 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
     assert len(judge_calls) == 2
     assert judge_calls[0] == judge_calls[1]
     assert len(slept) >= 1
+
+
+def test_quota_judge_retries_with_reset_time_sleeps_until_reset_plus_buffer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Agent Runtime usage-limit with reset_time -> sleep to reset_time + 2min buffer."""
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+
+    start = datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc)
+    reset_time = start + timedelta(minutes=5)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            if tz is None:
+                return start.replace(tzinfo=None)
+            return start.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.orchestrator.datetime", _FakeDateTime)
+
+    slept: list[float] = []
+    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
+
+    judge_calls: list[list[int]] = []
+
+    def _extract_candidate_ids(prompt: str) -> list[int]:
+        return [int(value) for value in re.findall(r"\[Candidate id=(\d+)\]", prompt)]
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        assert call_site == "judge"
+        ids = _extract_candidate_ids(prompt)
+        assert ids
+        judge_calls.append(ids)
+        runtime_log = (
+            logs_root
+            / "llm"
+            / "agent-runtime"
+            / "judge"
+            / f"judge-{len(judge_calls)}.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("judge output", encoding="utf-8")
+        if len(judge_calls) == 1:
+            return AgentRuntimeInvocationResult(
+                kind="usage_limit",
+                output="quota reached",
+                log_path=runtime_log,
+                usage=None,
+                reset_time=reset_time,
+                message=None,
+            )
+
+        ranked = [
+            {"id": listing_id, "rank": rank}
+            for rank, listing_id in enumerate(judge_calls[-1], start=1)
+        ]
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
+            log_path=runtime_log,
+            usage=None,
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    class _OneStubParser(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://judge.runtime/test",
+                    title="Job 1",
+                    source="stub",
+                )
+            ]
+
+    summary = run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        card_store=card_store,
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.written == 1
+    assert len(judge_calls) == 2
+    assert judge_calls[0] == judge_calls[1]
+    assert slept == [420.0]
+
+
+def test_quota_judge_retries_without_reset_time_sleeps_until_top_of_hour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing reset_time falls back to next top-of-hour + 2min buffer."""
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+
+    start = datetime(2026, 6, 22, 12, 30, tzinfo=timezone.utc)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            if tz is None:
+                return start.replace(tzinfo=None)
+            return start.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.orchestrator.datetime", _FakeDateTime)
+
+    slept: list[float] = []
+    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
+
+    judge_calls: list[list[int]] = []
+
+    def _extract_candidate_ids(prompt: str) -> list[int]:
+        return [int(value) for value in re.findall(r"\[Candidate id=(\d+)\]", prompt)]
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        assert call_site == "judge"
+        ids = _extract_candidate_ids(prompt)
+        assert ids
+        judge_calls.append(ids)
+        runtime_log = (
+            logs_root
+            / "llm"
+            / "agent-runtime"
+            / "judge"
+            / f"judge-{len(judge_calls)}.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("judge output", encoding="utf-8")
+        if len(judge_calls) == 1:
+            return AgentRuntimeInvocationResult(
+                kind="usage_limit",
+                output="quota reached",
+                log_path=runtime_log,
+                usage=None,
+                reset_time=None,
+                message=None,
+            )
+
+        ranked = [
+            {"id": listing_id, "rank": rank}
+            for rank, listing_id in enumerate(judge_calls[-1], start=1)
+        ]
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
+            log_path=runtime_log,
+            usage=None,
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    class _OneStubParser(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://judge.runtime/test",
+                    title="Job 1",
+                    source="stub",
+                )
+            ]
+
+    summary = run(
+        _one_stub_config(tmp_path),
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        card_store=card_store,
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.written == 1
+    assert len(judge_calls) == 2
+    assert judge_calls[0] == judge_calls[1]
+    # 12:30 -> next top of hour 13:00 + 2min buffer = 32 minutes
+    assert slept == [1920.0]
 
 
 def test_run_passes_local_operator_credential_to_agent_runtime_calls(

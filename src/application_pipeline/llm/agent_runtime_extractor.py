@@ -257,7 +257,7 @@ class AgentRuntimeExtractor:
             return parsed, response
         if result.kind == "usage_limit":
             raise UsageLimitError(
-                f"{site.call}: runtime usage limit reached",
+                f"{site.call}: Agent Runtime usage limit reached",
                 returncode=0,
                 stdout=result.output,
                 stderr=result.output,
@@ -265,7 +265,7 @@ class AgentRuntimeExtractor:
                 reset_time=result.reset_time,
             )
         raise ExtractorUnreachableError(
-            f"{site.call}: runtime provider failure",
+            f"{site.call}: Agent Runtime provider failure",
             returncode=0,
             stderr=result.message or result.output,
         )
@@ -326,7 +326,7 @@ class AgentRuntimeExtractor:
             )
         if result.kind == "usage_limit":
             raise UsageLimitError(
-                "llm runtime usage limit reached",
+                "classify_relevance: Agent Runtime usage limit reached",
                 returncode=0,
                 stdout=result.output,
                 stderr=result.output,
@@ -336,7 +336,7 @@ class AgentRuntimeExtractor:
         if result.kind == "retryable_provider_failure":
             raise _RetryableProviderFailureError()
         raise ExtractorUnreachableError(
-            "classify_relevance: runtime provider failure",
+            "classify_relevance: Agent Runtime provider failure",
             returncode=0,
             stderr=result.message or result.output,
         )

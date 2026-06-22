@@ -302,7 +302,7 @@ class _FakeClock:
 
 
 class _UsageLimitThenMatchedEnricher:
-    def __init__(self, *, reset_time: datetime) -> None:
+    def __init__(self, *, reset_time: datetime | None) -> None:
         self._reset_time = reset_time
         self.calls: list[list[int]] = []
 
@@ -1215,6 +1215,53 @@ def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
             "matches": True,
         },
     ]
+
+
+def test_classify_stage_quota_wall_fallback_without_reset_time(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Missing Agent Runtime reset time falls back to top-of-hour + 2min buffer."""
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+    start = datetime(2026, 5, 31, 12, 30, tzinfo=timezone.utc)
+    clock = _FakeClock(start)
+    quota_wall = _quota.QuotaWall(now_fn=clock.now, sleep_fn=clock.sleep)
+    llm_enricher = _UsageLimitThenMatchedEnricher(reset_time=None)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            now = clock.now()
+            if tz is None:
+                return now.replace(tzinfo=None)
+            return now.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.classify_stage.datetime", _FakeDateTime)
+
+    stage = ClassifyStage(
+        batch_size=1,
+        parallelism=1,
+        pool_collector=pool_collector,
+        llm_enricher=llm_enricher,
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(logs_dir),
+        quota_wall=quota_wall,
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    _submit_ready(handoff, 1)
+    stage.close()
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    # 12:30 -> next top of hour 13:00 + 2min buffer = 32 minutes
+    assert clock.sleep_calls == [1920.0]
+    assert pool_collector.matched == [(1, _stub_for(1))]
 
 
 def test_classify_stage_parallel_workers_log_one_quota_sleep_and_wait_for_active_wall(

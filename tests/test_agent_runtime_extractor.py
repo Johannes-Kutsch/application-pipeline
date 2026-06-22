@@ -476,6 +476,73 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
     assert "usage limit" in str(excinfo.value).lower()
 
 
+def test_judge_usage_limit_error_uses_agent_runtime_vocabulary(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        return AgentRuntimeInvocationResult(
+            kind="usage_limit",
+            output="quota reached",
+            log_path=logs_root / "llm-judge-quota.log",
+            usage=None,
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    with pytest.raises(UsageLimitError) as excinfo:
+        extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+        extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
+
+    message = str(excinfo.value)
+    assert "Agent Runtime" in message
+    assert "usage limit" in message.lower()
+
+
+def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        return AgentRuntimeInvocationResult(
+            kind="usage_limit",
+            output="limit reached",
+            log_path=runtime_log,
+            usage=None,
+            reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+    )
+
+    with pytest.raises(UsageLimitError) as excinfo:
+        extractor.classify_relevance([_item()])
+
+    message = str(excinfo.value)
+    assert "Agent Runtime" in message
+    assert "usage limit" in message.lower()
+
+
 def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:

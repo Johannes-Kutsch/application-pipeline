@@ -55,6 +55,19 @@ def test_run_fails_at_startup_when_settings_env_missing(tmp_path: Path) -> None:
     assert "OPENCODE_GO_API_KEY" in stderr
 
 
+def test_run_missing_operator_credential_stops_before_parser_work(
+    tmp_path: Path,
+) -> None:
+    """A missing Operator Credential stops run before Parser Lifecycle setup writes logs."""
+    home = tmp_path / "application-pipeline"
+    _minimal_config(home)
+
+    result = _run(["run"], tmp_path)
+
+    assert result.returncode != 0
+    assert not (home / ".runtime-data" / "logs").exists()
+
+
 def test_run_fails_at_startup_when_operator_credential_is_empty(
     tmp_path: Path,
 ) -> None:
@@ -100,6 +113,19 @@ def test_cron_fails_at_startup_when_operator_credential_missing(
     stderr = result.stderr + result.stdout
     assert ".env" in stderr
     assert "OPENCODE_GO_API_KEY" in stderr
+
+
+def test_cron_missing_operator_credential_stops_before_init_bootstrap(
+    tmp_path: Path,
+) -> None:
+    """A missing Operator Credential stops cron before Init Bootstrap writes setup scripts."""
+    home = tmp_path / "application-pipeline"
+    _minimal_config(home)
+
+    result = _run(["cron"], tmp_path)
+
+    assert result.returncode != 0
+    assert not (home / "setup" / "cron-install.sh").exists()
 
 
 def test_run_no_judge_requires_operator_credential(tmp_path: Path) -> None:

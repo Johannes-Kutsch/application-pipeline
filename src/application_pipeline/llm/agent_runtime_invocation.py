@@ -33,7 +33,6 @@ AgentRuntimeInvocationKind = Literal[
     "usage_limit",
     "retryable_provider_failure",
     "hard_provider_failure",
-    "missing_usage",
 ]
 
 
@@ -117,13 +116,6 @@ def _result_from_outcome(
 ) -> AgentRuntimeInvocationResult:
     usage = _to_agent_runtime_usage(outcome.usage)
     if outcome.kind == "completed":
-        if usage is None:
-            return _build_result(
-                kind="missing_usage",
-                output=outcome.output,
-                log_path=log_path,
-                usage=None,
-            )
         return _build_result(
             kind="completed",
             output=outcome.output,

@@ -5246,6 +5246,81 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
     assert not (tmp_path / "results" / f"{today}.md").exists()
 
 
+def test_runtime_completed_without_usage_still_writes_daily_results_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = _one_stub_config(tmp_path)
+    (tmp_path / ".env").write_text(
+        "OPENCODE_GO_API_KEY=local-operator-key\n", encoding="utf-8"
+    )
+    seen_path = tmp_path / ".seen.json"
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / call_site / f"{call_site}.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("runtime output\n", encoding="utf-8")
+        if call_site == "classify":
+            return AgentRuntimeInvocationResult(
+                kind="completed",
+                output=(
+                    '<verdict id="1">'
+                    '{"matches": true, "header": "Header\\nCompany\\n2026-06-22", '
+                    '"summary": "Summary"}'
+                    "</verdict>"
+                ),
+                log_path=runtime_log,
+                usage=None,
+                reset_time=None,
+                message=None,
+            )
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
+            log_path=runtime_log,
+            usage=None,
+            reset_time=None,
+            message=None,
+        )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+    class _OneStubParser(_StubParserBase):
+        def __enter__(self) -> "_OneStubParser":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def discover(self, query: ParserQuery) -> list[PositionStub]:
+            return [
+                PositionStub(
+                    url="https://runtime-no-usage.example/job",
+                    title="Job 1",
+                    source="stub",
+                )
+            ]
+
+    summary = run(
+        config_path,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.written == 1
+    today = datetime.now().date().isoformat()
+    assert (tmp_path / "results" / f"{today}.md").exists()
+
+
 # ---------------------------------------------------------------------------
 # Daily cutover â€" issue #390
 # ---------------------------------------------------------------------------

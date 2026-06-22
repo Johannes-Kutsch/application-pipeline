@@ -51,7 +51,7 @@ class AgentRuntimeUsage:
 @dataclass(frozen=True)
 class AgentRuntimeResponse:
     raw_response: str
-    usage: AgentRuntimeUsage
+    usage: AgentRuntimeUsage | None
     cost_usd: float
     duration_s: float
     session_id: str

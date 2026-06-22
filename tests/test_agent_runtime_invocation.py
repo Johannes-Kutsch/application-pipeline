@@ -173,7 +173,7 @@ def test_invoke_agent_runtime_reserves_one_judge_log_path_per_invocation(
     assert second.log_path.exists()
 
 
-def test_invoke_agent_runtime_reports_missing_usage_when_completed_usage_is_absent(
+def test_invoke_agent_runtime_completed_without_usage_stays_completed(
     monkeypatch: pytest.MonkeyPatch, logs_root: Path
 ) -> None:
     monkeypatch.setattr(
@@ -184,7 +184,7 @@ def test_invoke_agent_runtime_reports_missing_usage_when_completed_usage_is_abse
 
     result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="classify")
 
-    assert result.kind == "missing_usage"
+    assert result.kind == "completed"
     assert result.output == "payload"
     assert result.usage is None
 

@@ -24,7 +24,6 @@ from .types import (
     ExtractorBatchMalformedError,
     ExtractorError,
     ExtractorMalformedError,
-    ExtractorMalformedJSONError,
     ExtractorUnreachableError,
     JudgeCandidate,
     MatchVerdict,
@@ -203,12 +202,6 @@ class AgentRuntimeExtractor:
             provider_auth=self._provider_auth,
         )
         if result.kind == "completed":
-            if result.usage is None:
-                raise ExtractorMalformedJSONError(
-                    f"{site.call}: completed runtime response missing usage",
-                    prompt=prompt,
-                    raw_response=result.output,
-                )
             response = AgentRuntimeResponse(
                 raw_response=result.output,
                 usage=result.usage,
@@ -262,7 +255,6 @@ class AgentRuntimeExtractor:
             )
 
             return parsed, response
-
         if result.kind == "usage_limit":
             raise UsageLimitError(
                 f"{site.call}: runtime usage limit reached",
@@ -271,12 +263,6 @@ class AgentRuntimeExtractor:
                 stderr=result.output,
                 envelope={"result": result.output},
                 reset_time=result.reset_time,
-            )
-        if result.kind == "missing_usage":
-            raise ExtractorMalformedJSONError(
-                f"{site.call}: completed runtime response missing usage",
-                prompt=prompt,
-                raw_response=result.output,
             )
         raise ExtractorUnreachableError(
             f"{site.call}: runtime provider failure",
@@ -331,12 +317,6 @@ class AgentRuntimeExtractor:
             provider_auth=self._provider_auth,
         )
         if result.kind == "completed":
-            if result.usage is None:
-                raise ExtractorMalformedJSONError(
-                    "classify_relevance: completed runtime response missing usage",
-                    prompt=prompt,
-                    raw_response=result.output,
-                )
             return AgentRuntimeResponse(
                 raw_response=result.output,
                 usage=result.usage,
@@ -355,12 +335,6 @@ class AgentRuntimeExtractor:
             )
         if result.kind == "retryable_provider_failure":
             raise _RetryableProviderFailureError()
-        if result.kind == "missing_usage":
-            raise ExtractorMalformedJSONError(
-                "classify_relevance: missing usage in completed runtime response",
-                prompt=prompt,
-                raw_response=result.output,
-            )
         raise ExtractorUnreachableError(
             "classify_relevance: runtime provider failure",
             returncode=0,

@@ -14,7 +14,6 @@ from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
     AgentRuntimeExtractor,
     ExtractorBatchMalformedError,
-    ExtractorMalformedJSONError,
     ExtractorUnreachableError,
     UsageLimitError,
 )
@@ -830,7 +829,7 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
     assert results == [None, None]
 
 
-def test_classify_relevance_via_agent_runtime_missing_usage_is_malformed(
+def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_valid(
     run_log: RunLog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def _fake_invoke(
@@ -844,8 +843,8 @@ def test_classify_relevance_via_agent_runtime_missing_usage_is_malformed(
         runtime_log.parent.mkdir(parents=True, exist_ok=True)
         runtime_log.write_text("missing usage\n", encoding="utf-8")
         return AgentRuntimeInvocationResult(
-            kind="missing_usage",
-            output='<verdict id="1">{ "matches": false }</verdict>',
+            kind="completed",
+            output=_classify_output({"matches": False}),
             log_path=runtime_log,
             usage=None,
             reset_time=None,
@@ -863,12 +862,9 @@ def test_classify_relevance_via_agent_runtime_missing_usage_is_malformed(
         run_log=run_log,
     )
 
-    with pytest.raises(ExtractorMalformedJSONError) as excinfo:
-        extractor.classify_relevance([_item()])
+    results = extractor.classify_relevance([_item()])
 
-    assert (
-        excinfo.value.raw_response == '<verdict id="1">{ "matches": false }</verdict>'
-    )
+    assert results == [RelevanceVerdict(matches=False)]
 
 
 def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachable(
@@ -981,3 +977,25 @@ def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usag
     assert result.matches is True
     assert result.header is not None
     assert result.summary is not None
+
+
+def test_judge_top_n_succeeds_when_runtime_returns_completed_without_usage(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        lambda *args, **kwargs: AgentRuntimeInvocationResult(
+            kind="completed",
+            output=_judge_output([{"id": 0, "rank": 1}]),
+            log_path=Path("llm-judge.log"),
+            usage=None,
+            reset_time=None,
+            message=None,
+        ),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+
+    results = extractor.judge_top_n(_make_candidates(1))
+
+    assert results == [MatchVerdict(id=0, rank=1)]

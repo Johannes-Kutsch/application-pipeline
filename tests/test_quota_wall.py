@@ -44,12 +44,18 @@ def test_second_raise_wall_returns_false():
     assert wall.raise_wall(_utc(+10)) is False
 
 
-def test_second_raise_wall_does_not_extend_wall():
-    first_reset = _utc(+5)
-    wall = QuotaWall()
-    wall.raise_wall(first_reset)
-    wall.raise_wall(_utc(+10))
-    # wall should still expire at first_reset + 2min, well before +12min
+def test_later_second_raise_wall_extends_active_wall() -> None:
+    base = datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc)
+    clock = [base]
+
+    def now_fn() -> datetime:
+        return clock[0]
+
+    wall = QuotaWall(now_fn=now_fn)
+    wall.raise_wall(base + timedelta(minutes=5))
+    assert wall.raise_wall(base + timedelta(minutes=10)) is False
+
+    clock[0] = base + timedelta(minutes=8)
     assert wall.is_active() is True
 
 

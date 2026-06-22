@@ -106,8 +106,12 @@ class QuotaWall:
         wake = reset_time + _BUFFER
         with self._cond:
             if self._wake_time is not None and self._now() < self._wake_time:
+                if wake > self._wake_time:
+                    self._wake_time = wake
+                    self._cond.notify_all()
                 return False
             self._wake_time = wake
+            self._cond.notify_all()
             return True
 
     def wait_if_blocked(self) -> None:

@@ -347,6 +347,20 @@ def test_load_raises_when_claude_classify_batch_size_present(
         load(path)
 
 
+def test_load_raises_when_stale_classify_key_present_alongside_new_key(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = write_config(
+        tmp_path,
+        REQUIRED_BODY + "\nCLASSIFY_PARALLELISM = 2\nCLAUDE_CLASSIFY_PARALLELISM = 4\n",
+    )
+
+    with pytest.raises(
+        ConfigError, match="CLAUDE_CLASSIFY_PARALLELISM is no longer supported"
+    ):
+        load(path)
+
+
 def test_load_picks_up_changed_file_on_second_call(tmp_path: pathlib.Path) -> None:
     path = write_config(
         tmp_path,
@@ -669,6 +683,14 @@ def test_classify_parallelism_defaults_to_4(tmp_path: pathlib.Path) -> None:
     config = load(path)
 
     assert config.classify_parallelism == 4
+
+
+def test_classify_parallelism_reads_configured_value(tmp_path: pathlib.Path) -> None:
+    path = write_config(tmp_path, REQUIRED_BODY + "\nCLASSIFY_PARALLELISM = 3\n")
+
+    config = load(path)
+
+    assert config.classify_parallelism == 3
 
 
 @pytest.mark.parametrize("value", [0, -1])

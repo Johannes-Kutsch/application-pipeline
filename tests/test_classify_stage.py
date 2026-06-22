@@ -16,7 +16,7 @@ from application_pipeline.classify_stage import (
     ClassifyStage,
     ClassifyStageHandoff,
 )
-from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
+from application_pipeline.llm import ClaudeUsageLimitError
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,

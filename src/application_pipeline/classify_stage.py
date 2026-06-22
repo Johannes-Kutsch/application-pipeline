@@ -10,7 +10,7 @@ from typing import Protocol, runtime_checkable
 
 from application_pipeline._context import current_stage
 from application_pipeline.llm import ExtractorBatchMalformedError, ExtractorError
-from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
+from application_pipeline.llm import ClaudeUsageLimitError
 from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import AppliedClassifyOutcome
 from application_pipeline.parser_log import RunLog

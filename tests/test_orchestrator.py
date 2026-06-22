@@ -41,7 +41,7 @@ from application_pipeline.llm.types import (
     MatchedListing,
     RelevanceVerdict,
 )
-from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
+from application_pipeline.llm import ClaudeUsageLimitError
 from application_pipeline.orchestrator import RunSummary, run
 from application_pipeline.parsers import (
     Parser,
@@ -5116,14 +5116,8 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
             message=None,
         )
 
-    def _forbid_cli_call(self: object, *_: object, **__: object) -> None:  # type: ignore[override]
-        raise AssertionError("judge should use Agent Runtime")
-
     monkeypatch.setattr(
         "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
-    )
-    monkeypatch.setattr(
-        "application_pipeline.llm.claude.ClaudeCliInvoker.call", _forbid_cli_call
     )
 
     class _OneStubParser(_StubParserBase):
@@ -5182,14 +5176,8 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
             message="provider failed",
         )
 
-    def _forbid_cli_call(self: object, *_: object, **__: object) -> None:  # type: ignore[override]
-        raise AssertionError("judge should use Agent Runtime")
-
     monkeypatch.setattr(
         "application_pipeline.llm.claude.invoke_agent_runtime", _fake_invoke
-    )
-    monkeypatch.setattr(
-        "application_pipeline.llm.claude.ClaudeCliInvoker.call", _forbid_cli_call
     )
 
     class _OneStubParser(_StubParserBase):

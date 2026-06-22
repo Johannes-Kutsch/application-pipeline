@@ -49,7 +49,7 @@ from application_pipeline.llm import (
     JudgeCandidate,
     MatchVerdict,
 )
-from application_pipeline.llm.claude_cli import ClaudeUsageLimitError
+from application_pipeline.llm import ClaudeUsageLimitError
 from application_pipeline.llm.types import CallUsage
 from application_pipeline.llm_enricher import LLMEnricher, LLMExtractor
 from application_pipeline.pool import Pool

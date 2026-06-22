@@ -13,10 +13,7 @@ from .agent_output import (
     extract_json_block,
 )
 from .claude_cli import (
-    ClaudeCliError,
-    ClaudeCliInvoker,
     ClaudeUsageLimitError,
-    ClaudeMalformedEnvelopeError,
     ClaudeResponse,
     ClaudeUsage,
 )
@@ -78,18 +75,11 @@ def _strip_boilerplate(text: str) -> str:
     return "\n\n".join(result).rstrip()
 
 
-_CLASSIFY_MODEL = "haiku"
-_JUDGE_MODEL = "haiku"
-_JUDGE_EFFORT = "medium"
-
-
 @dataclass(frozen=True)
 class _CallSite:
     call: str
     component_id: str
     tag: str
-    model: str
-    effort: str
     protocol_error_cls: type[ExtractorError]
 
 
@@ -97,8 +87,6 @@ _CLASSIFY_SITE = _CallSite(
     call="classify_relevance",
     component_id="llm_classify_relevance",
     tag="verdict",
-    model=_CLASSIFY_MODEL,
-    effort="",
     protocol_error_cls=ExtractorMalformedError,
 )
 
@@ -106,8 +94,6 @@ _JUDGE_TOP_N_SITE = _CallSite(
     call="judge_top_n",
     component_id="llm_judge_match",
     tag="verdicts",
-    model=_JUDGE_MODEL,
-    effort=_JUDGE_EFFORT,
     protocol_error_cls=ExtractorBatchMalformedError,
 )
 
@@ -141,12 +127,10 @@ class ClaudeExtractor:
         prompts: Prompts,
         *,
         run_log: RunLog,
-        _invoker: ClaudeCliInvoker | None = None,
     ) -> None:
         self._config = config
         self._prompts = prompts
         self._run_log = run_log
-        self._invoker = _invoker
 
     def classify_relevance(
         self, items: list[ClassifyItem]
@@ -162,54 +146,20 @@ class ClaudeExtractor:
         prompt = self._prompts.classify_relevance.render(
             LISTINGS=_build_listings_block(items)
         )
-        t0 = time.monotonic()
-        if self._invoker is None:
-            try:
-                response = self._invoke_runtime(prompt)
-            except _RetryableProviderFailureError as exc:
-                return (
-                    [None for _ in items],
-                    exc.usage
-                    or CallUsage(
-                        input_tokens=0,
-                        output_tokens=0,
-                        cache_read_tokens=0,
-                        cost_usd=0.0,
-                        duration_s=0.0,
-                    ),
-                )
-        else:
-            try:
-                response = self._invoker.call(
-                    prompt,
-                    model=_CLASSIFY_SITE.model,
-                    effort=_CLASSIFY_SITE.effort,
-                )
-            except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
-                status = (
-                    "cli_error"
-                    if isinstance(exc, ClaudeCliError)
-                    else "malformed_envelope"
-                )
-                self._write_transcript(
-                    site=_CLASSIFY_SITE,
-                    prompt=prompt,
-                    status=status,
-                    duration_s=time.monotonic() - t0,
-                    extra={},
-                    exc=exc,
-                )
-                if isinstance(exc, ClaudeCliError):
-                    raise ExtractorUnreachableError(
-                        str(exc), returncode=exc.returncode, stderr=exc.stderr
-                    ) from exc
-                raise ExtractorMalformedJSONError(
-                    str(exc),
-                    returncode=exc.returncode,
-                    stderr=exc.stderr,
-                    prompt=prompt,
-                    raw_response=None,
-                ) from exc
+        try:
+            response = self._invoke_runtime(prompt)
+        except _RetryableProviderFailureError as exc:
+            return (
+                [None for _ in items],
+                exc.usage
+                or CallUsage(
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_read_tokens=0,
+                    cost_usd=0.0,
+                    duration_s=0.0,
+                ),
+            )
 
         verdicts_by_id = extract_id_tagged_verdicts(response.raw_response)
         results: list[RelevanceVerdict | None] = []
@@ -265,109 +215,13 @@ class ClaudeExtractor:
             )
         candidates_block = self._format_candidates(candidates)
         prompt = self._prompts.judge_top_n.render(CANDIDATES=candidates_block)
-        if self._invoker is None:
-            data, response = self._invoke_runtime_protocol(
-                _JUDGE_TOP_N_SITE,
-                prompt,
-                {"candidate_count": len(candidates)},
-            )
-        else:
-            data, response = self._invoke(
-                _JUDGE_TOP_N_SITE, prompt, {"candidate_count": len(candidates)}
-            )
+        data, response = self._invoke_runtime_protocol(
+            _JUDGE_TOP_N_SITE,
+            prompt,
+            {"candidate_count": len(candidates)},
+        )
         usage = self._usage_from(response)
         return self._parse_top_n_response(data, candidates), usage
-
-    def _invoke(
-        self,
-        site: _CallSite,
-        prompt: str,
-        extra: dict[str, object],
-    ) -> tuple[Any, ClaudeResponse]:
-        assert self._invoker is not None
-        t0 = time.monotonic()
-        try:
-            response = self._invoker.call(
-                prompt,
-                model=site.model,
-                effort=site.effort,
-            )
-        except (ClaudeCliError, ClaudeMalformedEnvelopeError) as exc:
-            status = (
-                "cli_error" if isinstance(exc, ClaudeCliError) else "malformed_envelope"
-            )
-            self._write_transcript(
-                site=site,
-                prompt=prompt,
-                status=status,
-                duration_s=time.monotonic() - t0,
-                extra=extra,
-                exc=exc,
-            )
-            if isinstance(exc, ClaudeCliError):
-                raise ExtractorUnreachableError(
-                    str(exc), returncode=exc.returncode, stderr=exc.stderr
-                ) from exc
-            raise ExtractorMalformedJSONError(
-                str(exc),
-                returncode=exc.returncode,
-                stderr=exc.stderr,
-                prompt=prompt,
-                raw_response=None,
-            ) from exc
-        # ClaudeUsageLimitError propagates as-is for abort handling
-
-        try:
-            parsed, is_fallback = extract_json_block(response.raw_response, site.tag)
-        except AgentOutputProtocolError as exc:
-            self._write_transcript(
-                site=site,
-                prompt=prompt,
-                status="protocol_error",
-                duration_s=time.monotonic() - t0,
-                extra=extra,
-                raw_response=response.raw_response,
-                kind=exc.kind,
-            )
-            msg = f"{site.call}: {exc.kind}: <{site.tag}> block missing or malformed"
-            if site.protocol_error_cls is ExtractorMalformedError:
-                raise ExtractorMalformedError(
-                    msg, prompt=prompt, raw_response=response.raw_response
-                ) from exc
-            raise site.protocol_error_cls(msg) from exc
-
-        if is_fallback:
-            self._write_transcript(
-                site=site,
-                prompt=prompt,
-                status="protocol_fallback",
-                duration_s=time.monotonic() - t0,
-                extra=extra,
-                raw_response=response.raw_response,
-            )
-            return parsed, response
-
-        transcript_entry: dict[str, object] = {
-            "call": site.call,
-            "prompt": prompt,
-            "raw_response": response.raw_response,
-            "usage": {
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-                "cache_read_tokens": response.usage.cache_read_tokens,
-            },
-            "cost_usd": response.cost_usd,
-            "duration_s": response.duration_s,
-        }
-        self._run_log.transcript(site.component_id, transcript_entry)
-        self._run_log.event(
-            site.component_id,
-            site.call,
-            cost_usd=response.cost_usd,
-            duration_s=f"{response.duration_s:.3f}",
-        )
-
-        return parsed, response
 
     def _invoke_runtime_protocol(
         self,
@@ -484,7 +338,6 @@ class ClaudeExtractor:
         status: str,
         duration_s: float,
         extra: dict[str, object],
-        exc: ClaudeCliError | ClaudeMalformedEnvelopeError | None = None,
         raw_response: str | None = None,
         kind: str | None = None,
     ) -> None:
@@ -497,12 +350,6 @@ class ClaudeExtractor:
             "duration_s": duration_s,
             **extra,
         }
-        if exc is not None:
-            entry["stdout"] = exc.stdout
-            entry["stderr"] = exc.stderr
-            entry["returncode"] = exc.returncode
-            entry["envelope"] = exc.envelope
-            entry["envelope_error_class"] = exc.envelope_error_class
         if raw_response is not None:
             entry["raw_response"] = raw_response
         if kind is not None:

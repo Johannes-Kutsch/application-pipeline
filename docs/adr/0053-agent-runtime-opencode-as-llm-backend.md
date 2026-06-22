@@ -5,3 +5,5 @@ The production **LLM Extractor** keeps its project-facing contract, batching, ta
 The installed `ruhken-agent-runtime==0.0.1` API is authoritative for this migration, not the moving GitHub `main` public API, because the two public surfaces currently differ.
 
 `CLAUDE_CLI_PATH` is retired and should fail config load like other removed config fields; silently ignoring it would hide a stale provider assumption.
+
+Current production/backend code and tests should use backend-neutral or Agent Runtime names. Historical ADRs may keep `Claude*` names where they describe past decisions, but current behavior must not expose `Claude*` vocabulary through live config, exceptions, metrics, or extractor class names.

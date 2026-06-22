@@ -1,6 +1,6 @@
 # Classifier runs a parallel worker pool of fixed size N
 
-N solo `claude -p` calls concurrently from a fixed pool. `Config.claude_classify_parallelism` (default 4, `≥ 1`). Solo-call protocol (ADR-0028), stdin-combined prompt (ADR-0029), and DeduplicationStore lock all preserved. Supersedes ADR-0028's explicit rejection of N>1.
+N classify calls run concurrently from a fixed pool. `Config.classify_parallelism` / `CLASSIFY_PARALLELISM` (default 4, `≥ 1`). Classifier output protocol and DeduplicationStore lock all preserved. Supersedes ADR-0028's explicit rejection of N>1.
 
 Amended by ADR-0042: workers now drain a classify queue and run only the LLM call, no body fetch.
 Amended by ADR-0047: single accumulator thread fills batches; workers receive pre-built batches only.
@@ -18,5 +18,5 @@ Shared coordination object: `raise_wall(reset_time) -> bool`, `wait_if_blocked()
 ## Consequences
 
 - N `_ClassifyThread` instances on shared queue. `_NO_MORE_BATCHES` sentinel enqueued N times.
-- `claude_classify_parallelism = 1` recovers single-worker behaviour exactly.
+- `CLASSIFY_PARALLELISM = 1` recovers single-worker behaviour exactly.
 - `RunMetrics` classify counters need lock or atomic adds (single-writer assumption broken).

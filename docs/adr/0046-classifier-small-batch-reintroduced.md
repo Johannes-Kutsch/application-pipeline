@@ -1,6 +1,6 @@
 # Classifier reintroduces small-batch calls; solo retired
 
-Supersedes ADR-0028. `classify_relevance(items: list[ClassifyItem]) -> list[RelevanceVerdict | None]` takes up to `claude_classify_batch_size` items (default 10, configurable). Each item gets a numbered id in the prompt; each verdict is returned as an individually-tagged `<verdict id="N">{...}</verdict>` block. Verdicts that fail to parse are returned as `None` — the corresponding listings stay unmarked and are re-discovered next run. No retry.
+Supersedes ADR-0028. `classify_relevance(items: list[ClassifyItem]) -> list[RelevanceVerdict | None]` takes up to `CLASSIFY_BATCH_SIZE` items (default 10, configurable). Each item gets a numbered id in the prompt; each verdict is returned as an individually-tagged `<verdict id="N">{...}</verdict>` block. Verdicts that fail to parse are returned as `None` — the corresponding listings stay unmarked and are re-discovered next run. No retry.
 
 Amended by ADR-0047: single accumulator thread fills batches sequentially; dispatch workers run only the LLM call. Parallel worker pool (ADR-0031) unchanged at default 4.
 
@@ -12,7 +12,7 @@ Amended by ADR-0047: single accumulator thread fills batches sequentially; dispa
 
 ## Consequences
 
-- `Config.claude_classify_batch_size: int` reintroduced (default 10, `≥ 1`).
+- `Config.classify_batch_size: int` / `CLASSIFY_BATCH_SIZE` reintroduced (default 10, `≥ 1`).
 - Prompt switches from single `<verdict>` to multiple `<verdict id="N">` tags.
 - `_ClassifyAccumulator` fills batches; `_ClassifyWorker` runs the LLM call only (ADR-0047).
 - Unparseable verdicts within a batch are silently dropped — listings re-enter next run via normal discovery.

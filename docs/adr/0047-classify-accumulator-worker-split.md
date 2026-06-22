@@ -1,6 +1,6 @@
 # Single accumulator thread fills classify batches; workers dispatch only
 
-Batch accumulation moves from N parallel workers to a single `_ClassifyAccumulator` thread. The accumulator pulls items from the classify queue, fills batches of `claude_classify_batch_size` sequentially, and puts complete batches onto a dispatch queue. N `_ClassifyWorker` threads consume pre-built batches and run only the LLM call + verdict handling. `claude_classify_parallelism` still sizes the worker pool.
+Batch accumulation moves from N parallel workers to a single `_ClassifyAccumulator` thread. The accumulator pulls items from the classify queue, fills batches of `CLASSIFY_BATCH_SIZE` sequentially, and puts complete batches onto a dispatch queue. N `_ClassifyWorker` threads consume pre-built batches and run only the LLM call + verdict handling. `CLASSIFY_PARALLELISM` still sizes the worker pool.
 
 ## Why
 
@@ -16,4 +16,4 @@ With N workers each accumulating independently on a shared item queue, OS thread
 - Accumulator receives one `_NO_MORE_BATCHES` sentinel, flushes its partial batch, then sends N sentinels to workers.
 - `is_degraded` check stays in workers, not accumulator — accumulator is a dumb batcher.
 - Accumulator does not poll for `run_state.is_aborted` — waits for natural sentinel arrival.
-- `claude_classify_parallelism = 1` still recovers single-worker behaviour.
+- `CLASSIFY_PARALLELISM = 1` still recovers single-worker behaviour.

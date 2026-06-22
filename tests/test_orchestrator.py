@@ -36,7 +36,6 @@ from application_pipeline.llm.types import (
     AppliedClassifyItemOutcome,
     AppliedClassifyOutcome,
     ClassifyItem,
-    ExtractorBatchMalformedError,
     JudgeCandidate,
     MatchVerdict,
     MatchedListing,
@@ -3382,7 +3381,7 @@ def test_classify_malformed_position_not_marked_seen(tmp_path: Path) -> None:
     assert not any(_ERR_URLS[0] in r.get("urls", []) for r in seen_data.values())
 
 
-def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
+def test_batch_retryable_classify_outcome_stays_at_stage_seam_and_run_continues(
     tmp_path: Path,
 ) -> None:
     logs_dir = tmp_path / "synched" / "logs"
@@ -3404,7 +3403,7 @@ def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
                 for i, url in enumerate(urls, start=1)
             ]
 
-    class _BatchMalformedThenMatchedEnricher:
+    class _RetryableThenMatchedEnricher:
         def __init__(self) -> None:
             self.calls = 0
 
@@ -3413,7 +3412,7 @@ def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
         ) -> AppliedClassifyOutcome:
             self.calls += 1
             if self.calls == 1:
-                raise ExtractorBatchMalformedError("bad batch verdict")
+                return _retryable_outcome(items)
             listing_id, stub, body = items[0]
             card_store.put(
                 listing_id,
@@ -3430,7 +3429,7 @@ def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
             include_remote=False,
             classify_batch_size=2,
         ),
-        llm_enricher=_BatchMalformedThenMatchedEnricher(),
+        llm_enricher=_RetryableThenMatchedEnricher(),
         extractor=_stub_extractor(),
         card_store=card_store,
         parser_registry=lambda _: _ThreeStubParser,  # type: ignore[return-value, arg-type]
@@ -3438,9 +3437,9 @@ def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
         run_log=run_log,
     )
 
-    assert summary.errored == 2
+    assert summary.enrich_failed == 2
     assert summary.written == 1
-    assert summary.classify_items == 1
+    assert summary.classify_items == 3
     assert card_store.get(3) is None
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
@@ -3459,18 +3458,23 @@ def test_batch_malformed_classify_failure_stays_at_stage_seam_and_run_continues(
         {
             "ts": classify_rows[0]["ts"],
             "event": "classify_relevance",
-            "status": "error",
-            "error": "bad batch verdict",
+            "matches": None,
         },
         {
             "ts": classify_rows[1]["ts"],
+            "event": "classify_relevance",
+            "matches": None,
+        },
+        {
+            "ts": classify_rows[2]["ts"],
             "event": "classify_relevance",
             "matches": True,
         },
     ]
 
     run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
-    assert "batches_failed=1" in run_log_text
+    assert "malformed=2" in run_log_text
+    assert "batches_failed=0" in run_log_text
 
 
 def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
@@ -4576,7 +4580,7 @@ def test_injected_llm_enricher_bypasses_default_construction(
 
 
 def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
-    """ExtractorError from llm_enricher.enrich(): classify_relevance row body shows dropped count."""
+    """A fatal classify error still leaves the classify_relevance row registered and done."""
     card_store = _make_card_store(tmp_path)
 
     class _ErrorEnricher:
@@ -4588,26 +4592,32 @@ def test_classify_error_refreshes_status_body(tmp_path: Path) -> None:
 
     display = FakeStatusDisplay()
 
-    run(
-        _two_stub_config(tmp_path),
-        llm_enricher=_ErrorEnricher(),
-        extractor=_stub_extractor(),
-        card_store=card_store,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        status_display=display,
-    )
+    with pytest.raises(ExtractorError, match="classify boom"):
+        run(
+            _two_stub_config(tmp_path),
+            llm_enricher=_ErrorEnricher(),
+            extractor=_stub_extractor(),
+            card_store=card_store,
+            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            status_display=display,
+        )
 
     classify_bodies = display.body_updates_for("llm classify relevance")
     assert classify_bodies, "expected at least one classify_relevance body update"
-    last_body = classify_bodies[-1]
-    assert "malformed" in last_body
+    classify_phase_updates = [
+        call.kwargs["phase"]
+        for call in display.calls
+        if call.method == "update_phase" and call.name == "llm classify relevance"
+    ]
+    assert classify_phase_updates
+    assert classify_phase_updates[-1] == "done"
 
 
 def test_classify_error_logs_warning(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """ExtractorError from llm_enricher.enrich() logs the same warning as before the refactor."""
+    """A fatal classify error propagates without the retired orchestrator warning log."""
     import logging
 
     card_store = _make_card_store(tmp_path)
@@ -4619,21 +4629,18 @@ def test_classify_error_logs_warning(
             raise ExtractorError("classify boom")
 
     with caplog.at_level(logging.WARNING, logger="application_pipeline.orchestrator"):
-        run(
-            _two_stub_config(tmp_path),
-            llm_enricher=_ErrorEnricher(),
-            extractor=_stub_extractor(),
-            card_store=card_store,
-            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        )
+        with pytest.raises(ExtractorError, match="classify boom"):
+            run(
+                _two_stub_config(tmp_path),
+                llm_enricher=_ErrorEnricher(),
+                extractor=_stub_extractor(),
+                card_store=card_store,
+                parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+                dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            )
 
-    assert any(
-        record.levelno == logging.WARNING
-        and record.name == "application_pipeline.orchestrator"
-        and record.getMessage() == "llm_enricher.enrich failed: classify boom"
-        for record in caplog.records
-    )
+    warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warning_records == [], f"unexpected WARNING(s): {warning_records}"
 
 
 def test_clean_run_bodies_contain_no_error_tokens(tmp_path: Path) -> None:

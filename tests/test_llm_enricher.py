@@ -20,6 +20,7 @@ from application_pipeline.llm.types import (
     ExtractorBatchMalformedError,
     ExtractorMalformedError,
     ExtractorMalformedJSONError,
+    ExtractorUnreachableError,
     RelevanceVerdict,
 )
 from application_pipeline.llm_enricher import LLMEnricher
@@ -214,7 +215,7 @@ def _read_malformed_stash(tmp_path: Path, source: str, slug: str) -> str:
     return stash_path.read_text(encoding="utf-8")
 
 
-def test_enricher_stashes_malformed_llm_output(
+def test_enricher_stashes_malformed_llm_output_and_returns_retryable(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
@@ -235,8 +236,10 @@ def test_enricher_stashes_malformed_llm_output(
         source="test_src",
     )
 
-    with pytest.raises(ExtractorMalformedError):
-        enricher.enrich([(99, stub, body)])
+    result = enricher.enrich([(99, stub, body)])
+
+    assert [item.state for item in result.items] == ["retryable"]
+    assert load_card_store(tmp_path / "extracts.json").get(99) is None
 
     slug = "example.com-job-99"
     content = _read_malformed_stash(tmp_path, "test_src", slug)
@@ -250,7 +253,7 @@ def test_enricher_stashes_malformed_llm_output(
 # ---------------------------------------------------------------------------
 
 
-def test_enricher_malformed_error_produces_md_file_with_all_sections(
+def test_enricher_malformed_error_produces_retryable_md_file_with_all_sections(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
@@ -273,8 +276,9 @@ def test_enricher_malformed_error_produces_md_file_with_all_sections(
         source="test_src",
     )
 
-    with pytest.raises(ExtractorMalformedError):
-        enricher.enrich([(99, stub, body)])
+    result = enricher.enrich([(99, stub, body)])
+
+    assert [item.state for item in result.items] == ["retryable"]
 
     slug = "example.com-job-99"
     content = _read_malformed_stash(tmp_path, "test_src", slug)
@@ -285,7 +289,7 @@ def test_enricher_malformed_error_produces_md_file_with_all_sections(
     assert raw_resp in content
 
 
-def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
+def test_enricher_malformed_json_error_produces_retryable_md_file_with_cli_sections(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
@@ -308,8 +312,9 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
         source="src_cli",
     )
 
-    with pytest.raises(ExtractorMalformedJSONError):
-        enricher.enrich([(99, stub, body)])
+    result = enricher.enrich([(99, stub, body)])
+
+    assert [item.state for item in result.items] == ["retryable"]
 
     slug = "example.com-job-cli"
     content = _read_malformed_stash(tmp_path, "src_cli", slug)
@@ -322,7 +327,7 @@ def test_enricher_malformed_json_error_produces_md_file_with_cli_sections(
     assert "<result>" not in content
 
 
-def test_enricher_batch_malformed_error_produces_md_file_without_prompt_or_response(
+def test_enricher_batch_malformed_error_returns_retryable_and_produces_md_file_without_prompt_or_response(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
@@ -343,8 +348,9 @@ def test_enricher_batch_malformed_error_produces_md_file_without_prompt_or_respo
         source="batch_src",
     )
 
-    with pytest.raises(ExtractorBatchMalformedError):
-        enricher.enrich([(1, stub, "body")])
+    result = enricher.enrich([(1, stub, "body")])
+
+    assert [item.state for item in result.items] == ["retryable"]
 
     slug = "example.com-job-batch"
     content = _read_malformed_stash(tmp_path, "batch_src", slug)
@@ -361,7 +367,7 @@ def test_enricher_batch_malformed_error_produces_md_file_without_prompt_or_respo
 # ---------------------------------------------------------------------------
 
 
-def test_enricher_malformed_llm_output_emits_log_event(
+def test_enricher_malformed_llm_output_emits_log_event_and_returns_retryable(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
@@ -380,8 +386,9 @@ def test_enricher_malformed_llm_output_emits_log_event(
         source="src_c",
     )
 
-    with pytest.raises(ExtractorMalformedError):
-        enricher.enrich([(99, stub, body)])
+    result = enricher.enrich([(99, stub, body)])
+
+    assert [item.state for item in result.items] == ["retryable"]
 
     events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
     assert events_file.exists()
@@ -776,10 +783,35 @@ def test_enrich_malformed_stash_written_once_for_batch(
     stub1 = PositionStub(url="https://example.com/job/a", title="Job A", source="src")
     stub2 = PositionStub(url="https://example.com/job/b", title="Job B", source="src")
 
-    with pytest.raises(ExtractorMalformedError):
-        enricher.enrich([(1, stub1, "body a"), (2, stub2, "body b")])
+    result = enricher.enrich([(1, stub1, "body a"), (2, stub2, "body b")])
+
+    assert [item.state for item in result.items] == ["retryable", "retryable"]
 
     malformed_dir = tmp_path / "failures" / "malformed"
     assert malformed_dir.exists()
     stash_files = list(malformed_dir.glob("*.md"))
-    assert len(stash_files) == 1, f"Expected 1 stash file, got {len(stash_files)}"
+    assert len(stash_files) == 2, f"Expected 2 stash files, got {len(stash_files)}"
+
+
+def test_enricher_fatal_provider_failure_propagates(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    body = "Software Engineer role."
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorUnreachableError(
+        "provider unreachable"
+    )
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/provider",
+        title="Software Engineer",
+        source="test_src",
+    )
+
+    with pytest.raises(ExtractorUnreachableError, match="provider unreachable"):
+        enricher.enrich([(99, stub, body)])

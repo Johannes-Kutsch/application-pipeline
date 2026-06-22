@@ -719,6 +719,7 @@ def test_refresh_on_empty_dir_writes_all_files(tmp_path: Path) -> None:
 
     ap = _ap(tmp_path)
     assert (ap / "config.py").read_bytes() == _ap_template_bytes("config.py")
+    assert (ap / ".env").read_text() == "OPENCODE_GO_API_KEY=\n"
     assert not (ap / "layout.py").exists()
     for fname in _SETUP_SCRIPTS:
         assert (ap / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
@@ -1704,9 +1705,50 @@ def test_refresh_removed_lines_still_appear(
     assert "removed layout.py" in capsys.readouterr().out
 
 
-def test_fresh_init_creates_env_placeholder(tmp_path: Path) -> None:
+def test_fresh_init_creates_operator_credential_placeholder(tmp_path: Path) -> None:
     init(tmp_path)
 
     env_path = _ap(tmp_path) / ".env"
     assert env_path.exists()
     assert env_path.read_text() == "OPENCODE_GO_API_KEY=\n"
+
+
+def test_rerun_init_preserves_existing_operator_credential(tmp_path: Path) -> None:
+    init(tmp_path)
+    env_path = _ap(tmp_path) / ".env"
+    original = "OPENCODE_GO_API_KEY=operator-secret\n"
+    env_path.write_text(original)
+
+    init(tmp_path)
+
+    assert env_path.read_text() == original
+
+
+def test_refresh_preserves_existing_operator_credential_without_stdout_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    env_path = _ap(tmp_path) / ".env"
+    original = "OPENCODE_GO_API_KEY=operator-secret\n"
+    env_path.write_text(original)
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert env_path.read_text() == original
+    assert ".env" not in capsys.readouterr().out
+
+
+def test_refresh_reseeds_missing_operator_credential_without_stdout_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(tmp_path)
+    env_path = _ap(tmp_path) / ".env"
+    env_path.unlink()
+    capsys.readouterr()
+
+    init(tmp_path, refresh=True)
+
+    assert env_path.read_text() == "OPENCODE_GO_API_KEY=\n"
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert lines == ["directory is current — no files changed"]

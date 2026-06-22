@@ -14,6 +14,7 @@ _RETIRED_REFRESH_PATHS: dict[str, tuple[Path, ...]] = {
     "claude": (Path("skills/iterate-cv/SKILL.md"),),
     "codex": (Path("skills/iterate-cv/SKILL.md"),),
 }
+_OPERATOR_CREDENTIAL_PLACEHOLDER = b"OPENCODE_GO_API_KEY=\n"
 
 
 class _SeedPolicy(NamedTuple):
@@ -46,7 +47,9 @@ def _seed_policies(cwd: Path) -> dict[str, _SeedPolicy]:
             bucket="application-pipeline",
             dest_root=cwd / "application-pipeline",
             operator_owned_roots=frozenset({"user-info"}),
-            operator_owned_top_level_files=frozenset({"config.py", ".gitignore"}),
+            operator_owned_top_level_files=frozenset(
+                {"config.py", ".env", ".gitignore"}
+            ),
             package_owned=_default_package_owned,
         ),
         "claude": _SeedPolicy(
@@ -97,6 +100,14 @@ def init(cwd: Path, *, refresh: bool = False) -> None:
                 policies["application-pipeline"].dest_root,
                 Path(),
                 policies["application-pipeline"],
+            )
+        )
+        seed_entries.append(
+            _SeedEntry(
+                template_bytes=_OPERATOR_CREDENTIAL_PLACEHOLDER,
+                dest_root=policies["application-pipeline"].dest_root,
+                rel=Path(".env"),
+                policy=policies["application-pipeline"],
             )
         )
 

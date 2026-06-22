@@ -406,6 +406,47 @@ def test_enricher_batch_malformed_stash_references_agent_runtime_log(
     assert stderr_text not in content
 
 
+def test_enricher_malformed_stash_uses_current_classify_runtime_log(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    stale_log = _runtime_log_path(tmp_path)
+    current_log = (
+        tmp_path / "logs" / "llm" / "agent-runtime" / "classify" / "current.log"
+    )
+    current_log.write_text("current runtime output\n", encoding="utf-8")
+
+    class _Extractor:
+        def __init__(self) -> None:
+            self.last_classify_log_path = stale_log
+
+        def classify_relevance(self, items: list[object]) -> list[object]:
+            self.last_classify_log_path = current_log
+            raise ExtractorBatchMalformedError("batch response could not be parsed")
+
+    enricher = _make_enricher(
+        extractor=_Extractor(),
+        tmp_path=tmp_path,
+        run_log=run_log,
+        run_metrics=run_metrics,
+    )
+    stub = PositionStub(
+        url="https://example.com/job/current-log",
+        title="Batch Job",
+        source="batch_src",
+    )
+
+    result = enricher.enrich([(1, stub, "body")])
+
+    assert [item.state for item in result.items] == ["retryable"]
+
+    slug = "example.com-job-current-log"
+    content = _read_malformed_stash(tmp_path, "batch_src", slug)
+    assert str(current_log) in content
+    assert str(stale_log) not in content
+
+
 def test_enricher_batch_malformed_error_returns_retryable_and_produces_md_file_without_prompt_or_response(
     tmp_path: Path,
     run_log: RunLog,

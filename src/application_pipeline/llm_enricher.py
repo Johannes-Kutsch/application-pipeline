@@ -72,6 +72,10 @@ class LLMEnricher:
         self.freshness_gate: FreshnessGate | None = freshness_gate
         self._dedup_store = dedup_store
 
+    def _last_classify_log_path(self) -> Path | None:
+        raw_log_path = getattr(self._extractor, "last_classify_log_path", None)
+        return raw_log_path if isinstance(raw_log_path, Path) else None
+
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
     ) -> AppliedClassifyOutcome:
@@ -87,11 +91,6 @@ class LLMEnricher:
             for _, stub, body in items
         ]
 
-        _raw_log_path = getattr(self._extractor, "last_classify_log_path", None)
-        agent_runtime_log_path: "Path | None" = (
-            _raw_log_path if isinstance(_raw_log_path, Path) else None
-        )
-
         try:
             raw_verdicts = self._extractor.classify_relevance(classify_items)
         except (
@@ -99,6 +98,7 @@ class LLMEnricher:
             ExtractorMalformedError,
             ExtractorMalformedJSONError,
         ) as exc:
+            agent_runtime_log_path = self._last_classify_log_path()
             # Treat a malformed response as retryable for every item in the batch,
             # stashing one malformed file per listing.
             self._run_log.event(
@@ -117,10 +117,7 @@ class LLMEnricher:
                 ]
             )
 
-        _raw_log_path = getattr(self._extractor, "last_classify_log_path", None)
-        agent_runtime_log_path = (
-            _raw_log_path if isinstance(_raw_log_path, Path) else None
-        )
+        agent_runtime_log_path = self._last_classify_log_path()
 
         outcome_items: list[AppliedClassifyItemOutcome] = []
         for (listing_id, stub, body), verdict in zip(items, raw_verdicts):

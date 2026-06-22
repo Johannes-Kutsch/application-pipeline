@@ -50,7 +50,7 @@ from application_pipeline.llm import (
     MatchVerdict,
 )
 from application_pipeline.llm import UsageLimitError
-from application_pipeline.llm.types import CallUsage
+
 from application_pipeline.llm_enricher import LLMEnricher, LLMExtractor
 from application_pipeline.pool import Pool
 from application_pipeline.parsers import Parser
@@ -79,9 +79,7 @@ def _has_native_enrich(cls: type) -> bool:
 
 @runtime_checkable
 class _LLMJudge(Protocol):
-    def judge_top_n(
-        self, candidates: list[JudgeCandidate]
-    ) -> tuple[list[MatchVerdict], CallUsage]: ...
+    def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]: ...
 
 
 class _RunState:
@@ -350,13 +348,12 @@ def run(
         if candidates and not no_judge:
             metrics.judge_started()
             verdicts: list[MatchVerdict] | None = None
-            judge_usage = None
             assert isinstance(extractor, _LLMJudge), (
                 "extractor must implement judge_top_n"
             )
             while True:
                 try:
-                    verdicts, judge_usage = extractor.judge_top_n(candidates)
+                    verdicts = extractor.judge_top_n(candidates)
                     break
                 except UsageLimitError as err:
                     now_utc = datetime.now(timezone.utc)
@@ -391,7 +388,7 @@ def run(
                     metrics.judge_failed_lifecycle()
                     break
 
-            if verdicts is not None and judge_usage is not None:
+            if verdicts is not None:
                 try:
                     daily_top_5_count = pool.apply_match_verdicts(
                         verdicts,
@@ -403,7 +400,6 @@ def run(
                     _log.error("daily file append failed: %s", exc)
                     raise
                 metrics.judge_succeeded(
-                    judge_usage,
                     card_count=daily_top_5_count,
                 )
                 run_log.event(

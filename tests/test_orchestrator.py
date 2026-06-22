@@ -19,13 +19,13 @@ from application_pipeline import dedup as dedup_module
 from application_pipeline.config import ConfigError
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.llm import (
-    CallUsage,
     ExtractorError,
     ExtractorUnreachableError,
 )
 from application_pipeline.llm.agent_runtime_invocation import (
     AgentRuntimeInvocationResult,
 )
+from application_pipeline.llm.agent_runtime_types import AgentRuntimeUsage
 from application_pipeline.extracts.card_store import (
     CardExtract,
     CardStore,
@@ -132,21 +132,12 @@ def _write_config(
     return config_path
 
 
-_ZERO_USAGE = CallUsage(
-    input_tokens=0, output_tokens=0, cache_read_tokens=0, cost_usd=0.0, duration_s=0.0
-)
-
-
 def _stub_extractor() -> MagicMock:
     ext = MagicMock()
-    ext.classify_relevance.return_value = (
-        [RelevanceVerdict(matches=False)],
-        _ZERO_USAGE,
-    )
-    ext.judge_top_n.side_effect = lambda candidates: (
-        [MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])],
-        _ZERO_USAGE,
-    )
+    ext.classify_relevance.return_value = [RelevanceVerdict(matches=False)]
+    ext.judge_top_n.side_effect = lambda candidates: [
+        MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
+    ]
     return ext
 
 
@@ -1170,30 +1161,12 @@ class _LLMStubParser(_StubParserBase):
         ]
 
 
-_FAKE_CLASSIFY_USAGE = CallUsage(
-    input_tokens=10,
-    output_tokens=5,
-    cache_read_tokens=2,
-    cost_usd=0.001,
-    duration_s=0.5,
-)
-_FAKE_JUDGE_USAGE = CallUsage(
-    input_tokens=8,
-    output_tokens=4,
-    cache_read_tokens=1,
-    cost_usd=0.0008,
-    duration_s=0.4,
-)
-
 _FAKE_ENRICH_HEADER = "Test Role · ACME · Hamburg"
 _FAKE_ENRICH_SUMMARY = "A test role."
 
 
 class _FakeLLMEnricherRejectJob1:
-    """Fake LLMEnricher: rejects stub with title 'Job 1'; all others are in-domain.
-
-    Tracks per-call usage: _FAKE_CLASSIFY_USAGE per call.
-    """
+    """Fake LLMEnricher: rejects stub with title 'Job 1'; all others are in-domain."""
 
     def __init__(
         self,
@@ -1223,13 +1196,11 @@ class _FakeLLMEnricherRejectJob1:
 class _FakeExtractor:
     """Deterministic extractor (v2): judge_top_n only."""
 
-    def judge_top_n(
-        self, candidates: list[JudgeCandidate]
-    ) -> tuple[list[MatchVerdict], CallUsage]:
+    def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
         verdicts = []
         for i, c in enumerate(candidates[:5]):
             verdicts.append(MatchVerdict(id=c.id, rank=i + 1))
-        return verdicts, _FAKE_JUDGE_USAGE
+        return verdicts
 
 
 def test_orchestrator_parser_lifecycle_full_run_smoke(tmp_path: Path) -> None:
@@ -1325,12 +1296,10 @@ def test_no_judge_skips_judge_no_daily_file_listings_remain_matched(
     judge_called = False
 
     class _TrackingExtractor:
-        def judge_top_n(
-            self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             nonlocal judge_called
             judge_called = True
-            return [], _ZERO_USAGE
+            return []
 
     summary = run(
         config_path,
@@ -1425,13 +1394,11 @@ def test_classify_precedes_judge(tmp_path: Path) -> None:
             return super().enrich(items)
 
     class _InstrumentedExtractor:
-        def judge_top_n(
-            self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             call_log.append("judge_top_n")
             return [
                 MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
-            ], _ZERO_USAGE
+            ]
 
     class _MultiStubParser(_StubParserBase):
         """Emits 5 stubs, all pass prefilter."""
@@ -2042,14 +2009,12 @@ def test_judge_pending_bypasses_classify_on_rerun(tmp_path: Path) -> None:
     judge_candidate_ids: list[int] = []
 
     class _TrackingExtractor:
-        def judge_top_n(
-            self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
                 MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
-            ], _ZERO_USAGE
+            ]
 
     summary = run(
         _one_stub_config(tmp_path),
@@ -2185,14 +2150,12 @@ def test_judge_pending_enrich_re_fetches_fresh_page(tmp_path: Path) -> None:
     card_store = load_card_store(tmp_path / "extracts.json")
 
     class _CapturingExtractor:
-        def judge_top_n(
-            self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
                 MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
-            ], _ZERO_USAGE
+            ]
 
     run(
         _one_stub_config(tmp_path),
@@ -3175,25 +3138,25 @@ def test_off_domain_marked_seen_immediately_no_judge(tmp_path: Path) -> None:
     class _TrackingExtractor:
         def classify_relevance(
             self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
+        ) -> list[RelevanceVerdict | None]:
             assert len(items) == 1
             if items[0].title == "Off-domain Job":
-                return [RelevanceVerdict(matches=False)], _ZERO_USAGE
+                return [RelevanceVerdict(matches=False)]
             return [
                 RelevanceVerdict(
                     matches=True,
                     header=_FAKE_ENRICH_HEADER,
                     summary=_FAKE_ENRICH_SUMMARY,
                 )
-            ], _ZERO_USAGE
+            ]
 
         def judge_top_n(
             self, candidates: "list[JudgeCandidate]"
-        ) -> "tuple[list[MatchVerdict], CallUsage]":
+        ) -> "list[MatchVerdict]":
             judge_candidate_ids.append([c.id for c in candidates])
             return [
                 MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
-            ], _ZERO_USAGE
+            ]
 
     class _TwoLangParser(_StubParserBase):
         def __enter__(self) -> "_TwoLangParser":
@@ -3493,11 +3456,6 @@ def test_run_summary_carries_token_and_cost_totals(tmp_path: Path) -> None:
 
     # 5 items pass prefilter â†' 5 enrich calls (1 off-domain + 4 in-domain = 5 classified)
     assert summary.classify_items == 5
-    # In v2, classify usage is zero; judge usage comes from _FakeExtractor._FAKE_JUDGE_USAGE
-    assert summary.claude_input_tokens == _FAKE_JUDGE_USAGE.input_tokens
-    assert summary.claude_output_tokens == _FAKE_JUDGE_USAGE.output_tokens
-    assert summary.claude_cache_read_tokens == _FAKE_JUDGE_USAGE.cache_read_tokens
-    assert abs(summary.claude_cost_usd - _FAKE_JUDGE_USAGE.cost_usd) < 1e-9
 
 
 def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
@@ -3539,11 +3497,6 @@ def test_classify_relevance_trailer_schema(tmp_path: Path) -> None:
         "matched=",
         "off_domain=",
         "batches_failed=",
-        "input_tokens=",
-        "output_tokens=",
-        "cache_read_tokens=",
-        "cost_usd=",
-        "duration_s=",
     ):
         assert key in content, f"key {key!r} missing from run.log"
 
@@ -3584,11 +3537,6 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
     for key in (
         "judges_sent=",
         "judges_failed=",
-        "input_tokens=",
-        "output_tokens=",
-        "cache_read_tokens=",
-        "cost_usd=",
-        "duration_s=",
     ):
         assert key in content, f"key {key!r} missing from run.log"
 
@@ -3596,7 +3544,7 @@ def test_judge_match_trailer_schema(tmp_path: Path) -> None:
 def test_main_run_complete_line_includes_new_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """__main__ 'run complete:' line includes classify_items, claude_* token and cost fields."""
+    """__main__ 'run complete:' line includes classify_items and duration fields."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     (tmp_path / "application-pipeline" / "config.py").write_text("")
@@ -3609,10 +3557,6 @@ def test_main_run_complete_line_includes_new_fields(
         discovered=3,
         written=2,
         classify_items=3,
-        claude_input_tokens=42,
-        claude_output_tokens=21,
-        claude_cache_read_tokens=6,
-        claude_cost_usd=0.0042,
         duration_seconds=1.5,
     )
     monkeypatch.setattr(
@@ -3629,10 +3573,7 @@ def test_main_run_complete_line_includes_new_fields(
     )
     for field in (
         "classify_items=",
-        "claude_input_tokens=",
-        "claude_output_tokens=",
-        "claude_cache_read_tokens=",
-        "claude_cost_usd=",
+        "duration=",
     ):
         assert field in out, f"field {field!r} missing from run complete line: {out!r}"
 
@@ -4307,7 +4248,7 @@ def test_non_quota_worker_exception_writes_failure_report(
 
         def judge_top_n(
             self, candidates: "list[JudgeCandidate]"
-        ) -> "tuple[list[MatchVerdict], CallUsage]":
+        ) -> "list[MatchVerdict]":
             raise RuntimeError("disk full")
 
     class _InDomainEnricher:
@@ -4883,8 +4824,6 @@ def test_run_reports_match_judge_completion_through_run_metrics(
     run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
     assert "judges_sent=1" in run_log_text
     assert "judges_failed=0" in run_log_text
-    assert "input_tokens=0" in run_log_text
-    assert "output_tokens=0" in run_log_text
 
 
 def test_run_reports_match_judge_failure_through_run_metrics(
@@ -4897,9 +4836,7 @@ def test_run_reports_match_judge_failure_through_run_metrics(
     card_store = _make_card_store(tmp_path)
 
     class _FailingJudge:
-        def judge_top_n(
-            self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             raise ExtractorError("judge failed")
 
     summary = run(
@@ -5035,7 +4972,7 @@ def test_quota_judge_retries_and_completes(
     class _RetryJudge:
         def judge_top_n(
             self, candidates: "list[JudgeCandidate]"
-        ) -> "tuple[list[MatchVerdict], CallUsage]":
+        ) -> "list[MatchVerdict]":
             judge_call_count[0] += 1
             if judge_call_count[0] == 1:
                 raise UsageLimitError(
@@ -5043,7 +4980,7 @@ def test_quota_judge_retries_and_completes(
                 )
             return [
                 MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
-            ], _ZERO_USAGE
+            ]
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -5096,12 +5033,10 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
                 kind="usage_limit",
                 output="quota reached",
                 log_path=runtime_log,
-                usage=CallUsage(
+                usage=AgentRuntimeUsage(
                     input_tokens=10,
                     output_tokens=1,
                     cache_read_tokens=0,
-                    cost_usd=0.01,
-                    duration_s=0.2,
                 ),
                 reset_time=None,
                 message=None,
@@ -5115,12 +5050,10 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
             kind="completed",
             output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
             log_path=runtime_log,
-            usage=CallUsage(
+            usage=AgentRuntimeUsage(
                 input_tokens=11,
                 output_tokens=2,
                 cache_read_tokens=0,
-                cost_usd=0.01,
-                duration_s=0.4,
             ),
             reset_time=None,
             message=None,
@@ -5193,7 +5126,11 @@ def test_run_passes_local_operator_credential_to_agent_runtime_calls(
                     "</verdict>"
                 ),
                 log_path=runtime_log,
-                usage=_FAKE_CLASSIFY_USAGE,
+                usage=AgentRuntimeUsage(
+                    input_tokens=10,
+                    output_tokens=5,
+                    cache_read_tokens=0,
+                ),
                 reset_time=None,
                 message=None,
             )
@@ -5201,7 +5138,11 @@ def test_run_passes_local_operator_credential_to_agent_runtime_calls(
             kind="completed",
             output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
             log_path=runtime_log,
-            usage=_FAKE_JUDGE_USAGE,
+            usage=AgentRuntimeUsage(
+                input_tokens=8,
+                output_tokens=4,
+                cache_read_tokens=0,
+            ),
             reset_time=None,
             message=None,
         )
@@ -5616,12 +5557,12 @@ def test_freshness_pool_reentry_fresh_position_stays_matched_and_reaches_judge(
     class _JudgeTrackingExtractor:
         def judge_top_n(
             self, candidates: "list[JudgeCandidate]"
-        ) -> "tuple[list[MatchVerdict], CallUsage]":
+        ) -> "list[MatchVerdict]":
             for c in candidates:
                 judge_candidate_ids.append(c.id)
             return [
                 MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
-            ], _ZERO_USAGE
+            ]
 
     run(
         _write_config(
@@ -5865,12 +5806,8 @@ class _FakeLLMEnricher:
 class _FakeJudgeExtractor:
     """Fake extractor with judge_top_n only."""
 
-    def judge_top_n(
-        self, candidates: "list[JudgeCandidate]"
-    ) -> "tuple[list[MatchVerdict], CallUsage]":
-        return [
-            MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
-        ], _ZERO_USAGE
+    def judge_top_n(self, candidates: "list[JudgeCandidate]") -> "list[MatchVerdict]":
+        return [MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])]
 
 
 def test_pipeline_produces_cards(tmp_path: Path) -> None:
@@ -6326,11 +6263,10 @@ def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
             return [PositionStub(url=url, title="ML Engineer", source="stub")]
 
     extractor_mock = MagicMock()
-    extractor_mock.classify_relevance.return_value = (
-        [RelevanceVerdict(matches=True, header=stale_header, summary="Old role.")],
-        _ZERO_USAGE,
-    )
-    extractor_mock.judge_top_n.return_value = ([], _ZERO_USAGE)
+    extractor_mock.classify_relevance.return_value = [
+        RelevanceVerdict(matches=True, header=stale_header, summary="Old role.")
+    ]
+    extractor_mock.judge_top_n.return_value = []
 
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
@@ -6393,35 +6329,26 @@ def test_post_llm_stale_outcome_is_dropped_and_fresh_batch_peer_reaches_judge(
     class _TrackingExtractor:
         def classify_relevance(
             self, items: list[ClassifyItem]
-        ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
+        ) -> list[RelevanceVerdict | None]:
             assert len(items) == 2
-            return (
-                [
-                    RelevanceVerdict(
-                        matches=True,
-                        header=stale_header,
-                        summary="Old role.",
-                    ),
-                    RelevanceVerdict(
-                        matches=True,
-                        header=fresh_header,
-                        summary="Fresh role.",
-                    ),
-                ],
-                _ZERO_USAGE,
-            )
+            return [
+                RelevanceVerdict(
+                    matches=True,
+                    header=stale_header,
+                    summary="Old role.",
+                ),
+                RelevanceVerdict(
+                    matches=True,
+                    header=fresh_header,
+                    summary="Fresh role.",
+                ),
+            ]
 
-        def judge_top_n(
-            self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             judge_candidate_ids.append([c.id for c in candidates])
-            return (
-                [
-                    MatchVerdict(id=c.id, rank=i + 1)
-                    for i, c in enumerate(candidates[:5])
-                ],
-                _ZERO_USAGE,
-            )
+            return [
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
+            ]
 
     summary = run(
         _write_config(
@@ -6971,16 +6898,12 @@ def test_matched_llm_enricher_outcome_reaches_judge_and_daily_results_file(
     class _Extractor:
         def classify_relevance(
             self, items: list[object]
-        ) -> tuple[list[RelevanceVerdict | None], CallUsage]:
-            return [
-                RelevanceVerdict(matches=True, header=header, summary=card_summary)
-            ], _ZERO_USAGE
+        ) -> list[RelevanceVerdict | None]:
+            return [RelevanceVerdict(matches=True, header=header, summary=card_summary)]
 
-        def judge_top_n(
-            self, candidates: list[JudgeCandidate]
-        ) -> tuple[list[MatchVerdict], CallUsage]:
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             judge_candidates.extend(candidates)
-            return [MatchVerdict(id=candidates[0].id, rank=1)], _ZERO_USAGE
+            return [MatchVerdict(id=candidates[0].id, rank=1)]
 
     extractor = _Extractor()
     card_store = load_card_store(extracts_path)

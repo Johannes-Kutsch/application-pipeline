@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Literal
 
@@ -64,15 +64,6 @@ class ClassifyItem:
     company: str | None = None
     location: str | None = None
     posted_date: date | None = None
-
-
-@dataclass(frozen=True)
-class CallUsage:
-    input_tokens: int
-    output_tokens: int
-    cache_read_tokens: int
-    cost_usd: float
-    duration_s: float
 
 
 @dataclass(frozen=True)
@@ -145,15 +136,6 @@ class AppliedClassifyItemOutcome:
 @dataclass(frozen=True)
 class AppliedClassifyOutcome:
     items: list[AppliedClassifyItemOutcome]
-    usage: CallUsage = field(
-        default_factory=lambda: CallUsage(
-            input_tokens=0,
-            output_tokens=0,
-            cache_read_tokens=0,
-            cost_usd=0.0,
-            duration_s=0.0,
-        )
-    )
 
     @property
     def matched_listings(self) -> list[tuple[int, "PositionStub"]]:

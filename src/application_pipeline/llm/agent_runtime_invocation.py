@@ -13,9 +13,9 @@ from agent_runtime import (
 from agent_runtime import ToolPolicy
 from agent_runtime.agent_log import AgentInvocationLog
 from agent_runtime.runtime import EphemeralRunRequest, ProviderAuth, ProviderUsage
-from agent_runtime.types import ProviderSelection
 
-from .types import CallUsage
+from .agent_runtime_types import AgentRuntimeUsage
+from agent_runtime.types import ProviderSelection
 
 _AGENT_RUNTIME_SERVICE: Final = "opencode"
 _AGENT_RUNTIME_MODEL: Final = "deepseek-v4-flash"
@@ -42,7 +42,7 @@ class AgentRuntimeInvocationResult:
     kind: AgentRuntimeInvocationKind
     output: str
     log_path: Path
-    usage: CallUsage | None = None
+    usage: AgentRuntimeUsage | None = None
     reset_time: datetime | None = None
     message: str | None = None
 
@@ -77,23 +77,19 @@ def _build_request(
     )
 
 
-def _to_call_usage(usage: ProviderUsage | None) -> CallUsage | None:
+def _to_agent_runtime_usage(usage: ProviderUsage | None) -> AgentRuntimeUsage | None:
     if usage is None:
         return None
     if (
         usage.input_tokens is None
         or usage.output_tokens is None
         or usage.cache_read_input_tokens is None
-        or usage.cost_usd is None
-        or usage.duration_seconds is None
     ):
         return None
-    return CallUsage(
+    return AgentRuntimeUsage(
         input_tokens=int(usage.input_tokens),
         output_tokens=int(usage.output_tokens),
         cache_read_tokens=int(usage.cache_read_input_tokens),
-        cost_usd=float(usage.cost_usd),
-        duration_s=float(usage.duration_seconds),
     )
 
 
@@ -102,7 +98,7 @@ def _build_result(
     kind: AgentRuntimeInvocationKind,
     output: str,
     log_path: Path,
-    usage: CallUsage | None,
+    usage: AgentRuntimeUsage | None,
     reset_time: datetime | None = None,
     message: str | None = None,
 ) -> AgentRuntimeInvocationResult:
@@ -119,7 +115,7 @@ def _build_result(
 def _result_from_outcome(
     outcome: RuntimeOutcome, log_path: Path
 ) -> AgentRuntimeInvocationResult:
-    usage = _to_call_usage(outcome.usage)
+    usage = _to_agent_runtime_usage(outcome.usage)
     if outcome.kind == "completed":
         if usage is None:
             return _build_result(

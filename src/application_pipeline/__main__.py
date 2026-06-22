@@ -179,10 +179,6 @@ def _execute_run(config_path: Path, *, no_judge: bool, failure_report_writer) ->
         f"  enrich_failed={summary.enrich_failed}"
         f"  errored={summary.errored}"
         f"  classify_items={summary.classify_items}"
-        f"  claude_input_tokens={summary.claude_input_tokens}"
-        f"  claude_output_tokens={summary.claude_output_tokens}"
-        f"  claude_cache_read_tokens={summary.claude_cache_read_tokens}"
-        f"  claude_cost_usd={summary.claude_cost_usd:.6f}"
         f"  duration={summary.duration_seconds:.1f}s"
     )
 

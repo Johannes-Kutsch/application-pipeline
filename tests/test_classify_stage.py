@@ -21,7 +21,6 @@ from application_pipeline.llm import quota as _quota
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
     AppliedClassifyItemOutcome,
-    CallUsage,
     ExtractorBatchMalformedError,
     MatchedListing,
 )
@@ -908,68 +907,6 @@ def test_classify_stage_matched_outcome_routes_original_submission_to_pool_and_p
     assert len(rows) == 1
     assert rows[0]["event"] == "classify_relevance"
     assert rows[0]["matches"] is True
-
-
-def test_classify_stage_success_outcome_carries_usage_into_run_metrics(
-    tmp_path: Path,
-) -> None:
-    logs_dir = tmp_path / "logs"
-    display = FakeStatusDisplay()
-    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
-    metrics.register_rows()
-    pool_collector = _CollectingPoolCollector()
-    usage = CallUsage(
-        input_tokens=321,
-        output_tokens=123,
-        cache_read_tokens=45,
-        cost_usd=0.006,
-        duration_s=1.75,
-    )
-
-    class _MatchedEnricherWithUsage:
-        def enrich(
-            self, items: list[tuple[int, PositionStub, str]]
-        ) -> AppliedClassifyOutcome:
-            listing_id, stub, _ = items[0]
-            return AppliedClassifyOutcome(
-                items=[
-                    AppliedClassifyItemOutcome(
-                        state="matched",
-                        event_matches=True,
-                        matched_listing=MatchedListing(
-                            listing_id=listing_id,
-                            stub=stub,
-                        ),
-                    )
-                ],
-                usage=usage,
-            )
-
-    stage = _build_stage(
-        logs_dir=logs_dir,
-        pool_collector=pool_collector,
-        llm_enricher=_MatchedEnricherWithUsage(),
-        metrics=metrics,
-    )
-    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
-
-    stage.start()
-    _submit_ready(handoff, 1)
-    stage.close()
-    completion = stage.wait()
-
-    assert completion.first_failure is None
-    assert metrics.classify_input_tokens == 321
-    assert metrics.classify_output_tokens == 123
-
-    divider = metrics.format_run_divider(
-        "2026-01-01T00:00:00Z", None, 3.0, dedup=DedupSnapshot()
-    )
-    assert "classify_input_tokens=321" in divider
-    assert "classify_output_tokens=123" in divider
-    assert "classify_cache_read_tokens=45" in divider
-    assert "classify_cost_usd=0.006000" in divider
-    assert "classify_total_s=1.8" in divider
 
 
 def test_classify_stage_rejected_outcome_skips_pool_and_counts_classifier_drop(

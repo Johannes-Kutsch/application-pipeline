@@ -104,6 +104,110 @@ def test_root_lifecycle_jsonl_exceeding_10000_lines_is_truncated_to_last_10000(
     assert result_lines[-1] == '{"line": 14999}'
 
 
+def test_agent_runtime_classify_log_older_than_30_days_is_deleted(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "old.log"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text("old runtime log\n" * 3)
+    old_mtime = time.time() - 31 * 24 * 3600
+    os.utime(log_file, (old_mtime, old_mtime))
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert not log_file.exists()
+
+
+def test_agent_runtime_judge_log_older_than_30_days_is_deleted(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "judge" / "old.log"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text("old runtime log\n" * 3)
+    old_mtime = time.time() - 31 * 24 * 3600
+    os.utime(log_file, (old_mtime, old_mtime))
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert not log_file.exists()
+
+
+def test_agent_runtime_classify_log_newer_than_30_days_is_preserved_instead_of_truncated(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "new.log"
+    log_file.parent.mkdir(parents=True)
+    lines = [f"line {i}" for i in range(15_000)]
+    log_file.write_text("\n".join(lines) + "\n")
+
+    run_maintenance(logs_dir, failures_dir)
+
+    result_lines = log_file.read_text().splitlines()
+    assert len(result_lines) == 15_000
+    assert result_lines[0] == "line 0"
+    assert result_lines[-1] == "line 14999"
+
+
+def test_agent_runtime_judge_log_newer_than_30_days_is_preserved_instead_of_truncated(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "judge" / "new.log"
+    log_file.parent.mkdir(parents=True)
+    lines = [f"line {i}" for i in range(15_000)]
+    log_file.write_text("\n".join(lines) + "\n")
+
+    run_maintenance(logs_dir, failures_dir)
+
+    result_lines = log_file.read_text().splitlines()
+    assert len(result_lines) == 15_000
+    assert result_lines[0] == "line 0"
+    assert result_lines[-1] == "line 14999"
+
+
+def test_agent_runtime_log_at_30_day_cutoff_is_preserved(
+    dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "cutoff.log"
+    log_file.parent.mkdir(parents=True)
+    lines = [f"line {i}" for i in range(15_000)]
+    log_file.write_text("\n".join(lines) + "\n")
+    fake_now = 1_000_000_000.0
+    cutoff_mtime = fake_now - 30 * 24 * 3600
+    os.utime(log_file, (cutoff_mtime, cutoff_mtime))
+    monkeypatch.setattr(time, "time", lambda: fake_now)
+
+    run_maintenance(logs_dir, failures_dir)
+
+    result_lines = log_file.read_text().splitlines()
+    assert len(result_lines) == 15_000
+    assert result_lines[0] == "line 0"
+    assert result_lines[-1] == "line 14999"
+
+
+def test_pipeline_owned_log_artifact_under_agent_runtime_subdir_keeps_tail_retention(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    log_file = (
+        logs_dir / "llm" / "agent-runtime" / "classify" / "component.events.jsonl"
+    )
+    log_file.parent.mkdir(parents=True)
+    lines = [f'{{"line": {i}}}' for i in range(15_000)]
+    log_file.write_text("\n".join(lines) + "\n")
+
+    run_maintenance(logs_dir, failures_dir)
+
+    result_lines = log_file.read_text().splitlines()
+    assert len(result_lines) == 10_000
+    assert result_lines[0] == '{"line": 5000}'
+    assert result_lines[-1] == '{"line": 14999}'
+
+
 def test_flat_log_artifact_exceeding_10000_lines_is_truncated_to_last_10000(
     dirs: tuple[Path, Path],
 ) -> None:
@@ -145,6 +249,33 @@ def test_filesystem_error_on_one_nested_log_artifact_does_not_stop_other_truncat
     assert len(result_lines) == 10_000
     assert result_lines[0] == '{"line": 5000}'
     assert result_lines[-1] == '{"line": 14999}'
+
+
+def test_filesystem_error_on_one_agent_runtime_log_does_not_stop_other_maintenance(
+    dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs_dir, failures_dir = dirs
+    bad_log = logs_dir / "llm" / "agent-runtime" / "classify" / "bad.log"
+    good_log = logs_dir / "run.log"
+    bad_log.parent.mkdir(parents=True, exist_ok=True)
+    bad_log.write_text("bad runtime log\n")
+    good_log.write_text("\n".join(f"line {i}" for i in range(15_000)) + "\n")
+
+    original_getmtime = os.path.getmtime
+
+    def flaky_getmtime(path: os.PathLike[str] | str) -> float:
+        if Path(path) == bad_log:
+            raise OSError("simulated stat failure")
+        return original_getmtime(path)
+
+    monkeypatch.setattr(os.path, "getmtime", flaky_getmtime)
+
+    run_maintenance(logs_dir, failures_dir)
+
+    result_lines = good_log.read_text().splitlines()
+    assert len(result_lines) == 10_000
+    assert result_lines[0] == "line 5000"
+    assert result_lines[-1] == "line 14999"
 
 
 def test_old_failure_report_markdown_in_failures_dir_is_deleted(

@@ -215,6 +215,43 @@ def _read_malformed_stash(tmp_path: Path, source: str, slug: str) -> str:
     return stash_path.read_text(encoding="utf-8")
 
 
+def _runtime_log_path(tmp_path: Path) -> Path:
+    path = tmp_path / "logs" / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("runtime output\n", encoding="utf-8")
+    return path
+
+
+def test_enricher_stashes_malformed_verdict_references_agent_runtime_log(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    runtime_log = _runtime_log_path(tmp_path)
+    extractor = MagicMock()
+    extractor.classify_relevance.return_value = [None]
+    extractor.last_classify_log_path = runtime_log
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/99",
+        title="Software Engineer",
+        source="test_src",
+    )
+
+    result = enricher.enrich([(99, stub, "Raw description body")])
+
+    assert [item.state for item in result.items] == ["retryable"]
+
+    slug = "example.com-job-99"
+    content = _read_malformed_stash(tmp_path, "test_src", slug)
+    assert str(runtime_log) in content
+    assert "## Prompt" not in content
+    assert "Raw description body" not in content
+
+
 def test_enricher_stashes_malformed_llm_output_and_returns_retryable(
     tmp_path: Path,
     run_log: RunLog,
@@ -253,11 +290,12 @@ def test_enricher_stashes_malformed_llm_output_and_returns_retryable(
 # ---------------------------------------------------------------------------
 
 
-def test_enricher_malformed_error_produces_retryable_md_file_with_all_sections(
+def test_enricher_malformed_error_produces_retryable_md_file_with_runtime_log_reference(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
+    runtime_log = _runtime_log_path(tmp_path)
     body = "Software Engineer role."
     error_msg = "classify_relevance: header must be a non-empty string"
     prompt_text = "You are a relevance classifier. Evaluate this job."
@@ -266,6 +304,7 @@ def test_enricher_malformed_error_produces_retryable_md_file_with_all_sections(
     extractor.classify_relevance.side_effect = ExtractorMalformedError(
         error_msg, prompt=prompt_text, raw_response=raw_resp
     )
+    extractor.last_classify_log_path = runtime_log
 
     enricher = _make_enricher(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -285,15 +324,18 @@ def test_enricher_malformed_error_produces_retryable_md_file_with_all_sections(
     assert "test_src" in content
     assert "https://example.com/job/99" in content
     assert error_msg in content
-    assert prompt_text in content
-    assert raw_resp in content
+    assert str(runtime_log) in content
+    assert prompt_text not in content
+    assert raw_resp not in content
+    assert body not in content
 
 
-def test_enricher_malformed_json_error_produces_retryable_md_file_with_cli_sections(
+def test_enricher_malformed_json_error_produces_retryable_md_file_with_runtime_log_reference(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
 ) -> None:
+    runtime_log = _runtime_log_path(tmp_path)
     body = "DevOps role."
     error_msg = "claude CLI exited with code 1"
     prompt_text = "Classify this job posting."
@@ -302,6 +344,7 @@ def test_enricher_malformed_json_error_produces_retryable_md_file_with_cli_secti
     extractor.classify_relevance.side_effect = ExtractorMalformedJSONError(
         error_msg, returncode=1, stderr=stderr_text, prompt=prompt_text
     )
+    extractor.last_classify_log_path = runtime_log
 
     enricher = _make_enricher(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -321,10 +364,46 @@ def test_enricher_malformed_json_error_produces_retryable_md_file_with_cli_secti
     assert "src_cli" in content
     assert "https://example.com/job/cli" in content
     assert error_msg in content
-    assert prompt_text in content
-    assert stderr_text in content
-    assert "1" in content
-    assert "<result>" not in content
+    assert str(runtime_log) in content
+    assert prompt_text not in content
+    assert stderr_text not in content
+    assert body not in content
+
+
+def test_enricher_batch_malformed_stash_references_agent_runtime_log(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    runtime_log = _runtime_log_path(tmp_path)
+    error_msg = "batch response could not be parsed"
+    prompt_text = "Classify this batch."
+    raw_response = "<result>{bad json}</result>"
+    stderr_text = "Error: API rate limit exceeded"
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorBatchMalformedError(error_msg)
+    extractor.last_classify_log_path = runtime_log
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/batch",
+        title="Batch Job",
+        source="batch_src",
+    )
+
+    result = enricher.enrich([(1, stub, "body")])
+
+    assert [item.state for item in result.items] == ["retryable"]
+
+    slug = "example.com-job-batch"
+    content = _read_malformed_stash(tmp_path, "batch_src", slug)
+    assert str(runtime_log) in content
+    assert error_msg in content
+    assert prompt_text not in content
+    assert raw_response not in content
+    assert stderr_text not in content
 
 
 def test_enricher_batch_malformed_error_returns_retryable_and_produces_md_file_without_prompt_or_response(

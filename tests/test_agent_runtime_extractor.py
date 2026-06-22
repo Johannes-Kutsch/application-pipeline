@@ -117,6 +117,24 @@ def _patch_runtime(
     )
 
 
+def _capture_invoke(
+    monkeypatch: pytest.MonkeyPatch,
+    result: AgentRuntimeInvocationResult,
+    captured: dict[str, object],
+) -> None:
+    def _fake_invoke(
+        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+    ) -> AgentRuntimeInvocationResult:
+        captured["prompt"] = prompt
+        captured["call_site"] = call_site
+        return result
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        _fake_invoke,
+    )
+
+
 def _item(**kwargs: object) -> ClassifyItem:
     defaults: dict[str, object] = dict(
         title="Senior Python Engineer", raw_description="Python ML role"
@@ -236,17 +254,22 @@ def test_classify_relevance_prompt_includes_company_and_location(
     run_log: RunLog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(
+    captured: dict[str, object] = {}
+    _capture_invoke(
         monkeypatch,
         _runtime_result(
             _classify_output({"matches": True, "header": "h", "summary": "s"})
         ),
+        captured,
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.classify_relevance([_item(company="TestCorp", location="Berlin")])
-    prompt_sent = _read_transcripts(run_log, "llm_classify_relevance")[0]["prompt"]
+    prompt_sent = str(captured["prompt"])
     assert "TestCorp" in prompt_sent
     assert "Berlin" in prompt_sent
+    assert not (
+        run_log.logs_dir / "llm" / "classify_relevance.transcripts.jsonl"
+    ).exists()
 
 
 def test_classify_relevance_legacy_in_domain_field_returns_none(
@@ -262,6 +285,21 @@ def test_classify_relevance_legacy_in_domain_field_returns_none(
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.classify_relevance([_item()])
     assert results[0] is None
+
+
+def test_classify_relevance_does_not_write_pipeline_owned_transcript_jsonl(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_runtime(
+        monkeypatch,
+        _runtime_result(_classify_output({"matches": False})),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor.classify_relevance([_item()])
+
+    transcript_path = run_log.logs_dir / "llm" / "classify_relevance.transcripts.jsonl"
+    assert not transcript_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +342,7 @@ def test_judge_top_n_empty_candidates_returns_empty_list(
     assert _read_events(run_log, "llm_judge_match") == []
 
 
-def test_judge_top_n_candidates_appear_in_prompt(
+def test_judge_top_n_does_not_write_pipeline_owned_transcript_jsonl(
     run_log: RunLog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -316,9 +354,29 @@ def test_judge_top_n_candidates_appear_in_prompt(
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.judge_top_n(candidates)
-    prompt_sent = _read_transcripts(run_log, "llm_judge_match")[0]["prompt"]
+
+    transcript_path = run_log.logs_dir / "llm" / "judge_match.transcripts.jsonl"
+    assert not transcript_path.exists()
+
+
+def test_judge_top_n_candidates_appear_in_prompt(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = _make_candidates(2)
+    verdicts_raw = [{"id": c.id, "rank": i + 1} for i, c in enumerate(candidates)]
+    captured: dict[str, object] = {}
+    _capture_invoke(
+        monkeypatch,
+        _runtime_result(_judge_output(verdicts_raw), usage=_judge_usage()),
+        captured,
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor.judge_top_n(candidates)
+    prompt_sent = str(captured["prompt"])
     assert "[Candidate id=0]" in prompt_sent
     assert "[Candidate id=1]" in prompt_sent
+    assert not (run_log.logs_dir / "llm" / "judge_match.transcripts.jsonl").exists()
 
 
 def test_judge_top_n_coerces_string_id_to_int(
@@ -432,11 +490,9 @@ def test_judge_top_n_success_logs_verdicts_without_usage_fields(
     results = extractor.judge_top_n(_make_candidates(1))
 
     assert results == [MatchVerdict(id=0, rank=1)]
-    transcript = _read_transcripts(run_log, "llm_judge_match")[-1]
+    assert not (run_log.logs_dir / "llm" / "judge_match.transcripts.jsonl").exists()
     event = _read_events(run_log, "llm_judge_match")[-1]
-    assert "usage" not in transcript
-    assert "cost_usd" not in transcript
-    assert "duration_s" not in transcript
+    assert "usage" not in event
     assert "cost_usd" not in event
     assert "duration_s" not in event
 
@@ -635,13 +691,17 @@ def test_classify_relevance_batch_prompt_includes_sequential_ids(
     output = _batch_classify_output(
         [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
     )
-    _patch_runtime(monkeypatch, _runtime_result(output))
+    captured: dict[str, object] = {}
+    _capture_invoke(monkeypatch, _runtime_result(output), captured)
     extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     extractor.classify_relevance(items)
-    prompt_sent = _read_transcripts(run_log, "llm_classify_relevance")[0]["prompt"]
+    prompt_sent = str(captured["prompt"])
     assert "id=1" in prompt_sent
     assert "id=2" in prompt_sent
     assert "id=3" in prompt_sent
+    assert not (
+        run_log.logs_dir / "llm" / "classify_relevance.transcripts.jsonl"
+    ).exists()
 
 
 def test_classify_relevance_out_of_order_verdicts_map_to_correct_positions(
@@ -707,7 +767,7 @@ def test_classify_relevance_all_verdicts_missing_returns_all_none_no_error(
     assert results == [None, None]
 
 
-def test_classify_relevance_batch_logs_the_full_batch_prompt_and_response(
+def test_classify_relevance_batch_includes_full_prompt_via_agent_runtime(
     run_log: RunLog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -715,17 +775,20 @@ def test_classify_relevance_batch_logs_the_full_batch_prompt_and_response(
     output = _batch_classify_output(
         [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
     )
-    _patch_runtime(monkeypatch, _runtime_result(output))
+    captured: dict[str, object] = {}
+    _capture_invoke(monkeypatch, _runtime_result(output), captured)
     extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
     extractor.classify_relevance(items)
-    transcript = _read_transcripts(run_log, "llm_classify_relevance")[-1]
-    assert "Job 1" in transcript["prompt"]
-    assert "Job 2" in transcript["prompt"]
-    assert "Job 3" in transcript["prompt"]
-    assert transcript["raw_response"] == output
+    prompt_sent = str(captured["prompt"])
+    assert "Job 1" in prompt_sent
+    assert "Job 2" in prompt_sent
+    assert "Job 3" in prompt_sent
+    assert not (
+        run_log.logs_dir / "llm" / "classify_relevance.transcripts.jsonl"
+    ).exists()
 
 
-def test_classify_relevance_success_logs_verdicts_without_usage_fields(
+def test_classify_relevance_success_logs_event_without_usage_fields(
     run_log: RunLog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -738,11 +801,11 @@ def test_classify_relevance_success_logs_verdicts_without_usage_fields(
     results = extractor.classify_relevance([_item()])
 
     assert results[0] is not None and results[0].matches is False
-    transcript = _read_transcripts(run_log, "llm_classify_relevance")[-1]
+    assert not (
+        run_log.logs_dir / "llm" / "classify_relevance.transcripts.jsonl"
+    ).exists()
     event = _read_events(run_log, "llm_classify_relevance")[-1]
-    assert "usage" not in transcript
-    assert "cost_usd" not in transcript
-    assert "duration_s" not in transcript
+    assert "usage" not in event
     assert "cost_usd" not in event
     assert "duration_s" not in event
 
@@ -1009,6 +1072,50 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
 
     assert captured["call_site"] == "classify"
     assert captured["provider_auth"] == provider_auth
+
+
+def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_log = (
+        run_log.logs_dir / "llm" / "agent-runtime" / "classify" / "missing.log"
+    )
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        lambda *args, **kwargs: AgentRuntimeInvocationResult(
+            kind="completed",
+            output=_classify_output({"matches": False}),
+            log_path=missing_log,
+            usage=_usage(),
+            reset_time=None,
+            message=None,
+        ),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+    results = extractor.classify_relevance([_item()])
+    assert results == [RelevanceVerdict(matches=False)]
+
+
+def test_judge_top_n_succeeds_when_runtime_log_file_is_missing(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing_log = run_log.logs_dir / "llm" / "agent-runtime" / "judge" / "missing.log"
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
+        lambda *args, **kwargs: AgentRuntimeInvocationResult(
+            kind="completed",
+            output=_judge_output([{"id": 0, "rank": 1}]),
+            log_path=missing_log,
+            usage=_judge_usage(),
+            reset_time=None,
+            message=None,
+        ),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+    results = extractor.judge_top_n(_make_candidates(1))
+    assert results == [MatchVerdict(id=0, rank=1)]
 
 
 def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usage(

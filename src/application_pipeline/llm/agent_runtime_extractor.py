@@ -1,6 +1,7 @@
+import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from application_pipeline.config import Config
@@ -131,6 +132,11 @@ class AgentRuntimeExtractor:
         self._prompts = prompts
         self._run_log = run_log
         self._provider_auth = provider_auth
+        self._local = threading.local()
+
+    @property
+    def last_classify_log_path(self) -> Path | None:
+        return getattr(self._local, "last_classify_log_path", None)
 
     def classify_relevance(
         self, items: list[ClassifyItem]
@@ -164,12 +170,6 @@ class AgentRuntimeExtractor:
                 except ExtractorMalformedError:
                     results.append(None)
 
-        transcript_entry: dict[str, object] = {
-            "call": _CLASSIFY_SITE.call,
-            "prompt": prompt,
-            "raw_response": response.raw_response,
-        }
-        self._run_log.transcript(_CLASSIFY_SITE.component_id, transcript_entry)
         self._run_log.event(
             _CLASSIFY_SITE.component_id,
             _CLASSIFY_SITE.call,
@@ -184,7 +184,6 @@ class AgentRuntimeExtractor:
         data, response = self._invoke_runtime_protocol(
             _JUDGE_TOP_N_SITE,
             prompt,
-            {"candidate_count": len(candidates)},
         )
         return self._parse_top_n_response(data, candidates)
 
@@ -192,7 +191,6 @@ class AgentRuntimeExtractor:
         self,
         site: _CallSite,
         prompt: str,
-        extra: dict[str, object],
     ) -> tuple[Any, AgentRuntimeResponse]:
         t0 = time.monotonic()
         result = invoke_agent_runtime(
@@ -214,14 +212,11 @@ class AgentRuntimeExtractor:
                     response.raw_response, site.tag
                 )
             except AgentOutputProtocolError as exc:
-                self._write_transcript(
-                    site=site,
-                    prompt=prompt,
+                self._run_log.event(
+                    site.component_id,
+                    site.call,
                     status="protocol_error",
-                    duration_s=time.monotonic() - t0,
-                    extra=extra,
-                    raw_response=response.raw_response,
-                    kind=exc.kind,
+                    duration_s=f"{time.monotonic() - t0:.3f}",
                 )
                 msg = (
                     f"{site.call}: {exc.kind}: <{site.tag}> block missing or malformed"
@@ -233,22 +228,14 @@ class AgentRuntimeExtractor:
                 raise site.protocol_error_cls(msg) from exc
 
             if is_fallback:
-                self._write_transcript(
-                    site=site,
-                    prompt=prompt,
+                self._run_log.event(
+                    site.component_id,
+                    site.call,
                     status="protocol_fallback",
-                    duration_s=time.monotonic() - t0,
-                    extra=extra,
-                    raw_response=response.raw_response,
+                    duration_s=f"{time.monotonic() - t0:.3f}",
                 )
                 return parsed, response
 
-            transcript_entry: dict[str, object] = {
-                "call": site.call,
-                "prompt": prompt,
-                "raw_response": response.raw_response,
-            }
-            self._run_log.transcript(site.component_id, transcript_entry)
             self._run_log.event(
                 site.component_id,
                 site.call,
@@ -270,38 +257,6 @@ class AgentRuntimeExtractor:
             stderr=result.message or result.output,
         )
 
-    def _write_transcript(
-        self,
-        *,
-        site: _CallSite,
-        prompt: str,
-        status: str,
-        duration_s: float,
-        extra: dict[str, object],
-        raw_response: str | None = None,
-        kind: str | None = None,
-    ) -> None:
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        entry: dict[str, object] = {
-            "ts": ts,
-            "call": site.call,
-            "status": status,
-            "prompt": prompt,
-            "duration_s": duration_s,
-            **extra,
-        }
-        if raw_response is not None:
-            entry["raw_response"] = raw_response
-        if kind is not None:
-            entry["envelope_error_class"] = kind
-        self._run_log.transcript(site.component_id, entry)
-        self._run_log.event(
-            site.component_id,
-            site.call,
-            status=status,
-            duration_s=f"{duration_s:.3f}",
-        )
-
     @staticmethod
     def _format_candidates(candidates: list[JudgeCandidate]) -> str:
         parts: list[str] = []
@@ -316,6 +271,7 @@ class AgentRuntimeExtractor:
             call_site="classify",
             provider_auth=self._provider_auth,
         )
+        self._local.last_classify_log_path = result.log_path
         if result.kind == "completed":
             return AgentRuntimeResponse(
                 raw_response=result.output,

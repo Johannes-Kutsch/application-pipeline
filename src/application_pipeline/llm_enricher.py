@@ -87,6 +87,11 @@ class LLMEnricher:
             for _, stub, body in items
         ]
 
+        _raw_log_path = getattr(self._extractor, "last_classify_log_path", None)
+        agent_runtime_log_path: "Path | None" = (
+            _raw_log_path if isinstance(_raw_log_path, Path) else None
+        )
+
         try:
             raw_verdicts = self._extractor.classify_relevance(classify_items)
         except (
@@ -104,7 +109,7 @@ class LLMEnricher:
                 error=str(exc),
             )
             for _, stub, _ in items:
-                self._stash_malformed(stub, exc)
+                self._stash_malformed(stub, exc, agent_runtime_log_path)
             return AppliedClassifyOutcome(
                 items=[
                     AppliedClassifyItemOutcome(state="retryable", event_matches=None)
@@ -112,10 +117,15 @@ class LLMEnricher:
                 ]
             )
 
+        _raw_log_path = getattr(self._extractor, "last_classify_log_path", None)
+        agent_runtime_log_path = (
+            _raw_log_path if isinstance(_raw_log_path, Path) else None
+        )
+
         outcome_items: list[AppliedClassifyItemOutcome] = []
         for (listing_id, stub, body), verdict in zip(items, raw_verdicts):
             if verdict is None:
-                self._stash_malformed_listing(stub)
+                self._stash_malformed_listing(stub, agent_runtime_log_path)
                 self._run_log.event(
                     "llm_enricher",
                     "classify_malformed",
@@ -188,12 +198,18 @@ class LLMEnricher:
         path = stash_dir / f"{stub.source}-{slug}.{ext}"
         path.write_text(content, encoding="utf-8")
 
-    def _stash_malformed_listing(self, stub: PositionStub) -> None:
+    def _stash_malformed_listing(
+        self,
+        stub: PositionStub,
+        agent_runtime_log_path: "Path | None" = None,
+    ) -> None:
         lines: list[str] = [
             f"**Source:** {stub.source}",
             f"**URL:** {stub.url}",
             "**Error:** malformed classifier verdict",
         ]
+        if agent_runtime_log_path is not None:
+            lines += ["", "## Agent Runtime Log", "", str(agent_runtime_log_path)]
         self._stash_failure("malformed", stub, "\n".join(lines), ext="md")
 
     def _stash_malformed(
@@ -204,22 +220,13 @@ class LLMEnricher:
             | ExtractorMalformedError
             | ExtractorMalformedJSONError
         ),
+        agent_runtime_log_path: "Path | None" = None,
     ) -> None:
         lines: list[str] = [
             f"**Source:** {stub.source}",
             f"**URL:** {stub.url}",
             f"**Error:** {exc}",
         ]
-        prompt = getattr(exc, "prompt", None)
-        if prompt is not None:
-            lines += ["", "## Prompt", "", prompt]
-        if isinstance(exc, ExtractorMalformedJSONError):
-            if exc.stderr:
-                lines += ["", "## CLI stderr", "", exc.stderr]
-            if exc.returncode is not None:
-                lines += ["", f"**Returncode:** {exc.returncode}"]
-        else:
-            raw_response = getattr(exc, "raw_response", None)
-            if raw_response is not None:
-                lines += ["", "## Raw response", "", raw_response]
+        if agent_runtime_log_path is not None:
+            lines += ["", "## Agent Runtime Log", "", str(agent_runtime_log_path)]
         self._stash_failure("malformed", stub, "\n".join(lines), ext="md")

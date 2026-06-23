@@ -1507,37 +1507,16 @@ def test_init_does_not_touch_existing_claude_settings_local(tmp_path: Path) -> N
     assert settings.read_text() == '{"foo": "bar"}\n'
 
 
-def test_init_seeds_gitignore(tmp_path: Path) -> None:
-    init(tmp_path)
-
-    gitignore = _ap(tmp_path) / ".gitignore"
-    assert gitignore.exists()
-    assert gitignore.read_text() == ".runtime-data/\n"
-
-
-def test_init_twice_leaves_gitignore_byte_identical(tmp_path: Path) -> None:
-    init(tmp_path)
-    first = (_ap(tmp_path) / ".gitignore").read_bytes()
-
-    init(tmp_path)
-
-    assert (_ap(tmp_path) / ".gitignore").read_bytes() == first
-
-
-def test_refresh_preserves_gitignore_and_runtime_data(tmp_path: Path) -> None:
+def test_refresh_preserves_runtime_data(tmp_path: Path) -> None:
     ap = _ap(tmp_path)
     runtime_data = ap / ".runtime-data"
     runtime_data.mkdir(parents=True)
     seen = runtime_data / "seen.json"
     seen.write_text('{"custom": true}')
 
-    gitignore = ap / ".gitignore"
-    gitignore.write_text("# bespoke content\n")
-
     init(tmp_path, refresh=True)
 
     assert seen.read_text() == '{"custom": true}'
-    assert gitignore.read_text() == "# bespoke content\n"
 
 
 # --- --refresh quiet output (issue #664) ---
@@ -1593,7 +1572,7 @@ def test_refresh_prints_only_visible_actions_for_mixed_refresh_outcomes(
     ]
 
 
-def test_refresh_config_and_gitignore_never_in_stdout(
+def test_refresh_config_never_in_stdout(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     init(tmp_path)
@@ -1603,7 +1582,6 @@ def test_refresh_config_and_gitignore_never_in_stdout(
 
     out = capsys.readouterr().out
     assert "config.py" not in out
-    assert ".gitignore" not in out
 
 
 def test_refresh_new_package_owned_file_is_reported_in_stdout(

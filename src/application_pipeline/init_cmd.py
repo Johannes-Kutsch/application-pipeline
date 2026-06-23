@@ -48,7 +48,7 @@ def _seed_policies(cwd: Path) -> dict[str, _SeedPolicy]:
             dest_root=cwd / "application-pipeline",
             operator_owned_roots=frozenset({"user-info"}),
             operator_owned_top_level_files=frozenset(
-                {"config.py", ".env", ".gitignore"}
+                {"config.py", ".env"}
             ),
             package_owned=_default_package_owned,
         ),

@@ -1,3 +1,0 @@
-# Local Operator Credential for Agent Runtime auth
-
-The **Operator Credential** for `opencode` lives only in `<settings-dir>/.env` as `OPENCODE_GO_API_KEY` and is read to build explicit Agent Runtime `ProviderAuth`; shell environment values and home-directory `.env` files are ignored for this app. It is not broad process environment configuration and it does not make service, model, or tool policy operator-configurable. Missing `.env` or missing `OPENCODE_GO_API_KEY` is a startup failure before parser work begins, while `init` may seed an empty operator-owned placeholder that `init --refresh` preserves.

@@ -16,30 +16,47 @@ _AGENT_RUNTIME_LOG_SUBDIRS = (
 
 
 def run_maintenance(logs_dir: Path, failures_dir: Path) -> None:
+    _delete_old_agent_runtime_evidence(logs_dir)
     _truncate_logs(logs_dir)
     _delete_old_failures(failures_dir)
 
 
-def _is_agent_runtime_log(logs_dir: Path, path: Path) -> bool:
-    return path.suffix == ".log" and any(
-        path.parent == logs_dir / subdir for subdir in _AGENT_RUNTIME_LOG_SUBDIRS
+def _agent_runtime_subdirs(logs_dir: Path) -> tuple[Path, ...]:
+    return tuple(logs_dir / subdir for subdir in _AGENT_RUNTIME_LOG_SUBDIRS)
+
+
+def _is_under_agent_runtime(logs_dir: Path, path: Path) -> bool:
+    return any(
+        subdir == path or subdir in path.parents
+        for subdir in _agent_runtime_subdirs(logs_dir)
     )
+
+
+def _delete_old_agent_runtime_evidence(logs_dir: Path) -> None:
+    """Delete whole per-call evidence directories older than 30 days (ADR-0057)."""
+    cutoff = time.time() - _AGENT_RUNTIME_LOG_MAX_AGE_SECONDS
+    for subdir in _agent_runtime_subdirs(logs_dir):
+        if not subdir.is_dir():
+            continue
+        for evidence_dir in subdir.iterdir():
+            try:
+                if not evidence_dir.is_dir():
+                    continue
+                if os.path.getmtime(evidence_dir) < cutoff:
+                    shutil.rmtree(evidence_dir)
+            except Exception:
+                pass
 
 
 def _truncate_logs(logs_dir: Path) -> None:
     if not logs_dir.is_dir():
         return
-    runtime_cutoff = time.time() - _AGENT_RUNTIME_LOG_MAX_AGE_SECONDS
     for path in logs_dir.rglob("*"):
         try:
             if not path.is_file():
                 continue
-            if _is_agent_runtime_log(logs_dir=logs_dir, path=path):
-                if os.path.getmtime(path) < runtime_cutoff:
-                    path.unlink()
-                    invocation_dir = path.with_suffix("")
-                    if invocation_dir.is_dir():
-                        shutil.rmtree(invocation_dir)
+            # Agent Runtime evidence is deleted whole, never tail-truncated.
+            if _is_under_agent_runtime(logs_dir, path):
                 continue
             lines = path.read_bytes().splitlines(keepends=True)
             if len(lines) > _LOG_TAIL_LINES:

@@ -88,12 +88,12 @@ def _judge_usage() -> AgentRuntimeUsage:
 def _runtime_result(
     output: str,
     usage: AgentRuntimeUsage | None = None,
-    log_path: Path | None = None,
+    evidence_dir: Path | None = None,
 ) -> AgentRuntimeInvocationResult:
     return AgentRuntimeInvocationResult(
         kind="completed",
         output=output,
-        log_path=log_path or Path("llm-classify.log"),
+        evidence_dir=evidence_dir or Path("llm-classify.log"),
         usage=usage or _usage(),
         reset_time=None,
         message=None,
@@ -146,6 +146,26 @@ def _item(**kwargs: object) -> ClassifyItem:
 # ---------------------------------------------------------------------------
 # classify_relevance: matched happy path
 # ---------------------------------------------------------------------------
+
+
+def test_classify_relevance_exposes_evidence_directory_as_last_log_path(
+    run_log: RunLog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_dir = (
+        run_log.logs_dir / "llm" / "agent-runtime" / "classify" / "llm-classify-1"
+    )
+    _patch_runtime(
+        monkeypatch,
+        _runtime_result(
+            _classify_output({"matches": False}), evidence_dir=evidence_dir
+        ),
+    )
+    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+
+    extractor.classify_relevance([_item()])
+
+    assert extractor.last_classify_log_path == evidence_dir
 
 
 def test_classify_relevance_matched_returns_header_and_summary(
@@ -435,7 +455,7 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
             output=(
                 '<verdicts>[{"id": 0, "rank": 1}, {"id": 1, "rank": 2}]</verdicts>'
             ),
-            log_path=runtime_log,
+            evidence_dir=runtime_log,
             usage=AgentRuntimeUsage(
                 input_tokens=15,
                 output_tokens=3,
@@ -506,7 +526,7 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="quota reached",
-            log_path=logs_root
+            evidence_dir=logs_root
             / "llm"
             / "agent-runtime"
             / "judge"
@@ -541,7 +561,7 @@ def test_judge_usage_limit_error_uses_agent_runtime_vocabulary(
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="quota reached",
-            log_path=logs_root / "llm-judge-quota.log",
+            evidence_dir=logs_root / "llm-judge-quota.log",
             usage=None,
             reset_time=None,
             message=None,
@@ -574,7 +594,7 @@ def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="limit reached",
-            log_path=runtime_log,
+            evidence_dir=runtime_log,
             usage=None,
             reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
             message=None,
@@ -614,7 +634,7 @@ def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
         return AgentRuntimeInvocationResult(
             kind="completed",
             output='<verdicts>[{"id": 0, "rank": 1}]</verdicts>',
-            log_path=logs_root / "judge.log",
+            evidence_dir=logs_root / "judge.log",
             usage=_judge_usage(),
             reset_time=None,
             message=None,
@@ -838,7 +858,7 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
                 '{ "matches": true, "header": "", "summary": "Missing header" }'
                 "</verdict>"
             ),
-            log_path=runtime_log,
+            evidence_dir=runtime_log,
             usage=AgentRuntimeUsage(
                 input_tokens=11,
                 output_tokens=7,
@@ -892,7 +912,7 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="limit reached",
-            log_path=runtime_log,
+            evidence_dir=runtime_log,
             usage=AgentRuntimeUsage(
                 input_tokens=11,
                 output_tokens=7,
@@ -934,7 +954,7 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
         return AgentRuntimeInvocationResult(
             kind="retryable_provider_failure",
             output="provider flake",
-            log_path=runtime_log,
+            evidence_dir=runtime_log,
             usage=AgentRuntimeUsage(
                 input_tokens=5,
                 output_tokens=1,
@@ -975,7 +995,7 @@ def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_vali
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=_classify_output({"matches": False}),
-            log_path=runtime_log,
+            evidence_dir=runtime_log,
             usage=None,
             reset_time=None,
             message=None,
@@ -1013,7 +1033,7 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
         return AgentRuntimeInvocationResult(
             kind="hard_provider_failure",
             output="runtime failed",
-            log_path=runtime_log,
+            evidence_dir=runtime_log,
             usage=None,
             reset_time=None,
             message="provider exploded",
@@ -1051,7 +1071,7 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
         return AgentRuntimeInvocationResult(
             kind="completed",
             output='<verdict id="1">{"matches": false}</verdict>',
-            log_path=logs_root / "classify.log",
+            evidence_dir=logs_root / "classify.log",
             usage=_usage(),
             reset_time=None,
             message=None,
@@ -1086,7 +1106,7 @@ def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(
         lambda *args, **kwargs: AgentRuntimeInvocationResult(
             kind="completed",
             output=_classify_output({"matches": False}),
-            log_path=missing_log,
+            evidence_dir=missing_log,
             usage=_usage(),
             reset_time=None,
             message=None,
@@ -1107,7 +1127,7 @@ def test_judge_top_n_succeeds_when_runtime_log_file_is_missing(
         lambda *args, **kwargs: AgentRuntimeInvocationResult(
             kind="completed",
             output=_judge_output([{"id": 0, "rank": 1}]),
-            log_path=missing_log,
+            evidence_dir=missing_log,
             usage=_judge_usage(),
             reset_time=None,
             message=None,
@@ -1136,7 +1156,7 @@ def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usag
                     "summary": "Great role for ML engineers.",
                 }
             ),
-            log_path=Path("llm-classify.log"),
+            evidence_dir=Path("llm-classify.log"),
             usage=None,
             reset_time=None,
             message=None,
@@ -1162,7 +1182,7 @@ def test_judge_top_n_succeeds_when_runtime_returns_completed_without_usage(
         lambda *args, **kwargs: AgentRuntimeInvocationResult(
             kind="completed",
             output=_judge_output([{"id": 0, "rank": 1}]),
-            log_path=Path("llm-judge.log"),
+            evidence_dir=Path("llm-judge.log"),
             usage=None,
             reset_time=None,
             message=None,

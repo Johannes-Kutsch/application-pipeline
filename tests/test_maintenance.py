@@ -104,128 +104,94 @@ def test_root_lifecycle_jsonl_exceeding_10000_lines_is_truncated_to_last_10000(
     assert result_lines[-1] == '{"line": 14999}'
 
 
-def test_agent_runtime_classify_log_older_than_30_days_is_deleted(
+def _make_evidence_dir(parent: Path, name: str) -> Path:
+    evidence_dir = parent / name
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "prompt").write_text("the prompt\n")
+    (evidence_dir / "response").write_text("the response\n")
+    (evidence_dir / "events").write_text("events\n")
+    (evidence_dir / "meta").write_text("meta\n")
+    return evidence_dir
+
+
+def _age(path: Path, days: float) -> None:
+    old_mtime = time.time() - days * 24 * 3600
+    os.utime(path, (old_mtime, old_mtime))
+
+
+def test_agent_runtime_classify_evidence_dir_older_than_30_days_is_deleted(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
-    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "old.log"
-    log_file.parent.mkdir(parents=True)
-    log_file.write_text("old runtime log\n" * 3)
-    old_mtime = time.time() - 31 * 24 * 3600
-    os.utime(log_file, (old_mtime, old_mtime))
+    evidence_dir = _make_evidence_dir(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-old"
+    )
+    _age(evidence_dir, 31)
 
     run_maintenance(logs_dir, failures_dir)
 
-    assert not log_file.exists()
+    assert not evidence_dir.exists()
 
 
-def test_agent_runtime_judge_log_older_than_30_days_is_deleted(
+def test_agent_runtime_judge_evidence_dir_older_than_30_days_is_deleted(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
-    log_file = logs_dir / "llm" / "agent-runtime" / "judge" / "old.log"
-    log_file.parent.mkdir(parents=True)
-    log_file.write_text("old runtime log\n" * 3)
-    old_mtime = time.time() - 31 * 24 * 3600
-    os.utime(log_file, (old_mtime, old_mtime))
+    evidence_dir = _make_evidence_dir(
+        logs_dir / "llm" / "agent-runtime" / "judge", "llm-judge-old"
+    )
+    _age(evidence_dir, 31)
 
     run_maintenance(logs_dir, failures_dir)
 
-    assert not log_file.exists()
+    assert not evidence_dir.exists()
 
 
-def test_agent_runtime_classify_log_older_than_30_days_deletes_sibling_invocation_dir(
+def test_agent_runtime_evidence_dir_newer_than_30_days_is_preserved(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
-    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "old.log"
-    log_file.parent.mkdir(parents=True)
-    log_file.write_text("old runtime log\n" * 3)
-    invocation_dir = log_file.with_suffix("")
-    invocation_dir.mkdir(parents=True)
-    artifact_in_dir = invocation_dir / "artifact.txt"
-    artifact_in_dir.write_text("runtime internal file\n" * 3)
-    old_mtime = time.time() - 31 * 24 * 3600
-    os.utime(log_file, (old_mtime, old_mtime))
+    evidence_dir = _make_evidence_dir(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-new"
+    )
 
     run_maintenance(logs_dir, failures_dir)
 
-    assert not log_file.exists()
-    assert not invocation_dir.exists()
+    assert evidence_dir.exists()
+    assert (evidence_dir / "response").read_text() == "the response\n"
 
 
-def test_agent_runtime_classify_log_newer_than_30_days_is_preserved_instead_of_truncated(
+def test_agent_runtime_evidence_files_are_not_tail_truncated(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
-    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "new.log"
-    log_file.parent.mkdir(parents=True)
+    parent = logs_dir / "llm" / "agent-runtime" / "classify"
+    evidence_dir = parent / "llm-classify-big"
+    evidence_dir.mkdir(parents=True)
     lines = [f"line {i}" for i in range(15_000)]
-    log_file.write_text("\n".join(lines) + "\n")
+    (evidence_dir / "response").write_text("\n".join(lines) + "\n")
 
     run_maintenance(logs_dir, failures_dir)
 
-    result_lines = log_file.read_text().splitlines()
+    result_lines = (evidence_dir / "response").read_text().splitlines()
     assert len(result_lines) == 15_000
-    assert result_lines[0] == "line 0"
-    assert result_lines[-1] == "line 14999"
 
 
-def test_agent_runtime_judge_log_newer_than_30_days_is_preserved_instead_of_truncated(
-    dirs: tuple[Path, Path],
-) -> None:
-    logs_dir, failures_dir = dirs
-    log_file = logs_dir / "llm" / "agent-runtime" / "judge" / "new.log"
-    log_file.parent.mkdir(parents=True)
-    lines = [f"line {i}" for i in range(15_000)]
-    log_file.write_text("\n".join(lines) + "\n")
-
-    run_maintenance(logs_dir, failures_dir)
-
-    result_lines = log_file.read_text().splitlines()
-    assert len(result_lines) == 15_000
-    assert result_lines[0] == "line 0"
-    assert result_lines[-1] == "line 14999"
-
-
-def test_agent_runtime_log_at_30_day_cutoff_is_preserved(
+def test_agent_runtime_evidence_dir_at_30_day_cutoff_is_preserved(
     dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     logs_dir, failures_dir = dirs
-    log_file = logs_dir / "llm" / "agent-runtime" / "classify" / "cutoff.log"
-    log_file.parent.mkdir(parents=True)
-    lines = [f"line {i}" for i in range(15_000)]
-    log_file.write_text("\n".join(lines) + "\n")
+    evidence_dir = _make_evidence_dir(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-cutoff"
+    )
     fake_now = 1_000_000_000.0
     cutoff_mtime = fake_now - 30 * 24 * 3600
-    os.utime(log_file, (cutoff_mtime, cutoff_mtime))
+    os.utime(evidence_dir, (cutoff_mtime, cutoff_mtime))
     monkeypatch.setattr(time, "time", lambda: fake_now)
 
     run_maintenance(logs_dir, failures_dir)
 
-    result_lines = log_file.read_text().splitlines()
-    assert len(result_lines) == 15_000
-    assert result_lines[0] == "line 0"
-    assert result_lines[-1] == "line 14999"
-
-
-def test_pipeline_owned_log_artifact_under_agent_runtime_subdir_keeps_tail_retention(
-    dirs: tuple[Path, Path],
-) -> None:
-    logs_dir, failures_dir = dirs
-    log_file = (
-        logs_dir / "llm" / "agent-runtime" / "classify" / "component.events.jsonl"
-    )
-    log_file.parent.mkdir(parents=True)
-    lines = [f'{{"line": {i}}}' for i in range(15_000)]
-    log_file.write_text("\n".join(lines) + "\n")
-
-    run_maintenance(logs_dir, failures_dir)
-
-    result_lines = log_file.read_text().splitlines()
-    assert len(result_lines) == 10_000
-    assert result_lines[0] == '{"line": 5000}'
-    assert result_lines[-1] == '{"line": 14999}'
+    assert evidence_dir.exists()
 
 
 def test_flat_log_artifact_exceeding_10000_lines_is_truncated_to_last_10000(
@@ -271,20 +237,21 @@ def test_filesystem_error_on_one_nested_log_artifact_does_not_stop_other_truncat
     assert result_lines[-1] == '{"line": 14999}'
 
 
-def test_filesystem_error_on_one_agent_runtime_log_does_not_stop_other_maintenance(
+def test_filesystem_error_on_one_agent_runtime_evidence_dir_does_not_stop_other_maintenance(
     dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     logs_dir, failures_dir = dirs
-    bad_log = logs_dir / "llm" / "agent-runtime" / "classify" / "bad.log"
+    bad_dir = _make_evidence_dir(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-bad"
+    )
+    _age(bad_dir, 31)
     good_log = logs_dir / "run.log"
-    bad_log.parent.mkdir(parents=True, exist_ok=True)
-    bad_log.write_text("bad runtime log\n")
     good_log.write_text("\n".join(f"line {i}" for i in range(15_000)) + "\n")
 
     original_getmtime = os.path.getmtime
 
     def flaky_getmtime(path: os.PathLike[str] | str) -> float:
-        if Path(path) == bad_log:
+        if Path(path) == bad_dir:
             raise OSError("simulated stat failure")
         return original_getmtime(path)
 

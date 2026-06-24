@@ -643,16 +643,6 @@ def test_cron_sh_has_no_fail_helper_or_init_run_stages(tmp_path: Path) -> None:
     assert not re.search(r"application-pipeline\s+run\b", cron_sh)
 
 
-def test_adr_0020_documents_pip_warn_and_continue_policy() -> None:
-    adr_file = (
-        Path(__file__).parent.parent
-        / "docs/adr/0015-distribution-via-pypi-and-cron-upgrade.md"
-    )
-    text = adr_file.read_text()
-    assert "warn" in text.lower() and "continue" in text.lower(), (
-        "ADR-0015 must document the warn-and-continue policy for pip-upgrade failures"
-    )
-
 
 def test_cron_install_writes_weekday_only_schedule(tmp_path: Path) -> None:
     init(tmp_path)

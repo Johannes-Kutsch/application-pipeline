@@ -131,13 +131,38 @@ def _write_config(
     return config_path
 
 
-def _stub_extractor() -> MagicMock:
-    ext = MagicMock()
-    ext.classify_relevance.return_value = [RelevanceVerdict(matches=False)]
-    ext.judge_top_n.side_effect = lambda candidates: [
-        MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
-    ]
-    return ext
+class _StubExtractor:
+    """Minimal extractor that satisfies LLMExtractor and exposes MagicMock-style call tracking."""
+
+    def __init__(self) -> None:
+        self.classify_relevance = MagicMock(  # type: ignore[assignment]
+            side_effect=lambda items: [RelevanceVerdict(matches=False)] * len(items)
+        )
+        self.judge_top_n = MagicMock(  # type: ignore[assignment]
+            side_effect=lambda candidates: [
+                MatchVerdict(id=c.id, rank=i + 1)
+                for i, c in enumerate(candidates[:5])
+            ]
+        )
+
+
+def _stub_extractor() -> _StubExtractor:
+    return _StubExtractor()
+
+
+class _ErrorJudgeExtractor:
+    """Extractor whose judge_top_n raises; satisfies both LLMExtractor and _LLMJudge."""
+
+    def __init__(self, side_effect: Exception) -> None:
+        self._side_effect = side_effect
+
+    def classify_relevance(
+        self, items: list[ClassifyItem]
+    ) -> list[RelevanceVerdict | None]:
+        return [RelevanceVerdict(matches=False)] * len(items)
+
+    def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
+        raise self._side_effect
 
 
 def _make_card_store(tmp_path: Path, name: str = "card_store.json") -> CardStore:
@@ -1195,6 +1220,11 @@ class _FakeLLMEnricherRejectJob1:
 class _FakeExtractor:
     """Deterministic extractor (v2): judge_top_n only."""
 
+    def classify_relevance(
+        self, items: list[ClassifyItem]
+    ) -> list[RelevanceVerdict | None]:
+        return [RelevanceVerdict(matches=False)] * len(items)
+
     def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
         verdicts = []
         for i, c in enumerate(candidates[:5]):
@@ -1295,6 +1325,11 @@ def test_no_judge_skips_judge_no_daily_file_listings_remain_matched(
     judge_called = False
 
     class _TrackingExtractor:
+        def classify_relevance(
+            self, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict | None]:
+            return [RelevanceVerdict(matches=False)] * len(items)
+
         def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             nonlocal judge_called
             judge_called = True
@@ -1518,8 +1553,7 @@ def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
-    ext = MagicMock()
-    ext.judge_top_n.side_effect = ExtractorError("judge boom")
+    ext = _ErrorJudgeExtractor(ExtractorError("judge boom"))
 
     summary = run(
         _two_stub_config(tmp_path),
@@ -1554,8 +1588,7 @@ def test_match_judge_failure_writes_one_failure_report(tmp_path: Path) -> None:
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
-    ext = MagicMock()
-    ext.judge_top_n.side_effect = ExtractorError("judge boom")
+    ext = _ErrorJudgeExtractor(ExtractorError("judge boom"))
 
     run(
         _one_stub_config(tmp_path),
@@ -1585,9 +1618,8 @@ def test_fatal_judge_provider_failure_writes_failure_report_with_judge_stage_and
     card_store = _make_card_store(tmp_path)
     results_dir = tmp_path / "results"
 
-    ext = MagicMock()
-    ext.judge_top_n.side_effect = ExtractorUnreachableError(
-        "judge provider unreachable"
+    ext = _ErrorJudgeExtractor(
+        ExtractorUnreachableError("judge provider unreachable")
     )
 
     run(
@@ -2016,8 +2048,7 @@ def test_judge_failure_leaves_status_matched(tmp_path: Path) -> None:
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
-    ext = MagicMock()
-    ext.judge_top_n.side_effect = ExtractorError("judge boom")
+    ext = _ErrorJudgeExtractor(ExtractorError("judge boom"))
 
     run(
         _one_stub_config(tmp_path),
@@ -2169,8 +2200,7 @@ def test_judge_pending_failure_stays_matched(tmp_path: Path) -> None:
     (tmp_path / "extracts.json").write_text(json.dumps({"1": _card}), encoding="utf-8")
     card_store = load_card_store(tmp_path / "extracts.json")
 
-    ext = MagicMock()
-    ext.judge_top_n.side_effect = ExtractorError("judge boom again")
+    ext = _ErrorJudgeExtractor(ExtractorError("judge boom again"))
 
     run(
         _one_stub_config(tmp_path),
@@ -2419,8 +2449,7 @@ def test_judge_pending_judge_failure_stays_matched_on_rerun(
     (tmp_path / "extracts.json").write_text(json.dumps({"1": _card}), encoding="utf-8")
     card_store = load_card_store(tmp_path / "extracts.json")
 
-    ext = MagicMock()
-    ext.judge_top_n.side_effect = ExtractorError("judge boom")
+    ext = _ErrorJudgeExtractor(ExtractorError("judge boom"))
 
     run(
         _one_stub_config(tmp_path),
@@ -3485,9 +3514,10 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     run_log = pl.RunLog(logs_dir)
     card_store = _make_card_store(tmp_path)
 
-    ext = MagicMock()
-    ext.judge_top_n.side_effect = ExtractorUnreachableError(
-        "cli gone", returncode=2, stderr="timeout on judge"
+    ext = _ErrorJudgeExtractor(
+        ExtractorUnreachableError(
+            "cli gone", returncode=2, stderr="timeout on judge"
+        )
     )
 
     run(
@@ -6682,11 +6712,18 @@ def test_post_llm_freshness_drop_still_works_after_post_enrich_bundle(
         def discover(self, query: ParserQuery) -> list[PositionStub]:
             return [PositionStub(url=url, title="ML Engineer", source="stub")]
 
-    extractor_mock = MagicMock()
-    extractor_mock.classify_relevance.return_value = [
-        RelevanceVerdict(matches=True, header=stale_header, summary="Old role.")
-    ]
-    extractor_mock.judge_top_n.return_value = []
+    class _StaleHeaderExtractor:
+        def classify_relevance(
+            self, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict | None]:
+            return [
+                RelevanceVerdict(matches=True, header=stale_header, summary="Old role.")
+            ] * len(items)
+
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
+            return []
+
+    extractor_mock = _StaleHeaderExtractor()
 
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)

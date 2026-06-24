@@ -33,7 +33,7 @@ class _FakeRuntimeClient:
     error: Exception | None = None
     requests: list[_CapturedRequest] = []
 
-    def run_ephemeral(self, request: EphemeralRunRequest) -> RuntimeOutcome:
+    async def run_ephemeral(self, request: EphemeralRunRequest) -> RuntimeOutcome:
         self.requests.append(
             _CapturedRequest(
                 prompt=request.prompt,

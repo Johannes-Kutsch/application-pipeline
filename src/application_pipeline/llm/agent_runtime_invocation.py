@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -97,7 +98,7 @@ def _to_agent_runtime_usage(usage: ProviderUsage | None) -> AgentRuntimeUsage | 
 def _render_events(events: tuple[AgentEvent, ...]) -> str:
     lines: list[str] = []
     for event in events:
-        parts = [event.type]
+        parts: list[str] = [event.type]
         if event.tool_name:
             parts.append(f"tool={event.tool_name}")
         body = event.text or event.payload or event.raw_provider_output
@@ -213,7 +214,10 @@ def invoke_agent_runtime(
             provider_auth=provider_auth,
         )
         try:
-            outcome = RuntimeClient().run_ephemeral(request)
+            # run_ephemeral is async (agent_runtime 0.0.2); the pipeline is
+            # synchronous (classify worker threads, single judge call), so we
+            # drive the coroutine to completion on a per-call event loop.
+            outcome = asyncio.run(RuntimeClient().run_ephemeral(request))
         except AgentRuntimeError as exc:
             evidence_dir = _new_evidence_dir(logs_root, call_site)
             return AgentRuntimeInvocationResult(

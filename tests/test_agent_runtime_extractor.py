@@ -74,6 +74,21 @@ def _runtime_result(
     )
 
 
+def _usage_limit_result(
+    evidence_dir: Path,
+    *,
+    output: str,
+    reset_time: datetime | None,
+) -> AgentRuntimeInvocationResult:
+    return AgentRuntimeInvocationResult(
+        kind="usage_limit",
+        output=output,
+        evidence_dir=evidence_dir,
+        reset_time=reset_time,
+        message=None,
+    )
+
+
 def _classify_output(verdict: object) -> str:
     return f'<verdict id="1">{json.dumps(verdict)}</verdict>'
 
@@ -859,6 +874,37 @@ def test_judge_usage_limit_error_uses_agent_runtime_vocabulary(
     message = str(excinfo.value)
     assert "Agent Runtime" in message
     assert "usage limit" in message.lower()
+
+
+def test_judge_usage_limit_invocation_result_preserves_reset_time(
+    run_log: RunLog,
+) -> None:
+    reset_time = datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc)
+
+    def _fake_invoke(
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
+    ) -> AgentRuntimeInvocationResult:
+        return _usage_limit_result(
+            logs_root / "llm-judge-quota.log",
+            output="quota reached",
+            reset_time=reset_time,
+        )
+
+    with pytest.raises(UsageLimitError) as excinfo:
+        extractor = AgentRuntimeExtractor(
+            _config(),
+            _prompts(),
+            run_log=run_log,
+            invocation_port=_MockInvocationPort(invoke=_fake_invoke),
+        )
+        extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
+
+    assert excinfo.value.reset_time == reset_time
+    assert "Agent Runtime usage limit" in str(excinfo.value)
 
 
 def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(

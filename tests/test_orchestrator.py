@@ -16,7 +16,9 @@ from agent_runtime.runtime import ProviderAuth
 from fake_status_display import FakeStatusDisplay
 
 from application_pipeline import dedup as dedup_module
+from application_pipeline import AgentRuntimeExtractor
 from application_pipeline.config import ConfigError
+from application_pipeline import config as config_module
 from application_pipeline.dedup import DedupStoreError, DeduplicationStore
 from application_pipeline.llm import (
     ExtractorError,
@@ -55,7 +57,7 @@ from application_pipeline.parsers.types import (
     EnrichResult,
     Remote,
 )
-from application_pipeline.prompts import PromptError
+from application_pipeline.prompts import PromptError, load_prompts
 from application_pipeline.daily_results_file import DailyResultsFile, ResultsFileError
 from application_pipeline.parser_log import RunLog
 from application_pipeline.status_display import PlainStatusDisplay
@@ -161,6 +163,53 @@ class _ErrorJudgeExtractor:
 
     def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
         raise self._side_effect
+
+
+class _ScriptedJudgeInvocationPort:
+    def __init__(self, *, reset_time: datetime | None, verdict_output: str) -> None:
+        self._reset_time = reset_time
+        self._verdict_output = verdict_output
+        self._call_count = 0
+        self.judge_candidate_ids: list[list[int]] = []
+
+    def invoke(
+        self,
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: str,
+        provider_auth: object = None,
+    ) -> AgentRuntimeInvocationResult:
+        assert call_site == "judge"
+        candidate_ids = [
+            int(value) for value in re.findall(r"\[Candidate id=(\d+)\]", prompt)
+        ]
+        self.judge_candidate_ids.append(candidate_ids)
+        self._call_count += 1
+        runtime_log = (
+            logs_root
+            / "llm"
+            / "agent-runtime"
+            / "judge"
+            / f"judge-{self._call_count}.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        runtime_log.write_text("judge output", encoding="utf-8")
+        if self._call_count == 1:
+            return AgentRuntimeInvocationResult(
+                kind="usage_limit",
+                output="quota reached",
+                evidence_dir=runtime_log,
+                reset_time=self._reset_time,
+                message=None,
+            )
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output=self._verdict_output,
+            evidence_dir=runtime_log,
+            reset_time=None,
+            message=None,
+        )
 
 
 def _make_card_store(tmp_path: Path, name: str = "card_store.json") -> CardStore:
@@ -5346,6 +5395,81 @@ def test_quota_judge_retries_with_reset_time_sleeps_until_reset_plus_buffer(
     assert slept == [420.0]
 
 
+def test_quota_judge_retries_via_invocation_port_and_writes_daily_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+    config_path = _one_stub_config(tmp_path)
+
+    start = datetime(2026, 6, 22, 12, 0, tzinfo=timezone.utc)
+    reset_time = start + timedelta(minutes=5)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            if tz is None:
+                return start.replace(tzinfo=None)
+            return start.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.orchestrator.datetime", _FakeDateTime)
+
+    slept: list[float] = []
+    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
+
+    cfg = config_module.load(config_path)
+    prompts = load_prompts(cfg)
+    invocation_port = _ScriptedJudgeInvocationPort(
+        reset_time=reset_time,
+        verdict_output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
+    )
+    extractor = AgentRuntimeExtractor(
+        cfg,
+        prompts,
+        run_log=run_log,
+        invocation_port=invocation_port,
+    )
+
+    summary = run(
+        config_path,
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=extractor,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        card_store=card_store,
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.written == 1
+    assert invocation_port.judge_candidate_ids == [[1], [1]]
+    assert slept == [420.0]
+
+    rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "orchestrator.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    quota_rows = [row for row in rows if row.get("event") == "quota_sleep"]
+    assert quota_rows == [
+        {
+            "ts": quota_rows[0]["ts"],
+            "event": "quota_sleep",
+            "reset_time": "2026-06-22T12:05:00+00:00",
+            "wake_time": "2026-06-22T12:07:00+00:00",
+            "duration_s": 420.0,
+        }
+    ]
+
+    body = _read_all_results(tmp_path / "results")
+    assert "Test Role" in body
+    assert "A test role description." in body
+    assert "https://resume.example/job/0" in body
+
+
 def test_quota_judge_retries_without_reset_time_sleeps_until_top_of_hour(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -5446,6 +5570,75 @@ def test_quota_judge_retries_without_reset_time_sleeps_until_top_of_hour(
     assert judge_calls[0] == judge_calls[1]
     # 12:30 -> next top of hour 13:00 + 2min buffer = 32 minutes
     assert slept == [1920.0]
+
+
+def test_quota_judge_fallback_retry_via_invocation_port_uses_top_of_hour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logs_dir = tmp_path / "synched" / "logs"
+    run_log = RunLog(logs_dir)
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+    config_path = _one_stub_config(tmp_path)
+
+    start = datetime(2026, 6, 22, 12, 30, tzinfo=timezone.utc)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            if tz is None:
+                return start.replace(tzinfo=None)
+            return start.astimezone(tz)
+
+    monkeypatch.setattr("application_pipeline.orchestrator.datetime", _FakeDateTime)
+
+    slept: list[float] = []
+    monkeypatch.setattr("application_pipeline.orchestrator.time.sleep", slept.append)
+
+    cfg = config_module.load(config_path)
+    prompts = load_prompts(cfg)
+    invocation_port = _ScriptedJudgeInvocationPort(
+        reset_time=None,
+        verdict_output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
+    )
+    extractor = AgentRuntimeExtractor(
+        cfg,
+        prompts,
+        run_log=run_log,
+        invocation_port=invocation_port,
+    )
+
+    summary = run(
+        config_path,
+        llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=extractor,
+        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+        card_store=card_store,
+        dedup_store=dedup_module.load(seen_path),
+        run_log=run_log,
+    )
+
+    assert summary.written == 1
+    assert invocation_port.judge_candidate_ids == [[1], [1]]
+    assert slept == [1920.0]
+
+    rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline" / "orchestrator.events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    quota_rows = [row for row in rows if row.get("event") == "quota_sleep"]
+    assert quota_rows == [
+        {
+            "ts": quota_rows[0]["ts"],
+            "event": "quota_sleep",
+            "reset_time": None,
+            "wake_time": "2026-06-22T13:02:00+00:00",
+            "duration_s": 1920.0,
+        }
+    ]
 
 
 def test_run_passes_local_operator_credential_to_agent_runtime_calls(

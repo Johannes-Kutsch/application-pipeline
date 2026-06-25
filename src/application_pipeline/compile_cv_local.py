@@ -80,8 +80,9 @@ class _CompileCvFakePdflatexAdapter:
         return result
 
     def _pdflatex_cmd(self, build_name: str, cv_data_dir: Path) -> list[str]:
+        cv_data_dir_tex = cv_data_dir.as_posix().replace("\\", "/")
         tex_input = (
-            rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}"
+            rf"\def\CvDataDir{{{cv_data_dir_tex}}}"
             rf"\def\BUILD{{{build_name}}}"
             r"\input{cv}"
         )
@@ -112,8 +113,9 @@ class _CompileCvLocalProductionAdapter:
         return _PdflatexRunResult(returncode=result.returncode)
 
     def _pdflatex_cmd(self, build_name: str, cv_data_dir: Path) -> list[str]:
+        cv_data_dir_tex = cv_data_dir.as_posix().replace("\\", "/")
         tex_input = (
-            rf"\def\CvDataDir{{{cv_data_dir.as_posix()}}}"
+            rf"\def\CvDataDir{{{cv_data_dir_tex}}}"
             rf"\def\BUILD{{{build_name}}}"
             r"\input{cv}"
         )

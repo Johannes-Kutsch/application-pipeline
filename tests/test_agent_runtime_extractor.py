@@ -230,6 +230,23 @@ def test_classify_relevance_out_of_domain_returns_none_header_and_summary(
     assert result.summary is None
 
 
+def test_classify_relevance_single_completed_legacy_verdict_through_invocation_port(
+    run_log: RunLog,
+) -> None:
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result('<verdict>{"matches": false}</verdict>')
+        ),
+    )
+
+    results = extractor.classify_relevance([_item()])
+
+    assert results == [RelevanceVerdict(matches=False)]
+
+
 # ---------------------------------------------------------------------------
 # classify_relevance: malformed responses → None (batch protocol)
 # ---------------------------------------------------------------------------

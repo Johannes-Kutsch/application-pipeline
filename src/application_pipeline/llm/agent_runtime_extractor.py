@@ -161,7 +161,9 @@ class AgentRuntimeExtractor:
         except _RetryableProviderFailureError:
             return [None for _ in items]
 
-        verdicts_by_id = extract_id_tagged_verdicts(response.raw_response)
+        verdicts_by_id = self._extract_classify_verdicts(
+            response.raw_response, len(items)
+        )
         results: list[RelevanceVerdict | None] = []
         for i in range(len(items)):
             item_id = i + 1
@@ -185,6 +187,19 @@ class AgentRuntimeExtractor:
             _CLASSIFY_SITE.call,
         )
         return results
+
+    @staticmethod
+    def _extract_classify_verdicts(
+        raw_response: str, item_count: int
+    ) -> dict[int, Any]:
+        verdicts_by_id = extract_id_tagged_verdicts(raw_response)
+        if verdicts_by_id or item_count != 1:
+            return verdicts_by_id
+        try:
+            parsed, _ = extract_json_block(raw_response, _CLASSIFY_SITE.tag)
+        except AgentOutputProtocolError:
+            return {}
+        return {1: parsed}
 
     def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
         if not candidates:

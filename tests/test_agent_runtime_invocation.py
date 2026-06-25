@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from agent_runtime.contracts import ToolAccess
@@ -190,18 +191,21 @@ def test_request_uses_no_tools_and_worktree_outside_logs_root(
     assert logs_root not in captured.invocation_dir.parents
 
 
-def test_explicit_provider_auth_is_forwarded(logs_root: Path) -> None:
+@pytest.mark.parametrize("call_site", ["classify", "judge"])
+def test_explicit_provider_auth_is_forwarded(
+    logs_root: Path, call_site: Literal["classify", "judge"]
+) -> None:
     _FakeRuntimeClient.outcome = _completed(output="[]")
     provider_auth = ProviderAuth(opencode_api_key="test-key")
 
     invoke_agent_runtime(
-        "judge prompt",
+        f"{call_site} prompt",
         logs_root=logs_root,
-        call_site="judge",
+        call_site=call_site,
         provider_auth=provider_auth,
     )
 
-    assert _FakeRuntimeClient.requests[0].auth == provider_auth
+    assert _FakeRuntimeClient.requests[0].auth is provider_auth
 
 
 def test_agent_runtime_invocation_adapter_delegates_call_shape() -> None:

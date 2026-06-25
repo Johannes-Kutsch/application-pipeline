@@ -885,7 +885,7 @@ def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
     extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
 
     assert captured["call_site"] == "judge"
-    assert captured["provider_auth"] == provider_auth
+    assert captured["provider_auth"] is provider_auth
 
 
 def _read_transcripts(run_log: RunLog, component_id: str) -> list[dict]:  # type: ignore[type-arg]
@@ -1323,7 +1323,51 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
     extractor.classify_relevance([_item()])
 
     assert captured["call_site"] == "classify"
-    assert captured["provider_auth"] == provider_auth
+    assert captured["provider_auth"] is provider_auth
+
+
+def test_classify_relevance_with_provider_auth_keeps_auth_out_of_ordinary_events(
+    run_log: RunLog,
+) -> None:
+    provider_auth = ProviderAuth(opencode_api_key="test-key")
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        provider_auth=provider_auth,
+        invocation_port=_invocation_port(
+            _runtime_result(_classify_output({"matches": False}))
+        ),
+    )
+
+    results = extractor.classify_relevance([_item()])
+
+    assert results == [RelevanceVerdict(matches=False)]
+    event = _read_events(run_log, "llm_classify_relevance")[-1]
+    assert "provider_auth" not in event
+    assert "opencode_api_key" not in json.dumps(event)
+
+
+def test_judge_top_n_with_provider_auth_keeps_auth_out_of_ordinary_events(
+    run_log: RunLog,
+) -> None:
+    provider_auth = ProviderAuth(opencode_api_key="test-key")
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        provider_auth=provider_auth,
+        invocation_port=_invocation_port(
+            _runtime_result(_judge_output([{"id": 0, "rank": 1}]))
+        ),
+    )
+
+    results = extractor.judge_top_n(_make_candidates(1))
+
+    assert results == [MatchVerdict(id=0, rank=1)]
+    event = _read_events(run_log, "llm_judge_match")[-1]
+    assert "provider_auth" not in event
+    assert "opencode_api_key" not in json.dumps(event)
 
 
 def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(

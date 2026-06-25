@@ -247,6 +247,25 @@ def test_classify_relevance_single_completed_legacy_verdict_through_invocation_p
     assert results == [RelevanceVerdict(matches=False)]
 
 
+def test_classify_relevance_single_completed_legacy_matching_verdict_through_invocation_port(
+    run_log: RunLog,
+) -> None:
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(
+                '<verdict>{"matches": true, "header": "h", "summary": "s"}</verdict>'
+            )
+        ),
+    )
+
+    results = extractor.classify_relevance([_item()])
+
+    assert results == [RelevanceVerdict(matches=True, header="h", summary="s")]
+
+
 # ---------------------------------------------------------------------------
 # classify_relevance: malformed responses → None (batch protocol)
 # ---------------------------------------------------------------------------
@@ -299,6 +318,40 @@ def test_classify_relevance_matched_empty_header_returns_none(
     )
     results = extractor.classify_relevance([_item()])
     assert results[0] is None
+
+
+def test_classify_relevance_single_legacy_matching_verdict_missing_summary_returns_none(
+    run_log: RunLog,
+) -> None:
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result('<verdict>{"matches": true, "header": "h"}</verdict>')
+        ),
+    )
+
+    results = extractor.classify_relevance([_item()])
+
+    assert results == [None]
+
+
+def test_classify_relevance_single_completed_without_verdict_tag_returns_none(
+    run_log: RunLog,
+) -> None:
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result('```json\n{"matches": false}\n```')
+        ),
+    )
+
+    results = extractor.classify_relevance([_item()])
+
+    assert results == [None]
 
 
 # ---------------------------------------------------------------------------

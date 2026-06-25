@@ -195,6 +195,8 @@ class AgentRuntimeExtractor:
         verdicts_by_id = extract_id_tagged_verdicts(raw_response)
         if verdicts_by_id or item_count != 1:
             return verdicts_by_id
+        if "<verdict>" not in raw_response or "</verdict>" not in raw_response:
+            return {}
         try:
             parsed, _ = extract_json_block(raw_response, _CLASSIFY_SITE.tag)
         except AgentOutputProtocolError:

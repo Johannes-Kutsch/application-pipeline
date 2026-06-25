@@ -202,10 +202,6 @@ class AgentRuntimeExtractor:
         if result.kind == "completed":
             response = AgentRuntimeResponse(
                 raw_response=result.output,
-                usage=result.usage,
-                cost_usd=0.0,
-                duration_s=0.0,
-                session_id=str(result.evidence_dir),
             )
             try:
                 parsed, is_fallback = extract_json_block(
@@ -275,10 +271,6 @@ class AgentRuntimeExtractor:
         if result.kind == "completed":
             return AgentRuntimeResponse(
                 raw_response=result.output,
-                usage=result.usage,
-                cost_usd=0.0,
-                duration_s=0.0,
-                session_id=str(result.evidence_dir),
             )
         if result.kind == "usage_limit":
             raise UsageLimitError(

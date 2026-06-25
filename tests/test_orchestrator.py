@@ -25,7 +25,6 @@ from application_pipeline.llm import (
 from application_pipeline.llm.agent_runtime_invocation import (
     AgentRuntimeInvocationResult,
 )
-from application_pipeline.llm.agent_runtime_types import AgentRuntimeUsage
 from application_pipeline.extracts.card_store import (
     CardExtract,
     CardStore,
@@ -5200,11 +5199,6 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
                 kind="usage_limit",
                 output="quota reached",
                 evidence_dir=runtime_log,
-                usage=AgentRuntimeUsage(
-                    input_tokens=10,
-                    output_tokens=1,
-                    cache_read_tokens=0,
-                ),
                 reset_time=None,
                 message=None,
             )
@@ -5217,11 +5211,6 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
             kind="completed",
             output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
             evidence_dir=runtime_log,
-            usage=AgentRuntimeUsage(
-                input_tokens=11,
-                output_tokens=2,
-                cache_read_tokens=0,
-            ),
             reset_time=None,
             message=None,
         )
@@ -5310,7 +5299,6 @@ def test_quota_judge_retries_with_reset_time_sleeps_until_reset_plus_buffer(
                 kind="usage_limit",
                 output="quota reached",
                 evidence_dir=runtime_log,
-                usage=None,
                 reset_time=reset_time,
                 message=None,
             )
@@ -5323,7 +5311,6 @@ def test_quota_judge_retries_with_reset_time_sleeps_until_reset_plus_buffer(
             kind="completed",
             output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
             evidence_dir=runtime_log,
-            usage=None,
             reset_time=None,
             message=None,
         )
@@ -5413,7 +5400,6 @@ def test_quota_judge_retries_without_reset_time_sleeps_until_top_of_hour(
                 kind="usage_limit",
                 output="quota reached",
                 evidence_dir=runtime_log,
-                usage=None,
                 reset_time=None,
                 message=None,
             )
@@ -5426,7 +5412,6 @@ def test_quota_judge_retries_without_reset_time_sleeps_until_top_of_hour(
             kind="completed",
             output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
             evidence_dir=runtime_log,
-            usage=None,
             reset_time=None,
             message=None,
         )
@@ -5501,11 +5486,6 @@ def test_run_passes_local_operator_credential_to_agent_runtime_calls(
                     "</verdict>"
                 ),
                 evidence_dir=runtime_log,
-                usage=AgentRuntimeUsage(
-                    input_tokens=10,
-                    output_tokens=5,
-                    cache_read_tokens=0,
-                ),
                 reset_time=None,
                 message=None,
             )
@@ -5513,11 +5493,6 @@ def test_run_passes_local_operator_credential_to_agent_runtime_calls(
             kind="completed",
             output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
             evidence_dir=runtime_log,
-            usage=AgentRuntimeUsage(
-                input_tokens=8,
-                output_tokens=4,
-                cache_read_tokens=0,
-            ),
             reset_time=None,
             message=None,
         )
@@ -5579,7 +5554,6 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
             kind="hard_provider_failure",
             output="provider failed",
             evidence_dir=runtime_log,
-            usage=None,
             reset_time=None,
             message="provider failed",
         )
@@ -5650,7 +5624,6 @@ def test_runtime_completed_without_usage_still_writes_daily_results_file(
                     "</verdict>"
                 ),
                 evidence_dir=runtime_log,
-                usage=None,
                 reset_time=None,
                 message=None,
             )
@@ -5658,7 +5631,6 @@ def test_runtime_completed_without_usage_still_writes_daily_results_file(
             kind="completed",
             output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
             evidence_dir=runtime_log,
-            usage=None,
             reset_time=None,
             message=None,
         )

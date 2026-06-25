@@ -2,13 +2,11 @@ import json
 import shutil
 import subprocess
 import tempfile
-import time
 from typing import Any, Protocol
 
 from application_pipeline.llm import quota as _quota
 from .agent_runtime_types import (
     AgentRuntimeResponse,
-    AgentRuntimeUsage,
     UsageLimitError,
     _ProviderForensicsError,
 )
@@ -116,9 +114,7 @@ class ClaudeCliInvoker:
         if effort:
             args += ["--effort", effort]
 
-        t0 = time.monotonic()
         returncode, stdout, stderr = self._runner(args, prompt)
-        duration_s = time.monotonic() - t0
 
         try:
             envelope = json.loads(stdout)
@@ -184,17 +180,6 @@ class ClaudeCliInvoker:
                 envelope_error_class="empty_result",
             )
 
-        usage_raw = envelope.get("usage", {})
-        usage = AgentRuntimeUsage(
-            input_tokens=int(usage_raw.get("input_tokens", 0)),
-            output_tokens=int(usage_raw.get("output_tokens", 0)),
-            cache_read_tokens=int(usage_raw.get("cache_read_input_tokens", 0)),
-        )
-
         return AgentRuntimeResponse(
             raw_response=raw_response,
-            usage=usage,
-            cost_usd=float(envelope.get("total_cost_usd", 0.0)),
-            duration_s=duration_s,
-            session_id=str(envelope.get("session_id", "")),
         )

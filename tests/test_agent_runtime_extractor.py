@@ -33,6 +33,7 @@ from application_pipeline.prompts import (
     PromptTemplate,
     Prompts,
 )
+from collections.abc import Callable
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -90,36 +91,15 @@ def _judge_output(verdicts: list[dict[str, int]]) -> str:
     return f"<verdicts>{json.dumps(verdicts)}</verdicts>"
 
 
-def _patch_runtime(
-    monkeypatch: pytest.MonkeyPatch, result: AgentRuntimeInvocationResult
-) -> None:
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        lambda *args, **kwargs: result,
-    )
-
-
-def _capture_invoke(
-    monkeypatch: pytest.MonkeyPatch,
-    result: AgentRuntimeInvocationResult,
-    captured: dict[str, object],
-) -> None:
-    def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
-    ) -> AgentRuntimeInvocationResult:
-        captured["prompt"] = prompt
-        captured["call_site"] = call_site
-        return result
-
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
-
-class _RecordingInvocationPort:
-    def __init__(self, result: AgentRuntimeInvocationResult) -> None:
+class _MockInvocationPort:
+    def __init__(
+        self,
+        *,
+        result: AgentRuntimeInvocationResult | None = None,
+        invoke: Callable[..., AgentRuntimeInvocationResult] | None = None,
+    ) -> None:
         self._result = result
+        self._invoke = invoke
         self.calls: list[dict[str, object]] = []
 
     def invoke(
@@ -138,7 +118,39 @@ class _RecordingInvocationPort:
                 "provider_auth": provider_auth,
             }
         )
+        if self._invoke is not None:
+            return self._invoke(
+                prompt,
+                logs_root=logs_root,
+                call_site=call_site,
+                provider_auth=provider_auth,
+            )
+        assert self._result is not None
         return self._result
+
+
+def _invocation_port(result: AgentRuntimeInvocationResult) -> _MockInvocationPort:
+    return _MockInvocationPort(result=result)
+
+
+def _capturing_invocation_port(
+    result: AgentRuntimeInvocationResult,
+    captured: dict[str, object],
+) -> _MockInvocationPort:
+    def _invoke(
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
+    ) -> AgentRuntimeInvocationResult:
+        captured["prompt"] = prompt
+        captured["logs_root"] = logs_root
+        captured["call_site"] = call_site
+        captured["provider_auth"] = provider_auth
+        return result
+
+    return _MockInvocationPort(invoke=_invoke)
 
 
 def _item(**kwargs: object) -> ClassifyItem:
@@ -156,18 +168,20 @@ def _item(**kwargs: object) -> ClassifyItem:
 
 def test_classify_relevance_exposes_evidence_directory_as_last_log_path(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     evidence_dir = (
         run_log.logs_dir / "llm" / "agent-runtime" / "classify" / "llm-classify-1"
     )
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(
-            _classify_output({"matches": False}), evidence_dir=evidence_dir
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(
+                _classify_output({"matches": False}), evidence_dir=evidence_dir
+            )
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
 
     extractor.classify_relevance([_item()])
 
@@ -176,21 +190,23 @@ def test_classify_relevance_exposes_evidence_directory_as_last_log_path(
 
 def test_classify_relevance_matched_returns_header_and_summary(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(
-            _classify_output(
-                {
-                    "matches": True,
-                    "header": "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
-                    "summary": "Great role for ML engineers.",
-                }
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(
+                _classify_output(
+                    {
+                        "matches": True,
+                        "header": "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+                        "summary": "Great role for ML engineers.",
+                    }
+                )
             )
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.classify_relevance([_item(company="Acme", location="Hamburg")])
     result = results[0]
     assert isinstance(result, RelevanceVerdict)
@@ -208,10 +224,15 @@ def test_classify_relevance_matched_returns_header_and_summary(
 
 def test_classify_relevance_out_of_domain_returns_none_header_and_summary(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(monkeypatch, _runtime_result(_classify_output({"matches": False})))
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(_classify_output({"matches": False}))
+        ),
+    )
     results = extractor.classify_relevance([_item()])
     result = results[0]
     assert isinstance(result, RelevanceVerdict)
@@ -227,41 +248,49 @@ def test_classify_relevance_out_of_domain_returns_none_header_and_summary(
 
 def test_classify_relevance_matched_missing_header_returns_none(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(_classify_output({"matches": True, "summary": "ok"})),
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(_classify_output({"matches": True, "summary": "ok"}))
+        ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.classify_relevance([_item()])
     assert results[0] is None
 
 
 def test_classify_relevance_matched_missing_summary_returns_none(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(_classify_output({"matches": True, "header": "some header"})),
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(
+                _classify_output({"matches": True, "header": "some header"})
+            )
+        ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.classify_relevance([_item()])
     assert results[0] is None
 
 
 def test_classify_relevance_matched_empty_header_returns_none(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(
-            _classify_output({"matches": True, "header": "", "summary": "ok"})
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(
+                _classify_output({"matches": True, "header": "", "summary": "ok"})
+            )
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.classify_relevance([_item()])
     assert results[0] is None
 
@@ -278,17 +307,19 @@ def test_classify_relevance_matched_empty_header_returns_none(
 
 def test_classify_relevance_prompt_includes_company_and_location(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
-    _capture_invoke(
-        monkeypatch,
-        _runtime_result(
-            _classify_output({"matches": True, "header": "h", "summary": "s"})
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_capturing_invocation_port(
+            _runtime_result(
+                _classify_output({"matches": True, "header": "h", "summary": "s"})
+            ),
+            captured,
         ),
-        captured,
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.classify_relevance([_item(company="TestCorp", location="Berlin")])
     prompt_sent = str(captured["prompt"])
     assert "TestCorp" in prompt_sent
@@ -302,7 +333,7 @@ def test_classify_relevance_uses_agent_runtime_invocation_port(
     run_log: RunLog,
 ) -> None:
     provider_auth = ProviderAuth(opencode_api_key="operator-key")
-    invocation_port = _RecordingInvocationPort(
+    invocation_port = _invocation_port(
         _runtime_result(_classify_output({"matches": False}))
     )
     extractor = AgentRuntimeExtractor(
@@ -334,28 +365,32 @@ def test_classify_relevance_uses_agent_runtime_invocation_port(
 
 def test_classify_relevance_legacy_in_domain_field_returns_none(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(
-            _classify_output({"in_domain": True, "header": "h", "summary": "s"})
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(
+                _classify_output({"in_domain": True, "header": "h", "summary": "s"})
+            )
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.classify_relevance([_item()])
     assert results[0] is None
 
 
 def test_classify_relevance_does_not_write_pipeline_owned_transcript_jsonl(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(_classify_output({"matches": False})),
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(_classify_output({"matches": False}))
+        ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.classify_relevance([_item()])
 
     transcript_path = run_log.logs_dir / "llm" / "classify_relevance.transcripts.jsonl"
@@ -376,15 +411,15 @@ def _make_candidates(n: int) -> list[JudgeCandidate]:
 
 def test_judge_top_n_returns_match_verdict_with_id_and_rank(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidates = _make_candidates(5)
     verdicts_raw = [{"id": c.id, "rank": i + 1} for i, c in enumerate(candidates)]
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(_judge_output(verdicts_raw)),
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(_runtime_result(_judge_output(verdicts_raw))),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.judge_top_n(candidates)
     assert len(results) == 5
     assert all(isinstance(v, MatchVerdict) for v in results)
@@ -396,7 +431,7 @@ def test_judge_top_n_uses_agent_runtime_invocation_port(
     run_log: RunLog,
 ) -> None:
     provider_auth = ProviderAuth(opencode_api_key="operator-key")
-    invocation_port = _RecordingInvocationPort(
+    invocation_port = _invocation_port(
         _runtime_result(_judge_output([{"id": 7, "rank": 1}]))
     )
     extractor = AgentRuntimeExtractor(
@@ -440,15 +475,15 @@ def test_judge_top_n_empty_candidates_returns_empty_list(
 
 def test_judge_top_n_does_not_write_pipeline_owned_transcript_jsonl(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidates = _make_candidates(2)
     verdicts_raw = [{"id": c.id, "rank": i + 1} for i, c in enumerate(candidates)]
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(_judge_output(verdicts_raw)),
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(_runtime_result(_judge_output(verdicts_raw))),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.judge_top_n(candidates)
 
     transcript_path = run_log.logs_dir / "llm" / "judge_match.transcripts.jsonl"
@@ -457,17 +492,19 @@ def test_judge_top_n_does_not_write_pipeline_owned_transcript_jsonl(
 
 def test_judge_top_n_candidates_appear_in_prompt(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidates = _make_candidates(2)
     verdicts_raw = [{"id": c.id, "rank": i + 1} for i, c in enumerate(candidates)]
     captured: dict[str, object] = {}
-    _capture_invoke(
-        monkeypatch,
-        _runtime_result(_judge_output(verdicts_raw)),
-        captured,
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_capturing_invocation_port(
+            _runtime_result(_judge_output(verdicts_raw)),
+            captured,
+        ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.judge_top_n(candidates)
     prompt_sent = str(captured["prompt"])
     assert "[Candidate id=0]" in prompt_sent
@@ -476,16 +513,17 @@ def test_judge_top_n_candidates_appear_in_prompt(
 
 
 def test_judge_top_n_coerces_string_id_to_int(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     candidates = _make_candidates(3)
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(
-            '<verdicts>[{"id": "0", "rank": 1}]</verdicts>',
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result('<verdicts>[{"id": "0", "rank": 1}]</verdicts>')
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     verdicts = extractor.judge_top_n(candidates)
     assert len(verdicts) == 1
     assert verdicts[0].id == 0
@@ -493,27 +531,32 @@ def test_judge_top_n_coerces_string_id_to_int(
 
 
 def test_judge_top_n_rejects_non_numeric_string_verdict_id(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     candidates = _make_candidates(3)
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(
-            '<verdicts>[{"id": "abc", "rank": 1}]</verdicts>',
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result('<verdicts>[{"id": "abc", "rank": 1}]</verdicts>')
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     with pytest.raises(ExtractorBatchMalformedError):
         extractor.judge_top_n(candidates)
 
 
 def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judge_runtime_file(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     captured: dict[str, object] = {}
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "judge"
         captured["prompt"] = prompt
@@ -534,11 +577,6 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     candidates = [
         JudgeCandidate(
             id=0, header="Title 0\nACME · Hamburg · remote", summary="Summary 0"
@@ -547,7 +585,12 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
             id=1, header="Title 1\nACME · Berlin · remote", summary="Summary 1"
         ),
     ]
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
+    )
     results = extractor.judge_top_n(candidates)
 
     assert captured["call_site"] == "judge"
@@ -568,13 +611,16 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
 
 
 def test_judge_top_n_success_logs_verdicts_without_usage_fields(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(_judge_output([{"id": 0, "rank": 1}])),
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(_judge_output([{"id": 0, "rank": 1}]))
+        ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
 
     results = extractor.judge_top_n(_make_candidates(1))
 
@@ -587,10 +633,14 @@ def test_judge_top_n_success_logs_verdicts_without_usage_fields(
 
 
 def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
@@ -604,23 +654,27 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     with pytest.raises(UsageLimitError) as excinfo:
-        extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+        extractor = AgentRuntimeExtractor(
+            _config(),
+            _prompts(),
+            run_log=run_log,
+            invocation_port=_MockInvocationPort(invoke=_fake_invoke),
+        )
         extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
 
     assert "usage limit" in str(excinfo.value).lower()
 
 
 def test_judge_usage_limit_error_uses_agent_runtime_vocabulary(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
@@ -630,13 +684,13 @@ def test_judge_usage_limit_error_uses_agent_runtime_vocabulary(
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     with pytest.raises(UsageLimitError) as excinfo:
-        extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
+        extractor = AgentRuntimeExtractor(
+            _config(),
+            _prompts(),
+            run_log=run_log,
+            invocation_port=_MockInvocationPort(invoke=_fake_invoke),
+        )
         extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
 
     message = str(excinfo.value)
@@ -645,10 +699,14 @@ def test_judge_usage_limit_error_uses_agent_runtime_vocabulary(
 
 
 def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         runtime_log = (
             logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
@@ -662,15 +720,11 @@ def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
     )
 
     with pytest.raises(UsageLimitError) as excinfo:
@@ -682,13 +736,17 @@ def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(
 
 
 def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     captured: dict[str, object] = {}
     provider_auth = ProviderAuth(opencode_api_key="test-key")
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         captured["prompt"] = prompt
         captured["call_site"] = call_site
@@ -701,16 +759,12 @@ def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     extractor = AgentRuntimeExtractor(
         _config(),
         _prompts(),
         run_log=run_log,
         provider_auth=provider_auth,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
     )
     extractor.judge_top_n([JudgeCandidate(id=0, header="h", summary="s")])
 
@@ -766,15 +820,18 @@ def _batch_classify_output(
 
 def test_classify_relevance_batch_prompt_includes_sequential_ids(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     items = [_item(title=f"Job {i + 1}") for i in range(3)]
     output = _batch_classify_output(
         [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
     )
     captured: dict[str, object] = {}
-    _capture_invoke(monkeypatch, _runtime_result(output), captured)
-    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=_capturing_invocation_port(_runtime_result(output), captured),
+    )
     extractor.classify_relevance(items)
     prompt_sent = str(captured["prompt"])
     assert "id=1" in prompt_sent
@@ -787,7 +844,6 @@ def test_classify_relevance_batch_prompt_includes_sequential_ids(
 
 def test_classify_relevance_out_of_order_verdicts_map_to_correct_positions(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     items = [_item(title=f"Job {i + 1}") for i in range(3)]
     # verdicts arrive as id=3, id=1, id=2
@@ -798,8 +854,12 @@ def test_classify_relevance_out_of_order_verdicts_map_to_correct_positions(
             (2, {"matches": False}),
         ]
     )
-    _patch_runtime(monkeypatch, _runtime_result(output))
-    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(_runtime_result(output)),
+    )
     results = extractor.classify_relevance(items)
     assert len(results) == 3
     assert results[0] is not None and results[0].header == "h1"
@@ -809,13 +869,16 @@ def test_classify_relevance_out_of_order_verdicts_map_to_correct_positions(
 
 def test_classify_relevance_missing_verdict_tag_produces_none(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     items = [_item(title="Job 1"), _item(title="Job 2")]
     # only id=1 present; id=2 missing
     output = _batch_classify_output([(1, {"matches": False})])
-    _patch_runtime(monkeypatch, _runtime_result(output))
-    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(_runtime_result(output)),
+    )
     results = extractor.classify_relevance(items)
     assert results[0] is not None and results[0].matches is False
     assert results[1] is None
@@ -823,15 +886,18 @@ def test_classify_relevance_missing_verdict_tag_produces_none(
 
 def test_classify_relevance_malformed_verdict_json_produces_none(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     items = [_item(title="Job 1"), _item(title="Job 2")]
     output = (
         '<verdict id="1">{"matches": false}</verdict>'
         '<verdict id="2">not valid json</verdict>'
     )
-    _patch_runtime(monkeypatch, _runtime_result(output))
-    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(_runtime_result(output)),
+    )
     results = extractor.classify_relevance(items)
     assert results[0] is not None and results[0].matches is False
     assert results[1] is None
@@ -839,26 +905,32 @@ def test_classify_relevance_malformed_verdict_json_produces_none(
 
 def test_classify_relevance_all_verdicts_missing_returns_all_none_no_error(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     items = [_item(), _item()]
-    _patch_runtime(monkeypatch, _runtime_result("no verdict tags here"))
-    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(_runtime_result("no verdict tags here")),
+    )
     results = extractor.classify_relevance(items)
     assert results == [None, None]
 
 
 def test_classify_relevance_batch_includes_full_prompt_via_agent_runtime(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     items = [_item(title=f"Job {i + 1}") for i in range(3)]
     output = _batch_classify_output(
         [(1, {"matches": False}), (2, {"matches": False}), (3, {"matches": False})]
     )
     captured: dict[str, object] = {}
-    _capture_invoke(monkeypatch, _runtime_result(output), captured)
-    extractor = AgentRuntimeExtractor(_config(), _batch_prompts(), run_log=run_log)
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=_capturing_invocation_port(_runtime_result(output), captured),
+    )
     extractor.classify_relevance(items)
     prompt_sent = str(captured["prompt"])
     assert "Job 1" in prompt_sent
@@ -871,13 +943,15 @@ def test_classify_relevance_batch_includes_full_prompt_via_agent_runtime(
 
 def test_classify_relevance_success_logs_event_without_usage_fields(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _patch_runtime(
-        monkeypatch,
-        _runtime_result(_classify_output({"matches": False})),
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(_classify_output({"matches": False}))
+        ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
 
     results = extractor.classify_relevance([_item()])
 
@@ -893,12 +967,15 @@ def test_classify_relevance_success_logs_event_without_usage_fields(
 
 def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         captured["prompt"] = prompt
         captured["call_site"] = call_site
@@ -924,16 +1001,12 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     items = [_item(title=f"Job {i + 1}") for i in range(3)]
     extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
     )
     results = extractor.classify_relevance(items)
 
@@ -954,10 +1027,14 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
 
 
 def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "classify"
         runtime_log = (
@@ -973,15 +1050,11 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
     )
 
     with pytest.raises(UsageLimitError) as excinfo:
@@ -991,10 +1064,14 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
 
 
 def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retryable(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "classify"
         runtime_log = (
@@ -1010,15 +1087,11 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
     )
     results = extractor.classify_relevance([_item(), _item()])
 
@@ -1026,10 +1099,14 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
 
 
 def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_valid(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         assert prompt
         assert call_site == "classify"
@@ -1046,15 +1123,11 @@ def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_vali
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
     )
 
     results = extractor.classify_relevance([_item()])
@@ -1063,10 +1136,14 @@ def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_vali
 
 
 def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachable(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         assert prompt
         assert call_site == "classify"
@@ -1083,15 +1160,11 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
             message="provider exploded",
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
     )
 
     with pytest.raises(ExtractorUnreachableError) as excinfo:
@@ -1101,13 +1174,17 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
 
 
 def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
     captured: dict[str, object] = {}
     provider_auth = ProviderAuth(opencode_api_key="test-key")
 
     def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         captured["prompt"] = prompt
         captured["call_site"] = call_site
@@ -1120,16 +1197,12 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
             message=None,
         )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
-    )
-
     extractor = AgentRuntimeExtractor(
         _config(),
         _batch_prompts(),
         run_log=run_log,
         provider_auth=provider_auth,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
     )
     extractor.classify_relevance([_item()])
 
@@ -1139,70 +1212,76 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
 
 def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     missing_log = (
         run_log.logs_dir / "llm" / "agent-runtime" / "classify" / "missing.log"
     )
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        lambda *args, **kwargs: AgentRuntimeInvocationResult(
-            kind="completed",
-            output=_classify_output({"matches": False}),
-            evidence_dir=missing_log,
-            reset_time=None,
-            message=None,
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            AgentRuntimeInvocationResult(
+                kind="completed",
+                output=_classify_output({"matches": False}),
+                evidence_dir=missing_log,
+                reset_time=None,
+                message=None,
+            ),
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.classify_relevance([_item()])
     assert results == [RelevanceVerdict(matches=False)]
 
 
 def test_judge_top_n_succeeds_when_runtime_log_file_is_missing(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     missing_log = run_log.logs_dir / "llm" / "agent-runtime" / "judge" / "missing.log"
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        lambda *args, **kwargs: AgentRuntimeInvocationResult(
-            kind="completed",
-            output=_judge_output([{"id": 0, "rank": 1}]),
-            evidence_dir=missing_log,
-            reset_time=None,
-            message=None,
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            AgentRuntimeInvocationResult(
+                kind="completed",
+                output=_judge_output([{"id": 0, "rank": 1}]),
+                evidence_dir=missing_log,
+                reset_time=None,
+                message=None,
+            ),
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.judge_top_n(_make_candidates(1))
     assert results == [MatchVerdict(id=0, rank=1)]
 
 
 def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usage(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A completed Agent Runtime classifier response with valid output and no usage
     metadata is applied normally.
     """
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        lambda *args, **kwargs: AgentRuntimeInvocationResult(
-            kind="completed",
-            output=_classify_output(
-                {
-                    "matches": True,
-                    "header": "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
-                    "summary": "Great role for ML engineers.",
-                }
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            AgentRuntimeInvocationResult(
+                kind="completed",
+                output=_classify_output(
+                    {
+                        "matches": True,
+                        "header": "Senior Python Engineer\nAcme · Hamburg · remote\n2024-01-01",
+                        "summary": "Great role for ML engineers.",
+                    }
+                ),
+                evidence_dir=Path("llm-classify.log"),
+                reset_time=None,
+                message=None,
             ),
-            evidence_dir=Path("llm-classify.log"),
-            reset_time=None,
-            message=None,
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
 
     results = extractor.classify_relevance([_item(company="Acme", location="Hamburg")])
 
@@ -1215,19 +1294,21 @@ def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usag
 
 def test_judge_top_n_succeeds_when_runtime_returns_completed_without_usage(
     run_log: RunLog,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        lambda *args, **kwargs: AgentRuntimeInvocationResult(
-            kind="completed",
-            output=_judge_output([{"id": 0, "rank": 1}]),
-            evidence_dir=Path("llm-judge.log"),
-            reset_time=None,
-            message=None,
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            AgentRuntimeInvocationResult(
+                kind="completed",
+                output=_judge_output([{"id": 0, "rank": 1}]),
+                evidence_dir=Path("llm-judge.log"),
+                reset_time=None,
+                message=None,
+            ),
         ),
     )
-    extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
 
     results = extractor.judge_top_n(_make_candidates(1))
 

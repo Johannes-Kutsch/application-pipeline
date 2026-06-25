@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+from abc import abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Final, Literal
+from typing import Protocol
 
 from agent_runtime import (
     AgentRuntimeError,
@@ -47,6 +50,41 @@ class AgentRuntimeInvocationResult:
     evidence_dir: Path
     reset_time: datetime | None = None
     message: str | None = None
+
+
+class AgentRuntimeInvocationPort(Protocol):
+    @abstractmethod
+    def invoke(
+        self,
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
+    ) -> AgentRuntimeInvocationResult: ...
+
+
+class AgentRuntimeInvocationAdapter:
+    def __init__(
+        self,
+        invoke: Callable[..., AgentRuntimeInvocationResult] | None = None,
+    ) -> None:
+        self._invoke = invoke if invoke is not None else invoke_agent_runtime
+
+    def invoke(
+        self,
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
+    ) -> AgentRuntimeInvocationResult:
+        return self._invoke(
+            prompt,
+            logs_root=logs_root,
+            call_site=call_site,
+            provider_auth=provider_auth,
+        )
 
 
 def _evidence_parent(logs_root: Path, call_site: AgentRuntimeCallSiteName) -> Path:

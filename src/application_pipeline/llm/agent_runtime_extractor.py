@@ -15,7 +15,11 @@ from .agent_output import (
     extract_id_tagged_verdicts,
     extract_json_block,
 )
-from .agent_runtime_invocation import invoke_agent_runtime
+from .agent_runtime_invocation import (
+    AgentRuntimeInvocationAdapter,
+    AgentRuntimeInvocationPort,
+    invoke_agent_runtime,
+)
 from .agent_runtime_types import (
     AgentRuntimeResponse,
     UsageLimitError,
@@ -127,11 +131,17 @@ class AgentRuntimeExtractor:
         *,
         run_log: RunLog,
         provider_auth: ProviderAuth | None = None,
+        invocation_port: AgentRuntimeInvocationPort | None = None,
     ) -> None:
         self._config = config
         self._prompts = prompts
         self._run_log = run_log
         self._provider_auth = provider_auth
+        self._invocation_port = (
+            invocation_port
+            if invocation_port is not None
+            else AgentRuntimeInvocationAdapter(invoke=invoke_agent_runtime)
+        )
         self._local = threading.local()
 
     @property
@@ -193,7 +203,7 @@ class AgentRuntimeExtractor:
         prompt: str,
     ) -> tuple[Any, AgentRuntimeResponse]:
         t0 = time.monotonic()
-        result = invoke_agent_runtime(
+        result = self._invocation_port.invoke(
             prompt,
             logs_root=self._run_log.logs_dir,
             call_site="judge",
@@ -261,7 +271,7 @@ class AgentRuntimeExtractor:
         return "\n\n".join(parts)
 
     def _invoke_runtime(self, prompt: str) -> AgentRuntimeResponse:
-        result = invoke_agent_runtime(
+        result = self._invocation_port.invoke(
             prompt,
             logs_root=self._run_log.logs_dir,
             call_site="classify",

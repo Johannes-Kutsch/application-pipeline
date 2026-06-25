@@ -13,7 +13,6 @@ from application_pipeline.dedup import load as dedup_load
 from application_pipeline.dedup.store import DeduplicationStore
 from application_pipeline.extracts.card_store import load_card_store
 from application_pipeline.freshness_gate import FreshnessGate
-from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
@@ -84,32 +83,6 @@ def _make_enricher_with_dedup(
         dedup_store=dedup,
     )
     return enricher, dedup
-
-
-# ---------------------------------------------------------------------------
-# strip_to_text
-# ---------------------------------------------------------------------------
-
-
-def test_strip_to_text_with_selector_returns_matched_node_text() -> None:
-    html = (
-        "<html><body>"
-        "<div class='other'>Noise</div>"
-        "<div class='job-body'>Python Engineer role</div>"
-        "</body></html>"
-    )
-    result = strip_to_text(html, ".job-body")
-    assert result == "Python Engineer role"
-
-
-def test_strip_to_text_without_selector_falls_back_to_trafilatura() -> None:
-    html = (
-        "<html><body>"
-        "<article>Senior Data Engineer – Python, Spark, and Kafka.</article>"
-        "</body></html>"
-    )
-    result = strip_to_text(html, None)
-    assert "Senior Data Engineer" in result
 
 
 # ---------------------------------------------------------------------------

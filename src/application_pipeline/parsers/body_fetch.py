@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from application_pipeline.llm.body_strip import strip_to_text
+from application_pipeline.parsers.body_text import html_to_raw_description
 from application_pipeline.parsers.http import ParserHttp
 
 _TOKEN_CAP_DEFAULT = 8_000
@@ -45,7 +45,7 @@ def fetch_and_strip(
     content = http.enrich_get(url, error_prefix=url)
     html = content.decode("utf-8", errors="replace")
 
-    text = strip_to_text(html, body_selector)
+    text = html_to_raw_description(html, body_selector)
 
     if len(text) > token_cap * _CHARS_PER_TOKEN:
         _stash(failures_dir / "oversized", source, url, html)

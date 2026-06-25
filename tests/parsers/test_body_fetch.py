@@ -10,6 +10,7 @@ import pytest
 from application_pipeline.http import HttpStubNotRetryableError
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.body_fetch import OversizedBodyError, fetch_and_strip
+from application_pipeline.parsers.body_text import html_to_raw_description
 from application_pipeline.parsers.types import EnrichFailedError
 from tests.parsers.http_helpers import (
     ScriptedParserHttpOutcome,
@@ -27,6 +28,32 @@ def run_log(tmp_path: Path) -> RunLog:
 
 def _make_http(run_log: RunLog, *outcomes: ScriptedParserHttpOutcome) -> ParserHttp:
     return make_scripted_parser_http(run_log, *outcomes, sleep=lambda _: None)[0]
+
+
+# ---------------------------------------------------------------------------
+# Behavior 0: parser-owned body text extraction preserves current behavior
+# ---------------------------------------------------------------------------
+
+
+def test_html_to_raw_description_with_selector_returns_matched_node_text() -> None:
+    html = (
+        "<html><body>"
+        "<div class='other'>Noise</div>"
+        "<div class='job-body'>Python Engineer role</div>"
+        "</body></html>"
+    )
+    result = html_to_raw_description(html, ".job-body")
+    assert result == "Python Engineer role"
+
+
+def test_html_to_raw_description_without_selector_falls_back_to_trafilatura() -> None:
+    html = (
+        "<html><body>"
+        "<article>Senior Data Engineer – Python, Spark, and Kafka.</article>"
+        "</body></html>"
+    )
+    result = html_to_raw_description(html, None)
+    assert "Senior Data Engineer" in result
 
 
 # ---------------------------------------------------------------------------

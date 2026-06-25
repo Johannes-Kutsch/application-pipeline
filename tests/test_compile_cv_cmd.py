@@ -589,7 +589,7 @@ class _MutateSourceSlotMapAfterStagingAdapter:
         return result
 
 
-def test_compile_cv_fake_adapter_uses_staged_cv_tex_after_staging(
+def test_compile_cv_published_pdfs_keep_staged_cv_tex_after_source_changes(
     app_dir: Path,
     project_root: Path,
 ) -> None:
@@ -610,7 +610,7 @@ def test_compile_cv_fake_adapter_uses_staged_cv_tex_after_staging(
     assert b"MUTATED SKILLS BODY" not in resume_pdf
 
 
-def test_compile_cv_fake_adapter_payload_varies_by_build_name(
+def test_compile_cv_published_pdfs_differ_by_build_name(
     app_dir: Path,
     project_root: Path,
 ) -> None:

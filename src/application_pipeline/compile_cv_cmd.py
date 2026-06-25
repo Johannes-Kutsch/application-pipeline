@@ -19,12 +19,8 @@ _BUILDS = ("cover", "resume", "combined")
 _LATEX_SUFFIXES = frozenset({".tex", ".cls", ".sty"})
 
 
-def compile_cv(
-    app_dir: Path,
-    *,
-    pdflatex: _PdflatexAdapter | None = None,
-) -> None:
-    _CompileCvWorkflow(app_dir, pdflatex=pdflatex).run()
+def compile_cv(app_dir: Path) -> None:
+    _CompileCvWorkflow(app_dir).run()
 
 
 @dataclass(slots=True)

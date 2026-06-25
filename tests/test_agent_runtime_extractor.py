@@ -65,7 +65,7 @@ def _runtime_result(
     return AgentRuntimeInvocationResult(
         kind="completed",
         output=output,
-        evidence_dir=evidence_dir or Path("llm-classify.log"),
+        evidence_dir=evidence_dir or Path("classify-evidence"),
         reset_time=None,
         message=None,
     )
@@ -785,11 +785,7 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="quota reached",
-            evidence_dir=logs_root
-            / "llm"
-            / "agent-runtime"
-            / "judge"
-            / "llm-judge-quota.log",
+            evidence_dir=logs_root / "judge-usage-limit-evidence",
             reset_time=None,
             message=None,
         )
@@ -819,7 +815,7 @@ def test_judge_usage_limit_error_uses_agent_runtime_vocabulary(
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="quota reached",
-            evidence_dir=logs_root / "llm-judge-quota.log",
+            evidence_dir=logs_root / "judge-usage-limit-evidence",
             reset_time=None,
             message=None,
         )
@@ -851,7 +847,7 @@ def test_judge_usage_limit_invocation_result_preserves_reset_time(
         provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         return _usage_limit_result(
-            logs_root / "llm-judge-quota.log",
+            logs_root / "judge-usage-limit-evidence",
             output="quota reached",
             reset_time=reset_time,
         )
@@ -879,14 +875,10 @@ def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(
         call_site: AgentRuntimeCallSiteName,
         provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="limit reached",
-            evidence_dir=runtime_log,
+            evidence_dir=logs_root / "classify-usage-limit-evidence",
             reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
             message=None,
         )
@@ -916,14 +908,10 @@ def test_classify_usage_limit_invocation_result_from_public_llm_import_preserves
         call_site: AgentRuntimeCallSiteName,
         provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="limit reached",
-            evidence_dir=runtime_log,
+            evidence_dir=logs_root / "classify-usage-limit-evidence",
             reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
             message=None,
         )
@@ -961,7 +949,7 @@ def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
         return AgentRuntimeInvocationResult(
             kind="completed",
             output='<verdicts>[{"id": 0, "rank": 1}]</verdicts>',
-            evidence_dir=logs_root / "judge.log",
+            evidence_dir=logs_root / "judge-evidence",
             reset_time=None,
             message=None,
         )
@@ -1295,14 +1283,10 @@ def test_classify_retryable_invocation_result_from_public_llm_port_marks_each_it
             call_site: AgentRuntimeCallSiteName,
             provider_auth: ProviderAuth | None = None,
         ) -> AgentRuntimeInvocationResult:
-            runtime_log = (
-                logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-            )
-            runtime_log.parent.mkdir(parents=True, exist_ok=True)
             return AgentRuntimeInvocationResult(
                 kind="retryable_provider_failure",
                 output="provider flake",
-                evidence_dir=runtime_log,
+                evidence_dir=logs_root / "classify-retryable-failure-evidence",
                 reset_time=None,
                 message=None,
             )
@@ -1425,7 +1409,7 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
         return AgentRuntimeInvocationResult(
             kind="completed",
             output='<verdict id="1">{"matches": false}</verdict>',
-            evidence_dir=logs_root / "classify.log",
+            evidence_dir=logs_root / "classify-evidence",
             reset_time=None,
             message=None,
         )
@@ -1487,11 +1471,11 @@ def test_judge_top_n_with_provider_auth_keeps_auth_out_of_ordinary_events(
     assert "opencode_api_key" not in json.dumps(event)
 
 
-def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(
+def test_classify_relevance_succeeds_when_evidence_path_is_missing(
     run_log: RunLog,
 ) -> None:
-    missing_log = (
-        run_log.logs_dir / "llm" / "agent-runtime" / "classify" / "missing.log"
+    missing_evidence_path = (
+        run_log.logs_dir / "llm" / "agent-runtime" / "classify" / "missing-evidence"
     )
     extractor = AgentRuntimeExtractor(
         _config(),
@@ -1501,7 +1485,7 @@ def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(
             AgentRuntimeInvocationResult(
                 kind="completed",
                 output=_classify_output({"matches": False}),
-                evidence_dir=missing_log,
+                evidence_dir=missing_evidence_path,
                 reset_time=None,
                 message=None,
             ),
@@ -1509,6 +1493,7 @@ def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(
     )
     results = extractor.classify_relevance([_item()])
     assert results == [RelevanceVerdict(matches=False)]
+    assert extractor.last_classify_log_path == missing_evidence_path
 
 
 def test_classify_relevance_succeeds_when_runtime_evidence_directory_is_missing(
@@ -1539,10 +1524,12 @@ def test_classify_relevance_succeeds_when_runtime_evidence_directory_is_missing(
     assert not missing_evidence_dir.exists()
 
 
-def test_judge_top_n_succeeds_when_runtime_log_file_is_missing(
+def test_judge_top_n_succeeds_when_evidence_path_is_missing(
     run_log: RunLog,
 ) -> None:
-    missing_log = run_log.logs_dir / "llm" / "agent-runtime" / "judge" / "missing.log"
+    missing_evidence_path = (
+        run_log.logs_dir / "llm" / "agent-runtime" / "judge" / "missing-evidence"
+    )
     extractor = AgentRuntimeExtractor(
         _config(),
         _prompts(),
@@ -1551,7 +1538,7 @@ def test_judge_top_n_succeeds_when_runtime_log_file_is_missing(
             AgentRuntimeInvocationResult(
                 kind="completed",
                 output=_judge_output([{"id": 0, "rank": 1}]),
-                evidence_dir=missing_log,
+                evidence_dir=missing_evidence_path,
                 reset_time=None,
                 message=None,
             ),
@@ -1608,7 +1595,7 @@ def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usag
                         "summary": "Great role for ML engineers.",
                     }
                 ),
-                evidence_dir=Path("llm-classify.log"),
+                evidence_dir=Path("classify-evidence"),
                 reset_time=None,
                 message=None,
             ),
@@ -1635,7 +1622,7 @@ def test_judge_top_n_succeeds_when_runtime_returns_completed_without_usage(
             AgentRuntimeInvocationResult(
                 kind="completed",
                 output=_judge_output([{"id": 0, "rank": 1}]),
-                evidence_dir=Path("llm-judge.log"),
+                evidence_dir=Path("judge-evidence"),
                 reset_time=None,
                 message=None,
             ),

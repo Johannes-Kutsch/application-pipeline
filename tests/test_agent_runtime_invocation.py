@@ -16,6 +16,10 @@ from agent_runtime.runtime import (
 from agent_runtime.session import RunKind
 
 from application_pipeline.llm.agent_runtime_invocation import invoke_agent_runtime
+from application_pipeline.llm.agent_runtime_invocation import (
+    AgentRuntimeInvocationAdapter,
+    AgentRuntimeInvocationResult,
+)
 
 
 @dataclass
@@ -198,6 +202,46 @@ def test_explicit_provider_auth_is_forwarded(logs_root: Path) -> None:
     )
 
     assert _FakeRuntimeClient.requests[0].auth == provider_auth
+
+
+def test_agent_runtime_invocation_adapter_delegates_call_shape() -> None:
+    captured: dict[str, object] = {}
+    expected = AgentRuntimeInvocationResult(
+        kind="completed",
+        output="payload",
+        evidence_dir=Path("llm/classify/llm-classify-1"),
+    )
+
+    def _fake_invoke(
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: str,
+        provider_auth: ProviderAuth | None = None,
+    ) -> AgentRuntimeInvocationResult:
+        captured["prompt"] = prompt
+        captured["logs_root"] = logs_root
+        captured["call_site"] = call_site
+        captured["provider_auth"] = provider_auth
+        return expected
+
+    provider_auth = ProviderAuth(opencode_api_key="operator-key")
+    adapter = AgentRuntimeInvocationAdapter(invoke=_fake_invoke)
+
+    result = adapter.invoke(
+        "judge prompt",
+        logs_root=Path("/tmp/run-log"),
+        call_site="judge",
+        provider_auth=provider_auth,
+    )
+
+    assert result == expected
+    assert captured == {
+        "prompt": "judge prompt",
+        "logs_root": Path("/tmp/run-log"),
+        "call_site": "judge",
+        "provider_auth": provider_auth,
+    }
 
 
 def test_multiple_records_are_index_suffixed_in_one_directory(

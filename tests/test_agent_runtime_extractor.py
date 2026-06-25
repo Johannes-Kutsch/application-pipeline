@@ -18,6 +18,7 @@ from application_pipeline.llm import (
     UsageLimitError,
 )
 from application_pipeline.llm.agent_runtime_invocation import (
+    AgentRuntimeCallSiteName,
     AgentRuntimeInvocationResult,
 )
 from application_pipeline.llm.types import (
@@ -114,6 +115,30 @@ def _capture_invoke(
         "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
         _fake_invoke,
     )
+
+
+class _RecordingInvocationPort:
+    def __init__(self, result: AgentRuntimeInvocationResult) -> None:
+        self._result = result
+        self.calls: list[dict[str, object]] = []
+
+    def invoke(
+        self,
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
+    ) -> AgentRuntimeInvocationResult:
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "logs_root": logs_root,
+                "call_site": call_site,
+                "provider_auth": provider_auth,
+            }
+        )
+        return self._result
 
 
 def _item(**kwargs: object) -> ClassifyItem:
@@ -273,6 +298,40 @@ def test_classify_relevance_prompt_includes_company_and_location(
     ).exists()
 
 
+def test_classify_relevance_uses_agent_runtime_invocation_port(
+    run_log: RunLog,
+) -> None:
+    provider_auth = ProviderAuth(opencode_api_key="operator-key")
+    invocation_port = _RecordingInvocationPort(
+        _runtime_result(_classify_output({"matches": False}))
+    )
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        provider_auth=provider_auth,
+        invocation_port=invocation_port,
+    )
+
+    results = extractor.classify_relevance([_item(company="Acme", location="Hamburg")])
+
+    assert results == [RelevanceVerdict(matches=False)]
+    assert invocation_port.calls == [
+        {
+            "prompt": (
+                "v2 ## Stellenanzeige id=1\n\n"
+                "- Jobtitel: Senior Python Engineer\n"
+                "- Unternehmen: Acme\n"
+                "- Ort: Hamburg\n\n"
+                "Python ML role"
+            ),
+            "logs_root": run_log.logs_dir,
+            "call_site": "classify",
+            "provider_auth": provider_auth,
+        }
+    ]
+
+
 def test_classify_relevance_legacy_in_domain_field_returns_none(
     run_log: RunLog,
     monkeypatch: pytest.MonkeyPatch,
@@ -331,6 +390,42 @@ def test_judge_top_n_returns_match_verdict_with_id_and_rank(
     assert all(isinstance(v, MatchVerdict) for v in results)
     assert {v.rank for v in results} == {1, 2, 3, 4, 5}
     assert all(v.id in {c.id for c in candidates} for v in results)
+
+
+def test_judge_top_n_uses_agent_runtime_invocation_port(
+    run_log: RunLog,
+) -> None:
+    provider_auth = ProviderAuth(opencode_api_key="operator-key")
+    invocation_port = _RecordingInvocationPort(
+        _runtime_result(_judge_output([{"id": 7, "rank": 1}]))
+    )
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        provider_auth=provider_auth,
+        invocation_port=invocation_port,
+    )
+
+    verdicts = extractor.judge_top_n(
+        [
+            JudgeCandidate(id=7, header="Header 7", summary="Summary 7"),
+            JudgeCandidate(id=9, header="Header 9", summary="Summary 9"),
+        ]
+    )
+
+    assert verdicts == [MatchVerdict(id=7, rank=1)]
+    assert invocation_port.calls == [
+        {
+            "prompt": (
+                "v2 [Candidate id=7]\nHeader 7\n\nSummary 7\n\n"
+                "[Candidate id=9]\nHeader 9\n\nSummary 9"
+            ),
+            "logs_root": run_log.logs_dir,
+            "call_site": "judge",
+            "provider_auth": provider_auth,
+        }
+    ]
 
 
 def test_judge_top_n_empty_candidates_returns_empty_list(

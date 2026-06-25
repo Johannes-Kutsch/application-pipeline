@@ -101,6 +101,18 @@ _JUDGE_TOP_N_SITE = _CallSite(
 )
 
 
+def _provider_failure_error(
+    call: str, result_message: str | None
+) -> ExtractorUnreachableError:
+    message = result_message or ""
+    detail = f": {message}" if message else ""
+    return ExtractorUnreachableError(
+        f"{call}: Agent Runtime provider failure{detail}",
+        returncode=0,
+        stderr=message,
+    )
+
+
 def _build_item_bullets(item: ClassifyItem) -> str:
     lines = [f"- Jobtitel: {item.title}"]
     if item.company and item.company.strip():
@@ -274,11 +286,7 @@ class AgentRuntimeExtractor:
                 envelope={"result": result.output},
                 reset_time=result.reset_time,
             )
-        raise ExtractorUnreachableError(
-            f"{site.call}: Agent Runtime provider failure",
-            returncode=0,
-            stderr=result.message or result.output,
-        )
+        raise _provider_failure_error(site.call, result.message or result.output)
 
     @staticmethod
     def _format_candidates(candidates: list[JudgeCandidate]) -> str:
@@ -310,10 +318,8 @@ class AgentRuntimeExtractor:
             )
         if result.kind == "retryable_provider_failure":
             raise _RetryableProviderFailureError()
-        raise ExtractorUnreachableError(
-            "classify_relevance: Agent Runtime provider failure",
-            returncode=0,
-            stderr=result.message or result.output,
+        raise _provider_failure_error(
+            "classify_relevance", result.message or result.output
         )
 
     @staticmethod

@@ -374,7 +374,7 @@ def run(
                 except ExtractorError as exc:
                     _log.warning("judge_top_n failed: %s", exc)
                     run_log.event(
-                        "llm_judge_top_n",
+                        "llm_judge_match",
                         "error",
                         returncode=getattr(exc, "returncode", None),
                         stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],

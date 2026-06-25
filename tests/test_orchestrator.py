@@ -11,7 +11,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from agent_runtime.runtime import ProviderAuth
+from agent_runtime.runtime import InvocationRecord, ProviderAuth, RuntimeOutcome
+from agent_runtime.session import RunKind
 
 from fake_status_display import FakeStatusDisplay
 
@@ -3575,12 +3576,14 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
 
     events_rows = [
         json.loads(line)
-        for line in (logs_dir / "llm" / "judge_top_n.events.jsonl")
+        for line in (logs_dir / "llm" / "judge_match.events.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]
     assert any(row.get("returncode") == 2 for row in events_rows)
     assert any(row.get("stderr_excerpt") == "timeout on judge" for row in events_rows)
+    assert all("usage" not in row for row in events_rows)
+    assert all("cost_usd" not in row for row in events_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -5729,26 +5732,27 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
     logs_dir = tmp_path / "synched" / "logs"
     run_log = RunLog(logs_dir)
 
-    def _fake_invoke(
-        prompt: str, *, logs_root: Path, call_site: str, provider_auth: object = None
-    ) -> AgentRuntimeInvocationResult:
-        assert call_site == "judge"
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "judge" / "llm-judge-fail.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        runtime_log.write_text("judge failed\n", encoding="utf-8")
-        return AgentRuntimeInvocationResult(
-            kind="hard_provider_failure",
-            output="provider failed",
-            evidence_dir=runtime_log,
-            reset_time=None,
-            message="provider failed",
-        )
+    class _FakeRuntimeClient:
+        async def run_ephemeral(self, request: object) -> RuntimeOutcome:
+            return RuntimeOutcome(
+                kind="hard_provider_failure",
+                output="",
+                invocation_records=(
+                    InvocationRecord(
+                        run_kind=RunKind.FRESH,
+                        service_name="opencode",
+                        model="deepseek-v4-flash",
+                        effort="medium",
+                        outcome="hard_provider_failure",
+                        events=(),
+                        provider_output=b"provider failed",
+                    ),
+                ),
+            )
 
     monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_extractor.invoke_agent_runtime",
-        _fake_invoke,
+        "application_pipeline.llm.agent_runtime_invocation.RuntimeClient",
+        _FakeRuntimeClient,
     )
 
     class _OneStubParser(_StubParserBase):
@@ -5777,7 +5781,9 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
     assert summary.written == 0
     reports = sorted((tmp_path / ".runtime-data" / "failures").glob("*.md"))
     assert len(reports) == 1
-    assert "llm_extractor:judge_match" in reports[0].read_text(encoding="utf-8")
+    report_body = reports[0].read_text(encoding="utf-8")
+    assert "llm_extractor:judge_match" in report_body
+    assert "provider failed" in report_body
 
     today = datetime.now().date().isoformat()
     assert not (tmp_path / "results" / f"{today}.md").exists()

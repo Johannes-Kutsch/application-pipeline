@@ -154,6 +154,21 @@ def _completed_output(outcome: RuntimeOutcome) -> str:
     return outcome.output
 
 
+def _failure_message(outcome: RuntimeOutcome) -> str | None:
+    if outcome.output:
+        return outcome.output
+    records = outcome.invocation_records or ()
+    for record in reversed(records):
+        decoded = _decode(record.provider_output).strip()
+        if decoded:
+            return decoded
+        for event in reversed(record.events):
+            body = (event.text or event.payload or event.raw_provider_output).strip()
+            if body:
+                return body
+    return None
+
+
 def _suffix(index: int) -> str:
     return "" if index == 0 else f".{index}"
 
@@ -228,6 +243,7 @@ def _result_from_outcome(
         kind=kind,
         output=outcome.output,
         evidence_dir=evidence_dir,
+        message=_failure_message(outcome),
     )
 
 

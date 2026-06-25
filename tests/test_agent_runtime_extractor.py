@@ -1487,6 +1487,45 @@ def test_classify_hard_provider_failure_from_public_llm_adapter_surfaces_provide
     assert excinfo.value.stderr == "provider exploded"
 
 
+def test_judge_top_n_via_agent_runtime_hard_provider_failure_surfaces_provider_message(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _FakeRuntimeClient:
+        async def run_ephemeral(self, request: object) -> RuntimeOutcome:
+            return RuntimeOutcome(
+                kind="hard_provider_failure",
+                output="",
+                invocation_records=(
+                    InvocationRecord(
+                        run_kind=RunKind.FRESH,
+                        service_name="opencode",
+                        model="deepseek-v4-flash",
+                        effort="medium",
+                        outcome="hard_provider_failure",
+                        events=(),
+                        provider_output=b"provider exploded",
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_invocation.RuntimeClient",
+        _FakeRuntimeClient,
+    )
+
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=AgentRuntimeInvocationAdapter(),
+    )
+
+    with pytest.raises(ExtractorUnreachableError) as excinfo:
+        extractor.judge_top_n(_make_candidates(1))
+
+    assert excinfo.value.stderr == "provider exploded"
+
+
 def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
     run_log: RunLog,
 ) -> None:

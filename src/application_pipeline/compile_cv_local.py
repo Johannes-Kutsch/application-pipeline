@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Deque
 from typing import Protocol
 
+from application_pipeline.cv_slot_contract import COVER_PARAGRAPH_PATTERN_SLOTS
+from application_pipeline.latex.slot_map import parse
+
 
 @dataclass(frozen=True, slots=True)
 class _PdflatexRunResult:
@@ -68,8 +71,42 @@ class _CompileCvFakePdflatexAdapter:
         result = self._queue.popleft()
 
         if result.returncode == 0:
+            slot_map = parse(build_dir.parent / "cv.tex")
+            if build_name == "cover":
+                slot_names = (
+                    "recipient_company",
+                    "recipient_name",
+                    "recipient_street",
+                    "recipient_zip_city",
+                    "opening",
+                    *COVER_PARAGRAPH_PATTERN_SLOTS,
+                )
+            elif build_name == "resume":
+                slot_names = (
+                    "resume_berufserfahrung",
+                    "resume_ausbildung",
+                    "resume_projekte",
+                    "skills_block",
+                )
+            else:
+                slot_names = (
+                    "recipient_company",
+                    "recipient_name",
+                    "recipient_street",
+                    "recipient_zip_city",
+                    "opening",
+                    *COVER_PARAGRAPH_PATTERN_SLOTS,
+                    "resume_berufserfahrung",
+                    "resume_ausbildung",
+                    "resume_projekte",
+                    "skills_block",
+                )
+
             (build_dir / f"{build_name}.pdf").write_bytes(
-                b"%PDF-1.4 fake\n" + build_name.encode("utf-8")
+                b"%PDF-1.4 fake\n"
+                + build_name.encode("utf-8")
+                + b"\n"
+                + b"".join(slot_map[slot].encode("utf-8") for slot in slot_names)
             )
         elif result.log_text is not None:
             (build_dir / f"{build_name}.log").write_text(

@@ -122,6 +122,54 @@ def test_compile_cv_produces_three_pdfs(
     assert not (app_dir / "combined.pdf").exists()
 
 
+def test_compile_cv_cover_build_contains_only_cover_slots(
+    app_dir: Path,
+    project_root: Path,
+) -> None:
+    fake = _install_passing_pdflatex()
+
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    cover_pdf = _published_pdf(app_dir, "cover").read_bytes()
+    assert b"Ich bewerbe mich hiermit." in cover_pdf
+    assert b"\\cventry{2020--2023}" not in cover_pdf
+    assert b"\\cventry{2016--2020}" not in cover_pdf
+    assert b"\\cventry{2021}{Projekt}" not in cover_pdf
+
+
+def test_compile_cv_resume_build_contains_resume_slots_only(
+    app_dir: Path,
+    project_root: Path,
+) -> None:
+    fake = _install_passing_pdflatex()
+
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    resume_pdf = _published_pdf(app_dir, "resume").read_bytes()
+    assert b"\\cventry{2020--2023}" in resume_pdf
+    assert b"\\cventry{2016--2020}" in resume_pdf
+    assert b"\\cventry{2021}{Projekt}" in resume_pdf
+    assert b"Python, LaTeX" in resume_pdf
+    assert b"Ich bewerbe mich hiermit." not in resume_pdf
+    assert b"Sehr geehrte Damen und Herren," not in resume_pdf
+
+
+def test_compile_cv_combined_build_contains_cover_and_resume_slots(
+    app_dir: Path,
+    project_root: Path,
+) -> None:
+    fake = _install_passing_pdflatex()
+
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    combined_pdf = _published_pdf(app_dir, "combined").read_bytes()
+    assert b"Ich bewerbe mich hiermit." in combined_pdf
+    assert b"\\cventry{2020--2023}" in combined_pdf
+    assert b"Python, LaTeX" in combined_pdf
+    assert b"\\cventry{2016--2020}" in combined_pdf
+    assert b"\\cventry{2021}{Projekt}" in combined_pdf
+
+
 def test_compile_cv_supported_build_modes_include_slot_content(
     app_dir: Path,
     project_root: Path,
@@ -483,6 +531,51 @@ def test_compile_cv_three_resume_slots_independently_substituted(
 
     resume_pdf = _published_pdf(app_dir, "resume").read_bytes()
     assert b"%PDF-1.4 fake\nresume" in resume_pdf
+
+
+def test_compile_cv_retains_substituted_cv_tex_when_build_fails(
+    app_dir: Path,
+    project_root: Path,
+) -> None:
+    fake = _install_failing_pdflatex(
+        log_text=(
+            "This is pdflatex\n"
+            "! Undefined control sequence.\n"
+            "l.42 \\\\badmacro\n"
+            "           {foo}\n"
+            "? \n"
+        )
+    )
+
+    with pytest.raises(SystemExit):
+        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    staged_cv = (app_dir / ".build" / "cv.tex").read_text(encoding="utf-8")
+    assert "<<" not in staged_cv
+    assert ">>" not in staged_cv
+    assert "Firma GmbH" in staged_cv
+    assert "Ich bewerbe mich hiermit." in staged_cv
+    assert "Python, LaTeX" in staged_cv
+
+
+def test_compile_cv_fake_adapter_payload_varies_by_build_name(
+    app_dir: Path,
+    project_root: Path,
+) -> None:
+    fake = _install_passing_pdflatex()
+
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    cover_pdf = _published_pdf(app_dir, "cover").read_bytes()
+    resume_pdf = _published_pdf(app_dir, "resume").read_bytes()
+    combined_pdf = _published_pdf(app_dir, "combined").read_bytes()
+
+    assert cover_pdf != resume_pdf
+    assert cover_pdf != combined_pdf
+    assert resume_pdf != combined_pdf
+    assert b"%PDF-1.4 fake\ncover" in cover_pdf
+    assert b"%PDF-1.4 fake\nresume" in resume_pdf
+    assert b"%PDF-1.4 fake\ncombined" in combined_pdf
 
 
 def test_compile_cv_inside_data_dir_hints_cd_dotdot(

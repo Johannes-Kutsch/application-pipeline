@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from collections.abc import Callable
 import pytest
@@ -418,6 +418,63 @@ def test_classify_relevance_uses_agent_runtime_invocation_port(
             "logs_root": run_log.logs_dir,
             "call_site": "classify",
             "provider_auth": provider_auth,
+        }
+    ]
+
+
+def test_classify_relevance_preserves_classify_call_facts_through_invocation_port(
+    run_log: RunLog,
+) -> None:
+    evidence_dir = (
+        run_log.logs_dir / "llm" / "agent-runtime" / "classify" / "llm-classify-7"
+    )
+    invocation_port = _invocation_port(
+        _runtime_result(
+            _classify_output({"matches": False}),
+            evidence_dir=evidence_dir,
+        )
+    )
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=invocation_port,
+    )
+
+    results = extractor.classify_relevance(
+        [
+            _item(
+                title="Senior Python Engineer",
+                company="Acme",
+                location="Hamburg",
+                posted_date=date(2024, 1, 2),
+                raw_description="First raw description",
+            ),
+            _item(
+                title="ML Platform Engineer",
+                raw_description="Second raw description",
+            ),
+        ]
+    )
+
+    assert results == [RelevanceVerdict(matches=False), None]
+    assert extractor.last_classify_log_path == evidence_dir
+    assert invocation_port.calls == [
+        {
+            "prompt": (
+                "v2 ## Stellenanzeige id=1\n\n"
+                "- Jobtitel: Senior Python Engineer\n"
+                "- Unternehmen: Acme\n"
+                "- Ort: Hamburg\n"
+                "- Listing-Datum: 2024-01-02\n\n"
+                "First raw description\n\n"
+                "## Stellenanzeige id=2\n\n"
+                "- Jobtitel: ML Platform Engineer\n\n"
+                "Second raw description"
+            ),
+            "logs_root": run_log.logs_dir,
+            "call_site": "classify",
+            "provider_auth": None,
         }
     ]
 
@@ -1291,6 +1348,34 @@ def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(
     )
     results = extractor.classify_relevance([_item()])
     assert results == [RelevanceVerdict(matches=False)]
+
+
+def test_classify_relevance_succeeds_when_runtime_evidence_directory_is_missing(
+    run_log: RunLog,
+) -> None:
+    missing_evidence_dir = (
+        run_log.logs_dir / "llm" / "agent-runtime" / "classify" / "missing-evidence-dir"
+    )
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            AgentRuntimeInvocationResult(
+                kind="completed",
+                output=_classify_output({"matches": False}),
+                evidence_dir=missing_evidence_dir,
+                reset_time=None,
+                message=None,
+            ),
+        ),
+    )
+
+    results = extractor.classify_relevance([_item()])
+
+    assert results == [RelevanceVerdict(matches=False)]
+    assert extractor.last_classify_log_path == missing_evidence_dir
+    assert not missing_evidence_dir.exists()
 
 
 def test_judge_top_n_succeeds_when_runtime_log_file_is_missing(

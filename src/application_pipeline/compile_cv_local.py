@@ -28,18 +28,9 @@ class _PdflatexAdapter(Protocol):
     ) -> _PdflatexRunResult: ...
 
 
-@dataclass(frozen=True, slots=True)
-class _CapturedPdflatexPass:
-    cmd: list[str]
-    cwd: Path
-    capture_output: bool
-    env: dict[str, str]
-
-
 @dataclass(slots=True)
 class _CompileCvFakePdflatexAdapter:
     outcomes: list[_PdflatexRunResult]
-    captured_runs: list[_CapturedPdflatexPass] | None = None
     _queue: Deque[_PdflatexRunResult] = field(
         init=False,
         default_factory=deque,
@@ -56,17 +47,6 @@ class _CompileCvFakePdflatexAdapter:
         build_name: str,
         cv_data_dir: Path,
     ) -> _PdflatexRunResult:
-        cmd = self._pdflatex_cmd(build_name, cv_data_dir)
-        if self.captured_runs is not None:
-            self.captured_runs.append(
-                _CapturedPdflatexPass(
-                    cmd=cmd,
-                    cwd=build_dir,
-                    capture_output=True,
-                    env={**os.environ, "TEXINPUTS": f".{os.pathsep}"},
-                )
-            )
-
         if not self._queue:
             raise AssertionError("unexpected pdflatex pass")
         result = self._queue.popleft()

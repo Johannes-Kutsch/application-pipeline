@@ -12,7 +12,6 @@ import application_pipeline.compile_cv_cmd as compile_cv_cmd_module
 from application_pipeline.__main__ import main
 from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import (
-    _CapturedPdflatexPass as _CapturedRun,
     _CompileCvFakePdflatexAdapter,
     _PdflatexAdapter,
     _PdflatexRunResult,
@@ -22,12 +21,9 @@ from application_pipeline.cv_slot_contract import SLOT_NAMES
 
 def _install_fake_pdflatex(
     outcomes: list[_PdflatexRunResult],
-    *,
-    captured_runs: list[_CapturedRun] | None = None,
 ) -> _CompileCvFakePdflatexAdapter:
     return _CompileCvFakePdflatexAdapter(
         outcomes=outcomes,
-        captured_runs=captured_runs,
     )
 
 

@@ -1,4 +1,4 @@
-"""Tests for LLM Enricher orchestrator and body strip helper."""
+"""Tests for LLM Enricher orchestrator."""
 
 from __future__ import annotations
 

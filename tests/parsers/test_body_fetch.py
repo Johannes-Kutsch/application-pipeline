@@ -1,4 +1,4 @@
-"""Tests for body_fetch.fetch_and_strip with ParserHttp integration."""
+"""Tests for parser body text extraction and body_fetch.fetch_and_strip."""
 
 from __future__ import annotations
 
@@ -46,6 +46,14 @@ def test_html_to_raw_description_with_selector_returns_matched_node_text() -> No
     assert result == "Python Engineer role"
 
 
+def test_html_to_raw_description_with_selector_returns_empty_when_node_missing() -> (
+    None
+):
+    html = "<html><body><div class='other'>Noise</div></body></html>"
+    result = html_to_raw_description(html, ".job-body")
+    assert result == ""
+
+
 def test_html_to_raw_description_without_selector_falls_back_to_trafilatura() -> None:
     html = (
         "<html><body>"
@@ -54,6 +62,13 @@ def test_html_to_raw_description_without_selector_falls_back_to_trafilatura() ->
     )
     result = html_to_raw_description(html, None)
     assert "Senior Data Engineer" in result
+
+
+def test_html_to_raw_description_without_selector_returns_empty_for_unusable_html() -> (
+    None
+):
+    result = html_to_raw_description("<html><body></body></html>", None)
+    assert result == ""
 
 
 # ---------------------------------------------------------------------------

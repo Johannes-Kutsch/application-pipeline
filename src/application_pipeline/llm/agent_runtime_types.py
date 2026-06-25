@@ -42,16 +42,5 @@ class UsageLimitError(_ProviderForensicsError):
 
 
 @dataclass(frozen=True)
-class AgentRuntimeUsage:
-    input_tokens: int
-    output_tokens: int
-    cache_read_tokens: int
-
-
-@dataclass(frozen=True)
 class AgentRuntimeResponse:
     raw_response: str
-    usage: AgentRuntimeUsage | None
-    cost_usd: float
-    duration_s: float
-    session_id: str

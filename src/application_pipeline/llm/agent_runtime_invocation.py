@@ -18,11 +18,9 @@ from agent_runtime.runtime import (
     EphemeralRunRequest,
     InvocationRecord,
     ProviderAuth,
-    ProviderUsage,
 )
 from agent_runtime.types import ProviderSelection
 
-from .agent_runtime_types import AgentRuntimeUsage
 
 _AGENT_RUNTIME_SERVICE: Final = "opencode"
 _AGENT_RUNTIME_MODEL: Final = "deepseek-v4-flash"
@@ -47,7 +45,6 @@ class AgentRuntimeInvocationResult:
     kind: AgentRuntimeInvocationKind
     output: str
     evidence_dir: Path
-    usage: AgentRuntimeUsage | None = None
     reset_time: datetime | None = None
     message: str | None = None
 
@@ -76,22 +73,6 @@ def _build_request(
             auth=provider_auth,
         ),
         tool_access=ToolAccess.no_tools(),
-    )
-
-
-def _to_agent_runtime_usage(usage: ProviderUsage | None) -> AgentRuntimeUsage | None:
-    if usage is None:
-        return None
-    if (
-        usage.input_tokens is None
-        or usage.output_tokens is None
-        or usage.cache_read_input_tokens is None
-    ):
-        return None
-    return AgentRuntimeUsage(
-        input_tokens=int(usage.input_tokens),
-        output_tokens=int(usage.output_tokens),
-        cache_read_tokens=int(usage.cache_read_input_tokens),
     )
 
 
@@ -177,7 +158,6 @@ def _persist_evidence(
 def _result_from_outcome(
     outcome: RuntimeOutcome, evidence_dir: Path
 ) -> AgentRuntimeInvocationResult:
-    usage = _to_agent_runtime_usage(outcome.usage)
     if outcome.kind == "completed":
         kind: AgentRuntimeInvocationKind = "completed"
     elif outcome.kind == "usage_limited":
@@ -185,7 +165,6 @@ def _result_from_outcome(
             kind="usage_limit",
             output=outcome.output,
             evidence_dir=evidence_dir,
-            usage=usage,
             reset_time=outcome.reset_time,
         )
     elif outcome.kind == "retryable_provider_failure":
@@ -196,7 +175,6 @@ def _result_from_outcome(
         kind=kind,
         output=outcome.output,
         evidence_dir=evidence_dir,
-        usage=usage,
     )
 
 
@@ -224,7 +202,6 @@ def invoke_agent_runtime(
                 kind="hard_provider_failure",
                 output="",
                 evidence_dir=evidence_dir,
-                usage=None,
                 message=str(exc),
             )
         evidence_dir = _persist_evidence(

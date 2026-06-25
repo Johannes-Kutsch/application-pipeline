@@ -20,7 +20,6 @@ from application_pipeline.llm import (
 from application_pipeline.llm.agent_runtime_invocation import (
     AgentRuntimeInvocationResult,
 )
-from application_pipeline.llm.agent_runtime_types import AgentRuntimeUsage
 from application_pipeline.llm.types import (
     JudgeCandidate,
     MatchVerdict,
@@ -69,32 +68,14 @@ def _prompts() -> Prompts:
     )
 
 
-def _usage() -> AgentRuntimeUsage:
-    return AgentRuntimeUsage(
-        input_tokens=100,
-        output_tokens=20,
-        cache_read_tokens=0,
-    )
-
-
-def _judge_usage() -> AgentRuntimeUsage:
-    return AgentRuntimeUsage(
-        input_tokens=100,
-        output_tokens=20,
-        cache_read_tokens=0,
-    )
-
-
 def _runtime_result(
     output: str,
-    usage: AgentRuntimeUsage | None = None,
     evidence_dir: Path | None = None,
 ) -> AgentRuntimeInvocationResult:
     return AgentRuntimeInvocationResult(
         kind="completed",
         output=output,
         evidence_dir=evidence_dir or Path("llm-classify.log"),
-        usage=usage or _usage(),
         reset_time=None,
         message=None,
     )
@@ -342,7 +323,7 @@ def test_judge_top_n_returns_match_verdict_with_id_and_rank(
     verdicts_raw = [{"id": c.id, "rank": i + 1} for i, c in enumerate(candidates)]
     _patch_runtime(
         monkeypatch,
-        _runtime_result(_judge_output(verdicts_raw), usage=_judge_usage()),
+        _runtime_result(_judge_output(verdicts_raw)),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     results = extractor.judge_top_n(candidates)
@@ -370,7 +351,7 @@ def test_judge_top_n_does_not_write_pipeline_owned_transcript_jsonl(
     verdicts_raw = [{"id": c.id, "rank": i + 1} for i, c in enumerate(candidates)]
     _patch_runtime(
         monkeypatch,
-        _runtime_result(_judge_output(verdicts_raw), usage=_judge_usage()),
+        _runtime_result(_judge_output(verdicts_raw)),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
     extractor.judge_top_n(candidates)
@@ -388,7 +369,7 @@ def test_judge_top_n_candidates_appear_in_prompt(
     captured: dict[str, object] = {}
     _capture_invoke(
         monkeypatch,
-        _runtime_result(_judge_output(verdicts_raw), usage=_judge_usage()),
+        _runtime_result(_judge_output(verdicts_raw)),
         captured,
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
@@ -407,7 +388,6 @@ def test_judge_top_n_coerces_string_id_to_int(
         monkeypatch,
         _runtime_result(
             '<verdicts>[{"id": "0", "rank": 1}]</verdicts>',
-            usage=_judge_usage(),
         ),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
@@ -425,7 +405,6 @@ def test_judge_top_n_rejects_non_numeric_string_verdict_id(
         monkeypatch,
         _runtime_result(
             '<verdicts>[{"id": "abc", "rank": 1}]</verdicts>',
-            usage=_judge_usage(),
         ),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
@@ -456,11 +435,6 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
                 '<verdicts>[{"id": 0, "rank": 1}, {"id": 1, "rank": 2}]</verdicts>'
             ),
             evidence_dir=runtime_log,
-            usage=AgentRuntimeUsage(
-                input_tokens=15,
-                output_tokens=3,
-                cache_read_tokens=1,
-            ),
             reset_time=None,
             message=None,
         )
@@ -503,7 +477,7 @@ def test_judge_top_n_success_logs_verdicts_without_usage_fields(
 ) -> None:
     _patch_runtime(
         monkeypatch,
-        _runtime_result(_judge_output([{"id": 0, "rank": 1}]), usage=_judge_usage()),
+        _runtime_result(_judge_output([{"id": 0, "rank": 1}])),
     )
     extractor = AgentRuntimeExtractor(_config(), _prompts(), run_log=run_log)
 
@@ -531,11 +505,6 @@ def test_judge_top_n_via_agent_runtime_usage_limit_becomes_quota_error(
             / "agent-runtime"
             / "judge"
             / "llm-judge-quota.log",
-            usage=AgentRuntimeUsage(
-                input_tokens=11,
-                output_tokens=0,
-                cache_read_tokens=0,
-            ),
             reset_time=None,
             message=None,
         )
@@ -562,7 +531,6 @@ def test_judge_usage_limit_error_uses_agent_runtime_vocabulary(
             kind="usage_limit",
             output="quota reached",
             evidence_dir=logs_root / "llm-judge-quota.log",
-            usage=None,
             reset_time=None,
             message=None,
         )
@@ -595,7 +563,6 @@ def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(
             kind="usage_limit",
             output="limit reached",
             evidence_dir=runtime_log,
-            usage=None,
             reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
             message=None,
         )
@@ -635,7 +602,6 @@ def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
             kind="completed",
             output='<verdicts>[{"id": 0, "rank": 1}]</verdicts>',
             evidence_dir=logs_root / "judge.log",
-            usage=_judge_usage(),
             reset_time=None,
             message=None,
         )
@@ -859,11 +825,6 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
                 "</verdict>"
             ),
             evidence_dir=runtime_log,
-            usage=AgentRuntimeUsage(
-                input_tokens=11,
-                output_tokens=7,
-                cache_read_tokens=3,
-            ),
             reset_time=None,
             message=None,
         )
@@ -913,11 +874,6 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
             kind="usage_limit",
             output="limit reached",
             evidence_dir=runtime_log,
-            usage=AgentRuntimeUsage(
-                input_tokens=11,
-                output_tokens=7,
-                cache_read_tokens=3,
-            ),
             reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
             message=None,
         )
@@ -955,11 +911,6 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
             kind="retryable_provider_failure",
             output="provider flake",
             evidence_dir=runtime_log,
-            usage=AgentRuntimeUsage(
-                input_tokens=5,
-                output_tokens=1,
-                cache_read_tokens=0,
-            ),
             reset_time=None,
             message=None,
         )
@@ -996,7 +947,6 @@ def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_vali
             kind="completed",
             output=_classify_output({"matches": False}),
             evidence_dir=runtime_log,
-            usage=None,
             reset_time=None,
             message=None,
         )
@@ -1034,7 +984,6 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
             kind="hard_provider_failure",
             output="runtime failed",
             evidence_dir=runtime_log,
-            usage=None,
             reset_time=None,
             message="provider exploded",
         )
@@ -1072,7 +1021,6 @@ def test_classify_relevance_forwards_provider_auth_to_agent_runtime(
             kind="completed",
             output='<verdict id="1">{"matches": false}</verdict>',
             evidence_dir=logs_root / "classify.log",
-            usage=_usage(),
             reset_time=None,
             message=None,
         )
@@ -1107,7 +1055,6 @@ def test_classify_relevance_succeeds_when_runtime_log_file_is_missing(
             kind="completed",
             output=_classify_output({"matches": False}),
             evidence_dir=missing_log,
-            usage=_usage(),
             reset_time=None,
             message=None,
         ),
@@ -1128,7 +1075,6 @@ def test_judge_top_n_succeeds_when_runtime_log_file_is_missing(
             kind="completed",
             output=_judge_output([{"id": 0, "rank": 1}]),
             evidence_dir=missing_log,
-            usage=_judge_usage(),
             reset_time=None,
             message=None,
         ),
@@ -1157,7 +1103,6 @@ def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usag
                 }
             ),
             evidence_dir=Path("llm-classify.log"),
-            usage=None,
             reset_time=None,
             message=None,
         ),
@@ -1183,7 +1128,6 @@ def test_judge_top_n_succeeds_when_runtime_returns_completed_without_usage(
             kind="completed",
             output=_judge_output([{"id": 0, "rank": 1}]),
             evidence_dir=Path("llm-judge.log"),
-            usage=None,
             reset_time=None,
             message=None,
         ),

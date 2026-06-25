@@ -10,6 +10,7 @@ from agent_runtime.runtime import (
     EphemeralRunRequest,
     InvocationRecord,
     ProviderAuth,
+    ProviderUsage,
     RuntimeOutcome,
 )
 from agent_runtime.session import RunKind
@@ -82,6 +83,7 @@ def _record(
     events: tuple[AgentEvent, ...] = (),
     provider_session_id: str | None = "sess-1",
     outcome: str = "completed",
+    usage: ProviderUsage | None = None,
 ) -> InvocationRecord:
     return InvocationRecord(
         run_kind=RunKind.FRESH,
@@ -92,7 +94,7 @@ def _record(
         provider_session_id=provider_session_id,
         events=events,
         provider_output=provider_output,
-        usage=None,
+        usage=usage,
     )
 
 
@@ -129,12 +131,18 @@ def test_completed_call_writes_per_call_evidence_directory(logs_root: Path) -> N
 def test_evidence_files_carry_prompt_response_events_and_meta(
     logs_root: Path,
 ) -> None:
+    usage = ProviderUsage(
+        input_tokens=12,
+        output_tokens=3,
+        cache_read_input_tokens=1,
+    )
     _FakeRuntimeClient.outcome = _completed(
         records=(
             _record(
                 provider_output=b"<verdict>{}</verdict>",
                 events=(_event("thinking"), _event("done")),
                 provider_session_id="sess-xyz",
+                usage=usage,
             ),
         ),
     )
@@ -145,21 +153,23 @@ def test_evidence_files_carry_prompt_response_events_and_meta(
     evidence_dir = result.evidence_dir
 
     assert (evidence_dir / "prompt").read_text(encoding="utf-8") == "the sent prompt"
-    assert (
-        (evidence_dir / "response").read_text(encoding="utf-8")
-        == "<verdict>{}</verdict>"
-    )
+    assert (evidence_dir / "response").read_text(
+        encoding="utf-8"
+    ) == "<verdict>{}</verdict>"
     events_text = (evidence_dir / "events").read_text(encoding="utf-8")
     assert "thinking" in events_text
     assert "done" in events_text
     meta_text = (evidence_dir / "meta").read_text(encoding="utf-8")
     assert "sess-xyz" in meta_text
+    assert f"usage: {usage}" in meta_text
 
 
 def test_judge_call_writes_under_judge_subdir(logs_root: Path) -> None:
     _FakeRuntimeClient.outcome = _completed(output="[]")
 
-    result = invoke_agent_runtime("judge prompt", logs_root=logs_root, call_site="judge")
+    result = invoke_agent_runtime(
+        "judge prompt", logs_root=logs_root, call_site="judge"
+    )
 
     assert result.evidence_dir.parent == logs_root / "llm" / "agent-runtime" / "judge"
 

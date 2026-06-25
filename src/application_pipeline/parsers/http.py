@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
@@ -33,61 +32,6 @@ class _ParserHttpTransport(Protocol):
     def get(self, url: str, *, timeout: float) -> httpx.Response: ...
 
     def close(self) -> None: ...
-
-
-@dataclass(frozen=True)
-class _ScriptedParserHttpRequest:
-    url: str
-    timeout: float
-
-
-@dataclass(frozen=True)
-class _ScriptedParserHttpResponse:
-    status: int
-    content: bytes = b""
-    headers: Mapping[str, str] | None = None
-
-    @classmethod
-    def redirect(cls, *, status: int, location: str) -> _ScriptedParserHttpResponse:
-        return cls(status=status, headers={"location": location})
-
-
-_ScriptedParserHttpOutcome = bytes | Exception | _ScriptedParserHttpResponse
-
-
-class _ScriptedParserHttpTransport:
-    def __init__(self, outcomes: list[_ScriptedParserHttpOutcome]) -> None:
-        self._outcomes = list(outcomes)
-        self.requests: list[_ScriptedParserHttpRequest] = []
-        self._closed = False
-
-    def get(self, url: str, *, timeout: float) -> httpx.Response:
-        if self._closed:
-            raise RuntimeError("Cannot send a request, as the client has been closed.")
-        self.requests.append(_ScriptedParserHttpRequest(url=url, timeout=timeout))
-        if not self._outcomes:
-            raise AssertionError("ScriptedParserHttpTransport ran out of outcomes")
-        outcome = self._outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        request = httpx.Request("GET", url)
-        if isinstance(outcome, bytes):
-            return httpx.Response(200, content=outcome, request=request)
-        return httpx.Response(
-            outcome.status,
-            content=outcome.content,
-            headers=outcome.headers,
-            request=request,
-        )
-
-    def close(self) -> None:
-        self._closed = True
-
-    def __enter__(self) -> _ScriptedParserHttpTransport:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
 
 
 class _HttpxParserHttpTransport:

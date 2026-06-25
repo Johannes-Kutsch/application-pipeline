@@ -16,7 +16,7 @@ from application_pipeline.parsers.stellen_hamburg_api import (
 from application_pipeline.parsers.types import City
 from tests.parsers.http_helpers import (
     ScriptedParserHttpOutcome,
-    ScriptedParserHttpTransport,
+    make_scripted_parser_http,
 )
 
 # ---------------------------------------------------------------------------
@@ -94,13 +94,9 @@ def _http(
     *,
     retries: int = 3,
 ) -> ParserHttp:
-    transport = ScriptedParserHttpTransport(list(responses))
-    return ParserHttp.for_test(
-        run_log=run_log,
-        transport=transport,
-        retries=retries,
-        sleep=_NO_SLEEP,
-    )
+    return make_scripted_parser_http(
+        run_log, *responses, retries=retries, sleep=_NO_SLEEP
+    )[0]
 
 
 def _query(**kwargs: object) -> ParserQuery:

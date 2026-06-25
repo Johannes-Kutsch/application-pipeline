@@ -25,12 +25,14 @@ from application_pipeline.parsers.http import (
     _HTTP_READ_TIMEOUT as HTTP_READ_TIMEOUT,
     _REQUEST_PACING as REQUEST_PACING,
     _USER_AGENT as USER_AGENT,
-    _ScriptedParserHttpRequest as ScriptedParserHttpRequest,
-    _ScriptedParserHttpResponse as ScriptedParserHttpResponse,
-    _ScriptedParserHttpTransport as ScriptedParserHttpTransport,
     _Throttle,
 )
 from application_pipeline.parsers.types import EnrichFailedError
+from tests.parsers.http_helpers import (
+    ScriptedParserHttpRequest,
+    ScriptedParserHttpResponse,
+    ScriptedParserHttpTransport,
+)
 
 _NO_SLEEP = lambda _: None  # noqa: E731
 

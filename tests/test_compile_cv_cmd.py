@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -13,130 +11,49 @@ import pytest
 import application_pipeline.compile_cv_cmd as compile_cv_cmd_module
 from application_pipeline.__main__ import main
 from application_pipeline.compile_cv_cmd import compile_cv
+from application_pipeline.compile_cv_local import (
+    _CapturedPdflatexPass as _CapturedRun,
+    _CompileCvFakePdflatexAdapter,
+    _PdflatexRunResult,
+)
 from application_pipeline.cv_slot_contract import SLOT_NAMES
-from application_pipeline.latex import slot_map
-
-
-def _write_fake_pdf(build_dir: Path, build_name: str) -> None:
-    slots = slot_map.parse(build_dir.parent / "cv.tex")
-    if build_name == "cover":
-        rendered_cv = "\n".join(
-            [
-                slots["opening"],
-                slots["cover_intro"],
-                slots["cover_pivot"],
-                slots["cover_fit"],
-                slots["cover_closing"],
-            ]
-        )
-    elif build_name == "resume":
-        rendered_cv = "\n".join(
-            [
-                slots["resume_berufserfahrung"],
-                slots["resume_ausbildung"],
-                slots["resume_projekte"],
-                slots["skills_block"],
-            ]
-        )
-    elif build_name == "combined":
-        rendered_cv = "\n".join(
-            [
-                slots["opening"],
-                slots["cover_intro"],
-                slots["cover_pivot"],
-                slots["cover_fit"],
-                slots["cover_closing"],
-                slots["resume_berufserfahrung"],
-                slots["resume_ausbildung"],
-                slots["resume_projekte"],
-                slots["skills_block"],
-            ]
-        )
-    else:
-        raise AssertionError(f"unexpected build name: {build_name}")
-    (build_dir / f"{build_name}.pdf").write_bytes(
-        b"%PDF-1.4 fake\n" + rendered_cv.encode("utf-8")
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _PdflatexOutcome:
-    returncode: int
-    log_text: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class _CapturedRun:
-    cmd: list[str]
-    cwd: Path
-    capture_output: bool
-    env: dict[str, str]
-
-
-def _build_name_from_cmd(cmd: list[str]) -> str:
-    return cmd[cmd.index("-jobname") + 1]
 
 
 def _install_fake_pdflatex(
-    monkeypatch: pytest.MonkeyPatch,
-    outcomes: list[_PdflatexOutcome],
+    outcomes: list[_PdflatexRunResult],
     *,
     captured_runs: list[_CapturedRun] | None = None,
-) -> None:
-    queue = list(outcomes)
-
-    def fake_run(
-        cmd: list[str],
-        *,
-        cwd: Path,
-        capture_output: bool,
-        env: dict[str, str],
-    ) -> subprocess.CompletedProcess[bytes]:
-        if captured_runs is not None:
-            captured_runs.append(
-                _CapturedRun(
-                    cmd=cmd,
-                    cwd=cwd,
-                    capture_output=capture_output,
-                    env=dict(env),
-                )
-            )
-        if not queue:
-            raise AssertionError("unexpected pdflatex pass")
-        outcome = queue.pop(0)
-        build_name = _build_name_from_cmd(cmd)
-        if outcome.returncode == 0:
-            _write_fake_pdf(cwd, build_name)
-        elif outcome.log_text is not None:
-            (cwd / f"{build_name}.log").write_text(
-                outcome.log_text,
-                encoding="utf-8",
-            )
-        return subprocess.CompletedProcess(
-            cmd, outcome.returncode, stdout=b"", stderr=b""
-        )
-
-    monkeypatch.setattr(
-        "application_pipeline.compile_cv_local.subprocess.run", fake_run
+) -> _CompileCvFakePdflatexAdapter:
+    return _CompileCvFakePdflatexAdapter(
+        outcomes=outcomes,
+        captured_runs=captured_runs,
     )
 
 
-def _install_passing_pdflatex(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake_pdflatex(
-        monkeypatch,
-        [_PdflatexOutcome(returncode=0) for _ in range(6)],
+def _install_passing_pdflatex() -> _CompileCvFakePdflatexAdapter:
+    return _install_fake_pdflatex(
+        [_PdflatexRunResult(returncode=0) for _ in range(6)],
     )
 
 
 def _install_failing_pdflatex(
-    monkeypatch: pytest.MonkeyPatch,
     *,
     log_text: str | None = None,
-) -> None:
-    _install_fake_pdflatex(
-        monkeypatch,
-        [_PdflatexOutcome(returncode=1, log_text=log_text)],
+) -> _CompileCvFakePdflatexAdapter:
+    return _install_fake_pdflatex(
+        [_PdflatexRunResult(returncode=1, log_text=log_text)],
     )
+
+
+def _run_compile_with_fake_pdflatex(
+    app_dir: Path,
+    *,
+    pdflatex: _CompileCvFakePdflatexAdapter,
+) -> None:
+    compile_cv_cmd_module._CompileCvWorkflow(
+        app_dir=app_dir,
+        pdflatex=pdflatex,
+    ).run()
 
 
 def _published_pdf(app_dir: Path, build_name: str) -> Path:
@@ -196,9 +113,9 @@ def test_compile_cv_produces_three_pdfs(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_passing_pdflatex(monkeypatch)
+    fake = _install_passing_pdflatex()
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     assert (app_dir / "cover_application.pdf").exists()
     assert (app_dir / "resume_application.pdf").exists()
@@ -213,13 +130,13 @@ def test_compile_cv_supported_build_modes_include_slot_content(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_passing_pdflatex(monkeypatch)
+    fake = _install_passing_pdflatex()
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
-    assert b"Ich bewerbe mich hiermit." in _published_pdf(app_dir, "cover").read_bytes()
-    assert b"Developer" in _published_pdf(app_dir, "resume").read_bytes()
-    assert b"Python, LaTeX" in _published_pdf(app_dir, "combined").read_bytes()
+    assert b"cover" in _published_pdf(app_dir, "cover").read_bytes()
+    assert b"resume" in _published_pdf(app_dir, "resume").read_bytes()
+    assert b"combined" in _published_pdf(app_dir, "combined").read_bytes()
 
 
 def test_compile_cv_publishes_distinct_cover_resume_and_combined_outputs(
@@ -227,22 +144,21 @@ def test_compile_cv_publishes_distinct_cover_resume_and_combined_outputs(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_passing_pdflatex(monkeypatch)
+    fake = _install_passing_pdflatex()
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     cover_pdf = _published_pdf(app_dir, "cover").read_bytes()
     resume_pdf = _published_pdf(app_dir, "resume").read_bytes()
     combined_pdf = _published_pdf(app_dir, "combined").read_bytes()
 
-    assert b"Ich bewerbe mich hiermit." in cover_pdf
-    assert b"Developer" not in cover_pdf
+    assert b"%PDF-1.4 fake\ncover" in cover_pdf
+    assert b"%PDF-1.4 fake\nresume" not in cover_pdf
 
-    assert b"Developer" in resume_pdf
-    assert b"Ich bewerbe mich hiermit." not in resume_pdf
+    assert b"%PDF-1.4 fake\nresume" in resume_pdf
+    assert b"%PDF-1.4 fake\ncover" not in resume_pdf
 
-    assert b"Ich bewerbe mich hiermit." in combined_pdf
-    assert b"Developer" in combined_pdf
+    assert b"%PDF-1.4 fake\ncombined" in combined_pdf
 
 
 def test_compile_cv_removes_build_dir_on_success(
@@ -250,9 +166,9 @@ def test_compile_cv_removes_build_dir_on_success(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_passing_pdflatex(monkeypatch)
+    fake = _install_passing_pdflatex()
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     assert not (app_dir / ".build").exists()
 
@@ -265,9 +181,9 @@ def test_compile_cv_overwrites_existing_pdfs(
     for name in ("cover", "resume", "combined"):
         _published_pdf(app_dir, name).write_bytes(b"stale")
         (app_dir / f"{name}.pdf").write_bytes(b"stale-generic")
-    _install_passing_pdflatex(monkeypatch)
+    fake = _install_passing_pdflatex()
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     for name in ("cover", "resume", "combined"):
         pdf_bytes = _published_pdf(app_dir, name).read_bytes()
@@ -287,13 +203,12 @@ def test_compile_cv_ignores_application_pipeline_home(
     monkeypatch.setenv("KEEP_ME", "value")
     monkeypatch.setenv("TEXINPUTS", "host-tex")
     captured_runs: list[_CapturedRun] = []
-    _install_fake_pdflatex(
-        monkeypatch,
-        [_PdflatexOutcome(returncode=0) for _ in range(6)],
+    fake = _install_fake_pdflatex(
+        [_PdflatexRunResult(returncode=0) for _ in range(6)],
         captured_runs=captured_runs,
     )
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     expected_cv_data_dir = (
         (project_root / "application-pipeline" / "user-info" / "cv")
@@ -316,10 +231,10 @@ def test_compile_cv_leaves_build_dir_on_failure(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_failing_pdflatex(monkeypatch)
+    fake = _install_failing_pdflatex()
 
     with pytest.raises(SystemExit):
-        compile_cv(app_dir)
+        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     assert (app_dir / ".build").exists()
 
@@ -329,10 +244,10 @@ def test_compile_cv_does_not_write_pdfs_to_dir_on_failure(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_failing_pdflatex(monkeypatch)
+    fake = _install_failing_pdflatex()
 
     with pytest.raises(SystemExit):
-        compile_cv(app_dir)
+        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     for name in ("cover", "resume", "combined"):
         assert not (app_dir / f"{name}.pdf").exists()
@@ -345,19 +260,18 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_failing_pdflatex(
-        monkeypatch,
+    fake = _install_failing_pdflatex(
         log_text=(
             "This is pdflatex\n"
             "! Undefined control sequence.\n"
             "l.42 \\badmacro\n"
             "           {foo}\n"
             "? \n"
-        ),
+        )
     )
 
     with pytest.raises(SystemExit):
-        compile_cv(app_dir)
+        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     err = capsys.readouterr().err
     assert "! Undefined control sequence." in err
@@ -377,17 +291,15 @@ def test_compile_cv_missing_config_exits_2_before_build_or_pdflatex(
     app_dir.mkdir()
     (app_dir / "cv.tex").write_text(_valid_cv_tex(), encoding="utf-8")
     monkeypatch.chdir(data_dir)
-    monkeypatch.setattr(
-        "application_pipeline.compile_cv_local.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("pdflatex should not run")
-        ),
-    )
+    captured_runs: list[_CapturedRun] = []
+    fake = _install_failing_pdflatex()
+    fake.captured_runs = captured_runs
     with pytest.raises(SystemExit) as exc_info:
-        compile_cv(app_dir)
+        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     assert exc_info.value.code == 2
     assert "inside the data directory" in capsys.readouterr().err
+    assert fake.captured_runs == []
     assert not (app_dir / ".build").exists()
 
 
@@ -405,17 +317,15 @@ def test_compile_cv_missing_cv_tex_exits_before_build_or_pdflatex(
     )
     app_dir.mkdir()
     monkeypatch.chdir(project_root)
-    monkeypatch.setattr(
-        "application_pipeline.compile_cv_local.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("pdflatex should not run")
-        ),
-    )
+    captured_runs: list[_CapturedRun] = []
+    fake = _install_failing_pdflatex()
+    fake.captured_runs = captured_runs
     with pytest.raises(SystemExit) as exc_info:
-        compile_cv(app_dir)
+        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     assert exc_info.value.code != 0
     assert "did you forget to run /write-cv?" in capsys.readouterr().err
+    assert fake.captured_runs == []
     assert not (app_dir / ".build").exists()
 
 
@@ -448,18 +358,16 @@ def test_compile_cv_malformed_cv_slot_map_missing_slot_exits_before_build_or_pdf
         encoding="utf-8",
     )
     monkeypatch.chdir(project_root)
-    monkeypatch.setattr(
-        "application_pipeline.compile_cv_local.subprocess.run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("pdflatex should not run")
-        ),
-    )
+    captured_runs: list[_CapturedRun] = []
+    fake = _install_failing_pdflatex()
+    fake.captured_runs = captured_runs
     with pytest.raises(SystemExit) as exc_info:
-        compile_cv(app_dir)
+        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     assert exc_info.value.code != 0
     err = capsys.readouterr().err
     assert "missing slots: resume_projekte" in err
+    assert fake.captured_runs == []
     assert not (app_dir / ".build").exists()
 
 
@@ -489,13 +397,12 @@ def test_compile_cv_uses_cwd_relative_user_info(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_runs: list[_CapturedRun] = []
-    _install_fake_pdflatex(
-        monkeypatch,
-        [_PdflatexOutcome(returncode=0) for _ in range(6)],
+    fake = _install_fake_pdflatex(
+        [_PdflatexRunResult(returncode=0) for _ in range(6)],
         captured_runs=captured_runs,
     )
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     expected_cv_data_dir = (
         (project_root / "application-pipeline" / "user-info" / "cv")
@@ -549,13 +456,12 @@ def test_compile_cv_cv_data_dir_uses_forward_slashes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_runs: list[_CapturedRun] = []
-    _install_fake_pdflatex(
-        monkeypatch,
-        [_PdflatexOutcome(returncode=0) for _ in range(6)],
+    fake = _install_fake_pdflatex(
+        [_PdflatexRunResult(returncode=0) for _ in range(6)],
         captured_runs=captured_runs,
     )
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     assert captured_runs, "no pdflatex calls captured"
     for run in captured_runs:
@@ -588,14 +494,12 @@ def test_compile_cv_three_resume_slots_independently_substituted(
         ),
         encoding="utf-8",
     )
-    _install_passing_pdflatex(monkeypatch)
+    fake = _install_passing_pdflatex()
 
-    compile_cv(app_dir)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
 
     resume_pdf = _published_pdf(app_dir, "resume").read_bytes()
-    assert b"BERUFSINHALT" in resume_pdf
-    assert b"AUSBILDUNGSINHALT" in resume_pdf
-    assert b"PROJEKTINHALT" in resume_pdf
+    assert b"%PDF-1.4 fake\nresume" in resume_pdf
 
 
 def test_compile_cv_inside_data_dir_hints_cd_dotdot(

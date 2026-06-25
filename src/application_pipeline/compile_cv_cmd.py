@@ -28,14 +28,12 @@ class _CompileCvWorkflow:
     app_dir: Path
     pdflatex: _PdflatexAdapter | None = None
 
-    def __post_init__(self) -> None:
-        if self.pdflatex is None:
-            self.pdflatex = _CompileCvLocalProductionAdapter()
-
     def run(self) -> None:
         self._require_config()
         app_dir = self.app_dir.resolve()
         slots = self._parse_slot_map(app_dir)
+        if self.pdflatex is None:
+            self.pdflatex = _CompileCvLocalProductionAdapter()
         build_dir = app_dir / ".build"
         build_dir.mkdir(exist_ok=True)
         self._stage_latex(build_dir, slots)

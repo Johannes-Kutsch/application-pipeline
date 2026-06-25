@@ -280,6 +280,19 @@ class _FailingPdflatexAdapterWithInMemoryLog:
         )
 
 
+class _CompileCvPreflightTripwire:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        raise AssertionError("preflight must not instantiate pdflatex adapter")
+
+
+def _install_preflight_tripwire(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        compile_cv_cmd_module,
+        "_CompileCvLocalProductionAdapter",
+        _CompileCvPreflightTripwire,
+    )
+
+
 def test_compile_cv_emits_error_blob_from_adapter_log_text_when_no_log_file(
     app_dir: Path,
     project_root: Path,
@@ -308,15 +321,12 @@ def test_compile_cv_missing_config_exits_2_before_build_or_pdflatex(
     app_dir.mkdir()
     (app_dir / "cv.tex").write_text(_valid_cv_tex(), encoding="utf-8")
     monkeypatch.chdir(data_dir)
-    captured_runs: list[_CapturedRun] = []
-    fake = _install_failing_pdflatex()
-    fake.captured_runs = captured_runs
+    _install_preflight_tripwire(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
-        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+        compile_cv(app_dir)
 
     assert exc_info.value.code == 2
     assert "inside the data directory" in capsys.readouterr().err
-    assert fake.captured_runs == []
     assert not (app_dir / ".build").exists()
 
 
@@ -334,15 +344,12 @@ def test_compile_cv_missing_cv_tex_exits_before_build_or_pdflatex(
     )
     app_dir.mkdir()
     monkeypatch.chdir(project_root)
-    captured_runs: list[_CapturedRun] = []
-    fake = _install_failing_pdflatex()
-    fake.captured_runs = captured_runs
+    _install_preflight_tripwire(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
-        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+        compile_cv(app_dir)
 
     assert exc_info.value.code != 0
     assert "did you forget to run /write-cv?" in capsys.readouterr().err
-    assert fake.captured_runs == []
     assert not (app_dir / ".build").exists()
 
 
@@ -375,16 +382,13 @@ def test_compile_cv_malformed_cv_slot_map_missing_slot_exits_before_build_or_pdf
         encoding="utf-8",
     )
     monkeypatch.chdir(project_root)
-    captured_runs: list[_CapturedRun] = []
-    fake = _install_failing_pdflatex()
-    fake.captured_runs = captured_runs
+    _install_preflight_tripwire(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
-        _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+        compile_cv(app_dir)
 
     assert exc_info.value.code != 0
     err = capsys.readouterr().err
     assert "missing slots: resume_projekte" in err
-    assert fake.captured_runs == []
     assert not (app_dir / ".build").exists()
 
 
@@ -415,10 +419,12 @@ def _valid_cv_tex() -> str:
 def test_compile_cv_missing_cv_tex_exits_with_write_cv_message(
     project_root: Path,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     app_dir_no_cv = tmp_path / "app_no_cv"
     app_dir_no_cv.mkdir()
+    _install_preflight_tripwire(monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
         compile_cv(app_dir_no_cv)
@@ -431,11 +437,13 @@ def test_compile_cv_missing_cv_tex_exits_with_write_cv_message(
 def test_compile_cv_malformed_cv_tex_exits_naming_missing_slot(
     project_root: Path,
     app_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     (app_dir / "cv.tex").write_text(
         "%% SLOT: recipient_company\nFirma GmbH\n", encoding="utf-8"
     )
+    _install_preflight_tripwire(monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
         compile_cv(app_dir)
@@ -487,6 +495,7 @@ def test_compile_cv_inside_data_dir_hints_cd_dotdot(
     data_dir.mkdir()
     (data_dir / "config.py").write_text("")
     monkeypatch.chdir(data_dir)
+    _install_preflight_tripwire(monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
         compile_cv(app_dir)
@@ -506,6 +515,7 @@ def test_compile_cv_missing_config_exits_2_without_build_dir(
     empty_root = tmp_path / "empty"
     empty_root.mkdir()
     monkeypatch.chdir(empty_root)
+    _install_preflight_tripwire(monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
         compile_cv(app_dir)

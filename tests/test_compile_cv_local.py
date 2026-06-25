@@ -33,7 +33,7 @@ def _capture_subprocess_call(
     return captured
 
 
-def test_compile_cv_local_adapter_invokes_pdflatex_with_required_tex_input(
+def test_pdflatex_adapter_invokes_pdflatex_with_required_tex_input(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -58,7 +58,7 @@ def test_compile_cv_local_adapter_invokes_pdflatex_with_required_tex_input(
     ]
 
 
-def test_compile_cv_local_adapter_runs_in_build_dir_and_captures_output(
+def test_pdflatex_adapter_runs_in_build_dir_and_captures_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -76,7 +76,7 @@ def test_compile_cv_local_adapter_runs_in_build_dir_and_captures_output(
     assert captured["capture_output"] is True
 
 
-def test_compile_cv_local_adapter_preserves_environment_except_texinputs(
+def test_pdflatex_adapter_preserves_environment_except_texinputs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -98,7 +98,7 @@ def test_compile_cv_local_adapter_preserves_environment_except_texinputs(
     assert os.environ["TEXINPUTS"] == "host:tex"
 
 
-def test_compile_cv_local_adapter_returns_subprocess_returncode(
+def test_pdflatex_adapter_returns_subprocess_returncode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

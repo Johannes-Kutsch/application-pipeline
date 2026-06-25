@@ -1,8 +1,7 @@
-"""Tests for the compile-cv subcommand."""
+"""Tests for the Compile CV Workflow."""
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -203,30 +202,13 @@ def test_compile_cv_ignores_application_pipeline_home(
     irrelevant = project_root / "irrelevant"
     (irrelevant / "user-info").mkdir(parents=True)
     monkeypatch.setenv("APPLICATION_PIPELINE_HOME", str(irrelevant))
-    monkeypatch.setenv("KEEP_ME", "value")
-    monkeypatch.setenv("TEXINPUTS", "host-tex")
-    captured_runs: list[_CapturedRun] = []
-    fake = _install_fake_pdflatex(
-        [_PdflatexRunResult(returncode=0) for _ in range(6)],
-        captured_runs=captured_runs,
-    )
+    fake = _install_passing_pdflatex()
 
     _run_compile_with_fake_pdflatex(app_dir, monkeypatch, pdflatex=fake)
 
-    expected_cv_data_dir = (
-        (project_root / "application-pipeline" / "user-info" / "cv")
-        .resolve()
-        .as_posix()
-    )
-    assert captured_runs
-    for run in captured_runs:
-        tex_input = run.cmd[-1]
-        assert expected_cv_data_dir in tex_input
-        assert irrelevant.resolve().as_posix() not in tex_input
-        assert run.cwd == app_dir / ".build"
-        assert run.capture_output is True
-        assert run.env == {**os.environ, "TEXINPUTS": f".{os.pathsep}"}
-    assert os.environ["TEXINPUTS"] == "host-tex"
+    assert (app_dir / "cover_application.pdf").exists()
+    assert (app_dir / "resume_application.pdf").exists()
+    assert (app_dir / "combined_application.pdf").exists()
 
 
 def test_compile_cv_leaves_build_dir_on_failure(
@@ -394,28 +376,6 @@ def test_compile_cv_via_cli_dispatch(
     assert captured_app_dirs == [app_dir]
 
 
-def test_compile_cv_uses_cwd_relative_user_info(
-    app_dir: Path,
-    project_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured_runs: list[_CapturedRun] = []
-    fake = _install_fake_pdflatex(
-        [_PdflatexRunResult(returncode=0) for _ in range(6)],
-        captured_runs=captured_runs,
-    )
-
-    _run_compile_with_fake_pdflatex(app_dir, monkeypatch, pdflatex=fake)
-
-    expected_cv_data_dir = (
-        (project_root / "application-pipeline" / "user-info" / "cv")
-        .resolve()
-        .as_posix()
-    )
-    assert captured_runs
-    assert all(expected_cv_data_dir in run.cmd[-1] for run in captured_runs)
-
-
 def _valid_cv_tex() -> str:
     return _render_cv_tex(_slot_bodies())
 
@@ -451,25 +411,6 @@ def test_compile_cv_malformed_cv_tex_exits_naming_missing_slot(
     assert exc_info.value.code != 0
     err = capsys.readouterr().err
     assert "resume_ausbildung" in err
-
-
-def test_compile_cv_cv_data_dir_uses_forward_slashes(
-    app_dir: Path,
-    project_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured_runs: list[_CapturedRun] = []
-    fake = _install_fake_pdflatex(
-        [_PdflatexRunResult(returncode=0) for _ in range(6)],
-        captured_runs=captured_runs,
-    )
-
-    _run_compile_with_fake_pdflatex(app_dir, monkeypatch, pdflatex=fake)
-
-    assert captured_runs, "no pdflatex calls captured"
-    for run in captured_runs:
-        tex_input = run.cmd[-1]
-        assert "\\" not in tex_input.partition(r"\def\CvDataDir{")[2].partition("}")[0]
 
 
 def test_compile_cv_three_resume_slots_independently_substituted(

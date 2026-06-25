@@ -139,8 +139,7 @@ class _StubExtractor:
         )
         self.judge_top_n = MagicMock(  # type: ignore[assignment]
             side_effect=lambda candidates: [
-                MatchVerdict(id=c.id, rank=i + 1)
-                for i, c in enumerate(candidates[:5])
+                MatchVerdict(id=c.id, rank=i + 1) for i, c in enumerate(candidates[:5])
             ]
         )
 
@@ -1617,9 +1616,7 @@ def test_fatal_judge_provider_failure_writes_failure_report_with_judge_stage_and
     card_store = _make_card_store(tmp_path)
     results_dir = tmp_path / "results"
 
-    ext = _ErrorJudgeExtractor(
-        ExtractorUnreachableError("judge provider unreachable")
-    )
+    ext = _ErrorJudgeExtractor(ExtractorUnreachableError("judge provider unreachable"))
 
     run(
         _one_stub_config(tmp_path),
@@ -3514,9 +3511,7 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
     card_store = _make_card_store(tmp_path)
 
     ext = _ErrorJudgeExtractor(
-        ExtractorUnreachableError(
-            "cli gone", returncode=2, stderr="timeout on judge"
-        )
+        ExtractorUnreachableError("cli gone", returncode=2, stderr="timeout on judge")
     )
 
     run(

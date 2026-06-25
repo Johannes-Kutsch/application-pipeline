@@ -7,7 +7,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from collections.abc import Callable
 import pytest
+from agent_runtime.runtime import InvocationRecord, RuntimeOutcome
 from agent_runtime.runtime import ProviderAuth
+from agent_runtime.session import RunKind
 
 from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
@@ -541,6 +543,51 @@ def test_judge_top_n_returns_match_verdict_with_id_and_rank(
     assert all(isinstance(v, MatchVerdict) for v in results)
     assert {v.rank for v in results} == {1, 2, 3, 4, 5}
     assert all(v.id in {c.id for c in candidates} for v in results)
+
+
+def test_judge_top_n_preserves_completed_provider_output_through_invocation_port(
+    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _FakeRuntimeClient:
+        async def run_ephemeral(self, request: object) -> RuntimeOutcome:
+            return RuntimeOutcome(
+                kind="completed",
+                output="",
+                invocation_records=(
+                    InvocationRecord(
+                        run_kind=RunKind.FRESH,
+                        service_name="opencode",
+                        model="deepseek-v4-flash",
+                        effort="medium",
+                        outcome="completed",
+                        provider_session_id="sess-1",
+                        events=(),
+                        provider_output=(
+                            b'<verdicts>[{"id": 7, "rank": 1}]</verdicts>'
+                        ),
+                        usage=None,
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(
+        "application_pipeline.llm.agent_runtime_invocation.RuntimeClient",
+        _FakeRuntimeClient,
+    )
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+    )
+
+    results = extractor.judge_top_n(
+        [
+            JudgeCandidate(id=7, header="Header 7", summary="Summary 7"),
+            JudgeCandidate(id=9, header="Header 9", summary="Summary 9"),
+        ]
+    )
+
+    assert results == [MatchVerdict(id=7, rank=1)]
 
 
 def test_judge_top_n_uses_agent_runtime_invocation_port(

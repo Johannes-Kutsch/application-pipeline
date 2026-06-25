@@ -143,6 +143,17 @@ def _decode(provider_output: bytes | None) -> str:
     return provider_output.decode("utf-8", errors="replace")
 
 
+def _completed_output(outcome: RuntimeOutcome) -> str:
+    if outcome.output:
+        return outcome.output
+    records = outcome.invocation_records or ()
+    for record in reversed(records):
+        decoded = _decode(record.provider_output)
+        if decoded:
+            return decoded
+    return outcome.output
+
+
 def _suffix(index: int) -> str:
     return "" if index == 0 else f".{index}"
 
@@ -197,7 +208,11 @@ def _result_from_outcome(
     outcome: RuntimeOutcome, evidence_dir: Path
 ) -> AgentRuntimeInvocationResult:
     if outcome.kind == "completed":
-        kind: AgentRuntimeInvocationKind = "completed"
+        return AgentRuntimeInvocationResult(
+            kind="completed",
+            output=_completed_output(outcome),
+            evidence_dir=evidence_dir,
+        )
     elif outcome.kind == "usage_limited":
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
@@ -206,7 +221,7 @@ def _result_from_outcome(
             reset_time=outcome.reset_time,
         )
     elif outcome.kind == "retryable_provider_failure":
-        kind = "retryable_provider_failure"
+        kind: AgentRuntimeInvocationKind = "retryable_provider_failure"
     else:
         kind = "hard_provider_failure"
     return AgentRuntimeInvocationResult(

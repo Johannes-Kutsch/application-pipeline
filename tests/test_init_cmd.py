@@ -643,7 +643,6 @@ def test_cron_sh_has_no_fail_helper_or_init_run_stages(tmp_path: Path) -> None:
     assert not re.search(r"application-pipeline\s+run\b", cron_sh)
 
 
-
 def test_cron_install_writes_weekday_only_schedule(tmp_path: Path) -> None:
     init(tmp_path)
     cron_install = (_ap(tmp_path) / "setup" / "cron-install.sh").read_text()

@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.resources
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from application_pipeline.compile_cv_local import (
@@ -26,7 +26,11 @@ def compile_cv(app_dir: Path) -> None:
 @dataclass(slots=True)
 class _CompileCvWorkflow:
     app_dir: Path
-    pdflatex: _PdflatexAdapter = field(default_factory=_CompileCvLocalProductionAdapter)
+    pdflatex: _PdflatexAdapter | None = None
+
+    def __post_init__(self) -> None:
+        if self.pdflatex is None:
+            self.pdflatex = _CompileCvLocalProductionAdapter()
 
     def run(self) -> None:
         self._require_config()
@@ -79,6 +83,7 @@ class _CompileCvWorkflow:
         (build_dir / "cv.tex").write_text(substituted, encoding="utf-8")
 
     def _run_builds(self, build_dir: Path) -> None:
+        assert self.pdflatex is not None
         cv_data_dir = (home_dir() / "user-info" / "cv").resolve()
         for build_name in _BUILDS:
             # Two passes: first writes \label{lastpage} to .aux; second lets

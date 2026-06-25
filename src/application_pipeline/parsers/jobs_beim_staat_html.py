@@ -23,8 +23,8 @@ from typing import Any, assert_never
 
 from bs4 import BeautifulSoup, Tag
 
-from application_pipeline.llm.body_strip import strip_to_text
 from application_pipeline.parser_log import RunLog
+from application_pipeline.parsers.body_text import html_to_raw_description
 
 from .http import ParserHttp
 from .location import NotServed, RemoteWire, Resolved, resolve
@@ -182,7 +182,7 @@ class JobsBeimStaatParser:
             iframe_url,
             error_prefix=f"jobs-beim-staat iframe fetch failed for {iframe_url}",
         )
-        body = strip_to_text(iframe_raw.decode("utf-8"), None)
+        body = html_to_raw_description(iframe_raw.decode("utf-8"), None)
         return EnrichResult(stub=stub, body=body, mode="native")
 
     def discover(self, query: ParserQuery) -> Iterator[PositionStub | NotServedQuery]:

@@ -1596,6 +1596,33 @@ def test_judge_top_n_succeeds_when_runtime_log_file_is_missing(
     assert results == [MatchVerdict(id=0, rank=1)]
 
 
+def test_judge_top_n_succeeds_when_runtime_evidence_directory_is_missing(
+    run_log: RunLog,
+) -> None:
+    missing_evidence_dir = (
+        run_log.logs_dir / "llm" / "agent-runtime" / "judge" / "missing-evidence-dir"
+    )
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _prompts(),
+        run_log=run_log,
+        invocation_port=_invocation_port(
+            AgentRuntimeInvocationResult(
+                kind="completed",
+                output=_judge_output([{"id": 0, "rank": 1}]),
+                evidence_dir=missing_evidence_dir,
+                reset_time=None,
+                message=None,
+            ),
+        ),
+    )
+
+    results = extractor.judge_top_n(_make_candidates(1))
+
+    assert results == [MatchVerdict(id=0, rank=1)]
+    assert not missing_evidence_dir.exists()
+
+
 def test_classify_relevance_succeeds_when_runtime_returns_completed_without_usage(
     run_log: RunLog,
 ) -> None:

@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from application_pipeline.http import HttpStubNotRetryableError
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.body_fetch import OversizedBodyError, fetch_and_strip
-from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.types import EnrichFailedError
 from tests.parsers.http_helpers import (
     ScriptedParserHttpOutcome,
     make_scripted_parser_http,
 )
+
+if TYPE_CHECKING:
+    from application_pipeline.parsers.http import ParserHttp
 
 
 @pytest.fixture

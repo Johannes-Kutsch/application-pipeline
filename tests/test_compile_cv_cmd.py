@@ -558,6 +558,62 @@ def test_compile_cv_retains_substituted_cv_tex_when_build_fails(
     assert "Python, LaTeX" in staged_cv
 
 
+@dataclass(slots=True)
+class _MutateSourceSlotMapAfterStagingAdapter:
+    app_dir: Path
+    delegate: _PdflatexAdapter
+    _calls: int = 0
+
+    def run_pass(
+        self,
+        *,
+        build_dir: Path,
+        build_name: str,
+        cv_data_dir: Path,
+    ) -> _PdflatexRunResult:
+        result = self.delegate.run_pass(
+            build_dir=build_dir,
+            build_name=build_name,
+            cv_data_dir=cv_data_dir,
+        )
+        self._calls += 1
+        if self._calls == 1:
+            self.app_dir.joinpath("cv.tex").write_text(
+                _render_cv_tex(
+                    _slot_bodies(
+                        {
+                            "cover_intro": "MUTATED COVER BODY",
+                            "resume_berufserfahrung": "MUTATED RESUME BODY",
+                            "skills_block": "MUTATED SKILLS BODY",
+                        }
+                    )
+                ),
+                encoding="utf-8",
+            )
+        return result
+
+
+def test_compile_cv_fake_adapter_uses_staged_cv_tex_after_staging(
+    app_dir: Path,
+    project_root: Path,
+) -> None:
+    adapter = _MutateSourceSlotMapAfterStagingAdapter(
+        app_dir=app_dir,
+        delegate=_install_passing_pdflatex(),
+    )
+
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=adapter)
+
+    cover_pdf = _published_pdf(app_dir, "cover").read_bytes()
+    resume_pdf = _published_pdf(app_dir, "resume").read_bytes()
+
+    assert b"Ich bewerbe mich hiermit." in cover_pdf
+    assert b"MUTATED COVER BODY" not in cover_pdf
+    assert b"\\cventry{2020--2023}" in resume_pdf
+    assert b"MUTATED RESUME BODY" not in resume_pdf
+    assert b"MUTATED SKILLS BODY" not in resume_pdf
+
+
 def test_compile_cv_fake_adapter_payload_varies_by_build_name(
     app_dir: Path,
     project_root: Path,

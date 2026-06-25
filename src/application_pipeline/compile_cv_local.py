@@ -44,6 +44,7 @@ class _CompileCvFakePdflatexAdapter:
         init=False,
         default_factory=deque,
     )
+    _slot_map: dict[str, str] | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self._queue = deque(self.outcomes)
@@ -71,42 +72,21 @@ class _CompileCvFakePdflatexAdapter:
         result = self._queue.popleft()
 
         if result.returncode == 0:
-            slot_map = parse(build_dir.parent / "cv.tex")
-            if build_name == "cover":
-                slot_names = (
-                    "recipient_company",
-                    "recipient_name",
-                    "recipient_street",
-                    "recipient_zip_city",
-                    "opening",
-                    *COVER_PARAGRAPH_PATTERN_SLOTS,
-                )
-            elif build_name == "resume":
-                slot_names = (
-                    "resume_berufserfahrung",
-                    "resume_ausbildung",
-                    "resume_projekte",
-                    "skills_block",
-                )
-            else:
-                slot_names = (
-                    "recipient_company",
-                    "recipient_name",
-                    "recipient_street",
-                    "recipient_zip_city",
-                    "opening",
-                    *COVER_PARAGRAPH_PATTERN_SLOTS,
-                    "resume_berufserfahrung",
-                    "resume_ausbildung",
-                    "resume_projekte",
-                    "skills_block",
-                )
-
+            if self._slot_map is None:
+                self._slot_map = parse(build_dir.parent / "cv.tex")
+            _assert_substituted_slots_present(
+                build_dir / "cv.tex",
+                self._slot_map,
+                _fake_pdf_slot_names(build_name),
+            )
             (build_dir / f"{build_name}.pdf").write_bytes(
                 b"%PDF-1.4 fake\n"
                 + build_name.encode("utf-8")
                 + b"\n"
-                + b"".join(slot_map[slot].encode("utf-8") for slot in slot_names)
+                + b"".join(
+                    self._slot_map[slot].rstrip("\n").encode("utf-8")
+                    for slot in _fake_pdf_slot_names(build_name)
+                )
             )
         elif result.log_text is not None:
             (build_dir / f"{build_name}.log").write_text(
@@ -130,6 +110,48 @@ class _CompileCvFakePdflatexAdapter:
             build_name,
             tex_input,
         ]
+
+
+def _fake_pdf_slot_names(build_name: str) -> tuple[str, ...]:
+    if build_name == "cover":
+        return (
+            "recipient_company",
+            "recipient_name",
+            "recipient_street",
+            "recipient_zip_city",
+            "opening",
+            *COVER_PARAGRAPH_PATTERN_SLOTS,
+        )
+    if build_name == "resume":
+        return (
+            "resume_berufserfahrung",
+            "resume_ausbildung",
+            "resume_projekte",
+            "skills_block",
+        )
+    return (
+        "recipient_company",
+        "recipient_name",
+        "recipient_street",
+        "recipient_zip_city",
+        "opening",
+        *COVER_PARAGRAPH_PATTERN_SLOTS,
+        "resume_berufserfahrung",
+        "resume_ausbildung",
+        "resume_projekte",
+        "skills_block",
+    )
+
+
+def _assert_substituted_slots_present(
+    build_cv_tex: Path,
+    slot_map: dict[str, str],
+    slot_names: tuple[str, ...],
+) -> None:
+    build_text = build_cv_tex.read_text(encoding="utf-8")
+    for slot_name in slot_names:
+        if slot_map[slot_name].rstrip("\n") not in build_text:
+            raise AssertionError(f"staged cv.tex missing slot body: {slot_name}")
 
 
 @dataclass(frozen=True, slots=True)

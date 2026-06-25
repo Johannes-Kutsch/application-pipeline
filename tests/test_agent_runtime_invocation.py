@@ -339,3 +339,24 @@ def test_hard_provider_failure_from_runtime_error(logs_root: Path) -> None:
     assert result.kind == "hard_provider_failure"
     assert result.output == ""
     assert result.message == "provider exploded"
+
+
+def test_hard_provider_failure_outcome_surfaces_provider_output_message(
+    logs_root: Path,
+) -> None:
+    _FakeRuntimeClient.outcome = RuntimeOutcome(
+        kind="hard_provider_failure",
+        output="",
+        invocation_records=(
+            _record(
+                provider_output=b"provider exploded",
+                outcome="hard_provider_failure",
+            ),
+        ),
+    )
+
+    result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="judge")
+
+    assert result.kind == "hard_provider_failure"
+    assert result.output == ""
+    assert result.message == "provider exploded"

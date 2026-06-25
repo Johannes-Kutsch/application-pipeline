@@ -11,8 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from agent_runtime.runtime import InvocationRecord, ProviderAuth, RuntimeOutcome
-from agent_runtime.session import RunKind
+from agent_runtime.runtime import ProviderAuth
 
 from fake_status_display import FakeStatusDisplay
 
@@ -5724,35 +5723,43 @@ def test_run_passes_local_operator_credential_to_agent_runtime_calls(
 
 
 def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_report(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     config_path = _one_stub_config(tmp_path)
     card_store = _make_card_store(tmp_path)
     seen_path = tmp_path / ".seen.json"
     logs_dir = tmp_path / "synched" / "logs"
     run_log = RunLog(logs_dir)
+    cfg = config_module.load(config_path)
+    prompts = load_prompts(cfg)
 
-    class _FakeRuntimeClient:
-        async def run_ephemeral(self, request: object) -> RuntimeOutcome:
-            return RuntimeOutcome(
+    class _HardFailJudgeInvocationPort:
+        def invoke(
+            self,
+            prompt: str,
+            *,
+            logs_root: Path,
+            call_site: str,
+            provider_auth: object = None,
+        ) -> AgentRuntimeInvocationResult:
+            assert prompt
+            assert call_site == "judge"
+            runtime_log = logs_root / "llm" / "agent-runtime" / "judge" / "judge-1.log"
+            runtime_log.parent.mkdir(parents=True, exist_ok=True)
+            runtime_log.write_text("provider failed\n", encoding="utf-8")
+            return AgentRuntimeInvocationResult(
                 kind="hard_provider_failure",
                 output="",
-                invocation_records=(
-                    InvocationRecord(
-                        run_kind=RunKind.FRESH,
-                        service_name="opencode",
-                        model="deepseek-v4-flash",
-                        effort="medium",
-                        outcome="hard_provider_failure",
-                        events=(),
-                        provider_output=b"provider failed",
-                    ),
-                ),
+                evidence_dir=runtime_log,
+                reset_time=None,
+                message="provider failed",
             )
 
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_invocation.RuntimeClient",
-        _FakeRuntimeClient,
+    extractor = AgentRuntimeExtractor(
+        cfg,
+        prompts,
+        run_log=run_log,
+        invocation_port=_HardFailJudgeInvocationPort(),
     )
 
     class _OneStubParser(_StubParserBase):
@@ -5772,6 +5779,7 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
     summary = run(
         config_path,
         llm_enricher=_make_fake_llm_enricher(card_store),
+        extractor=extractor,
         parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
         card_store=card_store,
         dedup_store=dedup_module.load(seen_path),

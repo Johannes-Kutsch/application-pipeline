@@ -29,12 +29,17 @@ from application_pipeline.parsers.http import (
 )
 from application_pipeline.parsers.types import EnrichFailedError
 from tests.parsers.http_helpers import (
-    ScriptedParserHttpRequest,
     ScriptedParserHttpResponse,
     ScriptedParserHttpTransport,
 )
 
 _NO_SLEEP = lambda _: None  # noqa: E731
+
+
+@dataclass(frozen=True)
+class _TransportRequest:
+    url: str
+    timeout: float
 
 
 @pytest.fixture
@@ -43,31 +48,32 @@ def run_log(tmp_path: Path) -> RunLog:
 
 
 class _CloseTrackingTransport:
-    def __init__(
-        self, *outcomes: bytes | Exception | ScriptedParserHttpResponse
-    ) -> None:
-        self._transport = ScriptedParserHttpTransport(list(outcomes))
+    def __init__(self, body: bytes = b"ok") -> None:
+        self._body = body
         self.closed = False
         self.close_calls = 0
-
-    @property
-    def requests(self) -> list[ScriptedParserHttpRequest]:
-        return self._transport.requests
+        self.requests: list[_TransportRequest] = []
 
     def get(self, url: str, *, timeout: float) -> httpx.Response:
-        return self._transport.get(url, timeout=timeout)
+        if self.closed:
+            raise RuntimeError("Cannot send a request, as the client has been closed.")
+        self.requests.append(_TransportRequest(url=url, timeout=timeout))
+        return httpx.Response(
+            200, content=self._body, request=httpx.Request("GET", url)
+        )
 
     def close(self) -> None:
         self.close_calls += 1
         self.closed = True
-        self._transport.close()
 
 
 class _BytesTransport:
     def __init__(self, body: bytes) -> None:
         self._body = body
+        self.requests: list[_TransportRequest] = []
 
     def get(self, url: str, *, timeout: float) -> httpx.Response:
+        self.requests.append(_TransportRequest(url=url, timeout=timeout))
         return httpx.Response(
             200, content=self._body, request=httpx.Request("GET", url)
         )
@@ -92,10 +98,10 @@ class _StatusErrorTransport:
         self._url = url
         self._status = status
         self._location = location
-        self.requests: list[ScriptedParserHttpRequest] = []
+        self.requests: list[_TransportRequest] = []
 
     def get(self, url: str, *, timeout: float) -> httpx.Response:
-        self.requests.append(ScriptedParserHttpRequest(url=url, timeout=timeout))
+        self.requests.append(_TransportRequest(url=url, timeout=timeout))
         response = httpx.Response(
             self._status,
             headers={"location": self._location}
@@ -213,13 +219,17 @@ def test_get_returns_bytes_on_success(run_log: RunLog):
     assert parser.get("http://example.com/", error_prefix="test") == b"hello"
 
 
-def test_get_passes_configured_timeout_to_scripted_transport(run_log: RunLog):
-    parser, transport = _make_scripted_parser(run_log, b"hello", timeout=7.5)
+def test_get_passes_configured_timeout_to_transport(run_log: RunLog):
+    transport = _BytesTransport(b"hello")
+    parser = ParserHttp.for_test(
+        run_log=run_log,
+        transport=transport,
+        timeout=7.5,
+        sleep=_NO_SLEEP,
+    )
 
     assert parser.get("http://example.com/", error_prefix="test") == b"hello"
-    assert transport.requests == [
-        ScriptedParserHttpRequest(url="http://example.com/", timeout=7.5)
-    ]
+    assert transport.requests == [_TransportRequest("http://example.com/", 7.5)]
 
 
 def test_parser_http_constructor_exposes_only_caller_relevant_arguments() -> None:
@@ -551,7 +561,7 @@ def test_get_preserves_stub_status_from_transport_http_status_error(
         }
     ]
     assert transport.requests == [
-        ScriptedParserHttpRequest(
+        _TransportRequest(
             url="http://example.com/job/1",
             timeout=HTTP_READ_TIMEOUT,
         )
@@ -594,7 +604,7 @@ def test_enrich_get_preserves_stub_status_from_transport_http_status_error(
         }
     ]
     assert transport.requests == [
-        ScriptedParserHttpRequest(
+        _TransportRequest(
             url="http://example.com/job/1",
             timeout=HTTP_READ_TIMEOUT,
         )
@@ -690,7 +700,7 @@ def test_get_preserves_parser_fatal_status_from_transport_http_status_error(
         }
     ]
     assert transport.requests == [
-        ScriptedParserHttpRequest(
+        _TransportRequest(
             url="http://example.com/job/1",
             timeout=HTTP_READ_TIMEOUT,
         )
@@ -906,7 +916,7 @@ def test_context_manager_closes_custom_transport_adapter_without_httpx_client(
 
     assert transport.closed is True
     assert transport.requests == [
-        ScriptedParserHttpRequest(
+        _TransportRequest(
             url="http://example.com/jobs",
             timeout=HTTP_READ_TIMEOUT,
         )
@@ -1116,7 +1126,7 @@ def test_get_preserves_redirect_from_transport_http_status_error(run_log: RunLog
     ]
     assert not any(e["event"] == "http_get_fatal" for e in events)
     assert transport.requests == [
-        ScriptedParserHttpRequest(
+        _TransportRequest(
             url="http://example.com/job/1",
             timeout=HTTP_READ_TIMEOUT,
         )

@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import date, datetime, timezone
 from pathlib import Path
-from collections.abc import Callable
 import pytest
-from agent_runtime.runtime import InvocationRecord, RuntimeOutcome
 from agent_runtime.runtime import ProviderAuth
-from agent_runtime.session import RunKind
 
 from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
     AgentRuntimeExtractor,
     AgentRuntimeCallSiteName,
-    AgentRuntimeInvocationAdapter,
     AgentRuntimeInvocationPort,
     AgentRuntimeInvocationResult,
     ExtractorBatchMalformedError,
@@ -561,38 +558,15 @@ def test_judge_top_n_returns_match_verdict_with_id_and_rank(
 
 
 def test_judge_top_n_preserves_completed_provider_output_through_invocation_port(
-    run_log: RunLog, monkeypatch: pytest.MonkeyPatch
+    run_log: RunLog,
 ) -> None:
-    class _FakeRuntimeClient:
-        async def run_ephemeral(self, request: object) -> RuntimeOutcome:
-            return RuntimeOutcome(
-                kind="completed",
-                output="",
-                invocation_records=(
-                    InvocationRecord(
-                        run_kind=RunKind.FRESH,
-                        service_name="opencode",
-                        model="deepseek-v4-flash",
-                        effort="medium",
-                        outcome="completed",
-                        provider_session_id="sess-1",
-                        events=(),
-                        provider_output=(
-                            b'<verdicts>[{"id": 7, "rank": 1}]</verdicts>'
-                        ),
-                        usage=None,
-                    ),
-                ),
-            )
-
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_invocation.RuntimeClient",
-        _FakeRuntimeClient,
-    )
     extractor = AgentRuntimeExtractor(
         _config(),
         _prompts(),
         run_log=run_log,
+        invocation_port=_invocation_port(
+            _runtime_result(_judge_output([{"id": 7, "rank": 1}]))
+        ),
     )
 
     results = extractor.judge_top_n(
@@ -724,7 +698,7 @@ def test_judge_top_n_rejects_non_numeric_string_verdict_id(
         extractor.judge_top_n(candidates)
 
 
-def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judge_runtime_file(
+def test_judge_top_n_keeps_candidate_block_shape_and_parses_invocation_output(
     run_log: RunLog,
 ) -> None:
     captured: dict[str, object] = {}
@@ -739,18 +713,12 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
         assert call_site == "judge"
         captured["prompt"] = prompt
         captured["call_site"] = call_site
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "judge" / "llm-judge-complete.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        runtime_log.write_text("runtime judge output\n", encoding="utf-8")
-        captured["runtime_log_path"] = runtime_log
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=(
                 '<verdicts>[{"id": 0, "rank": 1}, {"id": 1, "rank": 2}]</verdicts>'
             ),
-            evidence_dir=runtime_log,
+            evidence_dir=logs_root / "judge-evidence",
             reset_time=None,
             message=None,
         )
@@ -779,12 +747,6 @@ def test_judge_top_n_via_agent_runtime_keeps_candidate_block_shape_and_logs_judg
     assert "[Candidate id=1]" in prompt
     assert "Title 1" in prompt
     assert "Summary 1" in prompt
-    runtime_log_path = captured["runtime_log_path"]
-    assert isinstance(runtime_log_path, Path)
-    assert runtime_log_path.exists()
-    assert (
-        runtime_log_path.parent == run_log.logs_dir / "llm" / "agent-runtime" / "judge"
-    )
     assert len(results) == 2
 
 
@@ -1210,7 +1172,7 @@ def test_classify_relevance_success_logs_event_without_usage_fields(
     assert "duration_s" not in event
 
 
-def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
+def test_classify_relevance_keeps_verdict_shape_and_outcomes_from_invocation_output(
     run_log: RunLog,
 ) -> None:
     captured: dict[str, object] = {}
@@ -1224,12 +1186,6 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
     ) -> AgentRuntimeInvocationResult:
         captured["prompt"] = prompt
         captured["call_site"] = call_site
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-        )
-        captured["runtime_log_path"] = runtime_log
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        runtime_log.write_text("runtime output\n", encoding="utf-8")
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=(
@@ -1241,7 +1197,7 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
                 '{ "matches": true, "header": "", "summary": "Missing header" }'
                 "</verdict>"
             ),
-            evidence_dir=runtime_log,
+            evidence_dir=logs_root / "classify-evidence",
             reset_time=None,
             message=None,
         )
@@ -1259,19 +1215,13 @@ def test_classify_relevance_via_agent_runtime_keeps_verdict_shape_and_outcomes(
     assert "id=1" in str(captured["prompt"])
     assert "id=2" in str(captured["prompt"])
     assert "id=3" in str(captured["prompt"])
-    runtime_log_path = captured["runtime_log_path"]
-    assert isinstance(runtime_log_path, Path)
-    assert (
-        runtime_log_path.parent
-        == run_log.logs_dir / "llm" / "agent-runtime" / "classify"
-    )
-    assert runtime_log_path.exists()
+    assert extractor.last_classify_log_path == run_log.logs_dir / "classify-evidence"
     assert results[0] is not None and results[0].matches is True
     assert results[1] is not None and results[1].matches is False
     assert results[2] is None
 
 
-def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
+def test_classify_relevance_usage_limit_from_invocation_result_becomes_quota_error(
     run_log: RunLog,
 ) -> None:
     def _fake_invoke(
@@ -1282,15 +1232,10 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
         provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "classify"
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        runtime_log.write_text("usage limited\n", encoding="utf-8")
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output="limit reached",
-            evidence_dir=runtime_log,
+            evidence_dir=logs_root / "usage-limit-evidence",
             reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
             message=None,
         )
@@ -1308,7 +1253,7 @@ def test_classify_relevance_via_agent_runtime_usage_limit_becomes_quota_error(
     assert excinfo.value.reset_time == datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc)
 
 
-def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retryable(
+def test_classify_relevance_retryable_failure_marks_items_retryable(
     run_log: RunLog,
 ) -> None:
     def _fake_invoke(
@@ -1319,15 +1264,10 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
         provider_auth: ProviderAuth | None = None,
     ) -> AgentRuntimeInvocationResult:
         assert call_site == "classify"
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        runtime_log.write_text("provider flake\n", encoding="utf-8")
         return AgentRuntimeInvocationResult(
             kind="retryable_provider_failure",
             output="provider flake",
-            evidence_dir=runtime_log,
+            evidence_dir=logs_root / "retryable-failure-evidence",
             reset_time=None,
             message=None,
         )
@@ -1377,7 +1317,7 @@ def test_classify_retryable_invocation_result_from_public_llm_port_marks_each_it
     assert extractor.classify_relevance([_item(), _item()]) == [None, None]
 
 
-def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_valid(
+def test_classify_relevance_completed_without_usage_stays_valid(
     run_log: RunLog,
 ) -> None:
     def _fake_invoke(
@@ -1389,15 +1329,10 @@ def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_vali
     ) -> AgentRuntimeInvocationResult:
         assert prompt
         assert call_site == "classify"
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        runtime_log.write_text("missing usage\n", encoding="utf-8")
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=_classify_output({"matches": False}),
-            evidence_dir=runtime_log,
+            evidence_dir=logs_root / "completed-evidence",
             reset_time=None,
             message=None,
         )
@@ -1414,7 +1349,7 @@ def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_vali
     assert results == [RelevanceVerdict(matches=False)]
 
 
-def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachable(
+def test_classify_relevance_hard_provider_failure_is_unreachable(
     run_log: RunLog,
 ) -> None:
     def _fake_invoke(
@@ -1426,15 +1361,10 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
     ) -> AgentRuntimeInvocationResult:
         assert prompt
         assert call_site == "classify"
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        runtime_log.write_text("hard failure\n", encoding="utf-8")
         return AgentRuntimeInvocationResult(
             kind="hard_provider_failure",
             output="runtime failed",
-            evidence_dir=runtime_log,
+            evidence_dir=logs_root / "hard-failure-evidence",
             reset_time=None,
             message="provider exploded",
         )
@@ -1444,41 +1374,6 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
         _batch_prompts(),
         run_log=run_log,
         invocation_port=_MockInvocationPort(invoke=_fake_invoke),
-    )
-
-    with pytest.raises(ExtractorUnreachableError) as excinfo:
-        extractor.classify_relevance([_item()])
-
-    assert excinfo.value.stderr == "provider exploded"
-
-
-def test_classify_hard_provider_failure_from_public_llm_adapter_surfaces_provider_message(
-    run_log: RunLog,
-) -> None:
-    def _fake_invoke(
-        prompt: str,
-        *,
-        logs_root: Path,
-        call_site: AgentRuntimeCallSiteName,
-        provider_auth: ProviderAuth | None = None,
-    ) -> AgentRuntimeInvocationResult:
-        runtime_log = (
-            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
-        )
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        return AgentRuntimeInvocationResult(
-            kind="hard_provider_failure",
-            output="runtime failed",
-            evidence_dir=runtime_log,
-            reset_time=None,
-            message="provider exploded",
-        )
-
-    extractor = AgentRuntimeExtractor(
-        _config(),
-        _batch_prompts(),
-        run_log=run_log,
-        invocation_port=AgentRuntimeInvocationAdapter(invoke=_fake_invoke),
     )
 
     with pytest.raises(ExtractorUnreachableError) as excinfo:

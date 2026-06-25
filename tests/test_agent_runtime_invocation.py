@@ -179,7 +179,7 @@ def test_judge_call_writes_under_judge_subdir(logs_root: Path) -> None:
     assert result.evidence_dir.parent == logs_root / "llm" / "agent-runtime" / "judge"
 
 
-def test_request_uses_no_tools_and_worktree_outside_logs_root(
+def test_request_construction_uses_pinned_provider_no_tools_and_worktree_outside_logs_root(
     logs_root: Path,
 ) -> None:
     _FakeRuntimeClient.outcome = _completed()
@@ -187,6 +187,10 @@ def test_request_uses_no_tools_and_worktree_outside_logs_root(
     invoke_agent_runtime("classify prompt", logs_root=logs_root, call_site="classify")
 
     captured = _FakeRuntimeClient.requests[0]
+    assert captured.prompt == "classify prompt"
+    assert captured.service == "opencode"
+    assert captured.model == "deepseek-v4-flash"
+    assert captured.effort == "medium"
     assert captured.tool_access == ToolAccess.no_tools()
     assert logs_root not in captured.invocation_dir.parents
 

@@ -98,8 +98,10 @@ class _CompileCvWorkflow:
                 if result.returncode == 0:
                     continue
                 log_file = build_dir / f"{build_name}.log"
-                if log_file.exists():
-                    _emit_error_blob(log_file)
+                if result.log_text is not None:
+                    _emit_error_blob(result.log_text)
+                elif log_file.exists():
+                    _emit_error_blob(log_file.read_text(errors="replace"))
                 sys.exit(1)
 
     def _publish_pdfs(self, build_dir: Path, app_dir: Path) -> None:
@@ -119,8 +121,8 @@ def _substitute_slots(template: str, slots: dict[str, str]) -> str:
     return result
 
 
-def _emit_error_blob(log_file: Path) -> None:
-    lines = log_file.read_text(errors="replace").splitlines()
+def _emit_error_blob(log_text: str) -> None:
+    lines = log_text.splitlines()
     blob: list[str] = []
     trailing = 0
 

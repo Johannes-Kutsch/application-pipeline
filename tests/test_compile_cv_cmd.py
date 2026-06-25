@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from application_pipeline.compile_cv_cmd import _CompileCvWorkflow, compile_cv
 from application_pipeline.compile_cv_local import (
     _CapturedPdflatexPass as _CapturedRun,
     _CompileCvFakePdflatexAdapter,
+    _PdflatexAdapter,
     _PdflatexRunResult,
 )
 from application_pipeline.cv_slot_contract import SLOT_NAMES
@@ -47,7 +49,7 @@ def _install_failing_pdflatex(
 def _run_compile_with_fake_pdflatex(
     app_dir: Path,
     *,
-    pdflatex: _CompileCvFakePdflatexAdapter,
+    pdflatex: _PdflatexAdapter,
 ) -> None:
     _CompileCvWorkflow(app_dir, pdflatex=pdflatex).run()
 
@@ -247,6 +249,50 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     err = capsys.readouterr().err
     assert "! Undefined control sequence." in err
     assert "\\badmacro" in err
+
+
+@dataclass(slots=True)
+class _FailingPdflatexAdapterWithInMemoryLog:
+    """Adapter seam variant that returns log text without touching build files."""
+
+    returncode: int = 1
+    log_text: str = (
+        "This is pdflatex\n"
+        "! Undefined control sequence.\n"
+        "l.42 \\badmacro\n"
+        "           {foo}\n"
+        "? \n"
+    )
+
+    def run_pass(
+        self,
+        *,
+        build_dir: Path,
+        build_name: str,
+        cv_data_dir: Path,
+    ) -> _PdflatexRunResult:
+        assert build_dir is not None
+        assert build_name
+        assert cv_data_dir is not None
+        return _PdflatexRunResult(
+            returncode=self.returncode,
+            log_text=self.log_text,
+        )
+
+
+def test_compile_cv_emits_error_blob_from_adapter_log_text_when_no_log_file(
+    app_dir: Path,
+    project_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = _FailingPdflatexAdapterWithInMemoryLog()
+
+    with pytest.raises(SystemExit):
+        _run_compile_with_fake_pdflatex(app_dir, pdflatex=adapter)
+
+    err = capsys.readouterr().err
+    assert "! Undefined control sequence." in err
+    assert "l.42 \\badmacro" in err
 
 
 def test_compile_cv_missing_config_exits_2_before_build_or_pdflatex(

@@ -12,13 +12,13 @@ from agent_runtime.runtime import ProviderAuth
 from application_pipeline import ClassifyItem, Config, SourceEntry
 from application_pipeline.llm import (
     AgentRuntimeExtractor,
+    AgentRuntimeCallSiteName,
+    AgentRuntimeInvocationAdapter,
+    AgentRuntimeInvocationPort,
+    AgentRuntimeInvocationResult,
     ExtractorBatchMalformedError,
     ExtractorUnreachableError,
     UsageLimitError,
-)
-from application_pipeline.llm.agent_runtime_invocation import (
-    AgentRuntimeCallSiteName,
-    AgentRuntimeInvocationResult,
 )
 from application_pipeline.llm.types import (
     JudgeCandidate,
@@ -851,6 +851,42 @@ def test_classify_usage_limit_error_uses_agent_runtime_vocabulary(
     assert "usage limit" in message.lower()
 
 
+def test_classify_usage_limit_invocation_result_from_public_llm_import_preserves_reset_time(
+    run_log: RunLog,
+) -> None:
+    def _fake_invoke(
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
+    ) -> AgentRuntimeInvocationResult:
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        return AgentRuntimeInvocationResult(
+            kind="usage_limit",
+            output="limit reached",
+            evidence_dir=runtime_log,
+            reset_time=datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc),
+            message=None,
+        )
+
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=_MockInvocationPort(invoke=_fake_invoke),
+    )
+
+    with pytest.raises(UsageLimitError) as excinfo:
+        extractor.classify_relevance([_item()])
+
+    assert excinfo.value.reset_time == datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc)
+    assert "Agent Runtime usage limit" in str(excinfo.value)
+
+
 def test_judge_top_n_forwards_provider_auth_to_agent_runtime(
     run_log: RunLog,
 ) -> None:
@@ -1214,6 +1250,40 @@ def test_classify_relevance_via_agent_runtime_retryable_failure_marks_items_retr
     assert results == [None, None]
 
 
+def test_classify_retryable_invocation_result_from_public_llm_port_marks_each_item_retryable(
+    run_log: RunLog,
+) -> None:
+    class _RetryablePort(AgentRuntimeInvocationPort):
+        def invoke(
+            self,
+            prompt: str,
+            *,
+            logs_root: Path,
+            call_site: AgentRuntimeCallSiteName,
+            provider_auth: ProviderAuth | None = None,
+        ) -> AgentRuntimeInvocationResult:
+            runtime_log = (
+                logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+            )
+            runtime_log.parent.mkdir(parents=True, exist_ok=True)
+            return AgentRuntimeInvocationResult(
+                kind="retryable_provider_failure",
+                output="provider flake",
+                evidence_dir=runtime_log,
+                reset_time=None,
+                message=None,
+            )
+
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=_RetryablePort(),
+    )
+
+    assert extractor.classify_relevance([_item(), _item()]) == [None, None]
+
+
 def test_classify_relevance_via_agent_runtime_completed_without_usage_stays_valid(
     run_log: RunLog,
 ) -> None:
@@ -1281,6 +1351,41 @@ def test_classify_relevance_via_agent_runtime_hard_provider_failure_is_unreachab
         _batch_prompts(),
         run_log=run_log,
         invocation_port=_MockInvocationPort(invoke=_fake_invoke),
+    )
+
+    with pytest.raises(ExtractorUnreachableError) as excinfo:
+        extractor.classify_relevance([_item()])
+
+    assert excinfo.value.stderr == "provider exploded"
+
+
+def test_classify_hard_provider_failure_from_public_llm_adapter_surfaces_provider_message(
+    run_log: RunLog,
+) -> None:
+    def _fake_invoke(
+        prompt: str,
+        *,
+        logs_root: Path,
+        call_site: AgentRuntimeCallSiteName,
+        provider_auth: ProviderAuth | None = None,
+    ) -> AgentRuntimeInvocationResult:
+        runtime_log = (
+            logs_root / "llm" / "agent-runtime" / "classify" / "llm-classify.log"
+        )
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        return AgentRuntimeInvocationResult(
+            kind="hard_provider_failure",
+            output="runtime failed",
+            evidence_dir=runtime_log,
+            reset_time=None,
+            message="provider exploded",
+        )
+
+    extractor = AgentRuntimeExtractor(
+        _config(),
+        _batch_prompts(),
+        run_log=run_log,
+        invocation_port=AgentRuntimeInvocationAdapter(invoke=_fake_invoke),
     )
 
     with pytest.raises(ExtractorUnreachableError) as excinfo:

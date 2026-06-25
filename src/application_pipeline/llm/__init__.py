@@ -1,4 +1,10 @@
 from .agent_runtime_extractor import AgentRuntimeExtractor
+from .agent_runtime_invocation import (
+    AgentRuntimeCallSiteName,
+    AgentRuntimeInvocationAdapter,
+    AgentRuntimeInvocationPort,
+    AgentRuntimeInvocationResult,
+)
 from .agent_runtime_types import UsageLimitError
 from .types import (
     AppliedClassifyItemOutcome,
@@ -22,6 +28,10 @@ __all__ = [
     "AppliedClassifyState",
     "ClassifyItem",
     "AgentRuntimeExtractor",
+    "AgentRuntimeCallSiteName",
+    "AgentRuntimeInvocationAdapter",
+    "AgentRuntimeInvocationPort",
+    "AgentRuntimeInvocationResult",
     "UsageLimitError",
     "ExtractorBatchMalformedError",
     "ExtractorError",

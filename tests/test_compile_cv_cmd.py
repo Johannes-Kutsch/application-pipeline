@@ -50,12 +50,7 @@ def _run_compile_with_fake_pdflatex(
     *,
     pdflatex: _CompileCvFakePdflatexAdapter,
 ) -> None:
-    monkeypatch.setattr(
-        compile_cv_cmd_module,
-        "_CompileCvLocalProductionAdapter",
-        lambda: pdflatex,
-    )
-    compile_cv(app_dir)
+    compile_cv(app_dir, pdflatex=pdflatex)
 
 
 def _published_pdf(app_dir: Path, build_name: str) -> Path:

@@ -5,12 +5,12 @@ import logging
 import urllib.parse
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
-from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.stellen_hamburg_api import (
     StellenHamburgParser,
     parser_class,
@@ -28,6 +28,9 @@ from tests.parsers.http_helpers import (
     ScriptedParserHttpTransport,
     make_scripted_parser_http,
 )
+
+if TYPE_CHECKING:
+    from application_pipeline.parsers.http import ParserHttp
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "stellen_hamburg"
 _NO_SLEEP = lambda _: None  # noqa: E731

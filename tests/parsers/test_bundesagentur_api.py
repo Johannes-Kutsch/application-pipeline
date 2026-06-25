@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,7 +20,6 @@ from application_pipeline.parsers.bundesagentur_api import (
     BundesagenturParser,
     parser_class,
 )
-from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.types import (
     City,
     EnrichFailedError,
@@ -31,6 +31,9 @@ from tests.parsers.http_helpers import (
     ScriptedParserHttpTransport,
     make_scripted_parser_http,
 )
+
+if TYPE_CHECKING:
+    from application_pipeline.parsers.http import ParserHttp
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "bundesagentur"
 _NO_SLEEP = lambda _: None  # noqa: E731

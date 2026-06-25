@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers import Parser, ParserQuery, PositionStub
 from application_pipeline.parsers import jobs_beim_staat_html as parser_module
-from application_pipeline.parsers.http import ParserHttp
 from application_pipeline.parsers.jobs_beim_staat_html import (
     JobsBeimStaatParser,
     _parse_posted_date,
@@ -26,6 +26,9 @@ from application_pipeline.parsers.types import (
     NotServedQuery,
     Remote,
 )
+
+if TYPE_CHECKING:
+    from application_pipeline.parsers.http import ParserHttp
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "jobs_beim_staat"
 _TODAY = date(2026, 5, 8)

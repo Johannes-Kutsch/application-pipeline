@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 
 from application_pipeline.parser_log import RunLog
-from application_pipeline.parsers.http import ParserHttp
+
+if TYPE_CHECKING:
+    from application_pipeline.parsers.http import ParserHttp
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,8 @@ def make_scripted_parser_http(
     retries: int = 3,
     sleep: Callable[[float], None],
 ) -> tuple[ParserHttp, ScriptedParserHttpTransport]:
+    from application_pipeline.parsers.http import ParserHttp
+
     transport = ScriptedParserHttpTransport(list(outcomes))
     return (
         ParserHttp.for_test(

@@ -4,6 +4,8 @@ import json
 import time
 from datetime import date
 from pathlib import Path
+import pytest
+
 from fake_status_display import FakeStatusDisplay
 
 from application_pipeline.classify_stage import ClassifyStage, ClassifyStageHandoff
@@ -600,6 +602,22 @@ def test_parser_dead_preserves_failure_report_run_log_and_metrics_observations(
     assert "enrich_failed=0" in run_log_content
     assert "not_served_queries=0" in run_log_content
     assert "unparseable_dates=0" in run_log_content
+
+
+def test_parser_dead_prints_failure_report_path_to_stderr(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    plan = _make_plan(
+        tmp_path,
+        parser=_DiscoverCrashParser(),
+    )
+
+    run_parser_lifecycle(plan)
+
+    stderr = capsys.readouterr().err
+    failure_report = next((tmp_path / "failures").glob("*.md"))
+    assert f"parser test_parser died — failure report: {failure_report}" in stderr
 
 
 def test_stall_watchdog_logs_one_stalled_event_and_stack_trace_via_lifecycle(

@@ -206,13 +206,14 @@ class _OutboundDispatcher:
             self._metrics.parser_done(parser_id)
             return True
         elif isinstance(payload, _ParserDead):
-            self._run_log.traceback("parser_" + parser_id, payload.traceback_str)
-            self._metrics.parser_dead(parser_id)
-            self._failure_report_writer.record_parser_dead(
+            path = self._failure_report_writer.record_parser_dead(
                 parser_id=parser_id,
                 error=payload.exc,
                 traceback_str=payload.traceback_str,
             )
+            print(f"parser {parser_id} died — failure report: {path}", file=sys.stderr)
+            self._run_log.traceback("parser_" + parser_id, payload.traceback_str)
+            self._metrics.parser_dead(parser_id)
             return True
         elif payload is _PARSER_PROGRESS:
             return False

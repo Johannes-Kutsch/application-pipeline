@@ -45,7 +45,6 @@ from application_pipeline.failure_report import (
 )
 from application_pipeline.llm import (
     AgentRuntimeExtractor,
-    ExtractorError,
     JudgeCandidate,
     MatchVerdict,
 )
@@ -371,22 +370,6 @@ def run(
                         duration_s=duration_s,
                     )
                     time.sleep(duration_s)
-                except ExtractorError as exc:
-                    _log.warning("judge_top_n failed: %s", exc)
-                    run_log.event(
-                        "llm_judge_match",
-                        "error",
-                        returncode=getattr(exc, "returncode", None),
-                        stderr_excerpt=str(getattr(exc, "stderr", "") or "")[:200],
-                        error=str(exc),
-                    )
-                    failure_report_writer.write_failure(
-                        stage="llm_extractor:judge_match",
-                        error=exc,
-                        log_tail="",
-                    )
-                    metrics.judge_failed_lifecycle()
-                    break
 
             if verdicts is not None:
                 try:

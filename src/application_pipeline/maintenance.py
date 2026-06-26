@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import time
 from pathlib import Path
 
@@ -33,17 +32,17 @@ def _is_under_agent_runtime(logs_dir: Path, path: Path) -> bool:
 
 
 def _delete_old_agent_runtime_evidence(logs_dir: Path) -> None:
-    """Delete whole per-call evidence directories older than 30 days (ADR-0057)."""
+    """Delete old Agent Runtime log files older than 30 days."""
     cutoff = time.time() - _AGENT_RUNTIME_LOG_MAX_AGE_SECONDS
     for subdir in _agent_runtime_subdirs(logs_dir):
         if not subdir.is_dir():
             continue
-        for evidence_dir in subdir.iterdir():
+        for evidence_path in subdir.iterdir():
             try:
-                if not evidence_dir.is_dir():
+                if not evidence_path.is_file():
                     continue
-                if os.path.getmtime(evidence_dir) < cutoff:
-                    shutil.rmtree(evidence_dir)
+                if os.path.getmtime(evidence_path) < cutoff:
+                    evidence_path.unlink()
             except Exception:
                 pass
 

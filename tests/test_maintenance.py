@@ -126,21 +126,21 @@ def _age(path: Path, days: float) -> None:
     os.utime(path, (old_mtime, old_mtime))
 
 
-def test_agent_runtime_classify_evidence_dir_older_than_30_days_is_deleted(
+def test_agent_runtime_classify_log_file_older_than_30_days_is_deleted(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
-    evidence_dir = _make_evidence_file(
+    evidence_file = _make_evidence_file(
         logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-old.log"
     )
-    _age(evidence_dir, 31)
+    _age(evidence_file, 31)
 
     run_maintenance(logs_dir, failures_dir)
 
-    assert not evidence_dir.exists()
+    assert not evidence_file.exists()
 
 
-def test_agent_runtime_judge_evidence_dir_older_than_30_days_is_deleted_legacy(
+def test_agent_runtime_judge_log_file_older_than_30_days_is_deleted(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
@@ -154,26 +154,12 @@ def test_agent_runtime_judge_evidence_dir_older_than_30_days_is_deleted_legacy(
     assert not evidence_file.exists()
 
 
-def test_agent_runtime_judge_evidence_dir_older_than_30_days_is_deleted(
+def test_agent_runtime_non_file_entry_is_skipped_without_error(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
     evidence_dir = _make_evidence_dir(
-        logs_dir / "llm" / "agent-runtime" / "judge", "llm-judge-old"
-    )
-    _age(evidence_dir, 31)
-
-    run_maintenance(logs_dir, failures_dir)
-
-    assert not evidence_dir.exists()
-
-
-def test_agent_runtime_evidence_dir_newer_than_30_days_is_preserved(
-    dirs: tuple[Path, Path],
-) -> None:
-    logs_dir, failures_dir = dirs
-    evidence_dir = _make_evidence_dir(
-        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-new"
+        logs_dir / "llm" / "agent-runtime" / "judge", "stray-dir"
     )
 
     run_maintenance(logs_dir, failures_dir)
@@ -182,37 +168,51 @@ def test_agent_runtime_evidence_dir_newer_than_30_days_is_preserved(
     assert (evidence_dir / "response").read_text() == "the response\n"
 
 
-def test_agent_runtime_evidence_files_are_not_tail_truncated(
+def test_agent_runtime_log_file_newer_than_30_days_is_preserved(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    evidence_file = _make_evidence_file(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-new.log"
+    )
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert evidence_file.exists()
+    assert evidence_file.read_text() == "log payload\n"
+
+
+def test_agent_runtime_log_files_are_not_tail_truncated(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
     parent = logs_dir / "llm" / "agent-runtime" / "classify"
-    evidence_dir = parent / "llm-classify-big"
-    evidence_dir.mkdir(parents=True)
+    evidence_file = parent / "llm-classify-big.log"
+    evidence_file.parent.mkdir(parents=True)
     lines = [f"line {i}" for i in range(15_000)]
-    (evidence_dir / "response").write_text("\n".join(lines) + "\n")
+    evidence_file.write_text("\n".join(lines) + "\n")
 
     run_maintenance(logs_dir, failures_dir)
 
-    result_lines = (evidence_dir / "response").read_text().splitlines()
+    result_lines = evidence_file.read_text().splitlines()
     assert len(result_lines) == 15_000
 
 
-def test_agent_runtime_evidence_dir_at_30_day_cutoff_is_preserved(
+def test_agent_runtime_log_file_at_30_day_cutoff_is_preserved(
     dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     logs_dir, failures_dir = dirs
-    evidence_dir = _make_evidence_dir(
-        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-cutoff"
+    evidence_file = _make_evidence_file(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-cutoff.log"
     )
     fake_now = 1_000_000_000.0
     cutoff_mtime = fake_now - 30 * 24 * 3600
-    os.utime(evidence_dir, (cutoff_mtime, cutoff_mtime))
+    os.utime(evidence_file, (cutoff_mtime, cutoff_mtime))
     monkeypatch.setattr(time, "time", lambda: fake_now)
 
     run_maintenance(logs_dir, failures_dir)
 
-    assert evidence_dir.exists()
+    assert evidence_file.exists()
 
 
 def test_flat_log_artifact_exceeding_10000_lines_is_truncated_to_last_10000(
@@ -258,21 +258,28 @@ def test_filesystem_error_on_one_nested_log_artifact_does_not_stop_other_truncat
     assert result_lines[-1] == '{"line": 14999}'
 
 
-def test_filesystem_error_on_one_agent_runtime_evidence_dir_does_not_stop_other_maintenance(
+def test_filesystem_error_on_one_agent_runtime_log_file_does_not_stop_other_maintenance(
     dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     logs_dir, failures_dir = dirs
-    bad_dir = _make_evidence_dir(
-        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-bad"
+    bad_file = _make_evidence_file(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-bad.log"
     )
-    _age(bad_dir, 31)
+    _age(bad_file, 31)
+    good_old_file = _make_evidence_file(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-old.log"
+    )
+    _age(good_old_file, 31)
     good_log = logs_dir / "run.log"
     good_log.write_text("\n".join(f"line {i}" for i in range(15_000)) + "\n")
+    old_failure = failures_dir / "2024-01-01T000000.md"
+    old_failure.write_text("# failure\n")
+    _age(old_failure, 31)
 
     original_getmtime = os.path.getmtime
 
     def flaky_getmtime(path: os.PathLike[str] | str) -> float:
-        if Path(path) == bad_dir:
+        if Path(path) == bad_file:
             raise OSError("simulated stat failure")
         return original_getmtime(path)
 
@@ -280,10 +287,13 @@ def test_filesystem_error_on_one_agent_runtime_evidence_dir_does_not_stop_other_
 
     run_maintenance(logs_dir, failures_dir)
 
+    assert bad_file.exists()
+    assert not good_old_file.exists()
     result_lines = good_log.read_text().splitlines()
     assert len(result_lines) == 10_000
     assert result_lines[0] == "line 5000"
     assert result_lines[-1] == "line 14999"
+    assert not old_failure.exists()
 
 
 def test_old_failure_report_markdown_in_failures_dir_is_deleted(

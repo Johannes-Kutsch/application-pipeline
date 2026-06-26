@@ -171,10 +171,10 @@ def test_completed_call_writes_one_invocation_log_file(logs_root: Path) -> None:
     assert result.kind == "completed"
     assert result.output == "<verdict>{}</verdict>"
     assert (
-        result.evidence_dir.parent == logs_root / "llm" / "agent-runtime" / "classify"
+        result.evidence_path.parent == logs_root / "llm" / "agent-runtime" / "classify"
     )
-    assert result.evidence_dir.suffix == ".log"
-    assert result.evidence_dir.is_file()
+    assert result.evidence_path.suffix == ".log"
+    assert result.evidence_path.is_file()
 
 
 def test_log_file_has_prompt_events_and_result_sections(
@@ -191,7 +191,7 @@ def test_log_file_has_prompt_events_and_result_sections(
     result = invoke_agent_runtime(
         "the sent prompt", logs_root=logs_root, call_site="judge"
     )
-    content = result.evidence_dir.read_text(encoding="utf-8")
+    content = result.evidence_path.read_text(encoding="utf-8")
 
     assert content.startswith("[prompt]\nthe sent prompt\n")
     assert "[events]" in content
@@ -245,7 +245,7 @@ def test_agent_runtime_invocation_adapter_delegates_call_shape() -> None:
     expected = AgentRuntimeInvocationResult(
         kind="completed",
         output="payload",
-        evidence_dir=Path("llm/classify/llm-classify-1"),
+        evidence_path=Path("llm/classify/llm-classify-1"),
     )
 
     def _fake_invoke(
@@ -289,7 +289,7 @@ def test_usage_limited_outcome_reports_reset_time(logs_root: Path) -> None:
     assert result.kind == "usage_limit"
     assert result.output == "partial"
     assert result.reset_time == reset_time
-    assert "[result]\noutcome=usage_limited" in result.evidence_dir.read_text(
+    assert "[result]\noutcome=usage_limited" in result.evidence_path.read_text(
         encoding="utf-8"
     )
 
@@ -342,7 +342,7 @@ def test_log_file_records_non_default_selected_provider(logs_root: Path) -> None
 
     result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="classify")
 
-    content = result.evidence_dir.read_text(encoding="utf-8")
+    content = result.evidence_path.read_text(encoding="utf-8")
     assert "selected_service=opencode" in content
     assert "selected_model=gpt-5" in content
     assert "selected_effort=high" in content

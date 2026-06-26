@@ -48,7 +48,7 @@ AgentRuntimeInvocationKind = Literal[
 class AgentRuntimeInvocationResult:
     kind: AgentRuntimeInvocationKind
     output: str
-    evidence_dir: Path
+    evidence_path: Path
     reset_time: datetime | None = None
     message: str | None = None
 
@@ -182,20 +182,20 @@ def _to_invocation_result(
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=outcome.result.output,
-            evidence_dir=evidence_path,
+            evidence_path=evidence_path,
         )
     if isinstance(outcome.kind, UsageLimited):
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
             output=outcome.result.output,
-            evidence_dir=evidence_path,
+            evidence_path=evidence_path,
             reset_time=outcome.kind.reset_time,
         )
     if isinstance(outcome.kind, ProviderUnavailable):
         return AgentRuntimeInvocationResult(
             kind="retryable_provider_failure",
             output="",
-            evidence_dir=evidence_path,
+            evidence_path=evidence_path,
             message=outcome.kind.detail,
         )
 
@@ -208,7 +208,7 @@ def _to_invocation_result(
     return AgentRuntimeInvocationResult(
         kind="hard_provider_failure",
         output=message or "",
-        evidence_dir=evidence_path,
+        evidence_path=evidence_path,
         message=message or "",
     )
 
@@ -264,6 +264,6 @@ def invoke_agent_runtime(
             return AgentRuntimeInvocationResult(
                 kind="hard_provider_failure",
                 output="",
-                evidence_dir=evidence_path,
+                evidence_path=evidence_path,
                 message=str(exc),
             )

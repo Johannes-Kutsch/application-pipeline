@@ -302,7 +302,7 @@ class AgentRuntimeExtractor:
             call_site="classify",
             provider_auth=self._provider_auth,
         )
-        self._local.last_classify_log_path = result.evidence_dir
+        self._local.last_classify_log_path = result.evidence_path
         if result.kind == "completed":
             return AgentRuntimeResponse(
                 raw_response=result.output,

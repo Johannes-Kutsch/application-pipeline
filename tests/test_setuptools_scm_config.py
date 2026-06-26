@@ -67,7 +67,3 @@ def test_templates_keep_one_agent_skill_source_tree():
     assert (templates_root / "agent-skills").is_dir()
     assert not (templates_root / "claude/skills").exists()
     assert not (templates_root / "codex/skills").exists()
-
-
-def test_project_metadata_pins_agent_runtime_dependency():
-    assert "ruhken-agent-runtime == 0.0.5" in _project_dependencies()

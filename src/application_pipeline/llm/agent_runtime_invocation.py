@@ -23,6 +23,7 @@ from agent_runtime.runtime import (
     TimedOut,
     UsageLimited,
 )
+from agent_runtime.errors import ProviderUnavailableReason
 from agent_runtime.types import ProviderSelection
 
 
@@ -154,9 +155,9 @@ def _persist_result(
     _safe_append(path, "[result]\n")
     _safe_append(path, f"outcome={kind_name}\n")
     if selected is not None:
-        _safe_append(path, f"selected_service={selected.service}\n")
-        _safe_append(path, f"selected_model={selected.model}\n")
-        _safe_append(path, f"selected_effort={selected.effort}\n")
+        _safe_append(path, f"service={selected.service}\n")
+        _safe_append(path, f"model={selected.model}\n")
+        _safe_append(path, f"effort={selected.effort}\n")
     if usage is not None:
         _safe_append(path, f"usage={usage!r}\n")
 
@@ -192,8 +193,15 @@ def _to_invocation_result(
             reset_time=outcome.kind.reset_time,
         )
     if isinstance(outcome.kind, ProviderUnavailable):
+        if outcome.kind.reason == ProviderUnavailableReason.TRANSIENT_API_ERROR:
+            return AgentRuntimeInvocationResult(
+                kind="retryable_provider_failure",
+                output="",
+                evidence_path=evidence_path,
+                message=outcome.kind.detail,
+            )
         return AgentRuntimeInvocationResult(
-            kind="retryable_provider_failure",
+            kind="hard_provider_failure",
             output="",
             evidence_path=evidence_path,
             message=outcome.kind.detail,

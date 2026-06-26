@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 from agent_runtime.contracts import ToolAccess
@@ -20,6 +19,7 @@ from agent_runtime.runtime import (
     TimedOut,
     UsageLimited,
 )
+from agent_runtime.errors import ProviderUnavailableReason
 from agent_runtime.types import ResolvedProvider
 
 from typing import Literal
@@ -139,8 +139,11 @@ def _usage_limited(
     )
 
 
-def _provider_unavailable(detail: str = "provider unavailable") -> RuntimeOutcome:
-    reason: Any = cast(Any, "transient")
+def _provider_unavailable(
+    *,
+    detail: str = "provider unavailable",
+    reason: ProviderUnavailableReason = ProviderUnavailableReason.TRANSIENT_API_ERROR,
+) -> RuntimeOutcome:
     return RuntimeOutcome(
         kind=ProviderUnavailable(reason=reason, detail=detail),
         result=_run_result(),
@@ -167,6 +170,9 @@ def test_completed_call_writes_one_invocation_log_file(logs_root: Path) -> None:
     result = invoke_agent_runtime(
         "classify prompt", logs_root=logs_root, call_site="classify"
     )
+    judge_result = invoke_agent_runtime(
+        "judge prompt", logs_root=logs_root, call_site="judge"
+    )
 
     assert result.kind == "completed"
     assert result.output == "<verdict>{}</verdict>"
@@ -175,6 +181,14 @@ def test_completed_call_writes_one_invocation_log_file(logs_root: Path) -> None:
     )
     assert result.evidence_path.suffix == ".log"
     assert result.evidence_path.is_file()
+
+    assert judge_result.kind == "completed"
+    assert (
+        judge_result.evidence_path.parent
+        == logs_root / "llm" / "agent-runtime" / "judge"
+    )
+    assert judge_result.evidence_path.suffix == ".log"
+    assert judge_result.evidence_path.is_file()
 
 
 def test_log_file_has_prompt_events_and_result_sections(
@@ -200,9 +214,9 @@ def test_log_file_has_prompt_events_and_result_sections(
     assert "agent_message | done" in content
     assert "[result]" in content
     assert "outcome=completed" in content
-    assert "selected_service=opencode" in content
-    assert "selected_model=deepseek-v4-flash" in content
-    assert "selected_effort=medium" in content
+    assert "service=opencode" in content
+    assert "model=deepseek-v4-flash" in content
+    assert "effort=medium" in content
     assert "usage=ProviderUsage(" in content
 
 
@@ -289,17 +303,31 @@ def test_usage_limited_outcome_reports_reset_time(logs_root: Path) -> None:
     assert result.kind == "usage_limit"
     assert result.output == "partial"
     assert result.reset_time == reset_time
+    assert result.evidence_path.is_file()
     assert "[result]\noutcome=usage_limited" in result.evidence_path.read_text(
         encoding="utf-8"
     )
 
 
 def test_retryable_provider_failure_is_reported(logs_root: Path) -> None:
-    _FakeRuntimeClient.outcome = _provider_unavailable("provider unavailable")
+    _FakeRuntimeClient.outcome = _provider_unavailable()
 
     result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="classify")
 
     assert result.kind == "retryable_provider_failure"
+    assert result.output == ""
+    assert result.message == "provider unavailable"
+    assert result.evidence_path.is_file()
+
+
+def test_provider_not_available_is_hard_provider_failure(logs_root: Path) -> None:
+    _FakeRuntimeClient.outcome = _provider_unavailable(
+        reason=ProviderUnavailableReason.SERVICE_NOT_AVAILABLE
+    )
+
+    result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="classify")
+
+    assert result.kind == "hard_provider_failure"
     assert result.output == ""
     assert result.message == "provider unavailable"
 
@@ -314,6 +342,7 @@ def test_hard_provider_failure_from_runtime_error(logs_root: Path) -> None:
     assert result.kind == "hard_provider_failure"
     assert result.output == ""
     assert result.message == "provider exploded"
+    assert result.evidence_path.is_file()
 
 
 def test_cancelled_and_timed_out_map_to_hard_provider_failure(logs_root: Path) -> None:
@@ -343,9 +372,78 @@ def test_log_file_records_non_default_selected_provider(logs_root: Path) -> None
     result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="classify")
 
     content = result.evidence_path.read_text(encoding="utf-8")
-    assert "selected_service=opencode" in content
-    assert "selected_model=gpt-5" in content
-    assert "selected_effort=high" in content
+    assert "service=opencode" in content
+    assert "model=gpt-5" in content
+    assert "effort=high" in content
+
+
+def test_result_section_uses_plain_service_model_effort_fields(logs_root: Path) -> None:
+    _FakeRuntimeClient.outcome = _completed()
+
+    result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="judge")
+    content = result.evidence_path.read_text(encoding="utf-8")
+
+    assert "outcome=completed" in content
+    assert "service=opencode" in content
+    assert "model=deepseek-v4-flash" in content
+    assert "effort=medium" in content
+    assert "selected_service=" not in content
+    assert "selected_model=" not in content
+    assert "selected_effort=" not in content
+
+
+def test_events_append_during_live_invocation(
+    logs_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _FakeRuntimeClient.outcome = _completed()
+
+    writes: list[tuple[Path, str]] = []
+
+    import application_pipeline.llm.agent_runtime_invocation as adapter
+
+    original_append = adapter._safe_append
+
+    def recording_append(path: Path, payload: str) -> None:
+        writes.append((path, payload))
+        original_append(path, payload)
+
+    async def run_with_assertions(
+        self: object, request: EphemeralRunRequest
+    ) -> RuntimeOutcome:
+        assert request.on_live_output is not None
+        request.on_live_output(_event("first"))
+        request.on_live_output(_event("second"))
+
+        evidence = next(
+            path
+            for path, line in writes
+            if path.suffix == ".log" and line.startswith("[events]")
+        )
+        assert any(
+            path == evidence
+            and line == "agent_message | first | raw_provider_output=first\n"
+            for path, line in writes
+        )
+        assert any(
+            path == evidence
+            and line == "agent_message | second | raw_provider_output=second\n"
+            for path, line in writes
+        )
+        assert not any(
+            path == evidence and line.startswith("[result]") for path, line in writes
+        )
+
+        assert _FakeRuntimeClient.outcome is not None
+        return _FakeRuntimeClient.outcome
+
+    monkeypatch.setattr(adapter, "_safe_append", recording_append)
+    monkeypatch.setattr(_FakeRuntimeClient, "run_ephemeral", run_with_assertions)
+
+    result = invoke_agent_runtime(
+        "stream prompt", logs_root=logs_root, call_site="judge"
+    )
+
+    assert result.kind == "completed"
 
 
 def test_serialization_write_error_does_not_change_kind_or_output(
@@ -353,10 +451,12 @@ def test_serialization_write_error_does_not_change_kind_or_output(
 ) -> None:
     _FakeRuntimeClient.outcome = _completed(output="payload")
 
-    def boom(*args: object, **kwargs: object) -> str:
+    def boom(*args: object, **kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(Path, "write_text", boom)
+    import application_pipeline.llm.agent_runtime_invocation as adapter
+
+    monkeypatch.setattr(adapter, "_safe_append", boom)
 
     result = invoke_agent_runtime(
         "classify prompt", logs_root=logs_root, call_site="classify"

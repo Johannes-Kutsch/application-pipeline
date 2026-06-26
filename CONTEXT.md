@@ -24,7 +24,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Daily Results File**: One dated markdown file at `<settings-dir>/results/YYYY-MM-DD.md`, holding **Daily Top-5** as **Cards** in **Rank** order. Date is cron-anchored (ADR-0011/0012). No preamble, no Run Divider. Write-once; synced read-only. _Avoid_: results file (without "daily"), `current.md`.
 
-**Failure Report**: Markdown at `<settings-dir>/.runtime-data/failures/<timestamp>.md` (ADR-0003, path ADR-0028). Triggers: `cron.sh` errors (ADR-0015), orchestrator runtime errors, **Match Judge** failure, fatal **LLM Extractor** backend/provider invocation failures, parser-dead events (ADR-0032), missing title in discover (ADR-0032), native enrich failures (ADR-0031). Must include enough context to diagnose without `run.log`. The recorded stage must name the failing path; fatal classify/provider failures use an explicit LLM/classify stage and must not inherit stale parser lifecycle context. The `application_pipeline.failure_report` module owns timestamp generation, package-tag discovery, markdown rendering, temporary-file replacement, and trigger-specific stage/log-tail composition. Callers bind the failures directory once per run or invocation where practical. Acknowledged by deletion. Quota errors do NOT trigger — they sleep (ADR-0012). Per-listing soft failures (oversized/malformed) stash to sibling dirs without `seen.json` write. _Avoid_: incident report, error log, failure-report adapter.
+**Failure Report**: Markdown at `<settings-dir>/.runtime-data/failures/<timestamp>.md` (ADR-0003, path ADR-0028, ADR-0046). Trigger: parser-dead events only — a dead parser writes a report and the run continues. Contains full exception traceback (including chained exceptions); no log-tail. Fatal pipeline errors (LLM Extractor failures, **Match Judge** failure, unexpected exceptions) surface as unhandled exceptions to stderr instead (ADR-0046). The `application_pipeline.failure_report` module owns timestamp generation, package-tag discovery, markdown rendering, and atomic write. Acknowledged by deletion. Quota errors do NOT trigger — they sleep (ADR-0012). Per-listing soft failures (oversized/malformed) stash to sibling dirs without `seen.json` write. _Avoid_: incident report, error log, failure-report adapter.
 
 **Malformed Classify Stash**: Per-listing soft-failure markdown under `<settings-dir>/.runtime-data/failures/malformed/` for **Relevance Classifier** output that cannot be applied. Records listing identity, error classification, Agent Runtime Log pointers (per-call evidence directory), and raw model output when useful; does not duplicate full prompts or **Raw Description** bodies. _Avoid_: failure report, transcript.
 
@@ -122,7 +122,7 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Quota Wall**: Shared coordination for parallel classify pool (ADR-0024). Raised from **Agent Runtime** usage-limit outcomes carrying `reset_time`, then workers sleep and retry. `raise_wall(reset_time)`, `wait_if_blocked()`, `is_active()`. `threading.Condition` + `reset_time`. One `event=quota_sleep` row per wall raise. _Avoid_: rate limiter, barrier.
 
-**Match Judge**: Picks **Daily Top-5** from **Pool**. Single `judge_top_n(candidates)` per run. Takes `list[JudgeCandidate]` (**Listing ID** + Header + Summary), returns ≤5 `{id, rank}`. Consumes `{CANDIDATE_PROFILE}` + `{SKILLS}` (#615). On non-quota error → Failure Report, no daily file. _Avoid_: scorer.
+**Match Judge**: Picks **Daily Top-5** from **Pool**. Single `judge_top_n(candidates)` per run. Takes `list[JudgeCandidate]` (**Listing ID** + Header + Summary), returns ≤5 `{id, rank}`. Consumes `{CANDIDATE_PROFILE}` + `{SKILLS}` (#615). On non-quota error → fatal exception surfaces to stderr; no daily file. _Avoid_: scorer.
 
 ### Deduplication and run state
 
@@ -142,10 +142,10 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 **Error semantics for `mark_*`** (single-writer Pi):
 - **Pre-filter drop** → `mark_out_of_domain(stub)`. Does not reach the **LLM Extractor**.
 - **Malformed classifier output** → listing NOT marked; retry next tick. Stashed to `failures/malformed/`.
-- **LLM Extractor backend/provider invocation failure** → run aborts with **Failure Report**; listings not marked.
+- **LLM Extractor backend/provider invocation failure** → run aborts; exception surfaces to stderr. Listings not marked.
 - **Classifier usage-limit outcome** → **Quota Wall** raises; workers sleep until reset+2min.
-- **Judge non-quota error** → no daily file, Failure Report, Pool intact.
-- **Body fetch failure** → stub skipped, URL unrecorded (ADR-0030). Native-enrich: 401/403/5xx/3xx/JSON decode → Failure Report + parser dead; 404/400/422/retries-exhausted → silent skip.
+- **Judge non-quota error** → exception surfaces to stderr; no daily file, Pool intact.
+- **Body fetch failure** → stub skipped, URL unrecorded (ADR-0030). Native-enrich: 401/403/5xx/3xx/JSON decode → **Failure Report** + parser dead + stderr notification; 404/400/422/retries-exhausted → silent skip.
 - **Oversized/malformed LLM output** → stashed, no `seen.json` write, retried next run.
 
 State at `<settings-dir>/.runtime-data/seen.json` (ADR-0028; synced via Syncthing, ADR-0001). Shape: `{listing_id: {urls: [...], company_lc, title_lc, location_lc, status, status_last_changed}}`. `urls` most-recent-first; no alias records. On-load migration from legacy URL-keyed format. `DeduplicationStore` exposes four methods taking `listing_id: int`: `mark_out_of_domain`, `mark_matched`, `mark_selected_by_judge`, `mark_expired`. Single-writer (ADR-0001); internal lock covers concurrent writes. Config: `DEDUP_COOLDOWN_DAYS: int = 30` (ADR-0035). _Avoid_: duplicate filtering, URL filtering.

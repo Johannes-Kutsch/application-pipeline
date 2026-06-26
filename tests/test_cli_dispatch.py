@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -138,10 +140,8 @@ def test_run_exits_nonzero_on_bad_config(
     (home / ".env").write_text("OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(Exception, match="Missing required field: SOURCES"):
         _run_main(["run"])
-
-    assert exc_info.value.code != 0
 
 
 def test_run_materialises_logs_in_settings_dir_runtime_data(
@@ -332,88 +332,137 @@ def test_cron_no_judge_accepts_flag_and_runs_successfully(
     assert "run complete:" in capsys.readouterr().out
 
 
-def test_cron_init_failure_writes_failure_report(
+def test_cron_init_failure_surfaces_exception_and_does_not_write_failure_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     home = tmp_path / "application-pipeline"
     _make_config(home)
     monkeypatch.chdir(tmp_path)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
 
-    def fake_init(cwd: Path, *, refresh: bool) -> None:
-        raise RuntimeError("init blew up")
+    script = """
+from pathlib import Path
+import sys
+from unittest.mock import patch
 
-    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
+from application_pipeline.__main__ import main
 
-    with pytest.raises(SystemExit) as exc_info:
-        _run_main(["cron"])
 
-    assert exc_info.value.code != 0
+def fake_init(cwd: Path, *, refresh: bool) -> None:
+    raise RuntimeError("init failure") from ValueError("init root cause")
+
+with patch("application_pipeline.init_cmd.init", fake_init):
+    sys.argv = ["application-pipeline", "cron"]
+    main()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "RuntimeError: init failure" in result.stderr
+    assert "ValueError: init root cause" in result.stderr
     failures_dir = home / ".runtime-data" / "failures"
-    reports = list(failures_dir.glob("*.md"))
-    assert len(reports) == 1
-    content = reports[0].read_text()
-    assert "init --refresh" in content
+    assert list(failures_dir.glob("*.md")) == []
 
 
-def test_cron_run_failure_writes_failure_report(
+def test_cron_run_failure_surfaces_exception_and_does_not_write_failure_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     home = tmp_path / "application-pipeline"
     _make_config(home)
     monkeypatch.chdir(tmp_path)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
 
-    def fake_init(cwd: Path, *, refresh: bool) -> None:
-        pass
+    script = """
+from pathlib import Path
+import sys
+from unittest.mock import patch
 
-    def fake_run(
-        config_path: Path, *, status_display: object, run_log: object, no_judge: bool
-    ) -> object:
-        from application_pipeline._context import current_stage
-
-        current_stage.set("cron-run-stage")
-        raise RuntimeError("run blew up")
-
-    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
-    monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
-
-    with pytest.raises(SystemExit) as exc_info:
-        _run_main(["cron"])
-
-    assert exc_info.value.code != 0
-    failures_dir = home / ".runtime-data" / "failures"
-    reports = list(failures_dir.glob("*.md"))
-    assert len(reports) == 1
-    content = reports[0].read_text()
-    assert "**Stage:** cron-run-stage" in content
+from application_pipeline.__main__ import main
 
 
-def test_run_failure_writes_failure_report_for_current_stage(
+def fake_init(cwd: Path, *, refresh: bool) -> None:
+    pass
+
+
+def fake_run(
+    config_path: Path, *, status_display: object, run_log: object, no_judge: bool
+) -> object:
+    raise RuntimeError("cron run failure") from ValueError("run root cause")
+
+
+with patch("application_pipeline.init_cmd.init", fake_init), patch(
+    "application_pipeline.orchestrator.run", fake_run
+):
+    sys.argv = ["application-pipeline", "cron"]
+    main()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "RuntimeError: cron run failure" in result.stderr
+    assert "ValueError: run root cause" in result.stderr
+    assert list((home / ".runtime-data" / "failures").glob("*.md")) == []
+
+
+def test_run_failure_surfaces_exception_and_does_not_write_failure_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     home = tmp_path / "application-pipeline"
     _make_config(home)
     monkeypatch.chdir(tmp_path)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
 
-    def fake_run(
-        config_path: Path, *, status_display: object, run_log: object, no_judge: bool
-    ) -> object:
-        from application_pipeline._context import current_stage
+    script = """
+from pathlib import Path
+import sys
+from unittest.mock import patch
 
-        current_stage.set("run-stage")
-        raise RuntimeError("run blew up")
+from application_pipeline.__main__ import main
 
-    monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
 
-    with pytest.raises(SystemExit) as exc_info:
-        _run_main(["run"])
+def fake_run(
+    config_path: Path, *, status_display: object, run_log: object, no_judge: bool
+) -> object:
+    raise RuntimeError(\"initial failure\") from ValueError(\"inner cause\")
 
-    assert exc_info.value.code != 0
-    reports = list((home / ".runtime-data" / "failures").glob("*.md"))
-    assert len(reports) == 1
-    assert "**Stage:** run-stage" in reports[0].read_text()
+
+with patch(\"application_pipeline.orchestrator.run\", fake_run):
+    sys.argv = [\"application-pipeline\", \"run\"]
+    main()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "RuntimeError: initial failure" in result.stderr
+    assert "ValueError: inner cause" in result.stderr
+    assert list((home / ".runtime-data" / "failures").glob("*.md")) == []
 
 
 def test_cron_init_failure_ignores_failure_report_write_errors(
@@ -423,23 +472,42 @@ def test_cron_init_failure_ignores_failure_report_write_errors(
     home = tmp_path / "application-pipeline"
     _make_config(home)
     monkeypatch.chdir(tmp_path)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
 
-    def fake_init(cwd: Path, *, refresh: bool) -> None:
-        raise RuntimeError("init blew up")
+    script = """
+from pathlib import Path
+import sys
+from unittest.mock import patch
 
-    def fail_to_write(self, stage: str, error: BaseException, log_tail: str) -> Path:
-        raise OSError("disk full")
+from application_pipeline.__main__ import main
 
-    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
-    monkeypatch.setattr(
-        "application_pipeline.failure_report.FailureReportWriter.write_failure",
-        fail_to_write,
+
+def fake_init(cwd: Path, *, refresh: bool) -> None:
+    raise RuntimeError("init failed") from ValueError("init root cause")
+
+
+def fail_to_write(self, stage: str, error: BaseException, log_tail: str) -> Path:
+    raise OSError("disk full")
+
+
+with patch("application_pipeline.failure_report.FailureReportWriter.write_failure", fail_to_write):
+    with patch("application_pipeline.init_cmd.init", fake_init):
+        sys.argv = ["application-pipeline", "cron"]
+        main()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
     )
 
-    with pytest.raises(SystemExit) as exc_info:
-        _run_main(["cron"])
-
-    assert exc_info.value.code == 1
+    assert result.returncode != 0
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "RuntimeError: init failed" in result.stderr
+    assert "ValueError: init root cause" in result.stderr
     assert list((home / ".runtime-data" / "failures").glob("*.md")) == []
 
 
@@ -465,8 +533,8 @@ def test_run_failure_ignores_failure_report_write_errors(
         fail_to_write,
     )
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(RuntimeError) as exc_info:
         _run_main(["run"])
 
-    assert exc_info.value.code == 1
+    assert str(exc_info.value) == "run blew up"
     assert list((home / ".runtime-data" / "failures").glob("*.md")) == []

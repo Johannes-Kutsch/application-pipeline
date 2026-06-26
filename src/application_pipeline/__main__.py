@@ -63,23 +63,14 @@ def main() -> None:
         no_judge = "--no-judge" in cron_flags
         config_path = _require_config_path()
         _require_operator_credential(config_path.parent)
-        failure_report_writer = _bind_failure_report_writer(config_path.parent)
 
         from application_pipeline.init_cmd import init as _init
 
-        try:
-            _init(Path.cwd(), refresh=True)
-        except Exception as exc:
-            try:
-                failure_report_writer.write_failure("init --refresh", exc, _tail.tail())
-            except Exception:
-                pass
-            sys.exit(1)
+        _init(Path.cwd(), refresh=True)
 
         _execute_run(
             config_path,
             no_judge=no_judge,
-            failure_report_writer=failure_report_writer,
         )
         return
 
@@ -95,7 +86,6 @@ def main() -> None:
         _execute_run(
             config_path,
             no_judge=no_judge,
-            failure_report_writer=_bind_failure_report_writer(config_path.parent),
         )
         return
 
@@ -141,11 +131,11 @@ def _bind_failure_report_writer(home: Path):
     return FailureReportWriter(resolve_data_paths(home).failures_path)
 
 
-def _execute_run(config_path: Path, *, no_judge: bool, failure_report_writer) -> None:
+def _execute_run(config_path: Path, *, no_judge: bool) -> None:
     from application_pipeline.parser_log import RunLog
     from application_pipeline.config import resolve_data_paths
     from application_pipeline.maintenance import run_maintenance
-    from application_pipeline.orchestrator import current_stage, run
+    from application_pipeline.orchestrator import run
     from application_pipeline.status_display import (
         PlainStatusDisplay,
         RichStatusDisplay,
@@ -158,16 +148,9 @@ def _execute_run(config_path: Path, *, no_judge: bool, failure_report_writer) ->
         if sys.stdout.isatty()
         else PlainStatusDisplay(run_log=run_log)
     )
-    try:
-        summary = run(
-            config_path, status_display=display, run_log=run_log, no_judge=no_judge
-        )
-    except Exception as exc:
-        try:
-            failure_report_writer.write_failure(current_stage.get(), exc, _tail.tail())
-        except Exception:
-            pass
-        sys.exit(1)
+    summary = run(
+        config_path, status_display=display, run_log=run_log, no_judge=no_judge
+    )
 
     print(
         f"run complete:"

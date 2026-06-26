@@ -487,7 +487,7 @@ def fake_init(cwd: Path, *, refresh: bool) -> None:
     raise RuntimeError("init failed") from ValueError("init root cause")
 
 
-def fail_to_write(self, stage: str, error: BaseException, log_tail: str) -> Path:
+def fail_to_write(self, stage: str, error: BaseException) -> Path:
     raise OSError("disk full")
 
 
@@ -524,7 +524,7 @@ def test_run_failure_ignores_failure_report_write_errors(
     ) -> object:
         raise RuntimeError("run blew up")
 
-    def fail_to_write(self, stage: str, error: BaseException, log_tail: str) -> Path:
+    def fail_to_write(self, stage: str, error: BaseException) -> Path:
         raise OSError("disk full")
 
     monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)

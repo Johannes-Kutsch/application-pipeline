@@ -61,7 +61,6 @@ class _NotServedQuery:
 @dataclass
 class _ParserDead:
     exc: BaseException
-    traceback_str: str
 
 
 _NOT_SERVED_QUERY = _NotServedQuery()
@@ -164,9 +163,7 @@ class _ParserThread(threading.Thread):
                         location=location_str,
                     )
         except BaseException as exc:
-            self._outbound.put(
-                (self._parser_id, _ParserDead(exc, traceback.format_exc()))
-            )
+            self._outbound.put((self._parser_id, _ParserDead(exc)))
         else:
             self._outbound.put((self._parser_id, _PARSER_DONE))
 
@@ -209,10 +206,14 @@ class _OutboundDispatcher:
             path = self._failure_report_writer.record_parser_dead(
                 parser_id=parser_id,
                 error=payload.exc,
-                traceback_str=payload.traceback_str,
             )
             print(f"parser {parser_id} died — failure report: {path}", file=sys.stderr)
-            self._run_log.traceback("parser_" + parser_id, payload.traceback_str)
+            traceback_str = "".join(
+                traceback.format_exception(
+                    type(payload.exc), payload.exc, payload.exc.__traceback__
+                )
+            )
+            self._run_log.traceback("parser_" + parser_id, traceback_str)
             self._metrics.parser_dead(parser_id)
             return True
         elif payload is _PARSER_PROGRESS:

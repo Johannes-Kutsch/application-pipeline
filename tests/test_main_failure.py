@@ -34,7 +34,7 @@ def test_write_failure_writes_directly_into_given_failures_dir(tmp_path: Path) -
     not into a 'failures' subdirectory of it."""
     failures_dir = tmp_path / "data" / "failures"
 
-    path = write_failure("stage", ValueError("boom"), "log tail", failures_dir)
+    path = write_failure("stage", ValueError("boom"), failures_dir)
 
     assert path.parent == failures_dir, (
         f"Expected report directly in {failures_dir}, got {path.parent}"

@@ -171,5 +171,6 @@ def _execute_run(config_path: Path, *, no_judge: bool) -> None:
     except Exception:
         pass
 
+
 if __name__ == "__main__":
     main()

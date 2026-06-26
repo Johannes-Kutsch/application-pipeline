@@ -645,6 +645,25 @@ def test_enrich_writes_failure_report_and_raises_when_description_missing(
     assert len(failure_files) == 1
 
 
+def test_enrich_stderr_prints_failure_report_path_when_description_missing(
+    run_log: RunLog, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stub = PositionStub(
+        url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http, _ = _make_http(run_log, json.dumps({"referenznummer": "abc123"}).encode())
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+    captured = capsys.readouterr()
+    assert "failure report:" in captured.err
+    failure_files = list(tmp_path.glob("*.md"))
+    assert len(failure_files) == 1
+
+
 def test_enrich_writes_failure_report_and_raises_when_description_is_empty_string(
     run_log: RunLog, tmp_path: Path
 ) -> None:

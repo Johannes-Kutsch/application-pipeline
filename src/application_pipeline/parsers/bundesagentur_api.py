@@ -144,11 +144,13 @@ class BundesagenturParser:
             empty_body_error = ValueError(
                 "stellenangebotsBeschreibung missing or empty — API response may have changed shape"
             )
-            write_failure(
+            path = write_failure(
                 stage=f"enrich:bundesagentur_api:{stub.url}",
                 error=empty_body_error,
-                log_tail="",
                 failures_dir=self._failures_dir,
+            )
+            print(
+                f"bundesagentur enrich failed — failure report: {path}", file=sys.stderr
             )
             raise EnrichFailedError(str(empty_body_error)) from empty_body_error
         updated_stub = _backfill_posted_date(stub, data)

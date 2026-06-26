@@ -136,21 +136,6 @@ def test_snapshot_is_frozen(run_log: RunLog, display: FakeStatusDisplay) -> None
 
 
 # ---------------------------------------------------------------------------
-# pipeline_dedup row retired (issue #588)
-# ---------------------------------------------------------------------------
-
-
-def test_record_does_not_publish_to_pipeline_dedup_row(
-    run_log: RunLog, display: FakeStatusDisplay
-) -> None:
-    """record() no longer publishes body updates to the retired pipeline_dedup row."""
-    counters = _make(run_log, display)
-    counters.record("url_hit")
-    counters.record("miss")
-    assert display.body_updates_for("pipeline_dedup") == []
-
-
-# ---------------------------------------------------------------------------
 # emit_run_complete() — aggregate event
 # ---------------------------------------------------------------------------
 

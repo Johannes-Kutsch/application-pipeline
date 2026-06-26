@@ -1,4 +1,4 @@
-"""Tests that __main__ writes failure reports to <cwd>/application-pipeline/failures/."""
+"""Tests process-level failure behavior in application_pipeline.__main__."""
 
 from __future__ import annotations
 
@@ -80,3 +80,44 @@ def test_startup_failure_writes_to_home_failures_dir(tmp_path: Path) -> None:
     failures_dir = home / ".runtime-data" / "failures"
     assert failures_dir.is_dir()
     assert len(list(failures_dir.glob("*.md"))) == 1
+
+
+def test_match_judge_failure_surfaces_traceback_and_writes_no_failure_report(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "application-pipeline"
+    home.mkdir()
+    (home / "config.py").write_text(_MALFORMED_CONFIG)
+    (home / ".env").write_text("OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8")
+
+    patch_dir = tmp_path / "patches"
+    patch_dir.mkdir()
+    (patch_dir / "sitecustomize.py").write_text(
+        "from application_pipeline.llm import ExtractorError\n"
+        "import application_pipeline.orchestrator as orchestrator\n"
+        "\n"
+        "def judge_top_n():\n"
+        '    raise ExtractorError("judge boom")\n'
+        "\n"
+        "def _judge_boom(*args, **kwargs):\n"
+        "    judge_top_n()\n"
+        "\n"
+        "orchestrator.run = _judge_boom\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "application_pipeline", "run"],
+        cwd=str(tmp_path),
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join((str(patch_dir), _PYTHONPATH)),
+        },
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Traceback" in result.stderr
+    assert "ExtractorError: judge boom" in result.stderr
+    assert not (home / ".runtime-data" / "failures").exists()

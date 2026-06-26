@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import logging
 import sys
+import traceback
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -163,6 +164,8 @@ def _execute_run(config_path: Path, *, no_judge: bool, failure_report_writer) ->
             config_path, status_display=display, run_log=run_log, no_judge=no_judge
         )
     except Exception as exc:
+        if _is_match_judge_failure(exc):
+            raise
         try:
             failure_report_writer.write_failure(current_stage.get(), exc, _tail.tail())
         except Exception:
@@ -187,6 +190,16 @@ def _execute_run(config_path: Path, *, no_judge: bool, failure_report_writer) ->
         run_maintenance(data_paths.logs_path, data_paths.failures_path)
     except Exception:
         pass
+
+
+def _is_match_judge_failure(exc: Exception) -> bool:
+    from application_pipeline.llm import ExtractorError
+
+    if not isinstance(exc, ExtractorError):
+        return False
+    return any(
+        frame.name == "judge_top_n" for frame in traceback.extract_tb(exc.__traceback__)
+    )
 
 
 if __name__ == "__main__":

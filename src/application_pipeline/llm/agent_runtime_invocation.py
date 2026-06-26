@@ -123,9 +123,13 @@ def _build_request(
 
 
 def _normalize_prompt(prompt: str) -> str:
-    return "".join(
-        " " if unicodedata.category(char) == "Zs" else char for char in prompt
-    )
+    normalized: list[str] = []
+    for char in prompt:
+        category = unicodedata.category(char)
+        if category == "Cf":
+            continue
+        normalized.append(" " if category == "Zs" else char)
+    return "".join(normalized)
 
 
 def _safe_append(path: Path, payload: str) -> None:

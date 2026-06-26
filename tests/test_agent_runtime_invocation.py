@@ -277,15 +277,40 @@ def test_agent_runtime_invocation_normalizes_unicode_space_separators_for_window
     assert "[result]" in result.evidence_path.read_text(encoding="utf-8")
 
 
-def test_agent_runtime_invocation_rewrites_only_unicode_space_separators(
+def test_agent_runtime_invocation_drops_directional_format_characters(
     logs_root: Path,
 ) -> None:
     _FakeRuntimeClient.outcome = _completed()
+    _FakeRuntimeClient.prompt_encoding = "cp1252"
+    prompt = "Before\u200eMiddle\u200fAfter"
+
+    invoke_agent_runtime(prompt, logs_root=logs_root, call_site="judge")
+
+    assert _FakeRuntimeClient.requests[0].prompt == "BeforeMiddleAfter"
+
+
+def test_agent_runtime_invocation_rewrites_unicode_space_separators_and_drops_zero_width_format_characters(
+    logs_root: Path,
+) -> None:
+    _FakeRuntimeClient.outcome = _completed()
+    _FakeRuntimeClient.prompt_encoding = "cp1252"
     prompt = f"A{''.join(_UNICODE_SPACE_SEPARATORS)}B\tC\nD\u200bE"
 
     invoke_agent_runtime(prompt, logs_root=logs_root, call_site="classify")
 
-    assert _FakeRuntimeClient.requests[0].prompt == f"A{' ' * 17}B\tC\nD\u200bE"
+    assert _FakeRuntimeClient.requests[0].prompt == f"A{' ' * 17}B\tC\nDE"
+
+
+def test_agent_runtime_invocation_preserves_cp1252_encodable_umlauts(
+    logs_root: Path,
+) -> None:
+    _FakeRuntimeClient.outcome = _completed()
+    _FakeRuntimeClient.prompt_encoding = "cp1252"
+    prompt = "Fähre, Öl, Überblick, Straße"
+
+    invoke_agent_runtime(prompt, logs_root=logs_root, call_site="classify")
+
+    assert _FakeRuntimeClient.requests[0].prompt == prompt
 
 
 @pytest.mark.parametrize("call_site", ["classify", "judge"])

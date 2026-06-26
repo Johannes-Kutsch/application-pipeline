@@ -10,7 +10,7 @@ from pathlib import Path
 import unicodedata
 from typing import Final, Literal, Protocol
 
-from agent_runtime import AgentRuntimeError, RuntimeClient, RuntimeOutcome
+from agent_runtime import RuntimeClient, RuntimeOutcome
 from agent_runtime.contracts import ToolAccess
 from agent_runtime.runtime import (
     AgentEvent,
@@ -267,37 +267,19 @@ def invoke_agent_runtime(
             provider_auth=provider_auth,
             on_live_output=_on_live_output,
         )
+        # run_ephemeral is async; the pipeline is synchronous, so we drive it
+        # with a local event loop.
+        outcome = asyncio.run(RuntimeClient().run_ephemeral(request))
+        run_result: RunResult = outcome.result
         try:
-            # run_ephemeral is async; the pipeline is synchronous, so we drive it
-            # with a local event loop.
-            outcome = asyncio.run(RuntimeClient().run_ephemeral(request))
-            run_result: RunResult = outcome.result
-            try:
-                _persist_result(
-                    evidence_path,
-                    selected=run_result.selected,
-                    usage=run_result.usage,
-                    kind_name=_result_section_kind(outcome),
-                )
-            except OSError:
-                # Best-effort evidence: logging failures never block a valid outcome.
-                pass
-
-            return _to_invocation_result(outcome, evidence_path)
-        except AgentRuntimeError as exc:
-            try:
-                _persist_result(
-                    evidence_path,
-                    selected=_requested_provider(),
-                    usage=None,
-                    kind_name="hard_provider_failure",
-                )
-            except OSError:
-                # Best-effort evidence: logging failures never block a valid outcome.
-                pass
-            return AgentRuntimeInvocationResult(
-                kind="hard_provider_failure",
-                output="",
-                evidence_path=evidence_path,
-                message=str(exc),
+            _persist_result(
+                evidence_path,
+                selected=run_result.selected,
+                usage=run_result.usage,
+                kind_name=_result_section_kind(outcome),
             )
+        except OSError:
+            # Best-effort evidence: logging failures never block a valid outcome.
+            pass
+
+        return _to_invocation_result(outcome, evidence_path)

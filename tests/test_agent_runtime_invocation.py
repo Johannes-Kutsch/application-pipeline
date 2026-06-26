@@ -383,23 +383,13 @@ def test_provider_not_available_is_hard_provider_failure(logs_root: Path) -> Non
     assert result.message == "provider unavailable"
 
 
-def test_hard_provider_failure_from_runtime_error(logs_root: Path) -> None:
-    from agent_runtime import AgentRuntimeError
+def test_hard_agent_error_propagates_from_runtime_boundary(logs_root: Path) -> None:
+    from agent_runtime import HardAgentError
 
-    _FakeRuntimeClient.error = AgentRuntimeError("provider exploded")
+    _FakeRuntimeClient.error = HardAgentError("provider exploded")
 
-    result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="judge")
-
-    assert result.kind == "hard_provider_failure"
-    assert result.output == ""
-    assert result.message == "provider exploded"
-    assert result.evidence_path.is_file()
-    content = result.evidence_path.read_text(encoding="utf-8")
-    assert "[result]" in content
-    assert "outcome=hard_provider_failure" in content
-    assert "service=opencode" in content
-    assert "model=deepseek-v4-flash" in content
-    assert "effort=medium" in content
+    with pytest.raises(HardAgentError, match="provider exploded"):
+        invoke_agent_runtime("prompt", logs_root=logs_root, call_site="judge")
 
 
 def test_cancelled_and_timed_out_map_to_hard_provider_failure(logs_root: Path) -> None:

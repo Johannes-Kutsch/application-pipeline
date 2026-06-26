@@ -7,20 +7,21 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Final, Literal
-from typing import Protocol
+from typing import Final, Literal, Protocol
 
-from agent_runtime import (
-    AgentRuntimeError,
-    RuntimeClient,
-    RuntimeOutcome,
-)
+from agent_runtime import AgentRuntimeError, RuntimeClient, RuntimeOutcome
 from agent_runtime.contracts import ToolAccess
 from agent_runtime.runtime import (
     AgentEvent,
+    Cancelled,
+    Completed,
     EphemeralRunRequest,
-    InvocationRecord,
     ProviderAuth,
+    ProviderUnavailable,
+    RunResult,
+    ResolvedProvider,
+    TimedOut,
+    UsageLimited,
 )
 from agent_runtime.types import ProviderSelection
 
@@ -92,14 +93,17 @@ def _evidence_parent(logs_root: Path, call_site: AgentRuntimeCallSiteName) -> Pa
     return logs_root / _LLM_RUNTIME_LOG_DIR / subdir
 
 
-def _new_evidence_dir(logs_root: Path, call_site: AgentRuntimeCallSiteName) -> Path:
+def _new_evidence_path(logs_root: Path, call_site: AgentRuntimeCallSiteName) -> Path:
     parent = _evidence_parent(logs_root, call_site)
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S-%f")
-    return parent / f"llm-{call_site}-{stamp}"
+    return parent / f"llm-{call_site}-{stamp}.log"
 
 
 def _build_request(
-    prompt: str, invocation_dir: Path, provider_auth: ProviderAuth | None
+    prompt: str,
+    invocation_dir: Path,
+    provider_auth: ProviderAuth | None,
+    on_live_output: Callable[[AgentEvent], None] | None = None,
 ) -> EphemeralRunRequest:
     return EphemeralRunRequest(
         prompt=prompt,
@@ -111,139 +115,101 @@ def _build_request(
             auth=provider_auth,
         ),
         tool_access=ToolAccess.no_tools(),
+        timeout_seconds=1200,
+        on_live_output=on_live_output,
     )
 
 
-def _render_events(events: tuple[AgentEvent, ...]) -> str:
-    lines: list[str] = []
-    for event in events:
-        parts: list[str] = [event.type]
-        if event.tool_name:
-            parts.append(f"tool={event.tool_name}")
-        body = event.text or event.payload or event.raw_provider_output
-        if body:
-            parts.append(body)
-        lines.append(" | ".join(parts))
-    return "\n".join(lines)
+def _safe_append(path: Path, payload: str) -> None:
+    with path.open("a", encoding="utf-8") as f:
+        f.write(payload)
 
 
-def _render_meta(record: InvocationRecord, outcome_kind: str) -> str:
-    lines = [
-        f"outcome: {record.outcome or outcome_kind}",
-        f"provider_session_id: {record.provider_session_id or ''}",
-    ]
-    if record.usage is not None:
-        lines.append(f"usage: {record.usage}")
-    return "\n".join(lines) + "\n"
+def _persist_prompt(path: Path, prompt: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _safe_append(path, "[prompt]\n")
+    _safe_append(path, prompt)
+    if not prompt.endswith("\n"):
+        _safe_append(path, "\n")
 
 
-def _decode(provider_output: bytes | None) -> str:
-    if provider_output is None:
-        return ""
-    return provider_output.decode("utf-8", errors="replace")
+def _persist_events_header(path: Path) -> None:
+    _safe_append(path, "[events]\n")
 
 
-def _completed_output(outcome: RuntimeOutcome) -> str:
-    if outcome.output:
-        return outcome.output
-    records = outcome.invocation_records or ()
-    for record in reversed(records):
-        decoded = _decode(record.provider_output)
-        if decoded:
-            return decoded
-    return outcome.output
+def _render_event(event: AgentEvent) -> str:
+    parts = [event.type, event.display_message]
+    if event.raw_provider_output:
+        parts.append(f"raw_provider_output={event.raw_provider_output}")
+    return " | ".join(parts)
 
 
-def _failure_message(outcome: RuntimeOutcome) -> str | None:
-    if outcome.output:
-        return outcome.output
-    records = outcome.invocation_records or ()
-    for record in reversed(records):
-        decoded = _decode(record.provider_output).strip()
-        if decoded:
-            return decoded
-        for event in reversed(record.events):
-            body = (event.text or event.payload or event.raw_provider_output).strip()
-            if body:
-                return body
-    return None
-
-
-def _suffix(index: int) -> str:
-    return "" if index == 0 else f".{index}"
-
-
-def _write_evidence(
+def _persist_result(
+    path: Path,
     *,
-    evidence_dir: Path,
-    prompt: str,
-    outcome: RuntimeOutcome,
+    selected: ResolvedProvider | None,
+    usage: object | None,
+    kind_name: str,
 ) -> None:
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    (evidence_dir / "prompt").write_text(prompt, encoding="utf-8")
-    records = outcome.invocation_records or ()
-    if not records:
-        # Diagnostic gap: a completed call produced no provider evidence.
-        (evidence_dir / "response").write_text("", encoding="utf-8")
-        (evidence_dir / "events").write_text("", encoding="utf-8")
-        (evidence_dir / "meta").write_text(
-            f"outcome: {outcome.kind}\nprovider_session_id: \n", encoding="utf-8"
-        )
-        return
-    for index, record in enumerate(records):
-        suffix = _suffix(index)
-        (evidence_dir / f"response{suffix}").write_text(
-            _decode(record.provider_output), encoding="utf-8"
-        )
-        (evidence_dir / f"events{suffix}").write_text(
-            _render_events(record.events), encoding="utf-8"
-        )
-        (evidence_dir / f"meta{suffix}").write_text(
-            _render_meta(record, outcome.kind), encoding="utf-8"
-        )
+    _safe_append(path, "[result]\n")
+    _safe_append(path, f"outcome={kind_name}\n")
+    if selected is not None:
+        _safe_append(path, f"selected_service={selected.service}\n")
+        _safe_append(path, f"selected_model={selected.model}\n")
+        _safe_append(path, f"selected_effort={selected.effort}\n")
+    if usage is not None:
+        _safe_append(path, f"usage={usage!r}\n")
 
 
-def _persist_evidence(
-    *,
-    logs_root: Path,
-    call_site: AgentRuntimeCallSiteName,
-    prompt: str,
-    outcome: RuntimeOutcome,
-) -> Path:
-    evidence_dir = _new_evidence_dir(logs_root, call_site)
-    try:
-        _write_evidence(evidence_dir=evidence_dir, prompt=prompt, outcome=outcome)
-    except OSError:
-        # Best-effort: a logging/persist error must never break the run.
-        pass
-    return evidence_dir
+def _result_section_kind(outcome: RuntimeOutcome) -> str:
+    if isinstance(outcome.kind, Completed):
+        return "completed"
+    if isinstance(outcome.kind, UsageLimited):
+        return "usage_limited"
+    if isinstance(outcome.kind, ProviderUnavailable):
+        return "provider_unavailable"
+    if isinstance(outcome.kind, Cancelled):
+        return "cancelled"
+    if isinstance(outcome.kind, TimedOut):
+        return "timed_out"
+    return "hard_provider_failure"
 
 
-def _result_from_outcome(
-    outcome: RuntimeOutcome, evidence_dir: Path
+def _to_invocation_result(
+    outcome: RuntimeOutcome, evidence_path: Path
 ) -> AgentRuntimeInvocationResult:
-    if outcome.kind == "completed":
+    if isinstance(outcome.kind, Completed):
         return AgentRuntimeInvocationResult(
             kind="completed",
-            output=_completed_output(outcome),
-            evidence_dir=evidence_dir,
+            output=outcome.result.output,
+            evidence_dir=evidence_path,
         )
-    elif outcome.kind == "usage_limited":
+    if isinstance(outcome.kind, UsageLimited):
         return AgentRuntimeInvocationResult(
             kind="usage_limit",
-            output=outcome.output,
-            evidence_dir=evidence_dir,
-            reset_time=outcome.reset_time,
+            output=outcome.result.output,
+            evidence_dir=evidence_path,
+            reset_time=outcome.kind.reset_time,
         )
-    elif outcome.kind == "retryable_provider_failure":
-        kind: AgentRuntimeInvocationKind = "retryable_provider_failure"
-    else:
-        kind = "hard_provider_failure"
+    if isinstance(outcome.kind, ProviderUnavailable):
+        return AgentRuntimeInvocationResult(
+            kind="retryable_provider_failure",
+            output="",
+            evidence_dir=evidence_path,
+            message=outcome.kind.detail,
+        )
+
+    # Cancelled, TimedOut, and non-retryable provider failures become hard failures.
+    detail = getattr(outcome.kind, "detail", "")
+    message = outcome.result.output
+    if not message and isinstance(detail, str):
+        message = detail
+
     return AgentRuntimeInvocationResult(
-        kind=kind,
-        output=outcome.output,
-        evidence_dir=evidence_dir,
-        message=_failure_message(outcome),
+        kind="hard_provider_failure",
+        output=message or "",
+        evidence_dir=evidence_path,
+        message=message or "",
     )
 
 
@@ -254,29 +220,50 @@ def invoke_agent_runtime(
     call_site: AgentRuntimeCallSiteName,
     provider_auth: ProviderAuth | None = None,
 ) -> AgentRuntimeInvocationResult:
+    evidence_path = _new_evidence_path(logs_root=logs_root, call_site=call_site)
+
+    def _on_live_output(event: AgentEvent) -> None:
+        try:
+            _safe_append(evidence_path, f"{_render_event(event)}\n")
+        except OSError:
+            # Best-effort evidence: logging failures never block a valid outcome.
+            pass
+
+    try:
+        _persist_prompt(evidence_path, prompt)
+        _persist_events_header(evidence_path)
+    except OSError:
+        # Best-effort evidence: logging failures never block a valid outcome.
+        pass
+
     with tempfile.TemporaryDirectory(prefix="agent-runtime-worktree-") as worktree:
         request = _build_request(
             prompt=prompt,
             invocation_dir=Path(worktree),
             provider_auth=provider_auth,
+            on_live_output=_on_live_output,
         )
         try:
-            # run_ephemeral is async (agent_runtime 0.0.2); the pipeline is
-            # synchronous (classify worker threads, single judge call), so we
-            # drive the coroutine to completion on a per-call event loop.
+            # run_ephemeral is async; the pipeline is synchronous, so we drive it
+            # with a local event loop.
             outcome = asyncio.run(RuntimeClient().run_ephemeral(request))
+            run_result: RunResult = outcome.result
+            try:
+                _persist_result(
+                    evidence_path,
+                    selected=run_result.selected,
+                    usage=run_result.usage,
+                    kind_name=_result_section_kind(outcome),
+                )
+            except OSError:
+                # Best-effort evidence: logging failures never block a valid outcome.
+                pass
+
+            return _to_invocation_result(outcome, evidence_path)
         except AgentRuntimeError as exc:
-            evidence_dir = _new_evidence_dir(logs_root, call_site)
             return AgentRuntimeInvocationResult(
                 kind="hard_provider_failure",
                 output="",
-                evidence_dir=evidence_dir,
+                evidence_dir=evidence_path,
                 message=str(exc),
             )
-        evidence_dir = _persist_evidence(
-            logs_root=logs_root,
-            call_site=call_site,
-            prompt=prompt,
-            outcome=outcome,
-        )
-        return _result_from_outcome(outcome, evidence_dir=evidence_dir)

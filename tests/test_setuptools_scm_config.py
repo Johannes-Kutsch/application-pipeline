@@ -70,4 +70,4 @@ def test_templates_keep_one_agent_skill_source_tree():
 
 
 def test_project_metadata_pins_agent_runtime_dependency():
-    assert "ruhken-agent-runtime == 0.0.2" in _project_dependencies()
+    assert "ruhken-agent-runtime == 0.0.5" in _project_dependencies()

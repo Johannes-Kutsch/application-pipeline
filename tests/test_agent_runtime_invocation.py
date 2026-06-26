@@ -1,25 +1,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, cast
 
 import pytest
 from agent_runtime.contracts import ToolAccess
 from agent_runtime.runtime import (
     AgentEvent,
+    Cancelled,
+    Completed,
     EphemeralRunRequest,
-    InvocationRecord,
     ProviderAuth,
+    ProviderUnavailable,
     ProviderUsage,
+    RunResult,
     RuntimeOutcome,
+    TimedOut,
+    UsageLimited,
 )
-from agent_runtime.session import RunKind
+from agent_runtime.types import ResolvedProvider
 
-from application_pipeline.llm.agent_runtime_invocation import invoke_agent_runtime
+from typing import Literal
+
 from application_pipeline.llm.agent_runtime_invocation import (
     AgentRuntimeInvocationAdapter,
     AgentRuntimeInvocationResult,
+    invoke_agent_runtime,
 )
 
 
@@ -32,14 +40,21 @@ class _CapturedRequest:
     effort: str
     auth: ProviderAuth | None
     tool_access: object
+    callback_count: int
 
 
 class _FakeRuntimeClient:
     outcome: RuntimeOutcome | None = None
+    events: tuple[AgentEvent, ...] = ()
     error: Exception | None = None
     requests: list[_CapturedRequest] = []
 
     async def run_ephemeral(self, request: EphemeralRunRequest) -> RuntimeOutcome:
+        callback_count = 0
+        if request.on_live_output is not None:
+            for event in self.events:
+                request.on_live_output(event)
+                callback_count += 1
         self.requests.append(
             _CapturedRequest(
                 prompt=request.prompt,
@@ -49,6 +64,7 @@ class _FakeRuntimeClient:
                 effort=request.provider_selection.effort,
                 auth=request.provider_selection.auth,
                 tool_access=request.tool_access,
+                callback_count=callback_count,
             )
         )
         if self.error is not None:
@@ -61,6 +77,7 @@ class _FakeRuntimeClient:
 def _use_fake_runtime_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeRuntimeClient.outcome = None
     _FakeRuntimeClient.error = None
+    _FakeRuntimeClient.events = ()
     _FakeRuntimeClient.requests = []
     monkeypatch.setattr(
         "application_pipeline.llm.agent_runtime_invocation.RuntimeClient",
@@ -73,49 +90,78 @@ def logs_root(tmp_path: Path) -> Path:
     return tmp_path / ".runtime-data" / "logs"
 
 
-def _event(text: str) -> AgentEvent:
+def _event(display_message: str) -> AgentEvent:
     return AgentEvent(
         type="agent_message",
-        service_name="opencode",
-        raw_provider_output=text,
-        text=text,
+        display_message=display_message,
+        raw_provider_output=display_message,
     )
 
 
-def _record(
+def _run_result(
     *,
-    provider_output: bytes | None = b"<verdict>{}</verdict>",
-    events: tuple[AgentEvent, ...] = (),
-    provider_session_id: str | None = "sess-1",
-    outcome: str = "completed",
+    output: str = "<verdict>{}</verdict>",
     usage: ProviderUsage | None = None,
-) -> InvocationRecord:
-    return InvocationRecord(
-        run_kind=RunKind.FRESH,
-        service_name="opencode",
-        model="deepseek-v4-flash",
-        effort="medium",
-        outcome=outcome,
-        provider_session_id=provider_session_id,
-        events=events,
-        provider_output=provider_output,
+    selected: ResolvedProvider | None = None,
+) -> RunResult:
+    return RunResult(
+        output=output,
         usage=usage,
+        continuation=None,
+        selected=selected
+        or ResolvedProvider(
+            service="opencode", model="deepseek-v4-flash", effort="medium"
+        ),
     )
 
 
 def _completed(
     *,
     output: str = "<verdict>{}</verdict>",
-    records: tuple[InvocationRecord, ...] | None = None,
+    usage: ProviderUsage | None = None,
+    selected: ResolvedProvider | None = None,
 ) -> RuntimeOutcome:
     return RuntimeOutcome(
-        kind="completed",
-        output=output,
-        invocation_records=records if records is not None else (_record(),),
+        kind=Completed(),
+        result=_run_result(output=output, usage=usage, selected=selected),
     )
 
 
-def test_completed_call_writes_per_call_evidence_directory(logs_root: Path) -> None:
+def _usage_limited(
+    *,
+    output: str = "<verdict>{}</verdict>",
+    usage: ProviderUsage | None = None,
+    reset_time: datetime,
+) -> RuntimeOutcome:
+    return RuntimeOutcome(
+        kind=UsageLimited(reset_time=reset_time),
+        result=_run_result(output=output, usage=usage),
+    )
+
+
+def _provider_unavailable(detail: str = "provider unavailable") -> RuntimeOutcome:
+    reason: Any = cast(Any, "transient")
+    return RuntimeOutcome(
+        kind=ProviderUnavailable(reason=reason, detail=detail),
+        result=_run_result(),
+    )
+
+
+def _cancelled(detail: str = "cancelled") -> RuntimeOutcome:
+    return RuntimeOutcome(
+        kind=Cancelled(),
+        result=_run_result(output=detail),
+    )
+
+
+def _timed_out(detail: str = "timed out") -> RuntimeOutcome:
+    return RuntimeOutcome(
+        kind=TimedOut(),
+        result=_run_result(output=detail),
+    )
+
+
+def test_completed_call_writes_one_invocation_log_file(logs_root: Path) -> None:
     _FakeRuntimeClient.outcome = _completed()
 
     result = invoke_agent_runtime(
@@ -124,16 +170,14 @@ def test_completed_call_writes_per_call_evidence_directory(logs_root: Path) -> N
 
     assert result.kind == "completed"
     assert result.output == "<verdict>{}</verdict>"
-    evidence_dir = result.evidence_dir
-    assert evidence_dir.parent == logs_root / "llm" / "agent-runtime" / "classify"
-    assert evidence_dir.is_dir()
-    assert (evidence_dir / "prompt").is_file()
-    assert (evidence_dir / "response").is_file()
-    assert (evidence_dir / "events").is_file()
-    assert (evidence_dir / "meta").is_file()
+    assert (
+        result.evidence_dir.parent == logs_root / "llm" / "agent-runtime" / "classify"
+    )
+    assert result.evidence_dir.suffix == ".log"
+    assert result.evidence_dir.is_file()
 
 
-def test_evidence_files_carry_prompt_response_events_and_meta(
+def test_log_file_has_prompt_events_and_result_sections(
     logs_root: Path,
 ) -> None:
     usage = ProviderUsage(
@@ -141,42 +185,25 @@ def test_evidence_files_carry_prompt_response_events_and_meta(
         output_tokens=3,
         cache_read_input_tokens=1,
     )
-    _FakeRuntimeClient.outcome = _completed(
-        records=(
-            _record(
-                provider_output=b"<verdict>{}</verdict>",
-                events=(_event("thinking"), _event("done")),
-                provider_session_id="sess-xyz",
-                usage=usage,
-            ),
-        ),
-    )
+    _FakeRuntimeClient.events = (_event("thinking"), _event("done"))
+    _FakeRuntimeClient.outcome = _completed(usage=usage)
 
     result = invoke_agent_runtime(
-        "the sent prompt", logs_root=logs_root, call_site="classify"
+        "the sent prompt", logs_root=logs_root, call_site="judge"
     )
-    evidence_dir = result.evidence_dir
+    content = result.evidence_dir.read_text(encoding="utf-8")
 
-    assert (evidence_dir / "prompt").read_text(encoding="utf-8") == "the sent prompt"
-    assert (evidence_dir / "response").read_text(
-        encoding="utf-8"
-    ) == "<verdict>{}</verdict>"
-    events_text = (evidence_dir / "events").read_text(encoding="utf-8")
-    assert "thinking" in events_text
-    assert "done" in events_text
-    meta_text = (evidence_dir / "meta").read_text(encoding="utf-8")
-    assert "sess-xyz" in meta_text
-    assert f"usage: {usage}" in meta_text
-
-
-def test_judge_call_writes_under_judge_subdir(logs_root: Path) -> None:
-    _FakeRuntimeClient.outcome = _completed(output="[]")
-
-    result = invoke_agent_runtime(
-        "judge prompt", logs_root=logs_root, call_site="judge"
-    )
-
-    assert result.evidence_dir.parent == logs_root / "llm" / "agent-runtime" / "judge"
+    assert content.startswith("[prompt]\nthe sent prompt\n")
+    assert "[events]" in content
+    assert "agent_message | thinking" in content
+    assert "raw_provider_output=thinking" in content
+    assert "agent_message | done" in content
+    assert "[result]" in content
+    assert "outcome=completed" in content
+    assert "selected_service=opencode" in content
+    assert "selected_model=deepseek-v4-flash" in content
+    assert "selected_effort=medium" in content
+    assert "usage=ProviderUsage(" in content
 
 
 def test_request_construction_uses_pinned_provider_no_tools_and_worktree_outside_logs_root(
@@ -193,6 +220,7 @@ def test_request_construction_uses_pinned_provider_no_tools_and_worktree_outside
     assert captured.effort == "medium"
     assert captured.tool_access == ToolAccess.no_tools()
     assert logs_root not in captured.invocation_dir.parents
+    assert captured.callback_count == 0
 
 
 @pytest.mark.parametrize("call_site", ["classify", "judge"])
@@ -252,85 +280,28 @@ def test_agent_runtime_invocation_adapter_delegates_call_shape() -> None:
     }
 
 
-def test_multiple_records_are_index_suffixed_in_one_directory(
-    logs_root: Path,
-) -> None:
-    _FakeRuntimeClient.outcome = _completed(
-        records=(
-            _record(provider_output=b"first", provider_session_id="s0"),
-            _record(provider_output=b"second", provider_session_id="s1"),
-        ),
-    )
-
-    result = invoke_agent_runtime(
-        "classify prompt", logs_root=logs_root, call_site="classify"
-    )
-    evidence_dir = result.evidence_dir
-
-    assert (evidence_dir / "response").read_text(encoding="utf-8") == "first"
-    assert (evidence_dir / "response.1").read_text(encoding="utf-8") == "second"
-    assert (evidence_dir / "meta.1").is_file()
-
-
-def test_completed_call_with_no_records_is_a_diagnostic_gap_not_a_failure(
-    logs_root: Path,
-) -> None:
-    _FakeRuntimeClient.outcome = _completed(output="payload", records=())
-
-    result = invoke_agent_runtime(
-        "classify prompt", logs_root=logs_root, call_site="classify"
-    )
-
-    assert result.kind == "completed"
-    assert result.output == "payload"
-    # Directory exists for the pointer, but response evidence is empty.
-    assert (result.evidence_dir / "response").read_text(encoding="utf-8") == ""
-
-
-def test_serialization_write_error_does_not_change_kind_or_output(
-    logs_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _FakeRuntimeClient.outcome = _completed(output="payload")
-
-    def boom(*args: object, **kwargs: object) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(
-        "application_pipeline.llm.agent_runtime_invocation._write_evidence", boom
-    )
-
-    result = invoke_agent_runtime(
-        "classify prompt", logs_root=logs_root, call_site="classify"
-    )
-
-    assert result.kind == "completed"
-    assert result.output == "payload"
-
-
 def test_usage_limited_outcome_reports_reset_time(logs_root: Path) -> None:
-    from datetime import datetime, timezone
-
     reset_time = datetime(2026, 6, 22, 8, 45, tzinfo=timezone.utc)
-    _FakeRuntimeClient.outcome = RuntimeOutcome(
-        kind="usage_limited", output="partial", reset_time=reset_time
-    )
+    _FakeRuntimeClient.outcome = _usage_limited(output="partial", reset_time=reset_time)
 
     result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="judge")
 
     assert result.kind == "usage_limit"
     assert result.output == "partial"
     assert result.reset_time == reset_time
+    assert "[result]\noutcome=usage_limited" in result.evidence_dir.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_retryable_provider_failure_is_reported(logs_root: Path) -> None:
-    _FakeRuntimeClient.outcome = RuntimeOutcome(
-        kind="retryable_provider_failure", output="provider unavailable"
-    )
+    _FakeRuntimeClient.outcome = _provider_unavailable("provider unavailable")
 
     result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="classify")
 
     assert result.kind == "retryable_provider_failure"
-    assert result.output == "provider unavailable"
+    assert result.output == ""
+    assert result.message == "provider unavailable"
 
 
 def test_hard_provider_failure_from_runtime_error(logs_root: Path) -> None:
@@ -345,22 +316,51 @@ def test_hard_provider_failure_from_runtime_error(logs_root: Path) -> None:
     assert result.message == "provider exploded"
 
 
-def test_hard_provider_failure_outcome_surfaces_provider_output_message(
-    logs_root: Path,
+def test_cancelled_and_timed_out_map_to_hard_provider_failure(logs_root: Path) -> None:
+    _FakeRuntimeClient.outcome = _cancelled("cancelled during run")
+
+    cancelled = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="judge")
+
+    assert cancelled.kind == "hard_provider_failure"
+    assert cancelled.output == "cancelled during run"
+    assert "cancelled" in (cancelled.message or "")
+
+    _FakeRuntimeClient.outcome = _timed_out("timed out")
+
+    timed_out = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="judge")
+
+    assert timed_out.kind == "hard_provider_failure"
+    assert timed_out.output == "timed out"
+    assert "timed out" in (timed_out.message or "")
+
+
+def test_log_file_records_non_default_selected_provider(logs_root: Path) -> None:
+    selected = _run_result(
+        selected=ResolvedProvider(service="opencode", model="gpt-5", effort="high")
+    )
+    _FakeRuntimeClient.outcome = _completed(selected=selected.selected)
+
+    result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="classify")
+
+    content = result.evidence_dir.read_text(encoding="utf-8")
+    assert "selected_service=opencode" in content
+    assert "selected_model=gpt-5" in content
+    assert "selected_effort=high" in content
+
+
+def test_serialization_write_error_does_not_change_kind_or_output(
+    logs_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _FakeRuntimeClient.outcome = RuntimeOutcome(
-        kind="hard_provider_failure",
-        output="",
-        invocation_records=(
-            _record(
-                provider_output=b"provider exploded",
-                outcome="hard_provider_failure",
-            ),
-        ),
+    _FakeRuntimeClient.outcome = _completed(output="payload")
+
+    def boom(*args: object, **kwargs: object) -> str:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "write_text", boom)
+
+    result = invoke_agent_runtime(
+        "classify prompt", logs_root=logs_root, call_site="classify"
     )
 
-    result = invoke_agent_runtime("prompt", logs_root=logs_root, call_site="judge")
-
-    assert result.kind == "hard_provider_failure"
-    assert result.output == ""
-    assert result.message == "provider exploded"
+    assert result.kind == "completed"
+    assert result.output == "payload"

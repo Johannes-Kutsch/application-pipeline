@@ -1602,18 +1602,17 @@ def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
 
     ext = _ErrorJudgeExtractor(ExtractorError("judge boom"))
 
-    summary = run(
-        _two_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(
-            card_store, dedup_store=dedup_module.load(seen_path)
-        ),
-        extractor=ext,
-        card_store=card_store,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
-    )
-
-    assert summary.written == 0
+    with pytest.raises(ExtractorError, match="judge boom"):
+        run(
+            _two_stub_config(tmp_path),
+            llm_enricher=_make_fake_llm_enricher(
+                card_store, dedup_store=dedup_module.load(seen_path)
+            ),
+            extractor=ext,
+            card_store=card_store,
+            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(seen_path),
+        )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert (
@@ -1630,61 +1629,53 @@ def test_extractor_error_on_judge_leaves_status_matched(tmp_path: Path) -> None:
     )
 
 
-def test_match_judge_failure_writes_one_failure_report(tmp_path: Path) -> None:
-    """A non-quota Match Judge failure writes one Failure Report at stage judge_top_n."""
+def test_match_judge_failure_is_fatal_and_no_failure_report(tmp_path: Path) -> None:
+    """A non-quota Match Judge failure bubbles as ExtractorError and writes no Failure Report."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
 
     ext = _ErrorJudgeExtractor(ExtractorError("judge boom"))
 
-    run(
-        _one_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(
-            card_store, dedup_store=dedup_module.load(seen_path)
-        ),
-        extractor=ext,
-        card_store=card_store,
-        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
-    )
+    with pytest.raises(ExtractorError, match="judge boom"):
+        run(
+            _one_stub_config(tmp_path),
+            llm_enricher=_make_fake_llm_enricher(
+                card_store, dedup_store=dedup_module.load(seen_path)
+            ),
+            extractor=ext,
+            card_store=card_store,
+            parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(seen_path),
+        )
 
     reports = sorted((tmp_path / ".runtime-data" / "failures").glob("*.md"))
-    assert len(reports) == 1
-
-    body = reports[0].read_text(encoding="utf-8")
-    assert "**Stage:** llm_extractor:judge_match" in body
-    assert "ExtractorError" in body
-    assert "judge boom" in body
+    assert len(reports) == 0
 
 
-def test_fatal_judge_provider_failure_writes_failure_report_with_judge_stage_and_no_daily_file(
+def test_fatal_judge_provider_failure_is_fatal_and_no_daily_file(
     tmp_path: Path,
 ) -> None:
-    """ExtractorUnreachableError from judge_top_n writes a Failure Report at an explicit judge stage and produces no daily file."""
+    """ExtractorUnreachableError from judge_top_n bubbles and produces no Failure Report."""
     seen_path = tmp_path / ".seen.json"
     card_store = _make_card_store(tmp_path)
     results_dir = tmp_path / "results"
 
     ext = _ErrorJudgeExtractor(ExtractorUnreachableError("judge provider unreachable"))
 
-    run(
-        _one_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(
-            card_store, dedup_store=dedup_module.load(seen_path)
-        ),
-        extractor=ext,
-        card_store=card_store,
-        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
-    )
+    with pytest.raises(ExtractorUnreachableError, match="judge provider unreachable"):
+        run(
+            _one_stub_config(tmp_path),
+            llm_enricher=_make_fake_llm_enricher(
+                card_store, dedup_store=dedup_module.load(seen_path)
+            ),
+            extractor=ext,
+            card_store=card_store,
+            parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(seen_path),
+        )
 
     reports = sorted((tmp_path / ".runtime-data" / "failures").glob("*.md"))
-    assert len(reports) == 1
-
-    body = reports[0].read_text(encoding="utf-8")
-    assert "**Stage:** llm_extractor:judge_match" in body
-    assert "ExtractorUnreachableError" in body
-    assert "judge provider unreachable" in body
+    assert len(reports) == 0
 
     assert not _read_all_results(results_dir)
 
@@ -2095,16 +2086,17 @@ def test_judge_failure_leaves_status_matched(tmp_path: Path) -> None:
 
     ext = _ErrorJudgeExtractor(ExtractorError("judge boom"))
 
-    run(
-        _one_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(
-            card_store, dedup_store=dedup_module.load(seen_path)
-        ),
-        extractor=ext,
-        card_store=card_store,
-        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
-    )
+    with pytest.raises(ExtractorError, match="judge boom"):
+        run(
+            _one_stub_config(tmp_path),
+            llm_enricher=_make_fake_llm_enricher(
+                card_store, dedup_store=dedup_module.load(seen_path)
+            ),
+            extractor=ext,
+            card_store=card_store,
+            parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(seen_path),
+        )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert (
@@ -2247,14 +2239,15 @@ def test_judge_pending_failure_stays_matched(tmp_path: Path) -> None:
 
     ext = _ErrorJudgeExtractor(ExtractorError("judge boom again"))
 
-    run(
-        _one_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=ext,
-        card_store=card_store,
-        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
-    )
+    with pytest.raises(ExtractorError, match="judge boom again"):
+        run(
+            _one_stub_config(tmp_path),
+            llm_enricher=_make_fake_llm_enricher(card_store),
+            extractor=ext,
+            card_store=card_store,
+            parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(seen_path),
+        )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert (
@@ -2496,14 +2489,15 @@ def test_judge_pending_judge_failure_stays_matched_on_rerun(
 
     ext = _ErrorJudgeExtractor(ExtractorError("judge boom"))
 
-    run(
-        _one_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=ext,
-        card_store=card_store,
-        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(seen_path),
-    )
+    with pytest.raises(ExtractorError, match="judge boom"):
+        run(
+            _one_stub_config(tmp_path),
+            llm_enricher=_make_fake_llm_enricher(card_store),
+            extractor=ext,
+            card_store=card_store,
+            parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(seen_path),
+        )
 
     seen_data = json.loads(seen_path.read_text(encoding="utf-8"))
     assert (
@@ -3551,26 +3545,18 @@ def test_judge_error_log_includes_forensic_fields(tmp_path: Path) -> None:
         ExtractorUnreachableError("cli gone", returncode=2, stderr="timeout on judge")
     )
 
-    run(
-        _two_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=ext,
-        card_store=card_store,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
-        dedup_store=dedup_module.load(tmp_path / ".seen.json"),
-        run_log=run_log,
-    )
+    with pytest.raises(ExtractorUnreachableError, match="cli gone"):
+        run(
+            _two_stub_config(tmp_path),
+            llm_enricher=_make_fake_llm_enricher(card_store),
+            extractor=ext,
+            card_store=card_store,
+            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+            dedup_store=dedup_module.load(tmp_path / ".seen.json"),
+            run_log=run_log,
+        )
 
-    events_rows = [
-        json.loads(line)
-        for line in (logs_dir / "llm" / "judge_match.events.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    assert any(row.get("returncode") == 2 for row in events_rows)
-    assert any(row.get("stderr_excerpt") == "timeout on judge" for row in events_rows)
-    assert all("usage" not in row for row in events_rows)
-    assert all("cost_usd" not in row for row in events_rows)
+    assert not (logs_dir / "llm" / "judge_match.events.jsonl").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -5034,30 +5020,21 @@ def test_run_reports_match_judge_failure_through_run_metrics(
         def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
             raise ExtractorError("judge failed")
 
-    summary = run(
-        _two_stub_config(tmp_path),
-        llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=_FailingJudge(),
-        card_store=card_store,
-        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
-        dedup_store=dedup_module.load(seen_path),
-        status_display=PlainStatusDisplay(run_log=run_log),
-        run_log=run_log,
-    )
+    with pytest.raises(ExtractorError, match="judge failed"):
+        run(
+            _two_stub_config(tmp_path),
+            llm_enricher=_make_fake_llm_enricher(card_store),
+            extractor=_FailingJudge(),
+            card_store=card_store,
+            parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value]
+            dedup_store=dedup_module.load(seen_path),
+            status_display=PlainStatusDisplay(run_log=run_log),
+            run_log=run_log,
+        )
 
-    assert summary.written == 0
-    assert summary.errored == 1
-    lifecycle_rows = _read_lifecycle_rows(logs_dir)
-    assert not any(
-        row.get("event") == "phase_changed"
-        and row.get("component") == "llm judge match"
-        for row in lifecycle_rows
-    )
     assert not any((tmp_path / "results").glob("*.md"))
-
     run_log_text = (logs_dir / "run.log").read_text(encoding="utf-8")
-    assert "judges_sent=0" in run_log_text
-    assert "judges_failed=1" in run_log_text
+    assert "judges_failed" not in run_log_text
 
 
 def test_second_run_skips_all_urls_and_seen_json_unchanged(tmp_path: Path) -> None:
@@ -5705,7 +5682,7 @@ def test_run_passes_local_operator_credential_to_agent_runtime_calls(
     ]
 
 
-def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_report(
+def test_runtime_judge_failure_bubbles_and_writes_no_failure_report(
     tmp_path: Path,
 ) -> None:
     config_path = _one_stub_config(tmp_path)
@@ -5759,22 +5736,19 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
                 )
             ]
 
-    summary = run(
-        config_path,
-        llm_enricher=_make_fake_llm_enricher(card_store),
-        extractor=extractor,
-        parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
-        card_store=card_store,
-        dedup_store=dedup_module.load(seen_path),
-        run_log=run_log,
-    )
+    with pytest.raises(ExtractorUnreachableError, match="provider failed"):
+        run(
+            config_path,
+            llm_enricher=_make_fake_llm_enricher(card_store),
+            extractor=extractor,
+            parser_registry=lambda _: _OneStubParser,  # type: ignore[return-value, arg-type]
+            card_store=card_store,
+            dedup_store=dedup_module.load(seen_path),
+            run_log=run_log,
+        )
 
-    assert summary.written == 0
     reports = sorted((tmp_path / ".runtime-data" / "failures").glob("*.md"))
-    assert len(reports) == 1
-    report_body = reports[0].read_text(encoding="utf-8")
-    assert "llm_extractor:judge_match" in report_body
-    assert "provider failed" in report_body
+    assert len(reports) == 0
 
     today = datetime.now().date().isoformat()
     assert not (tmp_path / "results" / f"{today}.md").exists()

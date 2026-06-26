@@ -199,14 +199,14 @@ class _ScriptedJudgeInvocationPort:
             return AgentRuntimeInvocationResult(
                 kind="usage_limit",
                 output="quota reached",
-                evidence_dir=runtime_log,
+                evidence_path=runtime_log,
                 reset_time=self._reset_time,
                 message=None,
             )
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=self._verdict_output,
-            evidence_dir=runtime_log,
+            evidence_path=runtime_log,
             reset_time=None,
             message=None,
         )
@@ -5244,7 +5244,7 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
             return AgentRuntimeInvocationResult(
                 kind="usage_limit",
                 output="quota reached",
-                evidence_dir=runtime_log,
+                evidence_path=runtime_log,
                 reset_time=None,
                 message=None,
             )
@@ -5256,7 +5256,7 @@ def test_quota_judge_retries_and_completes_via_agent_runtime_with_same_candidate
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
-            evidence_dir=runtime_log,
+            evidence_path=runtime_log,
             reset_time=None,
             message=None,
         )
@@ -5344,7 +5344,7 @@ def test_quota_judge_retries_with_reset_time_sleeps_until_reset_plus_buffer(
             return AgentRuntimeInvocationResult(
                 kind="usage_limit",
                 output="quota reached",
-                evidence_dir=runtime_log,
+                evidence_path=runtime_log,
                 reset_time=reset_time,
                 message=None,
             )
@@ -5356,7 +5356,7 @@ def test_quota_judge_retries_with_reset_time_sleeps_until_reset_plus_buffer(
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
-            evidence_dir=runtime_log,
+            evidence_path=runtime_log,
             reset_time=None,
             message=None,
         )
@@ -5520,7 +5520,7 @@ def test_quota_judge_retries_without_reset_time_sleeps_until_top_of_hour(
             return AgentRuntimeInvocationResult(
                 kind="usage_limit",
                 output="quota reached",
-                evidence_dir=runtime_log,
+                evidence_path=runtime_log,
                 reset_time=None,
                 message=None,
             )
@@ -5532,7 +5532,7 @@ def test_quota_judge_retries_without_reset_time_sleeps_until_top_of_hour(
         return AgentRuntimeInvocationResult(
             kind="completed",
             output=f"<verdicts>{json.dumps(ranked)}</verdicts>",
-            evidence_dir=runtime_log,
+            evidence_path=runtime_log,
             reset_time=None,
             message=None,
         )
@@ -5675,14 +5675,14 @@ def test_run_passes_local_operator_credential_to_agent_runtime_calls(
                     '"summary": "Summary"}'
                     "</verdict>"
                 ),
-                evidence_dir=runtime_log,
+                evidence_path=runtime_log,
                 reset_time=None,
                 message=None,
             )
         return AgentRuntimeInvocationResult(
             kind="completed",
             output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
-            evidence_dir=runtime_log,
+            evidence_path=runtime_log,
             reset_time=None,
             message=None,
         )
@@ -5750,7 +5750,7 @@ def test_runtime_judge_failure_does_not_write_daily_file_and_writes_failure_repo
             return AgentRuntimeInvocationResult(
                 kind="hard_provider_failure",
                 output="",
-                evidence_dir=runtime_log,
+                evidence_path=runtime_log,
                 reset_time=None,
                 message="provider failed",
             )
@@ -5825,14 +5825,14 @@ def test_runtime_completed_without_usage_still_writes_daily_results_file(
                     '"summary": "Summary"}'
                     "</verdict>"
                 ),
-                evidence_dir=runtime_log,
+                evidence_path=runtime_log,
                 reset_time=None,
                 message=None,
             )
         return AgentRuntimeInvocationResult(
             kind="completed",
             output='<verdicts>[{"id": 1, "rank": 1}]</verdicts>',
-            evidence_dir=runtime_log,
+            evidence_path=runtime_log,
             reset_time=None,
             message=None,
         )

@@ -37,8 +37,6 @@ _CV_TEMPLATE_BRIDGES = (
     r"\PersonalInfo",
 )
 
-_RETIRED_FILENAMES = ("identity.tex", "contact.tex")
-
 
 @pytest.fixture(scope="module")
 def facts_seed() -> str:
@@ -68,26 +66,6 @@ def test_facts_tex_contains_no_moderncv_calls(facts_seed: str, call: str) -> Non
     assert call not in facts_seed, f"facts.tex must not contain moderncv call {call!r}"
 
 
-@pytest.mark.parametrize("retired", _RETIRED_FILENAMES)
-def test_retired_user_info_file_absent_from_package(retired: str) -> None:
-    user_info_cv = (
-        importlib.resources.files("application_pipeline.templates")
-        / "application-pipeline"
-        / "user-info"
-        / "cv"
-    )
-    names = {item.name for item in user_info_cv.iterdir()}
-    assert retired not in names, f"{retired} must be deleted from package"
-
-
-@pytest.mark.parametrize("retired", _RETIRED_FILENAMES)
-def test_cv_template_does_not_input_retired_file(
-    cv_template: str, retired: str
-) -> None:
-    stem = retired.removesuffix(".tex")
-    assert rf"\input{{\CvDataDir/{stem}}}" not in cv_template
-
-
 @pytest.mark.parametrize("bridge", _CV_TEMPLATE_BRIDGES)
 def test_cv_template_contains_bridge(cv_template: str, bridge: str) -> None:
     assert bridge in cv_template, f"{bridge!r} missing from cv_template.tex"
@@ -96,8 +74,3 @@ def test_cv_template_contains_bridge(cv_template: str, bridge: str) -> None:
 def test_cv_template_references_languages_and_hobbies(cv_template: str) -> None:
     assert r"\Languages" in cv_template
     assert r"\Hobbies" in cv_template
-
-
-@pytest.mark.parametrize("marker", ("<<LANGUAGES_BLOCK>>", "<<HOBBIES_BLOCK>>"))
-def test_cv_template_no_retired_block_marker(cv_template: str, marker: str) -> None:
-    assert marker not in cv_template

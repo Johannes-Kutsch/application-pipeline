@@ -162,6 +162,14 @@ def _persist_result(
         _safe_append(path, f"usage={usage!r}\n")
 
 
+def _requested_provider() -> ResolvedProvider:
+    return ResolvedProvider(
+        service=_AGENT_RUNTIME_SERVICE,
+        model=_AGENT_RUNTIME_MODEL,
+        effort=_AGENT_RUNTIME_EFFORT,
+    )
+
+
 def _result_section_kind(outcome: RuntimeOutcome) -> str:
     if isinstance(outcome.kind, Completed):
         return "completed"
@@ -269,6 +277,16 @@ def invoke_agent_runtime(
 
             return _to_invocation_result(outcome, evidence_path)
         except AgentRuntimeError as exc:
+            try:
+                _persist_result(
+                    evidence_path,
+                    selected=_requested_provider(),
+                    usage=None,
+                    kind_name="hard_provider_failure",
+                )
+            except OSError:
+                # Best-effort evidence: logging failures never block a valid outcome.
+                pass
             return AgentRuntimeInvocationResult(
                 kind="hard_provider_failure",
                 output="",

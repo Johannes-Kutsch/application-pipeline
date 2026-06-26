@@ -343,6 +343,12 @@ def test_hard_provider_failure_from_runtime_error(logs_root: Path) -> None:
     assert result.output == ""
     assert result.message == "provider exploded"
     assert result.evidence_path.is_file()
+    content = result.evidence_path.read_text(encoding="utf-8")
+    assert "[result]" in content
+    assert "outcome=hard_provider_failure" in content
+    assert "service=opencode" in content
+    assert "model=deepseek-v4-flash" in content
+    assert "effort=medium" in content
 
 
 def test_cancelled_and_timed_out_map_to_hard_provider_failure(logs_root: Path) -> None:

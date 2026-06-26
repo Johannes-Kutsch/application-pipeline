@@ -69,7 +69,7 @@ def test_startup_failure_writes_to_home_failures_dir(tmp_path: Path) -> None:
     (home / "config.py").write_text(_MALFORMED_CONFIG)
     (home / ".env").write_text("OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8")
 
-    _run_main(tmp_path)
+    result = _run_main(tmp_path)
 
     assert not (tmp_path / "results").exists(), (
         "Should not create results/ directly under cwd"
@@ -77,6 +77,7 @@ def test_startup_failure_writes_to_home_failures_dir(tmp_path: Path) -> None:
     assert not (tmp_path / "failures").exists(), (
         "Should not create failures/ directly under cwd"
     )
+    assert result.returncode != 0
+    assert "Traceback (most recent call last)" in result.stderr
     failures_dir = home / ".runtime-data" / "failures"
-    assert failures_dir.is_dir()
-    assert len(list(failures_dir.glob("*.md"))) == 1
+    assert len(list(failures_dir.glob("*.md"))) == 0

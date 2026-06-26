@@ -2798,10 +2798,10 @@ def test_crashed_run_does_not_write_daily_file(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fatal_error_writes_failure_report_and_exits_one(
+def test_fatal_error_surfaces_from_main_without_failure_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DedupStoreError at startup â†' failure report written, stage=orchestrator, exit 1."""
+    """DedupStoreError at startup surfaces as an unhandled exception from `main`."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "application-pipeline").mkdir()
     _write_config(tmp_path / "application-pipeline")
@@ -2820,24 +2820,17 @@ def test_fatal_error_writes_failure_report_and_exits_one(
 
     from application_pipeline.__main__ import main
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(DedupStoreError):
         main()
 
-    assert exc_info.value.code == 1
-
     failures_dir = tmp_path / "application-pipeline" / ".runtime-data" / "failures"
-    reports = list(failures_dir.glob("*.md"))
-    assert len(reports) == 1, f"expected one failure report, got {reports}"
-
-    body = reports[0].read_text(encoding="utf-8")
-    assert "orchestrator" in body
-    assert "startup failed" in body  # log tail captured before exception propagated
+    assert list(failures_dir.glob("*.md")) == []
 
 
-def test_fatal_classify_provider_failure_writes_failure_report_with_explicit_stage(
+def test_fatal_classify_provider_failure_surfaces_without_failure_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ExtractorUnreachableError from classify_relevance aborts the run and writes a Failure Report at an explicit LLM/classify stage."""
+    """ExtractorUnreachableError from classify_relevance aborts `main` without writing a report."""
     monkeypatch.chdir(tmp_path)
     home = tmp_path / "application-pipeline"
     home.mkdir()
@@ -2880,16 +2873,11 @@ def test_fatal_classify_provider_failure_writes_failure_report_with_explicit_sta
 
     from application_pipeline.__main__ import main
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(ExtractorUnreachableError):
         main()
 
-    assert exc_info.value.code == 1
-
     reports = sorted((home / ".runtime-data" / "failures").glob("*.md"))
-    assert len(reports) == 1
-    body = reports[0].read_text(encoding="utf-8")
-    assert "**Stage:** llm_extractor:classify_relevance" in body
-    assert "ExtractorUnreachableError" in body
+    assert reports == []
 
 
 def test_results_write_error_propagates_from_run(
@@ -4508,17 +4496,12 @@ def test_non_quota_worker_exception_writes_failure_report(
 
     from application_pipeline.__main__ import main
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(RuntimeError):
         main()
-
-    assert exc_info.value.code == 1
 
     failures_dir = tmp_path / "application-pipeline" / ".runtime-data" / "failures"
     reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
-    assert len(reports) == 1, f"expected one failure report, got {reports}"
-
-    body = reports[0].read_text(encoding="utf-8")
-    assert "RuntimeError" in body
+    assert reports == []
 
 
 def test_default_llm_enricher_receives_run_scoped_dependencies(

@@ -104,9 +104,16 @@ def test_root_lifecycle_jsonl_exceeding_10000_lines_is_truncated_to_last_10000(
     assert result_lines[-1] == '{"line": 14999}'
 
 
+def _make_evidence_file(parent: Path, name: str) -> Path:
+    parent.mkdir(parents=True, exist_ok=True)
+    evidence_file = parent / name
+    evidence_file.write_text("log payload\n")
+    return evidence_file
+
+
 def _make_evidence_dir(parent: Path, name: str) -> Path:
     evidence_dir = parent / name
-    evidence_dir.mkdir(parents=True)
+    evidence_dir.mkdir(parents=True, exist_ok=True)
     (evidence_dir / "prompt").write_text("the prompt\n")
     (evidence_dir / "response").write_text("the response\n")
     (evidence_dir / "events").write_text("events\n")
@@ -123,14 +130,28 @@ def test_agent_runtime_classify_evidence_dir_older_than_30_days_is_deleted(
     dirs: tuple[Path, Path],
 ) -> None:
     logs_dir, failures_dir = dirs
-    evidence_dir = _make_evidence_dir(
-        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-old"
+    evidence_dir = _make_evidence_file(
+        logs_dir / "llm" / "agent-runtime" / "classify", "llm-classify-old.log"
     )
     _age(evidence_dir, 31)
 
     run_maintenance(logs_dir, failures_dir)
 
     assert not evidence_dir.exists()
+
+
+def test_agent_runtime_judge_evidence_dir_older_than_30_days_is_deleted_legacy(
+    dirs: tuple[Path, Path],
+) -> None:
+    logs_dir, failures_dir = dirs
+    evidence_file = _make_evidence_file(
+        logs_dir / "llm" / "agent-runtime" / "judge", "llm-judge-old.log"
+    )
+    _age(evidence_file, 31)
+
+    run_maintenance(logs_dir, failures_dir)
+
+    assert not evidence_file.exists()
 
 
 def test_agent_runtime_judge_evidence_dir_older_than_30_days_is_deleted(

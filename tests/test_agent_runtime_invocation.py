@@ -47,6 +47,7 @@ class _FakeRuntimeClient:
     outcome: RuntimeOutcome | None = None
     events: tuple[AgentEvent, ...] = ()
     error: Exception | None = None
+    prompt_encoding: str | None = None
     requests: list[_CapturedRequest] = []
 
     async def run_ephemeral(self, request: EphemeralRunRequest) -> RuntimeOutcome:
@@ -55,6 +56,8 @@ class _FakeRuntimeClient:
             for event in self.events:
                 request.on_live_output(event)
                 callback_count += 1
+        if self.prompt_encoding is not None:
+            request.prompt.encode(self.prompt_encoding)
         self.requests.append(
             _CapturedRequest(
                 prompt=request.prompt,
@@ -78,6 +81,7 @@ def _use_fake_runtime_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeRuntimeClient.outcome = None
     _FakeRuntimeClient.error = None
     _FakeRuntimeClient.events = ()
+    _FakeRuntimeClient.prompt_encoding = None
     _FakeRuntimeClient.requests = []
     monkeypatch.setattr(
         "application_pipeline.llm.agent_runtime_invocation.RuntimeClient",
@@ -237,16 +241,51 @@ def test_request_construction_uses_pinned_provider_no_tools_and_worktree_outside
     assert captured.callback_count == 0
 
 
+_UNICODE_SPACE_SEPARATORS = (
+    "\u0020",
+    "\u00a0",
+    "\u1680",
+    "\u2000",
+    "\u2001",
+    "\u2002",
+    "\u2003",
+    "\u2004",
+    "\u2005",
+    "\u2006",
+    "\u2007",
+    "\u2008",
+    "\u2009",
+    "\u200a",
+    "\u202f",
+    "\u205f",
+    "\u3000",
+)
+
+
 @pytest.mark.parametrize("call_site", ["classify", "judge"])
-def test_prompt_normalizes_unicode_space_separators_before_invocation(
+def test_agent_runtime_invocation_normalizes_unicode_space_separators_for_windows_stdio(
     logs_root: Path, call_site: Literal["classify", "judge"]
 ) -> None:
     _FakeRuntimeClient.outcome = _completed()
-    prompt = "Before\u202fBefore after"
+    _FakeRuntimeClient.prompt_encoding = "cp1252"
+    prompt = "Before\u202fAfter"
 
-    invoke_agent_runtime(prompt, logs_root=logs_root, call_site=call_site)
+    result = invoke_agent_runtime(prompt, logs_root=logs_root, call_site=call_site)
 
-    assert _FakeRuntimeClient.requests[0].prompt == "Before Before after"
+    assert result.kind == "completed"
+    assert _FakeRuntimeClient.requests[0].prompt == "Before After"
+    assert "[result]" in result.evidence_path.read_text(encoding="utf-8")
+
+
+def test_agent_runtime_invocation_rewrites_only_unicode_space_separators(
+    logs_root: Path,
+) -> None:
+    _FakeRuntimeClient.outcome = _completed()
+    prompt = f"A{''.join(_UNICODE_SPACE_SEPARATORS)}B\tC\nD\u200bE"
+
+    invoke_agent_runtime(prompt, logs_root=logs_root, call_site="classify")
+
+    assert _FakeRuntimeClient.requests[0].prompt == f"A{' ' * 17}B\tC\nD\u200bE"
 
 
 @pytest.mark.parametrize("call_site", ["classify", "judge"])

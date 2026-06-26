@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-import traceback
 from abc import abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -302,11 +301,3 @@ def invoke_agent_runtime(
                 evidence_path=evidence_path,
                 message=str(exc),
             )
-        except BaseException:
-            try:
-                _safe_append(evidence_path, "[result]\n")
-                _safe_append(evidence_path, "outcome=unexpected_exception\n")
-                _safe_append(evidence_path, traceback.format_exc())
-            except OSError:
-                pass
-            raise

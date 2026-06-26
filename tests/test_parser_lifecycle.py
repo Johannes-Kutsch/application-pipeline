@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from datetime import date
 from pathlib import Path
@@ -617,7 +618,54 @@ def test_parser_dead_prints_failure_report_path_to_stderr(
 
     stderr = capsys.readouterr().err
     failure_report = next((tmp_path / "failures").glob("*.md"))
-    assert f"parser test_parser died — failure report: {failure_report}" in stderr
+    assert stderr == f"parser test_parser died — failure report: {failure_report}\n"
+
+
+def test_parser_dead_prints_failure_report_path_before_dead_acknowledgment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan, display = _make_plan_with_display(
+        tmp_path,
+        parser=_DiscoverCrashParser(),
+    )
+    failure_report = tmp_path / "failures"
+
+    class _StderrRecorder:
+        def __init__(self) -> None:
+            self.notification_lines: list[str] = []
+            self.dead_phase_visible_during_notification = False
+
+        def write(self, text: str) -> int:
+            if text and text != "\n":
+                self.notification_lines.append(text)
+                self.dead_phase_visible_during_notification = any(
+                    call.method == "update_phase"
+                    and call.name == "parser test parser"
+                    and call.kwargs["phase"] == "dead"
+                    for call in display.calls
+                )
+            return len(text)
+
+        def flush(self) -> None:
+            pass
+
+    recorder = _StderrRecorder()
+    monkeypatch.setattr(sys, "stderr", recorder)
+
+    run_parser_lifecycle(plan)
+
+    written_report = next(failure_report.glob("*.md"))
+    assert recorder.notification_lines == [
+        f"parser test_parser died — failure report: {written_report}"
+    ]
+    assert recorder.dead_phase_visible_during_notification is False
+    assert any(
+        call.method == "update_phase"
+        and call.name == "parser test parser"
+        and call.kwargs["phase"] == "dead"
+        for call in display.calls
+    )
 
 
 def test_stall_watchdog_logs_one_stalled_event_and_stack_trace_via_lifecycle(

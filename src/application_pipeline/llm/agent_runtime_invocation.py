@@ -128,7 +128,19 @@ def _normalize_prompt(prompt: str) -> str:
         category = unicodedata.category(char)
         if category == "Cf":
             continue
-        normalized.append(" " if category == "Zs" else char)
+        if category == "Zs":
+            normalized.append(" ")
+            continue
+        try:
+            char.encode("cp1252")
+            normalized.append(char)
+        except UnicodeEncodeError:
+            if category == "Pd":
+                normalized.append("-")
+            else:
+                fallback = unicodedata.normalize("NFKD", char).encode("ascii", "ignore").decode("ascii")
+                if fallback:
+                    normalized.append(fallback)
     return "".join(normalized)
 
 

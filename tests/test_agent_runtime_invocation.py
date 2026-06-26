@@ -301,6 +301,18 @@ def test_agent_runtime_invocation_rewrites_unicode_space_separators_and_drops_ze
     assert _FakeRuntimeClient.requests[0].prompt == f"A{' ' * 17}B\tC\nDE"
 
 
+def test_agent_runtime_invocation_replaces_cp1252_unencodable_dash_with_ascii_hyphen(
+    logs_root: Path,
+) -> None:
+    _FakeRuntimeClient.outcome = _completed()
+    _FakeRuntimeClient.prompt_encoding = "cp1252"
+    prompt = "non‑breaking"
+
+    invoke_agent_runtime(prompt, logs_root=logs_root, call_site="classify")
+
+    assert _FakeRuntimeClient.requests[0].prompt == "non-breaking"
+
+
 def test_agent_runtime_invocation_preserves_cp1252_encodable_umlauts(
     logs_root: Path,
 ) -> None:

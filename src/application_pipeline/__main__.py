@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import collections
 import logging
 import sys
 from pathlib import Path
@@ -10,18 +9,6 @@ from dotenv import load_dotenv
 load_dotenv(Path.home() / ".env")
 
 
-class _TailHandler(logging.Handler):
-    def __init__(self, n: int = 20) -> None:
-        super().__init__()
-        self._buf: collections.deque[str] = collections.deque(maxlen=n)
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self._buf.append(self.format(record))
-
-    def tail(self) -> str:
-        return "\n".join(self._buf)
-
-
 logging.basicConfig(
     stream=sys.stderr,
     level=logging.INFO,
@@ -29,9 +16,6 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
-_tail = _TailHandler()
-_tail.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-logging.getLogger().addHandler(_tail)
 
 
 def main() -> None:
@@ -124,13 +108,6 @@ def _require_operator_credential(settings_dir: Path) -> None:
         sys.exit(2)
 
 
-def _bind_failure_report_writer(home: Path):
-    from application_pipeline.config import resolve_data_paths
-    from application_pipeline.failure_report import FailureReportWriter
-
-    return FailureReportWriter(resolve_data_paths(home).failures_path)
-
-
 def _execute_run(config_path: Path, *, no_judge: bool) -> None:
     from application_pipeline.parser_log import RunLog
     from application_pipeline.config import resolve_data_paths
@@ -170,6 +147,7 @@ def _execute_run(config_path: Path, *, no_judge: bool) -> None:
         run_maintenance(data_paths.logs_path, data_paths.failures_path)
     except Exception:
         pass
+
 
 if __name__ == "__main__":
     main()

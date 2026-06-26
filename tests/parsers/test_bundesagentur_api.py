@@ -664,6 +664,27 @@ def test_enrich_stderr_prints_failure_report_path_when_description_missing(
     assert len(failure_files) == 1
 
 
+def test_enrich_failure_report_contains_traceback_when_description_missing(
+    run_log: RunLog, tmp_path: Path
+) -> None:
+    stub = PositionStub(
+        url="https://www.arbeitsagentur.de/jobsuche/jobdetail/abc123",
+        title="Software Engineer",
+        source="Bundesagentur",
+    )
+    http, _ = _make_http(run_log, json.dumps({"referenznummer": "abc123"}).encode())
+    with BundesagenturParser(run_log=run_log, failures_dir=tmp_path, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+    failure_report = next(tmp_path.glob("*.md"))
+    failure_body = failure_report.read_text(encoding="utf-8")
+    assert "**Traceback:**" in failure_body
+    assert "Traceback (most recent call last)" in failure_body
+    assert "ValueError" in failure_body
+    assert "stellenangebotsBeschreibung missing or empty" in failure_body
+
+
 def test_enrich_writes_failure_report_and_raises_when_description_is_empty_string(
     run_log: RunLog, tmp_path: Path
 ) -> None:

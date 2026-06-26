@@ -17,6 +17,7 @@ from application_pipeline.parsers.jobs_beim_staat_html import (
 )
 from tests.parsers.http_helpers import (
     ScriptedParserHttpOutcome,
+    ScriptedParserHttpResponse,
     ScriptedParserHttpTransport,
     make_scripted_parser_http,
 )
@@ -562,3 +563,45 @@ def test_enrich_raises_enrich_failed_error_when_iframe_has_no_src(
     with JobsBeimStaatParser(run_log=run_log, _http=http) as p:
         with pytest.raises(EnrichFailedError):
             p.enrich(stub)
+
+
+def test_enrich_follows_redirected_outer_page_and_updates_stub_url(
+    run_log: RunLog,
+    stub: PositionStub,
+    wrapper_html: bytes,
+    iframe_target_html: bytes,
+) -> None:
+    redirect_url = "https://www.jobs-beim-staat.de/stellenangebote/1965251471"
+    http, transport = _make_http(
+        run_log,
+        ScriptedParserHttpResponse.redirect(status=302, location=redirect_url),
+        wrapper_html,
+        iframe_target_html,
+    )
+
+    with JobsBeimStaatParser(run_log=run_log, _http=http) as p:
+        result = p.enrich(stub)
+
+    assert result.mode == "native"
+    assert result.stub.url == redirect_url
+    assert transport.requests[0].url == stub.url
+    assert transport.requests[1].url == redirect_url
+
+
+def test_enrich_redirected_outer_page_without_iframe_raises_enrich_failed_error(
+    run_log: RunLog,
+    stub: PositionStub,
+) -> None:
+    redirect_url = "https://www.jobs-beim-staat.de/stellenangebote/1965251471"
+    http, transport = _make_http(
+        run_log,
+        ScriptedParserHttpResponse.redirect(status=302, location=redirect_url),
+        b"<html><body>no iframe</body></html>",
+    )
+
+    with JobsBeimStaatParser(run_log=run_log, _http=http) as p:
+        with pytest.raises(EnrichFailedError):
+            p.enrich(stub)
+
+    assert transport.requests[0].url == stub.url
+    assert transport.requests[1].url == redirect_url

@@ -11,6 +11,7 @@ convention).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
@@ -23,6 +24,7 @@ from typing import Any, assert_never
 
 from bs4 import BeautifulSoup, Tag
 
+from application_pipeline.http import HttpRedirectResponse
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.body_text import html_to_raw_description
 
@@ -166,10 +168,17 @@ class JobsBeimStaatParser:
         self._http.__exit__(*args)
 
     def enrich(self, stub: PositionStub) -> EnrichResult:
-        outer_raw = self._http.get(
-            stub.url,
-            error_prefix=f"jobs-beim-staat outer page fetch failed for {stub.url}",
-        )
+        try:
+            outer_raw = self._http.get(
+                stub.url,
+                error_prefix=f"jobs-beim-staat outer page fetch failed for {stub.url}",
+            )
+        except HttpRedirectResponse as exc:
+            stub = dataclasses.replace(stub, url=exc.location)
+            outer_raw = self._http.get(
+                stub.url,
+                error_prefix=f"jobs-beim-staat outer page fetch failed for {stub.url}",
+            )
         soup = BeautifulSoup(outer_raw, "html.parser")
         iframe = soup.find(id="myiframe")
         if not isinstance(iframe, Tag) or not iframe.get("src"):

@@ -238,6 +238,18 @@ def test_request_construction_uses_pinned_provider_no_tools_and_worktree_outside
 
 
 @pytest.mark.parametrize("call_site", ["classify", "judge"])
+def test_prompt_normalizes_unicode_space_separators_before_invocation(
+    logs_root: Path, call_site: Literal["classify", "judge"]
+) -> None:
+    _FakeRuntimeClient.outcome = _completed()
+    prompt = "Before\u202fBefore after"
+
+    invoke_agent_runtime(prompt, logs_root=logs_root, call_site=call_site)
+
+    assert _FakeRuntimeClient.requests[0].prompt == "Before Before after"
+
+
+@pytest.mark.parametrize("call_site", ["classify", "judge"])
 def test_explicit_provider_auth_is_forwarded(
     logs_root: Path, call_site: Literal["classify", "judge"]
 ) -> None:

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import unicodedata
 from typing import Final, Literal, Protocol
 
 from agent_runtime import AgentRuntimeError, RuntimeClient, RuntimeOutcome
@@ -119,6 +120,12 @@ def _build_request(
         tool_access=ToolAccess.no_tools(),
         timeout_seconds=1200,
         on_live_output=on_live_output,
+    )
+
+
+def _normalize_prompt(prompt: str) -> str:
+    return "".join(
+        " " if unicodedata.category(char) == "Zs" else char for char in prompt
     )
 
 
@@ -237,6 +244,7 @@ def invoke_agent_runtime(
     call_site: AgentRuntimeCallSiteName,
     provider_auth: ProviderAuth | None = None,
 ) -> AgentRuntimeInvocationResult:
+    prompt = _normalize_prompt(prompt)
     evidence_path = _new_evidence_path(logs_root=logs_root, call_site=call_site)
 
     def _on_live_output(event: AgentEvent) -> None:

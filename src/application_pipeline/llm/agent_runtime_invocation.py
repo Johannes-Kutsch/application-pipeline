@@ -138,7 +138,11 @@ def _normalize_prompt(prompt: str) -> str:
             if category == "Pd":
                 normalized.append("-")
             else:
-                fallback = unicodedata.normalize("NFKD", char).encode("ascii", "ignore").decode("ascii")
+                fallback = (
+                    unicodedata.normalize("NFKD", char)
+                    .encode("ascii", "ignore")
+                    .decode("ascii")
+                )
                 if fallback:
                     normalized.append(fallback)
     return "".join(normalized)

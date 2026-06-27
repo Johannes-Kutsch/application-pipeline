@@ -225,6 +225,35 @@ def test_enricher_stashes_malformed_verdict_references_agent_runtime_log(
     assert "Raw description body" not in content
 
 
+def test_enricher_stashes_malformed_verdict_with_opaque_agent_runtime_pointer(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    runtime_pointer = "agent-runtime://classify/run-42?event=3#result"
+    extractor = MagicMock()
+    extractor.classify_relevance.return_value = [None]
+    extractor.last_classify_log_path = runtime_pointer
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/opaque-pointer",
+        title="Software Engineer",
+        source="test_src",
+    )
+
+    result = enricher.enrich([(99, stub, "Raw description body")])
+
+    assert [item.state for item in result.items] == ["retryable"]
+
+    content = _read_malformed_stash(
+        tmp_path, "test_src", "example.com-job-opaque-pointer"
+    )
+    assert runtime_pointer in content
+
+
 @pytest.mark.parametrize(
     ("classify_result", "expected_error_classification", "expected_error_message"),
     [

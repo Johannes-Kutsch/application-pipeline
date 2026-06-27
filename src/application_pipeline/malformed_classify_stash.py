@@ -19,7 +19,7 @@ def stash_malformed_classify_artifact(
     listing: ListingDiagnosticFacts,
     error_classification: str,
     error_message: str,
-    agent_runtime_log_pointer: Path | None = None,
+    agent_runtime_log_pointer: str | Path | None = None,
     raw_model_output: str | None = None,
 ) -> Path:
     stash_dir = filesystem_root / "malformed"

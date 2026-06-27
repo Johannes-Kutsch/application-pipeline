@@ -76,9 +76,9 @@ class LLMEnricher:
         self.freshness_gate: FreshnessGate | None = freshness_gate
         self._dedup_store = dedup_store
 
-    def _last_classify_log_path(self) -> Path | None:
+    def _last_classify_log_path(self) -> str | Path | None:
         raw_log_path = getattr(self._extractor, "last_classify_log_path", None)
-        return raw_log_path if isinstance(raw_log_path, Path) else None
+        return raw_log_path if isinstance(raw_log_path, (str, Path)) else None
 
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
@@ -193,7 +193,7 @@ class LLMEnricher:
     def _stash_malformed_listing(
         self,
         stub: PositionStub,
-        agent_runtime_log_path: "Path | None" = None,
+        agent_runtime_log_path: "str | Path | None" = None,
     ) -> None:
         stash_malformed_classify_artifact(
             filesystem_root=self._failures_dir,
@@ -213,7 +213,7 @@ class LLMEnricher:
             | ExtractorMalformedError
             | ExtractorMalformedJSONError
         ),
-        agent_runtime_log_path: "Path | None" = None,
+        agent_runtime_log_path: "str | Path | None" = None,
     ) -> None:
         stash_malformed_classify_artifact(
             filesystem_root=self._failures_dir,

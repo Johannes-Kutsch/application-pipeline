@@ -131,6 +131,25 @@ def test_parse_rejects_item_name_that_mismatches_following_newcommand(
         parse(p)
 
 
+def test_parse_rejects_item_name_that_mismatches_following_newcommand_after_gap_lines(
+    tmp_path: Path,
+) -> None:
+    mismatched_macro = textwrap.dedent("""\
+        % ===== Projekte =====
+
+        %%% ITEM: itemProjectMeta
+        %%% always: false
+
+        % comment
+        \\newcommand{\\itemProjectBody}{}
+    """)
+    p = tmp_path / "content_pool.tex"
+    p.write_text(mismatched_macro, encoding="utf-8")
+
+    with pytest.raises(ContentPoolError, match="itemProjectMeta"):
+        parse(p)
+
+
 def test_candidates_raise_named_error_for_malformed_relevance_on_projection() -> None:
     with pytest.raises(ContentPoolError, match="itemProjectBad"):
         ContentPoolDocument(

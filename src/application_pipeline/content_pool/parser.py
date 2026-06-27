@@ -154,6 +154,8 @@ def parse(path: Path) -> dict[str, PoolItem]:
                     f"newcommand: {current_item}"
                 )
             commit()
+        elif _is_metadata_gap_line(line):
+            continue
         else:
             commit()
 
@@ -171,6 +173,18 @@ def _parse_relevance(raw: str, macro_name: str) -> dict[str, RelevanceLevel]:
             )
         out[m.group(1)] = cast(RelevanceLevel, m.group(2))
     return out
+
+
+def _is_metadata_gap_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped == "" or (
+        stripped.startswith("%")
+        and not _SECTION_RE.match(line)
+        and not _ITEM_RE.match(line)
+        and not _ALWAYS_RE.match(line)
+        and not _GROUP_RE.match(line)
+        and not _RELEVANCE_RE.match(line)
+    )
 
 
 def _validate_relevance_mapping(

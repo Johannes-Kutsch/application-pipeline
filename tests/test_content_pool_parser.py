@@ -94,6 +94,22 @@ def test_candidates_raise_named_error_for_malformed_relevance_on_projection() ->
         )
 
 
+def test_candidates_raise_named_error_when_projection_relevance_is_not_mapping() -> (
+    None
+):
+    with pytest.raises(ContentPoolError, match="itemProjectBad"):
+        ContentPoolDocument(
+            {
+                "itemProjectBad": {
+                    "section": "Projekte",
+                    "always": False,
+                    "group": None,
+                    "relevance": cast(Any, None),
+                }
+            }
+        )
+
+
 def test_load_projects_resume_slot_candidates_in_authored_order(pool_tex: Path) -> None:
     pool_tex.write_text(
         textwrap.dedent("""\
@@ -219,3 +235,27 @@ def test_candidates_returns_empty_list_for_valid_resume_slot_without_items(
     document = load(pool_tex)
 
     assert document.candidates("resume_projekte") == []
+
+
+def test_candidates_expose_empty_relevance_mapping_when_omitted(pool_tex: Path) -> None:
+    pool_tex.write_text(
+        textwrap.dedent("""\
+            % ===== Projekte =====
+
+            %%% ITEM: itemProjectPlain
+            %%% always: true
+            \\newcommand{\\itemProjectPlain}{}
+        """),
+        encoding="utf-8",
+    )
+
+    document = load(pool_tex)
+
+    assert document.candidates("resume_projekte") == [
+        {
+            "name": "itemProjectPlain",
+            "always": True,
+            "group": None,
+            "relevance": {},
+        }
+    ]

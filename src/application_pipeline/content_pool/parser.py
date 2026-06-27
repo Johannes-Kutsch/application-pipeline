@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Mapping, TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 from application_pipeline.cv_slot_contract import SLOT_NAME_SET
 
@@ -137,8 +138,17 @@ def _parse_relevance(raw: str, macro_name: str) -> dict[str, RelevanceLevel]:
 def _validate_relevance_mapping(
     relevance: Mapping[str, str], macro_name: str
 ) -> dict[str, RelevanceLevel]:
+    if not isinstance(relevance, Mapping):
+        raise ContentPoolError(
+            f"malformed relevance entry for {macro_name!r}: expected mapping"
+        )
+
     out: dict[str, RelevanceLevel] = {}
     for topic, level in relevance.items():
+        if not isinstance(topic, str):
+            raise ContentPoolError(
+                f"malformed relevance entry for {macro_name!r}: invalid topic {topic!r}"
+            )
         if level not in {"high", "medium", "low"}:
             raise ContentPoolError(
                 f"malformed relevance entry for {macro_name!r}: {topic}={level!r}"

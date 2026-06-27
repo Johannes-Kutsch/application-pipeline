@@ -18,28 +18,6 @@ _PYTHONPATH = os.pathsep.join(
 )
 
 
-def _run_probe(home_dir: Path, env: dict[str, str]) -> str:
-    """Run a subprocess that imports __main__ and prints the token value."""
-    script = (
-        "import os, sys; "
-        "import application_pipeline.__main__; "
-        "print(os.environ.get('CLAUDE_CODE_OAUTH_TOKEN', '<missing>'))"
-    )
-    probe_env = {
-        **env,
-        "HOME": str(home_dir),
-        "USERPROFILE": str(home_dir),
-        "PYTHONPATH": _PYTHONPATH,
-    }
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        env=probe_env,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
-
-
 def _run_probe_for_key(home_dir: Path, env: dict[str, str], key: str) -> str:
     script = (
         "import os, sys; "
@@ -91,6 +69,8 @@ def test_shell_exported_env_value_remains_unchanged_on_import(
     assert _run_probe_for_key(tmp_path, base_env, key) == shell_value
 
 
-def test_missing_env_file_is_silent(tmp_path):
+def test_missing_home_env_file_is_silent(tmp_path: Path) -> None:
     base_env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_OAUTH_TOKEN"}
-    assert _run_probe(tmp_path, base_env) == "<missing>"
+    assert (
+        _run_probe_for_key(tmp_path, base_env, "CLAUDE_CODE_OAUTH_TOKEN") == "<missing>"
+    )

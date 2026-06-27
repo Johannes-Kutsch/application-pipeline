@@ -1,4 +1,6 @@
+import importlib.resources
 import textwrap
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -34,6 +36,15 @@ def pool_tex(tmp_path: Path) -> Path:
     p = tmp_path / "content_pool.tex"
     p.write_text(_FIXTURE, encoding="utf-8")
     return p
+
+
+@pytest.fixture
+def seeded_content_pool_path() -> Iterator[Path]:
+    resource = importlib.resources.files("application_pipeline.templates").joinpath(
+        "application-pipeline/user-info/cv/content_pool.tex"
+    )
+    with importlib.resources.as_file(resource) as path:
+        yield path
 
 
 def test_parse_returns_correct_shape(pool_tex: Path) -> None:
@@ -546,3 +557,68 @@ def test_render_selection_is_stable_across_repeated_calls(pool_tex: Path) -> Non
     assert document.render_selection("resume_projekte", ["itemProjectOne"]) == (
         "\\itemProjectOne"
     )
+
+
+def test_package_seeded_content_pool_loads_through_document_interface(
+    seeded_content_pool_path: Path,
+    tmp_path: Path,
+) -> None:
+    document = load(seeded_content_pool_path)
+    operator_owned_copy = tmp_path / "content_pool.tex"
+    operator_owned_copy.write_text(
+        seeded_content_pool_path.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    copied_document = load(operator_owned_copy)
+
+    assert {
+        "resume_berufserfahrung": len(document.candidates("resume_berufserfahrung")),
+        "resume_ausbildung": len(document.candidates("resume_ausbildung")),
+        "resume_projekte": len(document.candidates("resume_projekte")),
+    } == {
+        "resume_berufserfahrung": 2,
+        "resume_ausbildung": 2,
+        "resume_projekte": 3,
+    }
+    assert {
+        slot_name: [
+            candidate
+            for candidate in document.candidates(slot_name)
+            if candidate["always"]
+        ]
+        for slot_name in (
+            "resume_berufserfahrung",
+            "resume_ausbildung",
+            "resume_projekte",
+        )
+    } == {
+        "resume_berufserfahrung": [],
+        "resume_ausbildung": [
+            {
+                "name": "itemDegreeMaster",
+                "always": True,
+                "group": None,
+                "relevance": {"games": "high", "mle": "high"},
+            },
+            {
+                "name": "itemDegreeBachelor",
+                "always": True,
+                "group": None,
+                "relevance": {"games": "medium", "mle": "high"},
+            },
+        ],
+        "resume_projekte": [
+            {
+                "name": "itemProjectAwarded",
+                "always": True,
+                "group": None,
+                "relevance": {"games": "high", "mle": "medium"},
+            }
+        ],
+    }
+    for slot_name in (
+        "resume_berufserfahrung",
+        "resume_ausbildung",
+        "resume_projekte",
+    ):
+        assert copied_document.candidates(slot_name) == document.candidates(slot_name)

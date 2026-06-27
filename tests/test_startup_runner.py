@@ -427,6 +427,83 @@ def test_cron_startup_runner_refreshes_workspace_before_run(
     assert "run complete:" in out
 
 
+def test_cron_startup_runner_refreshes_before_run_and_keeps_success_path_behavior(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings_dir = _write_settings_dir(tmp_path, with_operator_credential=True)
+    observed: dict[str, object] = {"events": []}
+
+    class SummaryLike:
+        discovered = 3
+        skipped = 1
+        prefilter_dropped = 1
+        classifier_dropped = 1
+        written = 2
+        enrich_failed = 0
+        errored = 0
+        classify_items = 3
+        duration_seconds = 1.5
+
+    def fake_init(cwd: Path, *, refresh: bool) -> None:
+        observed["events"] = [*observed["events"], ("init", cwd, refresh)]
+
+    def fake_run(config_path: Path, **kwargs: object) -> SummaryLike:
+        observed["events"] = [
+            *observed["events"],
+            ("run", config_path, kwargs["no_judge"]),
+        ]
+        return SummaryLike()
+
+    def fake_maintenance(logs_dir: Path, failures_dir: Path) -> None:
+        observed["events"] = [
+            *observed["events"],
+            ("maintenance", logs_dir, failures_dir),
+        ]
+        observed["stdout_before_maintenance"] = capsys.readouterr().out
+
+    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
+    monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
+    monkeypatch.setattr(
+        "application_pipeline.maintenance.run_maintenance",
+        fake_maintenance,
+    )
+
+    run_startup(
+        StartupRequest(
+            cwd=tmp_path,
+            mode="cron",
+            no_judge=True,
+            has_terminal=False,
+        )
+    )
+
+    assert observed == {
+        "events": [
+            ("init", tmp_path, True),
+            ("run", settings_dir / "config.py", True),
+            (
+                "maintenance",
+                settings_dir / ".runtime-data" / "logs",
+                settings_dir / ".runtime-data" / "failures",
+            ),
+        ],
+        "stdout_before_maintenance": (
+            "run complete:"
+            "  discovered=3"
+            "  skipped=1"
+            "  prefilter_dropped=1"
+            "  classifier_dropped=1"
+            "  written=2"
+            "  enrich_failed=0"
+            "  errored=0"
+            "  classify_items=3"
+            "  duration=1.5s\n"
+        ),
+    }
+
+
 def test_startup_runner_uses_plain_status_display_without_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

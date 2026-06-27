@@ -23,18 +23,24 @@ class StartupRequest:
 
 def run_startup(request: StartupRequest) -> None:
     config_path = _require_config_path(request.cwd)
-    _require_operator_credential(config_path.parent)
+    home = config_path.parent
+    _require_operator_credential(home)
 
     if request.mode == "cron":
         from application_pipeline.init_cmd import init as _init
 
         _init(request.cwd, refresh=True)
 
-    _execute_run(
+    summary = _execute_run(
         config_path,
         no_judge=request.no_judge,
         has_terminal=request.has_terminal,
     )
+    if not isinstance(summary, RunSummary):
+        raise TypeError("startup runner expected Orchestrator to return RunSummary")
+
+    print(render_completion_summary(summary))
+    _run_post_run_maintenance(home)
 
 
 def _require_config_path(cwd: Path) -> Path:
@@ -60,8 +66,9 @@ def _require_operator_credential(settings_dir: Path) -> None:
         sys.exit(2)
 
 
-def _execute_run(config_path: Path, *, no_judge: bool, has_terminal: bool) -> None:
-    from application_pipeline.maintenance import run_maintenance
+def _execute_run(
+    config_path: Path, *, no_judge: bool, has_terminal: bool
+) -> RunSummary | object:
     from application_pipeline.orchestrator import run
 
     home = config_path.parent
@@ -71,13 +78,13 @@ def _execute_run(config_path: Path, *, no_judge: bool, has_terminal: bool) -> No
         if has_terminal
         else PlainStatusDisplay(run_log=run_log)
     )
-    summary = run(
-        config_path, status_display=display, run_log=run_log, no_judge=no_judge
-    )
+    return run(config_path, status_display=display, run_log=run_log, no_judge=no_judge)
 
-    print(render_completion_summary(summary))
 
-    data_paths = resolve_data_paths(home)
+def _run_post_run_maintenance(settings_dir: Path) -> None:
+    from application_pipeline.maintenance import run_maintenance
+
+    data_paths = resolve_data_paths(settings_dir)
     try:
         run_maintenance(data_paths.logs_path, data_paths.failures_path)
     except Exception:

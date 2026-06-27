@@ -137,6 +137,139 @@ def test_run_startup_prints_completion_summary_from_orchestrator_run_summary(
     )
 
 
+def test_run_startup_runs_maintenance_after_emitting_summary_with_settings_dirs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings_dir = _write_settings_dir(tmp_path, with_operator_credential=True)
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: _fake_summary(),
+    )
+
+    def fake_maintenance(logs_dir: Path, failures_dir: Path) -> None:
+        observed["logs_dir"] = logs_dir
+        observed["failures_dir"] = failures_dir
+        observed["stdout_before_maintenance"] = capsys.readouterr().out
+
+    monkeypatch.setattr(
+        "application_pipeline.maintenance.run_maintenance",
+        fake_maintenance,
+    )
+
+    run_startup(
+        StartupRequest(
+            cwd=tmp_path,
+            mode="run",
+            no_judge=False,
+            has_terminal=False,
+        )
+    )
+
+    assert observed == {
+        "logs_dir": settings_dir / ".runtime-data" / "logs",
+        "failures_dir": settings_dir / ".runtime-data" / "failures",
+        "stdout_before_maintenance": (
+            "run complete:"
+            "  discovered=3"
+            "  skipped=1"
+            "  prefilter_dropped=1"
+            "  classifier_dropped=1"
+            "  written=2"
+            "  enrich_failed=0"
+            "  errored=0"
+            "  classify_items=3"
+            "  duration=1.5s\n"
+        ),
+    }
+
+
+def test_run_startup_skips_maintenance_when_orchestrator_does_not_return_run_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+    maintenance_called = False
+
+    class SummaryLike:
+        discovered = 3
+        skipped = 1
+        prefilter_dropped = 1
+        classifier_dropped = 1
+        written = 2
+        enrich_failed = 0
+        errored = 0
+        classify_items = 3
+        duration_seconds = 1.5
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: SummaryLike(),
+    )
+
+    def fake_maintenance(*_args: object, **_kwargs: object) -> None:
+        nonlocal maintenance_called
+        maintenance_called = True
+
+    monkeypatch.setattr(
+        "application_pipeline.maintenance.run_maintenance",
+        fake_maintenance,
+    )
+
+    with pytest.raises(TypeError, match="RunSummary"):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert maintenance_called is False
+
+
+def test_run_startup_suppresses_maintenance_exception_after_successful_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: _fake_summary(),
+    )
+    monkeypatch.setattr(
+        "application_pipeline.maintenance.run_maintenance",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("maintenance exploded")),
+    )
+
+    run_startup(
+        StartupRequest(
+            cwd=tmp_path,
+            mode="run",
+            no_judge=False,
+            has_terminal=False,
+        )
+    )
+
+    assert capsys.readouterr().out == (
+        "run complete:"
+        "  discovered=3"
+        "  skipped=1"
+        "  prefilter_dropped=1"
+        "  classifier_dropped=1"
+        "  written=2"
+        "  enrich_failed=0"
+        "  errored=0"
+        "  classify_items=3"
+        "  duration=1.5s\n"
+    )
+
+
 def test_startup_runner_without_config_exits_2_with_guidance(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

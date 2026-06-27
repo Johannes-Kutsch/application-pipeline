@@ -100,6 +100,31 @@ def test_run_fails_at_startup_when_operator_credential_key_missing(
     assert "OPENCODE_GO_API_KEY" in stderr
 
 
+def test_run_ignores_shell_exported_operator_credential_without_settings_env(
+    tmp_path: Path,
+) -> None:
+    """A shell-exported Operator Credential does not bypass the local settings-dir file requirement."""
+    home = tmp_path / "application-pipeline"
+    _minimal_config(home)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "application_pipeline", "run"],
+        cwd=str(tmp_path),
+        env={
+            **os.environ,
+            "PYTHONPATH": _PYTHONPATH,
+            "OPENCODE_GO_API_KEY": "from-shell",
+        },
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    stderr = result.stderr + result.stdout
+    assert ".env" in stderr
+    assert "OPENCODE_GO_API_KEY" in stderr
+
+
 def test_cron_fails_at_startup_when_operator_credential_missing(
     tmp_path: Path,
 ) -> None:

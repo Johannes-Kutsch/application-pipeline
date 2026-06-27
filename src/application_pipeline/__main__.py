@@ -4,11 +4,6 @@ import logging
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv(Path.home() / ".env")
-
-
 logging.basicConfig(
     stream=sys.stderr,
     level=logging.INFO,

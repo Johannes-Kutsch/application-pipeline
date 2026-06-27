@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict
 
@@ -40,19 +40,30 @@ class ContentPoolCandidate(TypedDict):
 @dataclass(frozen=True)
 class ContentPoolDocument:
     _items: dict[str, PoolItem]
+    _candidates_by_slot: dict[str, tuple[ContentPoolCandidate, ...]] = field(
+        init=False,
+        default_factory=dict,
+    )
+
+    def __post_init__(self) -> None:
+        candidates_by_slot = {
+            slot_name: tuple(
+                ContentPoolCandidate(
+                    name=name,
+                    always=item["always"],
+                    group=item["group"],
+                    relevance=item["relevance"],
+                )
+                for name, item in self._items.items()
+                if _SECTION_TO_SLOT.get(item["section"]) == slot_name
+            )
+            for slot_name in _RESUME_SLOT_NAMES
+        }
+        object.__setattr__(self, "_candidates_by_slot", candidates_by_slot)
 
     def candidates(self, slot_name: str) -> list[ContentPoolCandidate]:
         _validate_slot_name(slot_name)
-        return [
-            ContentPoolCandidate(
-                name=name,
-                always=item["always"],
-                group=item["group"],
-                relevance=item["relevance"],
-            )
-            for name, item in self._items.items()
-            if _SECTION_TO_SLOT.get(item["section"]) == slot_name
-        ]
+        return list(self._candidates_by_slot[slot_name])
 
 
 def load(path: Path) -> ContentPoolDocument:

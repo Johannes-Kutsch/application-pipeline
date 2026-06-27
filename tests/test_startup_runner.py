@@ -190,6 +190,7 @@ def test_run_startup_runs_maintenance_after_emitting_summary_with_settings_dirs(
 def test_run_startup_skips_maintenance_when_orchestrator_does_not_return_run_summary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _write_settings_dir(tmp_path, with_operator_credential=True)
     maintenance_called = False
@@ -219,17 +220,28 @@ def test_run_startup_skips_maintenance_when_orchestrator_does_not_return_run_sum
         fake_maintenance,
     )
 
-    with pytest.raises(TypeError, match="RunSummary"):
-        run_startup(
-            StartupRequest(
-                cwd=tmp_path,
-                mode="run",
-                no_judge=False,
-                has_terminal=False,
-            )
+    run_startup(
+        StartupRequest(
+            cwd=tmp_path,
+            mode="run",
+            no_judge=False,
+            has_terminal=False,
         )
+    )
 
     assert maintenance_called is False
+    assert capsys.readouterr().out == (
+        "run complete:"
+        "  discovered=3"
+        "  skipped=1"
+        "  prefilter_dropped=1"
+        "  classifier_dropped=1"
+        "  written=2"
+        "  enrich_failed=0"
+        "  errored=0"
+        "  classify_items=3"
+        "  duration=1.5s\n"
+    )
 
 
 def test_run_startup_suppresses_maintenance_exception_after_successful_summary(
@@ -268,6 +280,41 @@ def test_run_startup_suppresses_maintenance_exception_after_successful_summary(
         "  classify_items=3"
         "  duration=1.5s\n"
     )
+
+
+def test_run_startup_skips_maintenance_when_orchestrator_run_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+    maintenance_called = False
+
+    def fake_maintenance(*_args: object, **_kwargs: object) -> None:
+        nonlocal maintenance_called
+        maintenance_called = True
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("run failed")),
+    )
+    monkeypatch.setattr(
+        "application_pipeline.maintenance.run_maintenance",
+        fake_maintenance,
+    )
+
+    with pytest.raises(RuntimeError, match="run failed"):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert maintenance_called is False
+    assert capsys.readouterr().out == ""
 
 
 def test_startup_runner_without_config_exits_2_with_guidance(

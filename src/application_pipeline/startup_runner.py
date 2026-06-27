@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from application_pipeline.config import resolve_data_paths
 from application_pipeline.parser_log import RunLog
@@ -21,6 +21,35 @@ class StartupRequest:
     has_terminal: bool
 
 
+class CompletionSummary(Protocol):
+    @property
+    def discovered(self) -> int: ...
+
+    @property
+    def skipped(self) -> int: ...
+
+    @property
+    def prefilter_dropped(self) -> int: ...
+
+    @property
+    def classifier_dropped(self) -> int: ...
+
+    @property
+    def written(self) -> int: ...
+
+    @property
+    def enrich_failed(self) -> int: ...
+
+    @property
+    def errored(self) -> int: ...
+
+    @property
+    def classify_items(self) -> int: ...
+
+    @property
+    def duration_seconds(self) -> float: ...
+
+
 def run_startup(request: StartupRequest) -> None:
     config_path = _require_config_path(request.cwd)
     home = config_path.parent
@@ -36,11 +65,9 @@ def run_startup(request: StartupRequest) -> None:
         no_judge=request.no_judge,
         has_terminal=request.has_terminal,
     )
-    if not isinstance(summary, RunSummary):
-        raise TypeError("startup runner expected Orchestrator to return RunSummary")
-
     print(render_completion_summary(summary))
-    _run_post_run_maintenance(home)
+    if isinstance(summary, RunSummary):
+        _run_post_run_maintenance(home)
 
 
 def _require_config_path(cwd: Path) -> Path:
@@ -68,7 +95,7 @@ def _require_operator_credential(settings_dir: Path) -> None:
 
 def _execute_run(
     config_path: Path, *, no_judge: bool, has_terminal: bool
-) -> RunSummary | object:
+) -> CompletionSummary:
     from application_pipeline.orchestrator import run
 
     home = config_path.parent
@@ -91,7 +118,7 @@ def _run_post_run_maintenance(settings_dir: Path) -> None:
         pass
 
 
-def render_completion_summary(summary: RunSummary) -> str:
+def render_completion_summary(summary: CompletionSummary) -> str:
     return (
         f"run complete:"
         f"  discovered={summary.discovered}"

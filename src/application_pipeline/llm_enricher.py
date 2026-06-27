@@ -22,6 +22,7 @@ from application_pipeline.llm.types import (
 from application_pipeline.malformed_classify_stash import (
     ListingDiagnosticFacts,
     stash_malformed_classify_artifact,
+    stash_malformed_classify_exception,
 )
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
@@ -113,7 +114,12 @@ class LLMEnricher:
                 error=str(exc),
             )
             for _, stub, _ in items:
-                self._stash_malformed(stub, exc, agent_runtime_log_path)
+                stash_malformed_classify_exception(
+                    filesystem_root=self._failures_dir,
+                    stub=stub,
+                    error=exc,
+                    agent_runtime_log_pointer=agent_runtime_log_path,
+                )
             return AppliedClassifyOutcome(
                 items=[
                     AppliedClassifyItemOutcome(state="retryable", event_matches=None)
@@ -203,25 +209,4 @@ class LLMEnricher:
             error_classification="malformed_classifier_verdict",
             error_message="malformed classifier verdict",
             agent_runtime_log_pointer=agent_runtime_log_path,
-        )
-
-    def _stash_malformed(
-        self,
-        stub: PositionStub,
-        exc: (
-            ExtractorBatchMalformedError
-            | ExtractorMalformedError
-            | ExtractorMalformedJSONError
-        ),
-        agent_runtime_log_path: "str | Path | None" = None,
-    ) -> None:
-        stash_malformed_classify_artifact(
-            filesystem_root=self._failures_dir,
-            listing=ListingDiagnosticFacts(
-                source=stub.source, url=stub.url, title=stub.title
-            ),
-            error_classification=type(exc).__name__,
-            error_message=str(exc),
-            agent_runtime_log_pointer=agent_runtime_log_path,
-            raw_model_output=getattr(exc, "raw_response", None),
         )

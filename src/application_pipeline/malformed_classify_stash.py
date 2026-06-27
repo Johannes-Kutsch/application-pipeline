@@ -3,7 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["ListingDiagnosticFacts", "stash_malformed_classify_artifact"]
+from application_pipeline.llm.types import (
+    ExtractorBatchMalformedError,
+    ExtractorMalformedError,
+    ExtractorMalformedJSONError,
+)
+from application_pipeline.parsers.types import PositionStub
+
+__all__ = [
+    "ListingDiagnosticFacts",
+    "stash_malformed_classify_artifact",
+    "stash_malformed_classify_exception",
+]
 
 
 @dataclass(frozen=True)
@@ -11,6 +22,11 @@ class ListingDiagnosticFacts:
     source: str
     url: str
     title: str | None = None
+
+
+MalformedClassifyError = (
+    ExtractorBatchMalformedError | ExtractorMalformedError | ExtractorMalformedJSONError
+)
 
 
 def stash_malformed_classify_artifact(
@@ -47,3 +63,24 @@ def stash_malformed_classify_artifact(
     markdown_path.write_text("\n".join(lines), encoding="utf-8")
 
     return markdown_path
+
+
+def stash_malformed_classify_exception(
+    *,
+    filesystem_root: Path,
+    stub: PositionStub,
+    error: MalformedClassifyError,
+    agent_runtime_log_pointer: str | Path | None = None,
+) -> Path:
+    return stash_malformed_classify_artifact(
+        filesystem_root=filesystem_root,
+        listing=ListingDiagnosticFacts(
+            source=stub.source,
+            url=stub.url,
+            title=stub.title,
+        ),
+        error_classification=type(error).__name__,
+        error_message=str(error),
+        agent_runtime_log_pointer=agent_runtime_log_pointer,
+        raw_model_output=getattr(error, "raw_response", None),
+    )

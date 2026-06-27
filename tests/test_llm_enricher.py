@@ -1004,6 +1004,55 @@ def test_enrich_malformed_stash_written_once_for_batch(
     assert len(stash_files) == 2, f"Expected 2 stash files, got {len(stash_files)}"
 
 
+def test_enrich_batch_malformed_exception_stashes_each_listing_identity(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorBatchMalformedError(
+        "batch response could not be parsed"
+    )
+    extractor.last_classify_log_path = _runtime_log_path(tmp_path)
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub1 = PositionStub(
+        url="https://example.com/job/a",
+        title="Job A",
+        source="src",
+    )
+    stub2 = PositionStub(
+        url="https://example.com/job/b",
+        title="Job B",
+        source="src",
+    )
+
+    result = enricher.enrich([(1, stub1, "body a"), (2, stub2, "body b")])
+
+    assert [item.state for item in result.items] == ["retryable", "retryable"]
+    malformed_dir = tmp_path / "failures" / "malformed"
+    assert (malformed_dir / "src-example.com-job-a.md").read_text(encoding="utf-8") == (
+        "**Source:** src\n"
+        "**URL:** https://example.com/job/a\n"
+        "**Title:** Job A\n"
+        "**Error Classification:** ExtractorBatchMalformedError\n"
+        "**Error:** batch response could not be parsed\n\n"
+        "## Agent Runtime Log\n\n"
+        f"{_runtime_log_path(tmp_path)}"
+    )
+    assert (malformed_dir / "src-example.com-job-b.md").read_text(encoding="utf-8") == (
+        "**Source:** src\n"
+        "**URL:** https://example.com/job/b\n"
+        "**Title:** Job B\n"
+        "**Error Classification:** ExtractorBatchMalformedError\n"
+        "**Error:** batch response could not be parsed\n\n"
+        "## Agent Runtime Log\n\n"
+        f"{_runtime_log_path(tmp_path)}"
+    )
+
+
 def test_enricher_fatal_provider_failure_propagates(
     tmp_path: Path,
     run_log: RunLog,

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from application_pipeline.llm.types import ExtractorMalformedError
 from application_pipeline.malformed_classify_stash import (
     ListingDiagnosticFacts,
     stash_malformed_classify_artifact,
+    stash_malformed_classify_exception,
 )
+from application_pipeline.parsers.types import PositionStub
 
 
 def _markdown_path(tmp_path: Path) -> Path:
@@ -190,4 +193,39 @@ def test_malformed_classify_stash_identifies_title_and_error_classification(
         "**Title:** Senior Platform Engineer\n"
         "**Error Classification:** ExtractorMalformedJSONError\n"
         "**Error:** classifier output could not be parsed"
+    )
+
+
+def test_malformed_classify_exception_uses_listing_and_error_details(
+    tmp_path: Path,
+) -> None:
+    runtime_log = tmp_path / "logs" / "llm" / "agent-runtime" / "classify" / "call.log"
+    stub = PositionStub(
+        url="https://example.com/job/42",
+        title="Senior Platform Engineer",
+        source="test_src",
+    )
+
+    stash_malformed_classify_exception(
+        filesystem_root=tmp_path / "failures",
+        stub=stub,
+        error=ExtractorMalformedError(
+            "header must be a non-empty string",
+            raw_response="<verdict>{bad json}</verdict>",
+        ),
+        agent_runtime_log_pointer=runtime_log,
+    )
+
+    assert _markdown_path(tmp_path).read_text(encoding="utf-8") == (
+        "**Source:** test_src\n"
+        "**URL:** https://example.com/job/42\n"
+        "**Title:** Senior Platform Engineer\n"
+        "**Error Classification:** ExtractorMalformedError\n"
+        "**Error:** header must be a non-empty string\n\n"
+        "## Agent Runtime Log\n\n"
+        f"{runtime_log}\n\n"
+        "## Raw Model Output\n\n"
+        "```text\n"
+        "<verdict>{bad json}</verdict>\n"
+        "```"
     )

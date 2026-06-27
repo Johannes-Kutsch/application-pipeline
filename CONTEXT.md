@@ -214,6 +214,8 @@ State at `<settings-dir>/.runtime-data/seen.json` (ADR-0028; synced via Syncthin
 
 Distributed via PyPI (ADR-0015). Install: `.venv/bin/pip install application-pipeline`, `init`, `bash setup/cron-install.sh`. Home dir hardcoded to `<cwd>/application-pipeline/` (ADR-0017).
 
+**Startup Runner**: Deep implementation behind `application-pipeline run [--no-judge]` and `application-pipeline cron [--no-judge]` that owns cwd-relative settings-dir discovery, missing Config exit-2 guidance, local Operator Credential preflight, cron Init Bootstrap refresh, Run Log and Status Display construction, Orchestrator invocation, completion-summary rendering, and best-effort post-run Maintenance. Caller-facing behavior stays the existing CLI surface plus one in-process startup request for tests. Cron differs from run only by explicit refresh-before-run policy. Startup failures surface naturally to stderr and do not write Failure Reports; parser-dead remains Parser Lifecycle behavior. _Avoid_: startup adapter, startup port, CLI helper, home env.
+
 - `application-pipeline run` reads `<cwd>/application-pipeline/config.py`.
 - `application-pipeline init [--refresh]` invokes **Init Bootstrap** to seed into `<cwd>/application-pipeline/` and tool-specific wrapper roots.
 - `application-pipeline compile-cv <app_dir>` compiles per-listing draft from slot-map. Windows paths normalized to POSIX for `\def\CvDataDir{...}` (ADR-0019, ADR-0018).

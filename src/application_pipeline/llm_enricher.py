@@ -223,4 +223,5 @@ class LLMEnricher:
             error_classification=type(exc).__name__,
             error_message=str(exc),
             agent_runtime_log_pointer=agent_runtime_log_path,
+            raw_model_output=getattr(exc, "raw_response", None),
         )

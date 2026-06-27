@@ -68,7 +68,7 @@ def test_malformed_classify_stash_writes_opaque_agent_runtime_log_pointer_text(
     assert not _raw_output_path(tmp_path).exists()
 
 
-def test_malformed_classify_stash_writes_raw_model_output_only_when_present(
+def test_malformed_classify_stash_includes_raw_model_output_as_diagnostic_content(
     tmp_path: Path,
 ) -> None:
     raw_model_output = "<verdict>{bad json}</verdict>"
@@ -87,9 +87,13 @@ def test_malformed_classify_stash_writes_raw_model_output_only_when_present(
         "**Source:** test_src\n"
         "**URL:** https://example.com/job/42\n"
         "**Error Classification:** ExtractorMalformedJSONError\n"
-        "**Error:** classifier output could not be parsed"
+        "**Error:** classifier output could not be parsed\n\n"
+        "## Raw Model Output\n\n"
+        "```text\n"
+        "<verdict>{bad json}</verdict>\n"
+        "```"
     )
-    assert _raw_output_path(tmp_path).read_text(encoding="utf-8") == raw_model_output
+    assert not _raw_output_path(tmp_path).exists()
 
 
 def test_malformed_classify_stash_reuses_listing_slug_for_http_urls(
@@ -107,6 +111,28 @@ def test_malformed_classify_stash_reuses_listing_slug_for_http_urls(
     assert (
         tmp_path / "failures" / "malformed" / "test_src-example.com-job-42.md"
     ).exists()
+
+
+def test_malformed_classify_stash_omits_whitespace_only_raw_model_output_section(
+    tmp_path: Path,
+) -> None:
+    stash_malformed_classify_artifact(
+        filesystem_root=tmp_path / "failures",
+        listing=ListingDiagnosticFacts(
+            source="test_src", url="https://example.com/job/42"
+        ),
+        error_classification="ExtractorMalformedJSONError",
+        error_message="classifier output could not be parsed",
+        raw_model_output=" \n\t ",
+    )
+
+    assert _markdown_path(tmp_path).read_text(encoding="utf-8") == (
+        "**Source:** test_src\n"
+        "**URL:** https://example.com/job/42\n"
+        "**Error Classification:** ExtractorMalformedJSONError\n"
+        "**Error:** classifier output could not be parsed"
+    )
+    assert not _raw_output_path(tmp_path).exists()
 
 
 def test_malformed_classify_stash_returns_written_markdown_path(tmp_path: Path) -> None:

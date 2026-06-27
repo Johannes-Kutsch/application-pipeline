@@ -42,10 +42,8 @@ def stash_malformed_classify_artifact(
     )
     if agent_runtime_log_pointer is not None:
         lines += ["", "## Agent Runtime Log", "", str(agent_runtime_log_pointer)]
+    if raw_model_output is not None and raw_model_output.strip():
+        lines += ["", "## Raw Model Output", "", "```text", raw_model_output, "```"]
     markdown_path.write_text("\n".join(lines), encoding="utf-8")
-
-    if raw_model_output is not None:
-        raw_output_path = stash_dir / f"{listing.source}-{slug}.txt"
-        raw_output_path.write_text(raw_model_output, encoding="utf-8")
 
     return markdown_path

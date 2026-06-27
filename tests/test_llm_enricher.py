@@ -370,8 +370,9 @@ def test_enricher_malformed_error_produces_retryable_md_file_with_runtime_log_re
     assert "https://example.com/job/99" in content
     assert error_msg in content
     assert str(runtime_log) in content
+    assert "## Raw Model Output" in content
+    assert raw_resp in content
     assert prompt_text not in content
-    assert raw_resp not in content
     assert body not in content
 
 

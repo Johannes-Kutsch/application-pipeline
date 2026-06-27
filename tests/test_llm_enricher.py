@@ -1096,14 +1096,29 @@ def test_enrich_batch_malformed_exception_stashes_each_listing_identity(
     )
 
 
-def test_enrich_short_malformed_batch_keeps_every_listing_retryable(
+@pytest.mark.parametrize(
+    "raw_verdicts",
+    [
+        pytest.param([None], id="short"),
+        pytest.param(
+            [
+                RelevanceVerdict(matches=False),
+                RelevanceVerdict(matches=False),
+                RelevanceVerdict(matches=False),
+            ],
+            id="long",
+        ),
+    ],
+)
+def test_enrich_malformed_batch_length_mismatch_keeps_every_listing_retryable(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
+    raw_verdicts: list[RelevanceVerdict | None],
 ) -> None:
     runtime_log = _runtime_log_path(tmp_path)
     extractor = MagicMock()
-    extractor.classify_relevance.return_value = [None]
+    extractor.classify_relevance.return_value = raw_verdicts
     extractor.last_classify_log_path = runtime_log
 
     enricher, dedup = _make_enricher_with_dedup(

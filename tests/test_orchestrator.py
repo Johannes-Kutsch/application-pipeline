@@ -1774,6 +1774,82 @@ def test_malformed_per_listing_classifier_verdict_stashes_malformed_and_leaves_u
     assert len(malformed_files) == 2
 
 
+def test_malformed_batch_classifier_response_stashes_each_listing_and_skips_pool_admission(
+    tmp_path: Path,
+) -> None:
+    seen_path = tmp_path / ".seen.json"
+    card_store = _make_card_store(tmp_path)
+
+    class _ShortBatchExtractor:
+        def classify_relevance(
+            self, items: list[ClassifyItem]
+        ) -> list[RelevanceVerdict | None]:
+            return [None]
+
+        def judge_top_n(self, candidates: list[JudgeCandidate]) -> list[MatchVerdict]:
+            return []
+
+    summary = run(
+        _write_config(
+            tmp_path,
+            sources='[SourceEntry(parser_type="bundesagentur_api")]',
+            keywords='["python"]',
+            locations='["Hamburg"]',
+            include_remote=False,
+            classify_batch_size=2,
+        ),
+        extractor=_ShortBatchExtractor(),
+        card_store=card_store,
+        parser_registry=lambda _: _TwoStubParser,  # type: ignore[return-value, arg-type]
+        dedup_store=dedup_module.load(seen_path, card_store=card_store),
+    )
+
+    assert summary.enrich_failed == 2
+    assert summary.written == 0
+    assert summary.classify_items == 2
+    assert card_store.get(1) is None
+    assert card_store.get(2) is None
+
+    seen_data = (
+        json.loads(seen_path.read_text(encoding="utf-8")) if seen_path.exists() else {}
+    )
+    assert not any(_ERR_URLS[0] in row.get("urls", []) for row in seen_data.values())
+    assert not any(_ERR_URLS[1] in row.get("urls", []) for row in seen_data.values())
+
+    malformed_dir = tmp_path / ".runtime-data" / "failures" / "malformed"
+    assert (malformed_dir / "stub-stub.example-err-0.md").exists()
+    assert (malformed_dir / "stub-stub.example-err-1.md").exists()
+
+    classify_rows = [
+        json.loads(line)
+        for line in (
+            tmp_path
+            / ".runtime-data"
+            / "logs"
+            / "llm"
+            / "classify_relevance.events.jsonl"
+        )
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert [row.get("matches") for row in classify_rows] == [None, None]
+
+    llm_rows = [
+        json.loads(line)
+        for line in (
+            tmp_path / ".runtime-data" / "logs" / "llm" / "enricher.events.jsonl"
+        )
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    malformed_rows = [
+        row for row in llm_rows if row.get("event") == "classify_malformed"
+    ]
+    assert len(malformed_rows) == 1
+
+
 def test_per_stub_http_error_on_enrich_increments_enrich_failed_and_continues(
     tmp_path: Path,
 ) -> None:

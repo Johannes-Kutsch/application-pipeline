@@ -1,9 +1,11 @@
 import textwrap
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from application_pipeline.content_pool import ContentPoolError, load, parse
+from application_pipeline.content_pool.parser import ContentPoolDocument
 
 _FIXTURE = textwrap.dedent("""\
     % ===== Berufserfahrung =====
@@ -76,6 +78,20 @@ def test_malformed_relevance_raises_named_error(tmp_path: Path) -> None:
 
     with pytest.raises(ContentPoolError, match="itemProjectBad"):
         parse(p)
+
+
+def test_candidates_raise_named_error_for_malformed_relevance_on_projection() -> None:
+    with pytest.raises(ContentPoolError, match="itemProjectBad"):
+        ContentPoolDocument(
+            {
+                "itemProjectBad": {
+                    "section": "Projekte",
+                    "always": False,
+                    "group": None,
+                    "relevance": cast(Any, {"mle": "urgent"}),
+                }
+            }
+        )
 
 
 def test_load_projects_resume_slot_candidates_in_authored_order(pool_tex: Path) -> None:

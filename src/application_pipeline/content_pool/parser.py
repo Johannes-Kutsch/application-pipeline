@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypedDict
+from typing import Literal, Mapping, TypedDict, cast
 
 from application_pipeline.cv_slot_contract import SLOT_NAME_SET
 
@@ -23,18 +23,21 @@ _SECTION_TO_SLOT = {
 _RESUME_SLOT_NAMES = frozenset(_SECTION_TO_SLOT.values())
 
 
+RelevanceLevel = Literal["high", "medium", "low"]
+
+
 class PoolItem(TypedDict):
     section: str
     always: bool
     group: str | None
-    relevance: dict[str, str]
+    relevance: dict[str, RelevanceLevel]
 
 
 class ContentPoolCandidate(TypedDict):
     name: str
     always: bool
     group: str | None
-    relevance: dict[str, str]
+    relevance: dict[str, RelevanceLevel]
 
 
 @dataclass(frozen=True)
@@ -52,7 +55,7 @@ class ContentPoolDocument:
                     name=name,
                     always=item["always"],
                     group=item["group"],
-                    relevance=item["relevance"],
+                    relevance=_validate_relevance_mapping(item["relevance"], name),
                 )
                 for name, item in self._items.items()
                 if _SECTION_TO_SLOT.get(item["section"]) == slot_name
@@ -83,7 +86,7 @@ def parse(path: Path) -> dict[str, PoolItem]:
     current_item: str | None = None
     always = False
     group: str | None = None
-    relevance: dict[str, str] = {}
+    relevance: dict[str, RelevanceLevel] = {}
 
     def commit() -> None:
         nonlocal current_item
@@ -119,13 +122,26 @@ def parse(path: Path) -> dict[str, PoolItem]:
     return result
 
 
-def _parse_relevance(raw: str, macro_name: str) -> dict[str, str]:
-    out: dict[str, str] = {}
+def _parse_relevance(raw: str, macro_name: str) -> dict[str, RelevanceLevel]:
+    out: dict[str, RelevanceLevel] = {}
     for entry in raw.split(","):
         m = _RELEVANCE_ENTRY_RE.match(entry)
         if not m:
             raise ContentPoolError(
                 f"malformed relevance entry for {macro_name!r}: {entry.strip()!r}"
             )
-        out[m.group(1)] = m.group(2)
+        out[m.group(1)] = cast(RelevanceLevel, m.group(2))
+    return out
+
+
+def _validate_relevance_mapping(
+    relevance: Mapping[str, str], macro_name: str
+) -> dict[str, RelevanceLevel]:
+    out: dict[str, RelevanceLevel] = {}
+    for topic, level in relevance.items():
+        if level not in {"high", "medium", "low"}:
+            raise ContentPoolError(
+                f"malformed relevance entry for {macro_name!r}: {topic}={level!r}"
+            )
+        out[topic] = cast(RelevanceLevel, level)
     return out

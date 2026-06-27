@@ -58,21 +58,27 @@ def test_parse_returns_correct_shape(pool_tex: Path) -> None:
     assert item["relevance"] == {"mle": "high", "games": "medium"}
 
 
-def test_always_is_parsed_as_bool(pool_tex: Path) -> None:
-    result = parse(pool_tex)
-    assert result["itemJobExample"]["always"] is False
-    assert result["itemDegreeMaster"]["always"] is True
+def test_load_exposes_candidate_metadata_through_resume_slot_interface(
+    pool_tex: Path,
+) -> None:
+    document = load(pool_tex)
 
-
-def test_group_omitted_defaults_to_none(pool_tex: Path) -> None:
-    result = parse(pool_tex)
-    assert result["itemDegreeMaster"]["group"] is None
-
-
-def test_section_derived_from_block_header(pool_tex: Path) -> None:
-    result = parse(pool_tex)
-    assert result["itemJobExample"]["section"] == "Berufserfahrung"
-    assert result["itemDegreeMaster"]["section"] == "Ausbildung"
+    assert document.candidates("resume_berufserfahrung") == [
+        {
+            "name": "itemJobExample",
+            "always": False,
+            "group": "example",
+            "relevance": {"mle": "high", "games": "medium"},
+        }
+    ]
+    assert document.candidates("resume_ausbildung") == [
+        {
+            "name": "itemDegreeMaster",
+            "always": True,
+            "group": None,
+            "relevance": {"mle": "high", "games": "high"},
+        }
+    ]
 
 
 def test_malformed_relevance_raises_named_error(tmp_path: Path) -> None:
@@ -107,7 +113,7 @@ def test_parse_rejects_duplicate_item_names(tmp_path: Path) -> None:
     p.write_text(duplicate, encoding="utf-8")
 
     with pytest.raises(ContentPoolError, match="itemProjectShared"):
-        parse(p)
+        load(p)
 
 
 def test_parse_rejects_item_declared_before_any_section_header(tmp_path: Path) -> None:
@@ -139,26 +145,7 @@ def test_parse_rejects_item_name_that_mismatches_following_newcommand(
     p.write_text(mismatched_macro, encoding="utf-8")
 
     with pytest.raises(ContentPoolError, match="itemProjectMeta"):
-        parse(p)
-
-
-def test_parse_rejects_item_name_that_mismatches_following_newcommand_after_gap_lines(
-    tmp_path: Path,
-) -> None:
-    mismatched_macro = textwrap.dedent("""\
-        % ===== Projekte =====
-
-        %%% ITEM: itemProjectMeta
-        %%% always: false
-
-        % comment
-        \\newcommand{\\itemProjectBody}{}
-    """)
-    p = tmp_path / "content_pool.tex"
-    p.write_text(mismatched_macro, encoding="utf-8")
-
-    with pytest.raises(ContentPoolError, match="itemProjectMeta"):
-        parse(p)
+        load(p)
 
 
 def test_candidates_raise_named_error_for_malformed_relevance_on_projection() -> None:

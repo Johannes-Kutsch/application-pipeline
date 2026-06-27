@@ -114,7 +114,7 @@ class ContentPoolDocument:
 
 
 def load(path: Path) -> ContentPoolDocument:
-    return ContentPoolDocument(parse(path))
+    return ContentPoolDocument(_parse_items(path))
 
 
 def _validate_slot_name(slot_name: str) -> None:
@@ -125,6 +125,10 @@ def _validate_slot_name(slot_name: str) -> None:
 
 
 def parse(path: Path) -> dict[str, PoolItem]:
+    return _parse_items(path)
+
+
+def _parse_items(path: Path) -> dict[str, PoolItem]:
     result: dict[str, PoolItem] = {}
     current_section: str | None = None
     current_item: str | None = None

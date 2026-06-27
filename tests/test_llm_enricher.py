@@ -461,6 +461,49 @@ def test_enricher_malformed_json_error_includes_raw_model_output_without_prompt_
     assert body not in content
 
 
+def test_enricher_malformed_exception_stashes_sanitized_raw_output(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    runtime_log = _runtime_log_path(tmp_path)
+    body = "DISTINCTIVE RAW DESCRIPTION BODY 1053"
+    prompt_text = "PROMPT TEXT 1053"
+    useful_raw_output = "provider note: trailing comma near summary field"
+    raw_resp = (
+        f"<verdict>{{bad json}}</verdict>\n{useful_raw_output}\n{prompt_text}\n{body}"
+    )
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorMalformedError(
+        "classify_relevance: malformed verdict payload",
+        prompt=prompt_text,
+        raw_response=raw_resp,
+    )
+    extractor.last_classify_log_path = runtime_log
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/sanitized-raw-output",
+        title="Software Engineer",
+        source="test_src",
+    )
+
+    result = enricher.enrich([(99, stub, body)])
+
+    assert [item.state for item in result.items] == ["retryable"]
+
+    content = _read_malformed_stash(
+        tmp_path, "test_src", "example.com-job-sanitized-raw-output"
+    )
+    assert "## Raw Model Output" in content
+    assert "<verdict>{bad json}</verdict>" in content
+    assert useful_raw_output in content
+    assert prompt_text not in content
+    assert body not in content
+
+
 def test_enricher_batch_malformed_stash_references_agent_runtime_log(
     tmp_path: Path,
     run_log: RunLog,

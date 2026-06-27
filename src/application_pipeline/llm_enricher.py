@@ -112,12 +112,13 @@ class LLMEnricher:
                 source=items[0][1].source,
                 error=str(exc),
             )
-            for _, stub, _ in items:
+            for _, stub, body in items:
                 stash_malformed_classify_exception(
                     filesystem_root=self._failures_dir,
                     stub=stub,
                     error=exc,
                     agent_runtime_log_pointer=agent_runtime_log_path,
+                    raw_description=body,
                 )
             return AppliedClassifyOutcome(
                 items=[

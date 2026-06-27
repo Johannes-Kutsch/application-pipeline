@@ -48,6 +48,12 @@ class ContentPoolDocument:
         init=False,
         default_factory=dict,
     )
+    _grouped_candidates_by_slot: dict[
+        str, dict[str, tuple[ContentPoolCandidate, ...]]
+    ] = field(
+        init=False,
+        default_factory=dict,
+    )
 
     def __post_init__(self) -> None:
         candidates_by_slot = {
@@ -63,11 +69,27 @@ class ContentPoolDocument:
             )
             for slot_name in _RESUME_SLOT_NAMES
         }
+        grouped_candidates_by_slot = {
+            slot_name: _group_candidates(candidates)
+            for slot_name, candidates in candidates_by_slot.items()
+        }
         object.__setattr__(self, "_candidates_by_slot", candidates_by_slot)
+        object.__setattr__(
+            self, "_grouped_candidates_by_slot", grouped_candidates_by_slot
+        )
 
     def candidates(self, slot_name: str) -> list[ContentPoolCandidate]:
         _validate_slot_name(slot_name)
         return list(self._candidates_by_slot[slot_name])
+
+    def grouped_candidates(
+        self, slot_name: str
+    ) -> dict[str, list[ContentPoolCandidate]]:
+        _validate_slot_name(slot_name)
+        return {
+            group: list(candidates)
+            for group, candidates in self._grouped_candidates_by_slot[slot_name].items()
+        }
 
 
 def load(path: Path) -> ContentPoolDocument:
@@ -155,3 +177,15 @@ def _validate_relevance_mapping(
             )
         out[topic] = cast(RelevanceLevel, level)
     return out
+
+
+def _group_candidates(
+    candidates: tuple[ContentPoolCandidate, ...],
+) -> dict[str, tuple[ContentPoolCandidate, ...]]:
+    grouped: dict[str, list[ContentPoolCandidate]] = {}
+    for candidate in candidates:
+        group = candidate["group"]
+        if group is None:
+            continue
+        grouped.setdefault(group, []).append(candidate)
+    return {group: tuple(items) for group, items in grouped.items()}

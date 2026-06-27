@@ -259,3 +259,99 @@ def test_candidates_expose_empty_relevance_mapping_when_omitted(pool_tex: Path) 
             "relevance": {},
         }
     ]
+
+
+def test_grouped_candidates_expose_alternatives_in_authored_order(
+    pool_tex: Path,
+) -> None:
+    pool_tex.write_text(
+        textwrap.dedent("""\
+            % ===== Projekte =====
+
+            %%% ITEM: itemProjectVariantA
+            %%% always: false
+            %%% group: project-summary
+            %%% relevance: mle=high
+            \\newcommand{\\itemProjectVariantA}{}
+
+            %%% ITEM: itemProjectStandalone
+            %%% always: true
+            %%% relevance: games=medium
+            \\newcommand{\\itemProjectStandalone}{}
+
+            %%% ITEM: itemProjectVariantB
+            %%% always: false
+            %%% group: project-summary
+            %%% relevance: mle=medium
+            \\newcommand{\\itemProjectVariantB}{}
+        """),
+        encoding="utf-8",
+    )
+
+    document = load(pool_tex)
+
+    assert document.grouped_candidates("resume_projekte") == {
+        "project-summary": [
+            {
+                "name": "itemProjectVariantA",
+                "always": False,
+                "group": "project-summary",
+                "relevance": {"mle": "high"},
+            },
+            {
+                "name": "itemProjectVariantB",
+                "always": False,
+                "group": "project-summary",
+                "relevance": {"mle": "medium"},
+            },
+        ]
+    }
+
+
+def test_ungrouped_candidates_remain_ordinary_and_are_not_synthesized_into_groups(
+    pool_tex: Path,
+) -> None:
+    pool_tex.write_text(
+        textwrap.dedent("""\
+            % ===== Projekte =====
+
+            %%% ITEM: itemProjectGrouped
+            %%% always: false
+            %%% group: project-summary
+            %%% relevance: mle=high
+            \\newcommand{\\itemProjectGrouped}{}
+
+            %%% ITEM: itemProjectStandalone
+            %%% always: true
+            %%% relevance: games=medium
+            \\newcommand{\\itemProjectStandalone}{}
+        """),
+        encoding="utf-8",
+    )
+
+    document = load(pool_tex)
+
+    assert document.candidates("resume_projekte") == [
+        {
+            "name": "itemProjectGrouped",
+            "always": False,
+            "group": "project-summary",
+            "relevance": {"mle": "high"},
+        },
+        {
+            "name": "itemProjectStandalone",
+            "always": True,
+            "group": None,
+            "relevance": {"games": "medium"},
+        },
+    ]
+    assert document.grouped_candidates("resume_projekte") == {
+        "project-summary": [
+            {
+                "name": "itemProjectGrouped",
+                "always": False,
+                "group": "project-summary",
+                "relevance": {"mle": "high"},
+            }
+        ]
+    }

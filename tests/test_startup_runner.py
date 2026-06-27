@@ -427,41 +427,64 @@ def test_cron_startup_runner_refreshes_workspace_before_run(
     assert "run complete:" in out
 
 
-def test_cron_startup_runner_refreshes_before_run_and_keeps_success_path_behavior(
+def test_run_startup_runner_does_not_refresh_workspace_before_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_dir = _write_settings_dir(
+        tmp_path, with_operator_credential=True, with_layout=True
+    )
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: _fake_summary(),
+    )
+    monkeypatch.setattr(
+        "application_pipeline.maintenance.run_maintenance",
+        lambda *_a, **_kw: None,
+    )
+
+    run_startup(
+        StartupRequest(
+            cwd=tmp_path,
+            mode="run",
+            no_judge=False,
+            has_terminal=False,
+        )
+    )
+
+    assert (settings_dir / "layout.py").exists()
+
+
+def test_cron_startup_runner_keeps_success_path_behavior_after_refresh(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     settings_dir = _write_settings_dir(tmp_path, with_operator_credential=True)
-    observed: dict[str, object] = {"events": []}
-
-    class SummaryLike:
-        discovered = 3
-        skipped = 1
-        prefilter_dropped = 1
-        classifier_dropped = 1
-        written = 2
-        enrich_failed = 0
-        errored = 0
-        classify_items = 3
-        duration_seconds = 1.5
+    events: list[tuple[object, ...]] = []
 
     def fake_init(cwd: Path, *, refresh: bool) -> None:
-        observed["events"] = [*observed["events"], ("init", cwd, refresh)]
+        events.append(("init", cwd, refresh))
 
-    def fake_run(config_path: Path, **kwargs: object) -> SummaryLike:
-        observed["events"] = [
-            *observed["events"],
-            ("run", config_path, kwargs["no_judge"]),
-        ]
-        return SummaryLike()
+    def fake_run(config_path: Path, **kwargs: object) -> RunSummary:
+        events.append(("run", config_path, kwargs["no_judge"]))
+        return _fake_summary()
 
     def fake_maintenance(logs_dir: Path, failures_dir: Path) -> None:
-        observed["events"] = [
-            *observed["events"],
-            ("maintenance", logs_dir, failures_dir),
-        ]
-        observed["stdout_before_maintenance"] = capsys.readouterr().out
+        events.append(("maintenance", logs_dir, failures_dir))
+        stdout_before_maintenance = capsys.readouterr().out
+        assert stdout_before_maintenance == (
+            "run complete:"
+            "  discovered=3"
+            "  skipped=1"
+            "  prefilter_dropped=1"
+            "  classifier_dropped=1"
+            "  written=2"
+            "  enrich_failed=0"
+            "  errored=0"
+            "  classify_items=3"
+            "  duration=1.5s\n"
+        )
 
     monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
     monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
@@ -479,29 +502,15 @@ def test_cron_startup_runner_refreshes_before_run_and_keeps_success_path_behavio
         )
     )
 
-    assert observed == {
-        "events": [
-            ("init", tmp_path, True),
-            ("run", settings_dir / "config.py", True),
-            (
-                "maintenance",
-                settings_dir / ".runtime-data" / "logs",
-                settings_dir / ".runtime-data" / "failures",
-            ),
-        ],
-        "stdout_before_maintenance": (
-            "run complete:"
-            "  discovered=3"
-            "  skipped=1"
-            "  prefilter_dropped=1"
-            "  classifier_dropped=1"
-            "  written=2"
-            "  enrich_failed=0"
-            "  errored=0"
-            "  classify_items=3"
-            "  duration=1.5s\n"
+    assert events == [
+        ("init", tmp_path, True),
+        ("run", settings_dir / "config.py", True),
+        (
+            "maintenance",
+            settings_dir / ".runtime-data" / "logs",
+            settings_dir / ".runtime-data" / "failures",
         ),
-    }
+    ]
 
 
 def test_startup_runner_uses_plain_status_display_without_terminal(

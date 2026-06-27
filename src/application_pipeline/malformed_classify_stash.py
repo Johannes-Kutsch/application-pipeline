@@ -14,6 +14,7 @@ __all__ = [
     "ListingDiagnosticFacts",
     "stash_malformed_classify_artifact",
     "stash_malformed_classify_exception",
+    "stash_malformed_classify_listing",
     "stash_malformed_classify_verdict",
 ]
 
@@ -66,13 +67,22 @@ def stash_malformed_classify_artifact(
     return markdown_path
 
 
-def stash_malformed_classify_exception(
+def stash_malformed_classify_listing(
     *,
     filesystem_root: Path,
     stub: PositionStub,
-    error: MalformedClassifyError,
+    error: MalformedClassifyError | None = None,
     agent_runtime_log_pointer: str | Path | None = None,
 ) -> Path:
+    if error is None:
+        error_classification = "malformed_classifier_verdict"
+        error_message = "malformed classifier verdict"
+        raw_model_output = None
+    else:
+        error_classification = type(error).__name__
+        error_message = str(error)
+        raw_model_output = getattr(error, "raw_response", None)
+
     return stash_malformed_classify_artifact(
         filesystem_root=filesystem_root,
         listing=ListingDiagnosticFacts(
@@ -80,10 +90,25 @@ def stash_malformed_classify_exception(
             url=stub.url,
             title=stub.title,
         ),
-        error_classification=type(error).__name__,
-        error_message=str(error),
+        error_classification=error_classification,
+        error_message=error_message,
         agent_runtime_log_pointer=agent_runtime_log_pointer,
-        raw_model_output=getattr(error, "raw_response", None),
+        raw_model_output=raw_model_output,
+    )
+
+
+def stash_malformed_classify_exception(
+    *,
+    filesystem_root: Path,
+    stub: PositionStub,
+    error: MalformedClassifyError,
+    agent_runtime_log_pointer: str | Path | None = None,
+) -> Path:
+    return stash_malformed_classify_listing(
+        filesystem_root=filesystem_root,
+        stub=stub,
+        error=error,
+        agent_runtime_log_pointer=agent_runtime_log_pointer,
     )
 
 
@@ -93,14 +118,8 @@ def stash_malformed_classify_verdict(
     stub: PositionStub,
     agent_runtime_log_pointer: str | Path | None = None,
 ) -> Path:
-    return stash_malformed_classify_artifact(
+    return stash_malformed_classify_listing(
         filesystem_root=filesystem_root,
-        listing=ListingDiagnosticFacts(
-            source=stub.source,
-            url=stub.url,
-            title=stub.title,
-        ),
-        error_classification="malformed_classifier_verdict",
-        error_message="malformed classifier verdict",
+        stub=stub,
         agent_runtime_log_pointer=agent_runtime_log_pointer,
     )

@@ -55,6 +55,10 @@ class ContentPoolDocument:
         init=False,
         default_factory=dict,
     )
+    _candidate_names_by_slot: dict[str, frozenset[str]] = field(
+        init=False,
+        default_factory=dict,
+    )
 
     def __post_init__(self) -> None:
         candidates_by_slot = {
@@ -74,10 +78,17 @@ class ContentPoolDocument:
             slot_name: _group_candidates(candidates)
             for slot_name, candidates in candidates_by_slot.items()
         }
+        candidate_names_by_slot = {
+            slot_name: frozenset(
+                candidate["name"] for candidate in candidates_by_slot[slot_name]
+            )
+            for slot_name in _RESUME_SLOT_NAMES
+        }
         object.__setattr__(self, "_candidates_by_slot", candidates_by_slot)
         object.__setattr__(
             self, "_grouped_candidates_by_slot", grouped_candidates_by_slot
         )
+        object.__setattr__(self, "_candidate_names_by_slot", candidate_names_by_slot)
 
     def candidates(self, slot_name: str) -> list[ContentPoolCandidate]:
         _validate_slot_name(slot_name)
@@ -94,11 +105,8 @@ class ContentPoolDocument:
 
     def render_selection(self, slot_name: str, item_names: list[str]) -> str:
         _validate_slot_name(slot_name)
-        candidate_names = {
-            candidate["name"] for candidate in self._candidates_by_slot[slot_name]
-        }
         for item_name in item_names:
-            if item_name not in candidate_names:
+            if item_name not in self._candidate_names_by_slot[slot_name]:
                 raise ContentPoolError(
                     f"unknown content pool item for {slot_name}: {item_name}"
                 )

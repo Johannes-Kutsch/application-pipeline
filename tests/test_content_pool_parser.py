@@ -512,3 +512,37 @@ def test_render_selection_returns_empty_body_for_empty_valid_selection(
     document = load(pool_tex)
 
     assert document.render_selection("resume_berufserfahrung", []) == ""
+
+
+def test_render_selection_rejects_unknown_and_non_resume_slots(
+    pool_tex: Path,
+) -> None:
+    document = load(pool_tex)
+
+    with pytest.raises(ContentPoolError, match="recipient_company"):
+        document.render_selection("recipient_company", ["itemJobExample"])
+
+    with pytest.raises(ContentPoolError, match="resume_unknown"):
+        document.render_selection("resume_unknown", ["itemJobExample"])
+
+
+def test_render_selection_is_stable_across_repeated_calls(pool_tex: Path) -> None:
+    pool_tex.write_text(
+        textwrap.dedent("""\
+            % ===== Projekte =====
+
+            %%% ITEM: itemProjectOne
+            %%% always: false
+            \\newcommand{\\itemProjectOne}{}
+        """),
+        encoding="utf-8",
+    )
+
+    document = load(pool_tex)
+
+    assert document.render_selection("resume_projekte", ["itemProjectOne"]) == (
+        "\\itemProjectOne"
+    )
+    assert document.render_selection("resume_projekte", ["itemProjectOne"]) == (
+        "\\itemProjectOne"
+    )

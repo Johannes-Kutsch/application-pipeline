@@ -6,7 +6,11 @@ from typing import cast
 import pytest
 
 from application_pipeline.run_metrics import RunSummary
-from application_pipeline.startup_runner import StartupRequest, run_startup
+from application_pipeline.startup_runner import (
+    StartupRequest,
+    render_completion_summary,
+    run_startup,
+)
 from application_pipeline.status_display import PlainStatusDisplay, RichStatusDisplay
 
 
@@ -52,6 +56,35 @@ def test_startup_request_carries_startup_runner_inputs(tmp_path: Path) -> None:
         mode="cron",
         no_judge=True,
         has_terminal=False,
+    )
+
+
+def test_render_completion_summary_matches_current_cli_fields() -> None:
+    summary = RunSummary(
+        discovered=3,
+        skipped=1,
+        prefilter_dropped=2,
+        classifier_dropped=4,
+        written=5,
+        enrich_failed=6,
+        errored=7,
+        classify_items=8,
+        duration_seconds=1.5,
+    )
+
+    rendered = render_completion_summary(summary)
+
+    assert rendered == (
+        "run complete:"
+        "  discovered=3"
+        "  skipped=1"
+        "  prefilter_dropped=2"
+        "  classifier_dropped=4"
+        "  written=5"
+        "  enrich_failed=6"
+        "  errored=7"
+        "  classify_items=8"
+        "  duration=1.5s"
     )
 
 

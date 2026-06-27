@@ -7,6 +7,7 @@ from typing import Literal
 
 from application_pipeline.config import resolve_data_paths
 from application_pipeline.parser_log import RunLog
+from application_pipeline.run_metrics import RunSummary
 from application_pipeline.status_display import PlainStatusDisplay, RichStatusDisplay
 
 StartupMode = Literal["run", "cron"]
@@ -74,7 +75,17 @@ def _execute_run(config_path: Path, *, no_judge: bool, has_terminal: bool) -> No
         config_path, status_display=display, run_log=run_log, no_judge=no_judge
     )
 
-    print(
+    print(render_completion_summary(summary))
+
+    data_paths = resolve_data_paths(home)
+    try:
+        run_maintenance(data_paths.logs_path, data_paths.failures_path)
+    except Exception:
+        pass
+
+
+def render_completion_summary(summary: RunSummary) -> str:
+    return (
         f"run complete:"
         f"  discovered={summary.discovered}"
         f"  skipped={summary.skipped}"
@@ -86,9 +97,3 @@ def _execute_run(config_path: Path, *, no_judge: bool, has_terminal: bool) -> No
         f"  classify_items={summary.classify_items}"
         f"  duration={summary.duration_seconds:.1f}s"
     )
-
-    data_paths = resolve_data_paths(home)
-    try:
-        run_maintenance(data_paths.logs_path, data_paths.failures_path)
-    except Exception:
-        pass

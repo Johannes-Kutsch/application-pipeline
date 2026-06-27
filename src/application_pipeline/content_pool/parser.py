@@ -16,6 +16,7 @@ _ALWAYS_RE = re.compile(r"^%%% always:\s*(true|false)\s*$")
 _GROUP_RE = re.compile(r"^%%% group:\s*(\S.*?)\s*$")
 _RELEVANCE_RE = re.compile(r"^%%% relevance:\s*(.+)$")
 _RELEVANCE_ENTRY_RE = re.compile(r"^\s*(\w+)=(high|medium|low)\s*$")
+_NEWCOMMAND_RE = re.compile(r"^\\newcommand\{\\([^}]+)\}")
 _SECTION_TO_SLOT = {
     "Berufserfahrung": "resume_berufserfahrung",
     "Ausbildung": "resume_ausbildung",
@@ -105,7 +106,7 @@ def _validate_slot_name(slot_name: str) -> None:
 
 def parse(path: Path) -> dict[str, PoolItem]:
     result: dict[str, PoolItem] = {}
-    current_section = ""
+    current_section: str | None = None
     current_item: str | None = None
     always = False
     group: str | None = None
@@ -114,6 +115,14 @@ def parse(path: Path) -> dict[str, PoolItem]:
     def commit() -> None:
         nonlocal current_item
         if current_item is not None:
+            if current_section is None:
+                raise ContentPoolError(
+                    f"content pool item declared before any section header: {current_item}"
+                )
+            if current_item in result:
+                raise ContentPoolError(
+                    f"duplicate content pool item declaration: {current_item}"
+                )
             result[current_item] = PoolItem(
                 section=current_section,
                 always=always,
@@ -138,6 +147,13 @@ def parse(path: Path) -> dict[str, PoolItem]:
             group = m.group(1)
         elif m := _RELEVANCE_RE.match(line):
             relevance = _parse_relevance(m.group(1), current_item)
+        elif m := _NEWCOMMAND_RE.match(line):
+            if m.group(1) != current_item:
+                raise ContentPoolError(
+                    "content pool item metadata does not match following "
+                    f"newcommand: {current_item}"
+                )
+            commit()
         else:
             commit()
 

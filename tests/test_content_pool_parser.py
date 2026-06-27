@@ -80,6 +80,57 @@ def test_malformed_relevance_raises_named_error(tmp_path: Path) -> None:
         parse(p)
 
 
+def test_parse_rejects_duplicate_item_names(tmp_path: Path) -> None:
+    duplicate = textwrap.dedent("""\
+        % ===== Projekte =====
+
+        %%% ITEM: itemProjectShared
+        %%% always: false
+        \\newcommand{\\itemProjectShared}{}
+
+        %%% ITEM: itemProjectShared
+        %%% always: true
+        \\newcommand{\\itemProjectShared}{}
+    """)
+    p = tmp_path / "content_pool.tex"
+    p.write_text(duplicate, encoding="utf-8")
+
+    with pytest.raises(ContentPoolError, match="itemProjectShared"):
+        parse(p)
+
+
+def test_parse_rejects_item_declared_before_any_section_header(tmp_path: Path) -> None:
+    pre_section = textwrap.dedent("""\
+        %%% ITEM: itemProjectOrphan
+        %%% always: false
+        \\newcommand{\\itemProjectOrphan}{}
+
+        % ===== Projekte =====
+    """)
+    p = tmp_path / "content_pool.tex"
+    p.write_text(pre_section, encoding="utf-8")
+
+    with pytest.raises(ContentPoolError, match="itemProjectOrphan"):
+        load(p)
+
+
+def test_parse_rejects_item_name_that_mismatches_following_newcommand(
+    tmp_path: Path,
+) -> None:
+    mismatched_macro = textwrap.dedent("""\
+        % ===== Projekte =====
+
+        %%% ITEM: itemProjectMeta
+        %%% always: false
+        \\newcommand{\\itemProjectBody}{}
+    """)
+    p = tmp_path / "content_pool.tex"
+    p.write_text(mismatched_macro, encoding="utf-8")
+
+    with pytest.raises(ContentPoolError, match="itemProjectMeta"):
+        parse(p)
+
+
 def test_candidates_raise_named_error_for_malformed_relevance_on_projection() -> None:
     with pytest.raises(ContentPoolError, match="itemProjectBad"):
         ContentPoolDocument(

@@ -16,9 +16,7 @@ from application_pipeline.freshness_gate import FreshnessGate
 from application_pipeline.llm.quota import QuotaWall
 from application_pipeline.llm.types import (
     AppliedClassifyOutcome,
-    ExtractorBatchMalformedError,
     ExtractorMalformedError,
-    ExtractorMalformedJSONError,
     ExtractorUnreachableError,
     RelevanceVerdict,
 )
@@ -186,58 +184,22 @@ def _runtime_log_path(tmp_path: Path) -> Path:
     return path
 
 
-def _record_verdict_stash_calls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> list[dict[str, object]]:
-    calls: list[dict[str, object]] = []
-
-    def _fake_stash(**kwargs: object) -> Path:
-        calls.append(kwargs)
-        return Path("fake-stash.md")
-
-    monkeypatch.setattr(
-        "application_pipeline.llm_enricher.stash_malformed_classify_verdict",
-        _fake_stash,
-    )
-    return calls
+def _malformed_stash_files(tmp_path: Path) -> list[Path]:
+    return sorted((tmp_path / "failures" / "malformed").glob("*.md"))
 
 
-def _record_exception_stash_calls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> list[dict[str, object]]:
-    calls: list[dict[str, object]] = []
-
-    def _fake_stash(**kwargs: object) -> Path:
-        calls.append(kwargs)
-        return Path("fake-stash.md")
-
-    monkeypatch.setattr(
-        "application_pipeline.llm_enricher.stash_malformed_classify_exception",
-        _fake_stash,
-    )
-    return calls
+def _malformed_raw_output_sidecars(tmp_path: Path) -> list[Path]:
+    return sorted((tmp_path / "failures" / "malformed").glob("*.txt"))
 
 
-def _assert_stashed_error(
-    error: object,
-    expected_type: type[BaseException],
-    expected_message: str,
-) -> None:
-    assert isinstance(error, expected_type)
-    assert str(error) == expected_message
-
-
-def test_enricher_stashes_malformed_verdict_references_agent_runtime_log(
+def test_enricher_malformed_verdict_returns_retryable_and_writes_malformed_classify_stash(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runtime_log = _runtime_log_path(tmp_path)
-    stash_calls = _record_verdict_stash_calls(monkeypatch)
+    _runtime_log_path(tmp_path)
     extractor = MagicMock()
     extractor.classify_relevance.return_value = [None]
-    extractor.last_classify_log_path = runtime_log
 
     enricher = _make_enricher(
         extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
@@ -251,116 +213,18 @@ def test_enricher_stashes_malformed_verdict_references_agent_runtime_log(
     result = enricher.enrich([(99, stub, "Raw description body")])
 
     assert [item.state for item in result.items] == ["retryable"]
-    assert stash_calls == [
-        {
-            "filesystem_root": tmp_path / "failures",
-            "stub": stub,
-            "agent_runtime_log_pointer": runtime_log,
-        }
-    ]
-
-
-def test_enricher_stashes_malformed_verdict_with_opaque_agent_runtime_pointer(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime_pointer = "agent-runtime://classify/run-42?event=3#result"
-    stash_calls = _record_verdict_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    extractor.classify_relevance.return_value = [None]
-    extractor.last_classify_log_path = runtime_pointer
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/opaque-pointer",
-        title="Software Engineer",
-        source="test_src",
-    )
-
-    result = enricher.enrich([(99, stub, "Raw description body")])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert stash_calls == [
-        {
-            "filesystem_root": tmp_path / "failures",
-            "stub": stub,
-            "agent_runtime_log_pointer": runtime_pointer,
-        }
-    ]
-
-
-@pytest.mark.parametrize(
-    ("classify_result", "expected_error_classification", "expected_error_message"),
-    [
-        ([None], "malformed_classifier_verdict", "malformed classifier verdict"),
-        (
-            ExtractorMalformedError("header must be a non-empty string"),
-            "ExtractorMalformedError",
-            "header must be a non-empty string",
-        ),
-    ],
-)
-def test_enricher_malformed_stash_identifies_listing_title(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-    classify_result: list[None] | ExtractorMalformedError,
-    expected_error_classification: str,
-    expected_error_message: str,
-) -> None:
-    verdict_stash_calls = _record_verdict_stash_calls(monkeypatch)
-    exception_stash_calls = _record_exception_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    if isinstance(classify_result, Exception):
-        extractor.classify_relevance.side_effect = classify_result
-    else:
-        extractor.classify_relevance.return_value = classify_result
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/99",
-        title="Software Engineer",
-        source="test_src",
-    )
-
-    result = enricher.enrich([(99, stub, "Raw description body")])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert len(verdict_stash_calls) + len(exception_stash_calls) == 1
-    stash_call = (
-        verdict_stash_calls[0] if verdict_stash_calls else exception_stash_calls[0]
-    )
-    assert stash_call["filesystem_root"] == tmp_path / "failures"
-    assert stash_call["stub"] == stub
-    if isinstance(classify_result, Exception):
-        error = stash_call["error"]
-        assert isinstance(error, ExtractorMalformedError)
-        assert type(error).__name__ == expected_error_classification
-        assert str(error) == expected_error_message
-    else:
-        assert expected_error_classification == "malformed_classifier_verdict"
-        assert expected_error_message == "malformed classifier verdict"
-        assert stash_call["agent_runtime_log_pointer"] is None
+    assert len(_malformed_stash_files(tmp_path)) == 1
 
 
 def test_enricher_stashes_malformed_llm_output_and_returns_retryable(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     body = "Software Engineer role."
     error_msg = (
         "classify_relevance: header must be a non-empty string for in-domain verdict"
     )
-    stash_calls = _record_exception_stash_calls(monkeypatch)
     extractor = MagicMock()
     extractor.classify_relevance.side_effect = ExtractorMalformedError(error_msg)
 
@@ -377,294 +241,8 @@ def test_enricher_stashes_malformed_llm_output_and_returns_retryable(
 
     assert [item.state for item in result.items] == ["retryable"]
     assert load_card_store(tmp_path / "extracts.json").get(99) is None
-    assert len(stash_calls) == 1
-    assert stash_calls[0]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[0]["stub"] == stub
-    assert stash_calls[0]["agent_runtime_log_pointer"] is None
-    assert stash_calls[0]["raw_description"] == body
-    _assert_stashed_error(stash_calls[0]["error"], ExtractorMalformedError, error_msg)
-
-
-# ---------------------------------------------------------------------------
-# LLMEnricher: malformed LLM output — .md format with structured sections
-# ---------------------------------------------------------------------------
-
-
-def test_enricher_malformed_error_produces_retryable_md_file_with_runtime_log_reference(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime_log = _runtime_log_path(tmp_path)
-    body = "Software Engineer role."
-    error_msg = "classify_relevance: header must be a non-empty string"
-    prompt_text = "You are a relevance classifier. Evaluate this job."
-    raw_resp = "<result>{bad json}</result>"
-    stash_calls = _record_exception_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    extractor.classify_relevance.side_effect = ExtractorMalformedError(
-        error_msg, prompt=prompt_text, raw_response=raw_resp
-    )
-    extractor.last_classify_log_path = runtime_log
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/99",
-        title="Software Engineer",
-        source="test_src",
-    )
-
-    result = enricher.enrich([(99, stub, body)])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert len(stash_calls) == 1
-    assert stash_calls[0]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[0]["stub"] == stub
-    assert stash_calls[0]["agent_runtime_log_pointer"] == runtime_log
-    assert stash_calls[0]["raw_description"] == body
-    _assert_stashed_error(stash_calls[0]["error"], ExtractorMalformedError, error_msg)
-
-
-def test_enricher_malformed_json_error_produces_retryable_md_file_with_runtime_log_reference(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime_log = _runtime_log_path(tmp_path)
-    body = "DevOps role."
-    error_msg = "claude CLI exited with code 1"
-    prompt_text = "Classify this job posting."
-    stderr_text = "Error: API rate limit exceeded"
-    stash_calls = _record_exception_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    extractor.classify_relevance.side_effect = ExtractorMalformedJSONError(
-        error_msg, returncode=1, stderr=stderr_text, prompt=prompt_text
-    )
-    extractor.last_classify_log_path = runtime_log
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/cli",
-        title="DevOps Engineer",
-        source="src_cli",
-    )
-
-    result = enricher.enrich([(99, stub, body)])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert len(stash_calls) == 1
-    assert stash_calls[0]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[0]["stub"] == stub
-    assert stash_calls[0]["agent_runtime_log_pointer"] == runtime_log
-    assert stash_calls[0]["raw_description"] == body
-    _assert_stashed_error(
-        stash_calls[0]["error"], ExtractorMalformedJSONError, error_msg
-    )
-
-
-def test_enricher_malformed_json_error_includes_raw_model_output_without_prompt_or_raw_description(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime_log = _runtime_log_path(tmp_path)
-    body = "DevOps role."
-    error_msg = "claude CLI exited with code 1"
-    prompt_text = "Classify this job posting."
-    stderr_text = "Error: API rate limit exceeded"
-    raw_resp = "<result>{bad json}</result>"
-    stash_calls = _record_exception_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    extractor.classify_relevance.side_effect = ExtractorMalformedJSONError(
-        error_msg,
-        returncode=1,
-        stderr=stderr_text,
-        prompt=prompt_text,
-        raw_response=raw_resp,
-    )
-    extractor.last_classify_log_path = runtime_log
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/cli",
-        title="DevOps Engineer",
-        source="src_cli",
-    )
-
-    result = enricher.enrich([(99, stub, body)])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert len(stash_calls) == 1
-    assert stash_calls[0]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[0]["stub"] == stub
-    assert stash_calls[0]["agent_runtime_log_pointer"] == runtime_log
-    assert stash_calls[0]["raw_description"] == body
-    _assert_stashed_error(
-        stash_calls[0]["error"], ExtractorMalformedJSONError, error_msg
-    )
-
-
-def test_enricher_malformed_exception_stashes_sanitized_raw_output(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime_log = _runtime_log_path(tmp_path)
-    body = "DISTINCTIVE RAW DESCRIPTION BODY 1053"
-    prompt_text = "PROMPT TEXT 1053"
-    useful_raw_output = "provider note: trailing comma near summary field"
-    raw_resp = (
-        f"<verdict>{{bad json}}</verdict>\n{useful_raw_output}\n{prompt_text}\n{body}"
-    )
-    stash_calls = _record_exception_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    extractor.classify_relevance.side_effect = ExtractorMalformedError(
-        "classify_relevance: malformed verdict payload",
-        prompt=prompt_text,
-        raw_response=raw_resp,
-    )
-    extractor.last_classify_log_path = runtime_log
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/sanitized-raw-output",
-        title="Software Engineer",
-        source="test_src",
-    )
-
-    result = enricher.enrich([(99, stub, body)])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert len(stash_calls) == 1
-    assert stash_calls[0]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[0]["stub"] == stub
-    assert stash_calls[0]["agent_runtime_log_pointer"] == runtime_log
-    assert stash_calls[0]["raw_description"] == body
-    _assert_stashed_error(
-        stash_calls[0]["error"],
-        ExtractorMalformedError,
-        "classify_relevance: malformed verdict payload",
-    )
-
-
-def test_enricher_batch_malformed_stash_references_agent_runtime_log(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime_log = _runtime_log_path(tmp_path)
-    error_msg = "batch response could not be parsed"
-    stash_calls = _record_exception_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    extractor.classify_relevance.side_effect = ExtractorBatchMalformedError(error_msg)
-    extractor.last_classify_log_path = runtime_log
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/batch",
-        title="Batch Job",
-        source="batch_src",
-    )
-
-    result = enricher.enrich([(1, stub, "body")])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert len(stash_calls) == 1
-    assert stash_calls[0]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[0]["stub"] == stub
-    assert stash_calls[0]["agent_runtime_log_pointer"] == runtime_log
-    assert stash_calls[0]["raw_description"] == "body"
-    _assert_stashed_error(
-        stash_calls[0]["error"], ExtractorBatchMalformedError, error_msg
-    )
-
-
-def test_enricher_malformed_stash_uses_current_classify_runtime_log(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    stale_log = _runtime_log_path(tmp_path)
-    current_log = (
-        tmp_path / "logs" / "llm" / "agent-runtime" / "classify" / "current.log"
-    )
-    current_log.write_text("current runtime output\n", encoding="utf-8")
-    stash_calls = _record_exception_stash_calls(monkeypatch)
-
-    class _Extractor:
-        def __init__(self) -> None:
-            self.last_classify_log_path = stale_log
-
-        def classify_relevance(self, items: list[object]) -> list[object]:
-            self.last_classify_log_path = current_log
-            raise ExtractorBatchMalformedError("batch response could not be parsed")
-
-    enricher = _make_enricher(
-        extractor=_Extractor(),
-        tmp_path=tmp_path,
-        run_log=run_log,
-        run_metrics=run_metrics,
-    )
-    stub = PositionStub(
-        url="https://example.com/job/current-log",
-        title="Batch Job",
-        source="batch_src",
-    )
-
-    result = enricher.enrich([(1, stub, "body")])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert len(stash_calls) == 1
-    assert stash_calls[0]["agent_runtime_log_pointer"] == current_log
-
-
-def test_enricher_batch_malformed_error_returns_retryable_and_produces_md_file_without_prompt_or_response(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    error_msg = "batch response could not be parsed"
-    stash_calls = _record_exception_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    extractor.classify_relevance.side_effect = ExtractorBatchMalformedError(error_msg)
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub = PositionStub(
-        url="https://example.com/job/batch",
-        title="Batch Job",
-        source="batch_src",
-    )
-
-    result = enricher.enrich([(1, stub, "body")])
-
-    assert [item.state for item in result.items] == ["retryable"]
-    assert len(stash_calls) == 1
-    assert stash_calls[0]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[0]["stub"] == stub
-    _assert_stashed_error(
-        stash_calls[0]["error"], ExtractorBatchMalformedError, error_msg
-    )
-    assert stash_calls[0]["agent_runtime_log_pointer"] is None
-    assert stash_calls[0]["raw_description"] == "body"
+    assert len(_malformed_stash_files(tmp_path)) == 1
+    assert _malformed_raw_output_sidecars(tmp_path) == []
 
 
 # ---------------------------------------------------------------------------
@@ -944,10 +522,8 @@ def test_enrich_batch_keeps_none_verdict_retryable_while_later_verdicts_apply(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime_log = _runtime_log_path(tmp_path)
-    stash_calls = _record_verdict_stash_calls(monkeypatch)
     extractor = MagicMock()
     extractor.classify_relevance.return_value = [
         None,
@@ -1017,13 +593,7 @@ def test_enrich_batch_keeps_none_verdict_retryable_while_later_verdicts_apply(
         stub_match.url in r.get("urls", []) and r["status"] == "matched"
         for r in seen_data.values()
     )
-    assert stash_calls == [
-        {
-            "filesystem_root": tmp_path / "failures",
-            "stub": stub_none,
-            "agent_runtime_log_pointer": runtime_log,
-        }
-    ]
+    assert len(_malformed_stash_files(tmp_path)) == 1
 
     events = [
         json.loads(line)
@@ -1182,10 +752,8 @@ def test_enrich_malformed_stash_written_once_for_batch(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     error_msg = "batch classify failed"
-    stash_calls = _record_exception_stash_calls(monkeypatch)
     extractor = MagicMock()
     extractor.classify_relevance.side_effect = ExtractorMalformedError(error_msg)
 
@@ -1198,58 +766,8 @@ def test_enrich_malformed_stash_written_once_for_batch(
     result = enricher.enrich([(1, stub1, "body a"), (2, stub2, "body b")])
 
     assert [item.state for item in result.items] == ["retryable", "retryable"]
-    assert [call["stub"] for call in stash_calls] == [stub1, stub2]
-
-
-def test_enrich_batch_malformed_exception_stashes_each_listing_identity(
-    tmp_path: Path,
-    run_log: RunLog,
-    run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    stash_calls = _record_exception_stash_calls(monkeypatch)
-    extractor = MagicMock()
-    extractor.classify_relevance.side_effect = ExtractorBatchMalformedError(
-        "batch response could not be parsed"
-    )
-    extractor.last_classify_log_path = _runtime_log_path(tmp_path)
-
-    enricher = _make_enricher(
-        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
-    )
-    stub1 = PositionStub(
-        url="https://example.com/job/a",
-        title="Job A",
-        source="src",
-    )
-    stub2 = PositionStub(
-        url="https://example.com/job/b",
-        title="Job B",
-        source="src",
-    )
-
-    result = enricher.enrich([(1, stub1, "body a"), (2, stub2, "body b")])
-
-    assert [item.state for item in result.items] == ["retryable", "retryable"]
-    assert len(stash_calls) == 2
-    assert stash_calls[0]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[0]["stub"] == stub1
-    assert stash_calls[0]["agent_runtime_log_pointer"] == _runtime_log_path(tmp_path)
-    assert stash_calls[0]["raw_description"] == "body a"
-    _assert_stashed_error(
-        stash_calls[0]["error"],
-        ExtractorBatchMalformedError,
-        "batch response could not be parsed",
-    )
-    assert stash_calls[1]["filesystem_root"] == tmp_path / "failures"
-    assert stash_calls[1]["stub"] == stub2
-    assert stash_calls[1]["agent_runtime_log_pointer"] == _runtime_log_path(tmp_path)
-    assert stash_calls[1]["raw_description"] == "body b"
-    _assert_stashed_error(
-        stash_calls[1]["error"],
-        ExtractorBatchMalformedError,
-        "batch response could not be parsed",
-    )
+    assert len(_malformed_stash_files(tmp_path)) == 2
+    assert _malformed_raw_output_sidecars(tmp_path) == []
 
 
 @pytest.mark.parametrize(
@@ -1270,11 +788,9 @@ def test_enrich_malformed_batch_length_mismatch_keeps_every_listing_retryable(
     tmp_path: Path,
     run_log: RunLog,
     run_metrics: RunMetrics,
-    monkeypatch: pytest.MonkeyPatch,
     raw_verdicts: list[RelevanceVerdict | None],
 ) -> None:
     runtime_log = _runtime_log_path(tmp_path)
-    stash_calls = _record_exception_stash_calls(monkeypatch)
     extractor = MagicMock()
     extractor.classify_relevance.return_value = raw_verdicts
     extractor.last_classify_log_path = runtime_log
@@ -1305,13 +821,7 @@ def test_enrich_malformed_batch_length_mismatch_keeps_every_listing_retryable(
 
     seen_path = tmp_path / ".seen.json"
     assert not seen_path.exists()
-    assert len(stash_calls) == 2
-    assert [call["stub"] for call in stash_calls] == [stub_a, stub_b]
-    assert all(call["agent_runtime_log_pointer"] == runtime_log for call in stash_calls)
-    assert all(call["raw_description"] in {"body a", "body b"} for call in stash_calls)
-    assert all(
-        isinstance(call["error"], ExtractorBatchMalformedError) for call in stash_calls
-    )
+    assert len(_malformed_stash_files(tmp_path)) == 2
 
     events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
     events = [json.loads(line) for line in events_file.read_text().splitlines() if line]

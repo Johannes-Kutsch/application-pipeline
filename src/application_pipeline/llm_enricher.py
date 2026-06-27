@@ -197,7 +197,9 @@ class LLMEnricher:
     ) -> None:
         stash_malformed_classify_artifact(
             filesystem_root=self._failures_dir,
-            listing=ListingDiagnosticFacts(source=stub.source, url=stub.url),
+            listing=ListingDiagnosticFacts(
+                source=stub.source, url=stub.url, title=stub.title
+            ),
             error_classification="malformed_classifier_verdict",
             error_message="malformed classifier verdict",
             agent_runtime_log_pointer=agent_runtime_log_path,
@@ -215,7 +217,9 @@ class LLMEnricher:
     ) -> None:
         stash_malformed_classify_artifact(
             filesystem_root=self._failures_dir,
-            listing=ListingDiagnosticFacts(source=stub.source, url=stub.url),
+            listing=ListingDiagnosticFacts(
+                source=stub.source, url=stub.url, title=stub.title
+            ),
             error_classification=type(exc).__name__,
             error_message=str(exc),
             agent_runtime_log_pointer=agent_runtime_log_path,

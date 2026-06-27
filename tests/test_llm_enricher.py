@@ -225,6 +225,49 @@ def test_enricher_stashes_malformed_verdict_references_agent_runtime_log(
     assert "Raw description body" not in content
 
 
+@pytest.mark.parametrize(
+    ("classify_result", "expected_error_classification", "expected_error_message"),
+    [
+        ([None], "malformed_classifier_verdict", "malformed classifier verdict"),
+        (
+            ExtractorMalformedError("header must be a non-empty string"),
+            "ExtractorMalformedError",
+            "header must be a non-empty string",
+        ),
+    ],
+)
+def test_enricher_malformed_stash_identifies_listing_title(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+    classify_result: list[None] | ExtractorMalformedError,
+    expected_error_classification: str,
+    expected_error_message: str,
+) -> None:
+    extractor = MagicMock()
+    if isinstance(classify_result, Exception):
+        extractor.classify_relevance.side_effect = classify_result
+    else:
+        extractor.classify_relevance.return_value = classify_result
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/99",
+        title="Software Engineer",
+        source="test_src",
+    )
+
+    result = enricher.enrich([(99, stub, "Raw description body")])
+
+    assert [item.state for item in result.items] == ["retryable"]
+    content = _read_malformed_stash(tmp_path, "test_src", "example.com-job-99")
+    assert "**Title:** Software Engineer" in content
+    assert f"**Error Classification:** {expected_error_classification}" in content
+    assert f"**Error:** {expected_error_message}" in content
+
+
 def test_enricher_stashes_malformed_llm_output_and_returns_retryable(
     tmp_path: Path,
     run_log: RunLog,

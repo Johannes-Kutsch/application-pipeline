@@ -889,6 +889,116 @@ def test_enrich_accepts_list_of_items_and_returns_structured_outcome(
 # ---------------------------------------------------------------------------
 
 
+def test_enrich_batch_keeps_none_verdict_retryable_while_later_verdicts_apply(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    runtime_log = _runtime_log_path(tmp_path)
+    extractor = MagicMock()
+    extractor.classify_relevance.return_value = [
+        None,
+        RelevanceVerdict(matches=False),
+        RelevanceVerdict(
+            matches=True,
+            header="ML Engineer\nAcme · Berlin · remote\n2024-06-01",
+            summary="Good role.",
+        ),
+    ]
+    extractor.last_classify_log_path = runtime_log
+
+    enricher, dedup = _make_enricher_with_dedup(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub_none = PositionStub(
+        url="https://example.com/job/none-first",
+        title="Unknown",
+        source="test",
+    )
+    stub_reject = PositionStub(
+        url="https://example.com/job/reject-after-none",
+        title="Sales Manager",
+        source="test",
+    )
+    stub_match = PositionStub(
+        url="https://example.com/job/match-after-none",
+        title="ML Engineer",
+        source="test",
+        company="Acme",
+        location="Berlin",
+    )
+
+    with dedup.run_scope():
+        dedup.is_seen(stub_none)
+        dedup.is_seen(stub_reject)
+        dedup.is_seen(stub_match)
+
+        results = enricher.enrich(
+            [
+                (1, stub_none, "Unknown body"),
+                (2, stub_reject, "Sales body"),
+                (3, stub_match, "ML body"),
+            ]
+        )
+
+    assert [item.state for item in results.items] == [
+        "retryable",
+        "rejected",
+        "matched",
+    ]
+    assert results.items[0].matched_listing is None
+    assert results.matched_listings == [(3, stub_match)]
+
+    card_store = load_card_store(tmp_path / "extracts.json")
+    assert card_store.get(1) is None
+    assert card_store.get(2) is None
+    assert card_store.get(3) is not None
+
+    seen_data = json.loads((tmp_path / ".seen.json").read_text(encoding="utf-8"))
+    assert not any(stub_none.url in r.get("urls", []) for r in seen_data.values())
+    assert any(
+        stub_reject.url in r.get("urls", []) and r["status"] == "out_of_domain"
+        for r in seen_data.values()
+    )
+    assert any(
+        stub_match.url in r.get("urls", []) and r["status"] == "matched"
+        for r in seen_data.values()
+    )
+
+    assert _read_malformed_stash(
+        tmp_path,
+        "test",
+        "example.com-job-none-first",
+    ) == (
+        "**Source:** test\n"
+        "**URL:** https://example.com/job/none-first\n"
+        "**Title:** Unknown\n"
+        "**Error Classification:** malformed_classifier_verdict\n"
+        "**Error:** malformed classifier verdict\n\n"
+        "## Agent Runtime Log\n\n"
+        f"{runtime_log}"
+    )
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / "llm" / "enricher.events.jsonl")
+        .read_text()
+        .splitlines()
+        if line
+    ]
+    malformed_events = [e for e in events if e.get("event") == "classify_malformed"]
+    assert malformed_events == [
+        {
+            "ts": malformed_events[0]["ts"],
+            "source": "test",
+            "url": stub_none.url,
+            "module": "llm_enricher",
+            "event": "classify_malformed",
+            "error": "malformed classifier verdict",
+        }
+    ]
+
+
 def test_enrich_batch_routes_match_reject_none_independently(
     tmp_path: Path,
     run_log: RunLog,

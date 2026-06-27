@@ -96,6 +96,7 @@ class LLMEnricher:
             url=items[0][1].url,
             source=items[0][1].source,
             error=str(exc),
+            module="llm_enricher",
         )
         for _, stub, body in items:
             stash_malformed_classify_exception(
@@ -161,6 +162,7 @@ class LLMEnricher:
                     url=stub.url,
                     source=stub.source,
                     error="malformed classifier verdict",
+                    module="llm_enricher",
                 )
                 outcome_items.append(
                     AppliedClassifyItemOutcome(

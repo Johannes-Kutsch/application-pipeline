@@ -455,3 +455,60 @@ def test_ungrouped_candidates_remain_ordinary_and_are_not_synthesized_into_group
             }
         ]
     }
+
+
+def test_render_selection_returns_raw_macro_calls_in_selected_order(
+    pool_tex: Path,
+) -> None:
+    pool_tex.write_text(
+        textwrap.dedent("""\
+            % ===== Projekte =====
+
+            %%% ITEM: itemProjectOne
+            %%% always: false
+            \\newcommand{\\itemProjectOne}{%
+              \\cventry{2024}{One}{}{}{}{First.}%
+            }
+
+            %%% ITEM: itemProjectTwo
+            %%% always: true
+            \\newcommand{\\itemProjectTwo}{%
+              \\cventry{2025}{Two}{}{}{}{Second.}%
+            }
+        """),
+        encoding="utf-8",
+    )
+
+    document = load(pool_tex)
+
+    assert (
+        document.render_selection(
+            "resume_projekte",
+            ["itemProjectTwo", "itemProjectOne"],
+        )
+        == "\\itemProjectTwo\n\\itemProjectOne"
+    )
+
+
+def test_render_selection_rejects_unknown_item_names(pool_tex: Path) -> None:
+    document = load(pool_tex)
+
+    with pytest.raises(ContentPoolError, match="itemProjectMissing"):
+        document.render_selection("resume_berufserfahrung", ["itemProjectMissing"])
+
+
+def test_render_selection_rejects_item_names_from_a_different_resume_slot(
+    pool_tex: Path,
+) -> None:
+    document = load(pool_tex)
+
+    with pytest.raises(ContentPoolError, match="itemDegreeMaster"):
+        document.render_selection("resume_berufserfahrung", ["itemDegreeMaster"])
+
+
+def test_render_selection_returns_empty_body_for_empty_valid_selection(
+    pool_tex: Path,
+) -> None:
+    document = load(pool_tex)
+
+    assert document.render_selection("resume_berufserfahrung", []) == ""

@@ -92,6 +92,18 @@ class ContentPoolDocument:
             for group, candidates in self._grouped_candidates_by_slot[slot_name].items()
         }
 
+    def render_selection(self, slot_name: str, item_names: list[str]) -> str:
+        _validate_slot_name(slot_name)
+        candidate_names = {
+            candidate["name"] for candidate in self._candidates_by_slot[slot_name]
+        }
+        for item_name in item_names:
+            if item_name not in candidate_names:
+                raise ContentPoolError(
+                    f"unknown content pool item for {slot_name}: {item_name}"
+                )
+        return "\n".join(f"\\{item_name}" for item_name in item_names)
+
 
 def load(path: Path) -> ContentPoolDocument:
     return ContentPoolDocument(parse(path))

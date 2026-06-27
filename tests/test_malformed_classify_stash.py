@@ -42,6 +42,32 @@ def test_malformed_classify_stash_writes_listing_facts_error_and_runtime_log_poi
     assert not _raw_output_path(tmp_path).exists()
 
 
+def test_malformed_classify_stash_writes_opaque_agent_runtime_log_pointer_text(
+    tmp_path: Path,
+) -> None:
+    runtime_pointer = "agent-runtime://classify/run-42?event=3#result"
+
+    stash_malformed_classify_artifact(
+        filesystem_root=tmp_path / "failures",
+        listing=ListingDiagnosticFacts(
+            source="test_src", url="https://example.com/job/42"
+        ),
+        error_classification="ExtractorMalformedError",
+        error_message="header must be a non-empty string",
+        agent_runtime_log_pointer=runtime_pointer,
+    )
+
+    assert _markdown_path(tmp_path).read_text(encoding="utf-8") == (
+        "**Source:** test_src\n"
+        "**URL:** https://example.com/job/42\n"
+        "**Error Classification:** ExtractorMalformedError\n"
+        "**Error:** header must be a non-empty string\n\n"
+        "## Agent Runtime Log\n\n"
+        f"{runtime_pointer}"
+    )
+    assert not _raw_output_path(tmp_path).exists()
+
+
 def test_malformed_classify_stash_writes_raw_model_output_only_when_present(
     tmp_path: Path,
 ) -> None:

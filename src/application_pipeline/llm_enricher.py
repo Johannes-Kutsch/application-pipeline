@@ -20,9 +20,8 @@ from application_pipeline.llm.types import (
     RelevanceVerdict,
 )
 from application_pipeline.malformed_classify_stash import (
-    ListingDiagnosticFacts,
-    stash_malformed_classify_artifact,
     stash_malformed_classify_exception,
+    stash_malformed_classify_verdict,
 )
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
@@ -132,7 +131,11 @@ class LLMEnricher:
         outcome_items: list[AppliedClassifyItemOutcome] = []
         for (listing_id, stub, body), verdict in zip(items, raw_verdicts):
             if verdict is None:
-                self._stash_malformed_listing(stub, agent_runtime_log_path)
+                stash_malformed_classify_verdict(
+                    filesystem_root=self._failures_dir,
+                    stub=stub,
+                    agent_runtime_log_pointer=agent_runtime_log_path,
+                )
                 self._run_log.event(
                     "llm_enricher",
                     "classify_malformed",
@@ -195,18 +198,3 @@ class LLMEnricher:
                 )
 
         return AppliedClassifyOutcome(items=outcome_items)
-
-    def _stash_malformed_listing(
-        self,
-        stub: PositionStub,
-        agent_runtime_log_path: "str | Path | None" = None,
-    ) -> None:
-        stash_malformed_classify_artifact(
-            filesystem_root=self._failures_dir,
-            listing=ListingDiagnosticFacts(
-                source=stub.source, url=stub.url, title=stub.title
-            ),
-            error_classification="malformed_classifier_verdict",
-            error_message="malformed classifier verdict",
-            agent_runtime_log_pointer=agent_runtime_log_path,
-        )

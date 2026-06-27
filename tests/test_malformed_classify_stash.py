@@ -7,6 +7,7 @@ from application_pipeline.malformed_classify_stash import (
     ListingDiagnosticFacts,
     stash_malformed_classify_artifact,
     stash_malformed_classify_exception,
+    stash_malformed_classify_verdict,
 )
 from application_pipeline.parsers.types import PositionStub
 
@@ -228,4 +229,31 @@ def test_malformed_classify_exception_uses_listing_and_error_details(
         "```text\n"
         "<verdict>{bad json}</verdict>\n"
         "```"
+    )
+
+
+def test_malformed_classify_verdict_uses_listing_identity_and_runtime_pointer(
+    tmp_path: Path,
+) -> None:
+    runtime_log = tmp_path / "logs" / "llm" / "agent-runtime" / "classify" / "call.log"
+    stub = PositionStub(
+        url="https://example.com/job/42",
+        title="Senior Platform Engineer",
+        source="test_src",
+    )
+
+    stash_malformed_classify_verdict(
+        filesystem_root=tmp_path / "failures",
+        stub=stub,
+        agent_runtime_log_pointer=runtime_log,
+    )
+
+    assert _markdown_path(tmp_path).read_text(encoding="utf-8") == (
+        "**Source:** test_src\n"
+        "**URL:** https://example.com/job/42\n"
+        "**Title:** Senior Platform Engineer\n"
+        "**Error Classification:** malformed_classifier_verdict\n"
+        "**Error:** malformed classifier verdict\n\n"
+        "## Agent Runtime Log\n\n"
+        f"{runtime_log}"
     )

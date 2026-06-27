@@ -14,7 +14,6 @@ __all__ = [
     "ListingDiagnosticFacts",
     "stash_malformed_classify_artifact",
     "stash_malformed_classify_exception",
-    "stash_malformed_classify_listing",
     "stash_malformed_classify_verdict",
 ]
 
@@ -67,7 +66,7 @@ def stash_malformed_classify_artifact(
     return markdown_path
 
 
-def stash_malformed_classify_listing(
+def _stash_malformed_classify_listing(
     *,
     filesystem_root: Path,
     stub: PositionStub,
@@ -104,7 +103,7 @@ def stash_malformed_classify_exception(
     error: MalformedClassifyError,
     agent_runtime_log_pointer: str | Path | None = None,
 ) -> Path:
-    return stash_malformed_classify_listing(
+    return _stash_malformed_classify_listing(
         filesystem_root=filesystem_root,
         stub=stub,
         error=error,
@@ -118,7 +117,7 @@ def stash_malformed_classify_verdict(
     stub: PositionStub,
     agent_runtime_log_pointer: str | Path | None = None,
 ) -> Path:
-    return stash_malformed_classify_listing(
+    return _stash_malformed_classify_listing(
         filesystem_root=filesystem_root,
         stub=stub,
         agent_runtime_log_pointer=agent_runtime_log_pointer,

@@ -47,11 +47,13 @@ def seeded_content_pool_path() -> Iterator[Path]:
         yield path
 
 
-def test_parse_returns_correct_shape(pool_tex: Path) -> None:
+def test_parse_keeps_shallow_content_pool_item_shape(pool_tex: Path) -> None:
     result = parse(pool_tex)
 
+    assert isinstance(result, dict)
     assert set(result.keys()) == {"itemJobExample", "itemDegreeMaster"}
     item = result["itemJobExample"]
+    assert set(item.keys()) == {"section", "always", "group", "relevance"}
     assert item["section"] == "Berufserfahrung"
     assert item["always"] is False
     assert item["group"] == "example"
@@ -97,7 +99,7 @@ def test_malformed_relevance_raises_named_error(tmp_path: Path) -> None:
         parse(p)
 
 
-def test_parse_rejects_duplicate_item_names(tmp_path: Path) -> None:
+def test_load_rejects_duplicate_item_names(tmp_path: Path) -> None:
     duplicate = textwrap.dedent("""\
         % ===== Projekte =====
 
@@ -116,7 +118,7 @@ def test_parse_rejects_duplicate_item_names(tmp_path: Path) -> None:
         load(p)
 
 
-def test_parse_rejects_item_declared_before_any_section_header(tmp_path: Path) -> None:
+def test_load_rejects_item_declared_before_any_section_header(tmp_path: Path) -> None:
     pre_section = textwrap.dedent("""\
         %%% ITEM: itemProjectOrphan
         %%% always: false
@@ -131,7 +133,7 @@ def test_parse_rejects_item_declared_before_any_section_header(tmp_path: Path) -
         load(p)
 
 
-def test_parse_rejects_item_name_that_mismatches_following_newcommand(
+def test_load_rejects_item_name_that_mismatches_following_newcommand(
     tmp_path: Path,
 ) -> None:
     mismatched_macro = textwrap.dedent("""\
@@ -235,7 +237,9 @@ def test_load_projects_resume_slot_candidates_in_authored_order(pool_tex: Path) 
     }
 
 
-def test_load_maps_jobs_and_education_sections_to_resume_slots(pool_tex: Path) -> None:
+def test_load_maps_berufserfahrung_and_ausbildung_sections_to_resume_slots(
+    pool_tex: Path,
+) -> None:
     pool_tex.write_text(
         textwrap.dedent("""\
             % ===== Berufserfahrung =====

@@ -88,6 +88,55 @@ def test_render_completion_summary_matches_current_cli_fields() -> None:
     )
 
 
+def test_run_startup_prints_completion_summary_from_orchestrator_run_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+    summary = RunSummary(
+        discovered=11,
+        skipped=12,
+        prefilter_dropped=13,
+        classifier_dropped=14,
+        written=15,
+        enrich_failed=16,
+        errored=17,
+        classify_items=18,
+        duration_seconds=19.25,
+    )
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: summary,
+    )
+    monkeypatch.setattr(
+        "application_pipeline.maintenance.run_maintenance",
+        lambda *_a, **_kw: None,
+    )
+
+    run_startup(
+        StartupRequest(
+            cwd=tmp_path,
+            mode="run",
+            no_judge=False,
+            has_terminal=False,
+        )
+    )
+
+    assert capsys.readouterr().out == (
+        "run complete:"
+        "  discovered=11"
+        "  skipped=12"
+        "  prefilter_dropped=13"
+        "  classifier_dropped=14"
+        "  written=15"
+        "  enrich_failed=16"
+        "  errored=17"
+        "  classify_items=18"
+        "  duration=19.2s\n"
+    )
+
+
 def test_startup_runner_without_config_exits_2_with_guidance(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -416,6 +416,51 @@ def test_enricher_malformed_json_error_produces_retryable_md_file_with_runtime_l
     assert body not in content
 
 
+def test_enricher_malformed_json_error_includes_raw_model_output_without_prompt_or_raw_description(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    runtime_log = _runtime_log_path(tmp_path)
+    body = "DevOps role."
+    error_msg = "claude CLI exited with code 1"
+    prompt_text = "Classify this job posting."
+    stderr_text = "Error: API rate limit exceeded"
+    raw_resp = "<result>{bad json}</result>"
+    extractor = MagicMock()
+    extractor.classify_relevance.side_effect = ExtractorMalformedJSONError(
+        error_msg,
+        returncode=1,
+        stderr=stderr_text,
+        prompt=prompt_text,
+        raw_response=raw_resp,
+    )
+    extractor.last_classify_log_path = runtime_log
+
+    enricher = _make_enricher(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub = PositionStub(
+        url="https://example.com/job/cli",
+        title="DevOps Engineer",
+        source="src_cli",
+    )
+
+    result = enricher.enrich([(99, stub, body)])
+
+    assert [item.state for item in result.items] == ["retryable"]
+
+    slug = "example.com-job-cli"
+    content = _read_malformed_stash(tmp_path, "src_cli", slug)
+    assert error_msg in content
+    assert str(runtime_log) in content
+    assert "## Raw Model Output" in content
+    assert raw_resp in content
+    assert prompt_text not in content
+    assert stderr_text not in content
+    assert body not in content
+
+
 def test_enricher_batch_malformed_stash_references_agent_runtime_log(
     tmp_path: Path,
     run_log: RunLog,

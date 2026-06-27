@@ -135,6 +135,28 @@ def test_malformed_classify_stash_omits_whitespace_only_raw_model_output_section
     assert not _raw_output_path(tmp_path).exists()
 
 
+def test_malformed_classify_stash_omits_empty_raw_model_output_section(
+    tmp_path: Path,
+) -> None:
+    stash_malformed_classify_artifact(
+        filesystem_root=tmp_path / "failures",
+        listing=ListingDiagnosticFacts(
+            source="test_src", url="https://example.com/job/42"
+        ),
+        error_classification="ExtractorMalformedJSONError",
+        error_message="classifier output could not be parsed",
+        raw_model_output="",
+    )
+
+    assert _markdown_path(tmp_path).read_text(encoding="utf-8") == (
+        "**Source:** test_src\n"
+        "**URL:** https://example.com/job/42\n"
+        "**Error Classification:** ExtractorMalformedJSONError\n"
+        "**Error:** classifier output could not be parsed"
+    )
+    assert not _raw_output_path(tmp_path).exists()
+
+
 def test_malformed_classify_stash_returns_written_markdown_path(tmp_path: Path) -> None:
     artifact_path = stash_malformed_classify_artifact(
         filesystem_root=tmp_path / "failures",

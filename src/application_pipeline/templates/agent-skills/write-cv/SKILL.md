@@ -83,13 +83,26 @@ Ziel ist es, die Slots Berufserfahrung, Ausbildung und Projekte mit Makros zu f�
 
 - Lies die Datei `application-pipeline/user-info/cv/content_pool.tex`. Hier sind Makros für Berufserfahrung, Ausbildung und Projekte hinterlegt.
 - Lies die Datei `application-pipeline/user-info/triage-profile/candidate-profile.md`. Hier sind Identität plus Match-Kriterien hinterlegt.
+- Behandle `content_pool.tex` nicht als Freitext-Sammlung, sondern als **Content Pool** mit deterministischen Resume-Projektionen.
+- Arbeite pro Resume-Slot (`resume_berufserfahrung`, `resume_ausbildung`, `resume_projekte`) mit den dazugehörigen **Content Pool Candidates**. Diese Projektion liefert bereits:
+  - den Zielslot,
+  - den Abschnitt / die Herkunft im Content Pool,
+  - den Item-Namen,
+  - den validierten Makro-Aufruf für den Slot-Body,
+  - `always` als Pflichtstatus,
+  - `group` für exklusive Alternativen,
+  - validierte `relevance`-Metadaten,
+  - die authored order innerhalb des Artefakts.
+- Leite Section-to-slot-Zuordnung, Pflichtstatus, Gruppenlogik und Relevance-Regeln nicht neu aus Prosa oder ad-hoc Parsing her; diese Artefaktregeln gehören dem **Content Pool**-Modul.
 
 <Makro-Slot-Regeln>
-- `always: true`-Einträge werden immer aufgenommen – vorbehaltlich der `group:`-Exklusivität.
-- Einträge mit demselben `group:`-Wert sind alternative Varianten desselben Eintrags und schließen sich gegenseitig aus.
-- Restliche Einträge (ohne `always: true`, ohne `group:`-Konflikt): gleiche jeden Eintrag gegen die Analyseergebnisse aus `/analyse-listing` ab.
-- Innerhalb jedes Resume-Slots: relevanteste zuerst.
-- Einträge werden als reine `\itemName`-Macro-Aufrufe in den Body geschrieben, einer pro Zeile.
+- Beginne je Resume-Slot mit allen **Content Pool Candidates**, die für diesen Slot projiziert werden.
+- Nimm Pflichtkandidaten (`always: true`) immer auf, vorbehaltlich exklusiver `group`-Alternativen.
+- Kandidaten mit demselben `group`-Wert sind gegenseitig ausschließende Alternativen derselben Stelle. Wähle höchstens einen Kandidaten pro Gruppe.
+- Nutze `relevance`-Metadaten und Candidate-Kontext als deterministische Hinweisstruktur des Artefakts; erfinde keine zusätzlichen Regelstufen.
+- Die Auswahl optionaler Kandidaten bleibt urteilsbasiert: gleiche sie gegen die Analyseergebnisse aus `/analyse-listing` sowie gegen `candidate-profile.md` ab. Welche optionalen Kandidaten den besten Fit liefern, entscheidet nicht das Modul hartkodiert.
+- Ordne die gewählten Kandidaten innerhalb jedes Resume-Slots nach Relevanz und Candidate-Kontext; erhalte dabei die authored order als Tie-Breaker bzw. dort, wo das Artefakt keine stärkere Priorisierung vorgibt.
+- Schreibe nur validierte Makro-Aufrufe aus den gewählten Candidates in den Slot-Body, genau ein Makro-Aufruf pro Zeile.
 </Makro-Slot-Regeln>
 
 ### 5.2. Skills

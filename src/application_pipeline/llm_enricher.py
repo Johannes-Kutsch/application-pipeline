@@ -80,6 +80,38 @@ class LLMEnricher:
         raw_log_path = getattr(self._extractor, "last_classify_log_path", None)
         return raw_log_path if isinstance(raw_log_path, (str, Path)) else None
 
+    def _apply_batch_malformed(
+        self,
+        items: list[tuple[int, PositionStub, str]],
+        exc: (
+            ExtractorBatchMalformedError
+            | ExtractorMalformedError
+            | ExtractorMalformedJSONError
+        ),
+    ) -> AppliedClassifyOutcome:
+        agent_runtime_log_path = self._last_classify_log_path()
+        self._run_log.event(
+            "llm_enricher",
+            "classify_malformed",
+            url=items[0][1].url,
+            source=items[0][1].source,
+            error=str(exc),
+        )
+        for _, stub, body in items:
+            stash_malformed_classify_exception(
+                filesystem_root=self._failures_dir,
+                stub=stub,
+                error=exc,
+                agent_runtime_log_pointer=agent_runtime_log_path,
+                raw_description=body,
+            )
+        return AppliedClassifyOutcome(
+            items=[
+                AppliedClassifyItemOutcome(state="retryable", event_matches=None)
+                for _ in items
+            ]
+        )
+
     def enrich(
         self, items: list[tuple[int, PositionStub, str]]
     ) -> AppliedClassifyOutcome:
@@ -102,29 +134,15 @@ class LLMEnricher:
             ExtractorMalformedError,
             ExtractorMalformedJSONError,
         ) as exc:
-            agent_runtime_log_path = self._last_classify_log_path()
-            # Treat a malformed response as retryable for every item in the batch,
-            # stashing one malformed file per listing.
-            self._run_log.event(
-                "llm_enricher",
-                "classify_malformed",
-                url=items[0][1].url,
-                source=items[0][1].source,
-                error=str(exc),
-            )
-            for _, stub, body in items:
-                stash_malformed_classify_exception(
-                    filesystem_root=self._failures_dir,
-                    stub=stub,
-                    error=exc,
-                    agent_runtime_log_pointer=agent_runtime_log_path,
-                    raw_description=body,
-                )
-            return AppliedClassifyOutcome(
-                items=[
-                    AppliedClassifyItemOutcome(state="retryable", event_matches=None)
-                    for _ in items
-                ]
+            return self._apply_batch_malformed(items, exc)
+
+        if len(raw_verdicts) != len(items):
+            return self._apply_batch_malformed(
+                items,
+                ExtractorBatchMalformedError(
+                    "classify_relevance returned "
+                    f"{len(raw_verdicts)} verdicts for {len(items)} items"
+                ),
             )
 
         agent_runtime_log_path = self._last_classify_log_path()

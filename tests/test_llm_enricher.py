@@ -1096,6 +1096,53 @@ def test_enrich_batch_malformed_exception_stashes_each_listing_identity(
     )
 
 
+def test_enrich_short_malformed_batch_keeps_every_listing_retryable(
+    tmp_path: Path,
+    run_log: RunLog,
+    run_metrics: RunMetrics,
+) -> None:
+    runtime_log = _runtime_log_path(tmp_path)
+    extractor = MagicMock()
+    extractor.classify_relevance.return_value = [None]
+    extractor.last_classify_log_path = runtime_log
+
+    enricher, dedup = _make_enricher_with_dedup(
+        extractor=extractor, tmp_path=tmp_path, run_log=run_log, run_metrics=run_metrics
+    )
+    stub_a = PositionStub(
+        url="https://example.com/job/short-a",
+        title="Job A",
+        source="src",
+    )
+    stub_b = PositionStub(
+        url="https://example.com/job/short-b",
+        title="Job B",
+        source="src",
+    )
+
+    with dedup.run_scope():
+        dedup.is_seen(stub_a)
+        dedup.is_seen(stub_b)
+        result = enricher.enrich([(1, stub_a, "body a"), (2, stub_b, "body b")])
+
+    assert [item.state for item in result.items] == ["retryable", "retryable"]
+    assert result.matched_listings == []
+    assert load_card_store(tmp_path / "extracts.json").get(1) is None
+    assert load_card_store(tmp_path / "extracts.json").get(2) is None
+
+    seen_path = tmp_path / ".seen.json"
+    assert not seen_path.exists()
+
+    malformed_dir = tmp_path / "failures" / "malformed"
+    assert (malformed_dir / "src-example.com-job-short-a.md").exists()
+    assert (malformed_dir / "src-example.com-job-short-b.md").exists()
+
+    events_file = tmp_path / "logs" / "llm" / "enricher.events.jsonl"
+    events = [json.loads(line) for line in events_file.read_text().splitlines() if line]
+    malformed_events = [e for e in events if e.get("event") == "classify_malformed"]
+    assert len(malformed_events) == 1
+
+
 def test_enricher_fatal_provider_failure_propagates(
     tmp_path: Path,
     run_log: RunLog,

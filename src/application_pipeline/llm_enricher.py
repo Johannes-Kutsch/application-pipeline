@@ -19,6 +19,10 @@ from application_pipeline.llm.types import (
     MatchedListing,
     RelevanceVerdict,
 )
+from application_pipeline.malformed_classify_stash import (
+    ListingDiagnosticFacts,
+    stash_malformed_classify_artifact,
+)
 from application_pipeline.parser_log import RunLog
 from application_pipeline.parsers.types import PositionStub
 
@@ -186,28 +190,18 @@ class LLMEnricher:
 
         return AppliedClassifyOutcome(items=outcome_items)
 
-    def _stash_failure(
-        self, kind: str, stub: PositionStub, content: str, *, ext: str = "html"
-    ) -> None:
-        stash_dir = self._failures_dir / kind
-        stash_dir.mkdir(parents=True, exist_ok=True)
-        slug = stub.url.replace("https://", "").replace("http://", "").replace("/", "-")
-        path = stash_dir / f"{stub.source}-{slug}.{ext}"
-        path.write_text(content, encoding="utf-8")
-
     def _stash_malformed_listing(
         self,
         stub: PositionStub,
         agent_runtime_log_path: "Path | None" = None,
     ) -> None:
-        lines: list[str] = [
-            f"**Source:** {stub.source}",
-            f"**URL:** {stub.url}",
-            "**Error:** malformed classifier verdict",
-        ]
-        if agent_runtime_log_path is not None:
-            lines += ["", "## Agent Runtime Log", "", str(agent_runtime_log_path)]
-        self._stash_failure("malformed", stub, "\n".join(lines), ext="md")
+        stash_malformed_classify_artifact(
+            filesystem_root=self._failures_dir,
+            listing=ListingDiagnosticFacts(source=stub.source, url=stub.url),
+            error_classification="malformed_classifier_verdict",
+            error_message="malformed classifier verdict",
+            agent_runtime_log_pointer=agent_runtime_log_path,
+        )
 
     def _stash_malformed(
         self,
@@ -219,11 +213,10 @@ class LLMEnricher:
         ),
         agent_runtime_log_path: "Path | None" = None,
     ) -> None:
-        lines: list[str] = [
-            f"**Source:** {stub.source}",
-            f"**URL:** {stub.url}",
-            f"**Error:** {exc}",
-        ]
-        if agent_runtime_log_path is not None:
-            lines += ["", "## Agent Runtime Log", "", str(agent_runtime_log_path)]
-        self._stash_failure("malformed", stub, "\n".join(lines), ext="md")
+        stash_malformed_classify_artifact(
+            filesystem_root=self._failures_dir,
+            listing=ListingDiagnosticFacts(source=stub.source, url=stub.url),
+            error_classification=type(exc).__name__,
+            error_message=str(exc),
+            agent_runtime_log_pointer=agent_runtime_log_path,
+        )

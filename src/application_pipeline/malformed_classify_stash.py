@@ -115,7 +115,7 @@ def _apply_raw_output_policy(
         if blocked_text and blocked_text.strip():
             sanitized = sanitized.replace(blocked_text, "")
 
-    sanitized = "\n".join(line for line in sanitized.splitlines() if line.strip())
+    sanitized = sanitized.strip()
     return sanitized or None
 
 

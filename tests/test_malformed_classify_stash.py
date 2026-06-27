@@ -232,6 +232,47 @@ def test_malformed_classify_exception_uses_listing_and_error_details(
     )
 
 
+def test_malformed_classify_exception_redacts_prompt_and_body_without_reformatting_raw_output(
+    tmp_path: Path,
+) -> None:
+    stub = PositionStub(
+        url="https://example.com/job/42",
+        title="Senior Platform Engineer",
+        source="test_src",
+    )
+    prompt_text = "PROMPT BLOCK 1053"
+    raw_description = "RAW DESCRIPTION BODY 1053"
+
+    stash_malformed_classify_exception(
+        filesystem_root=tmp_path / "failures",
+        stub=stub,
+        error=ExtractorMalformedError(
+            "header must be a non-empty string",
+            prompt=prompt_text,
+            raw_response=(
+                "<verdict>{bad json}</verdict>\n\n"
+                "provider note: trailing comma near summary field\n\n"
+                f"{prompt_text}\n"
+                f"{raw_description}\n"
+            ),
+        ),
+        raw_description=raw_description,
+    )
+
+    assert _markdown_path(tmp_path).read_text(encoding="utf-8") == (
+        "**Source:** test_src\n"
+        "**URL:** https://example.com/job/42\n"
+        "**Title:** Senior Platform Engineer\n"
+        "**Error Classification:** ExtractorMalformedError\n"
+        "**Error:** header must be a non-empty string\n\n"
+        "## Raw Model Output\n\n"
+        "```text\n"
+        "<verdict>{bad json}</verdict>\n\n"
+        "provider note: trailing comma near summary field\n"
+        "```"
+    )
+
+
 def test_malformed_classify_verdict_uses_listing_identity_and_runtime_pointer(
     tmp_path: Path,
 ) -> None:

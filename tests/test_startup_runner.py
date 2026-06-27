@@ -94,6 +94,45 @@ def test_startup_runner_requires_operator_credential_before_parser_work(
     assert not (settings_dir / ".runtime-data" / "logs").exists()
 
 
+def test_run_startup_passes_config_no_judge_and_runtime_logs_to_orchestrator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings_dir = _write_settings_dir(tmp_path, with_operator_credential=True)
+    captured: dict[str, object] = {}
+
+    def fake_run(config_path: Path, **kwargs: object) -> RunSummary:
+        captured["config_path"] = config_path
+        captured["no_judge"] = kwargs["no_judge"]
+        run_log = kwargs["run_log"]
+        assert hasattr(run_log, "event")
+        run_log.event("pipeline_startup", "forwarded")
+        return _fake_summary()
+
+    monkeypatch.setattr("application_pipeline.orchestrator.run", fake_run)
+    monkeypatch.setattr(
+        "application_pipeline.maintenance.run_maintenance",
+        lambda *_a, **_kw: None,
+    )
+
+    run_startup(
+        StartupRequest(
+            cwd=tmp_path,
+            mode="run",
+            no_judge=True,
+            has_terminal=False,
+        )
+    )
+
+    assert captured == {
+        "config_path": settings_dir / "config.py",
+        "no_judge": True,
+    }
+    assert (
+        settings_dir / ".runtime-data" / "logs" / "pipeline" / "startup.events.jsonl"
+    ).exists()
+    assert not (tmp_path / ".runtime-data" / "logs").exists()
+
+
 def test_cron_startup_runner_refreshes_workspace_before_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1162,6 +1162,86 @@ def test_classify_stage_retryable_batch_outcome_skips_pool_and_continues(
     ]
 
 
+def test_classify_stage_mixed_batch_keeps_malformed_listing_out_of_pool(
+    tmp_path: Path,
+) -> None:
+    logs_dir = tmp_path / "logs"
+    display = FakeStatusDisplay()
+    metrics = RunMetrics(display, run_log=RunLog(logs_dir))
+    metrics.register_rows()
+    pool_collector = _CollectingPoolCollector()
+
+    class _RetryableRejectedMatchedEnricher:
+        def enrich(
+            self, items: list[tuple[int, PositionStub, str]]
+        ) -> AppliedClassifyOutcome:
+            assert [listing_id for listing_id, _, _ in items] == [1, 2, 3]
+            return AppliedClassifyOutcome(
+                items=[
+                    AppliedClassifyItemOutcome(
+                        state="retryable",
+                        event_matches=None,
+                    ),
+                    AppliedClassifyItemOutcome(
+                        state="rejected",
+                        event_matches=False,
+                    ),
+                    AppliedClassifyItemOutcome(
+                        state="matched",
+                        event_matches=True,
+                        matched_listing=MatchedListing(
+                            listing_id=items[2][0],
+                            stub=items[2][1],
+                        ),
+                    ),
+                ]
+            )
+
+    stage = ClassifyStage(
+        batch_size=3,
+        parallelism=1,
+        pool_collector=pool_collector,
+        llm_enricher=_RetryableRejectedMatchedEnricher(),
+        metrics=metrics,
+        run_state=_FakeRunState(),
+        run_log=RunLog(logs_dir),
+        quota_wall=_quota.QuotaWall(),
+    )
+    handoff = stage.handoff_for(parser_id="parser.test", metrics=metrics)
+
+    stage.start()
+    _submit_ready(handoff, 1)
+    _submit_ready(handoff, 2)
+    _submit_ready(handoff, 3)
+    stage.close()
+    completion = stage.wait()
+
+    assert completion.first_failure is None
+    assert [listing_id for listing_id, _ in pool_collector.matched] == [3]
+    assert _last_body(display, "llm classify relevance") == (
+        "1 malformed · 1 dropped · 1 forwarded"
+    )
+
+    rows = _classify_event_rows(logs_dir)
+    assert rows == [
+        {
+            "ts": rows[0]["ts"],
+            "event": "classify_relevance",
+            "matches": None,
+        },
+        {
+            "ts": rows[1]["ts"],
+            "event": "classify_relevance",
+            "matches": False,
+        },
+        {
+            "ts": rows[2]["ts"],
+            "event": "classify_relevance",
+            "matches": True,
+        },
+    ]
+
+
 def test_classify_stage_retries_quota_limited_batch_after_wall_sleep(
     tmp_path: Path, monkeypatch
 ) -> None:

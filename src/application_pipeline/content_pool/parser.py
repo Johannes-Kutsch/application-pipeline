@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
+
+from application_pipeline.cv_slot_contract import SLOT_NAME_SET
 
 from .errors import ContentPoolError
 
@@ -12,6 +15,12 @@ _ALWAYS_RE = re.compile(r"^%%% always:\s*(true|false)\s*$")
 _GROUP_RE = re.compile(r"^%%% group:\s*(\S.*?)\s*$")
 _RELEVANCE_RE = re.compile(r"^%%% relevance:\s*(.+)$")
 _RELEVANCE_ENTRY_RE = re.compile(r"^\s*(\w+)=(high|medium|low)\s*$")
+_SECTION_TO_SLOT = {
+    "Berufserfahrung": "resume_berufserfahrung",
+    "Ausbildung": "resume_ausbildung",
+    "Projekte": "resume_projekte",
+}
+_RESUME_SLOT_NAMES = frozenset(_SECTION_TO_SLOT.values())
 
 
 class PoolItem(TypedDict):
@@ -19,6 +28,42 @@ class PoolItem(TypedDict):
     always: bool
     group: str | None
     relevance: dict[str, str]
+
+
+class ContentPoolCandidate(TypedDict):
+    name: str
+    always: bool
+    group: str | None
+    relevance: dict[str, str]
+
+
+@dataclass(frozen=True)
+class ContentPoolDocument:
+    _items: dict[str, PoolItem]
+
+    def candidates(self, slot_name: str) -> list[ContentPoolCandidate]:
+        _validate_slot_name(slot_name)
+        return [
+            ContentPoolCandidate(
+                name=name,
+                always=item["always"],
+                group=item["group"],
+                relevance=item["relevance"],
+            )
+            for name, item in self._items.items()
+            if _SECTION_TO_SLOT.get(item["section"]) == slot_name
+        ]
+
+
+def load(path: Path) -> ContentPoolDocument:
+    return ContentPoolDocument(parse(path))
+
+
+def _validate_slot_name(slot_name: str) -> None:
+    if slot_name not in SLOT_NAME_SET:
+        raise ContentPoolError(f"unknown content pool slot: {slot_name}")
+    if slot_name not in _RESUME_SLOT_NAMES:
+        raise ContentPoolError(f"content pool slot is not a resume slot: {slot_name}")
 
 
 def parse(path: Path) -> dict[str, PoolItem]:

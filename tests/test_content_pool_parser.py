@@ -217,6 +217,16 @@ def test_candidates_reject_unknown_and_non_resume_slots(pool_tex: Path) -> None:
         document.candidates("resume_unknown")
 
 
+def test_grouped_candidates_reject_unknown_and_non_resume_slots(pool_tex: Path) -> None:
+    document = load(pool_tex)
+
+    with pytest.raises(ContentPoolError, match="recipient_company"):
+        document.grouped_candidates("recipient_company")
+
+    with pytest.raises(ContentPoolError, match="resume_unknown"):
+        document.grouped_candidates("resume_unknown")
+
+
 def test_candidates_returns_empty_list_for_valid_resume_slot_without_items(
     pool_tex: Path,
 ) -> None:
@@ -235,6 +245,26 @@ def test_candidates_returns_empty_list_for_valid_resume_slot_without_items(
     document = load(pool_tex)
 
     assert document.candidates("resume_projekte") == []
+
+
+def test_grouped_candidates_returns_empty_dict_for_valid_resume_slot_without_items(
+    pool_tex: Path,
+) -> None:
+    pool_tex.write_text(
+        textwrap.dedent("""\
+            % ===== Berufserfahrung =====
+
+            %%% ITEM: itemJobOnly
+            %%% always: false
+            %%% relevance: mle=high
+            \\newcommand{\\itemJobOnly}{}
+        """),
+        encoding="utf-8",
+    )
+
+    document = load(pool_tex)
+
+    assert document.grouped_candidates("resume_projekte") == {}
 
 
 def test_candidates_expose_empty_relevance_mapping_when_omitted(pool_tex: Path) -> None:

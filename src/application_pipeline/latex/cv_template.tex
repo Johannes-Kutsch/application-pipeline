@@ -54,7 +54,7 @@
 \makeatother
 
 % Ported from cv_7.tex — tighter itemize spacing.
-\setlist[itemize]{itemsep=-0.2em}
+\setlist[itemize]{itemsep=-0.2em, topsep=0pt}
 \setlist[itemize,2]{topsep=-0.4em}
 
 % User-level helper macro on top of stock moderncv 1.2.0. Verbatim from the
@@ -141,6 +141,7 @@
 \begin{document}
 
 %----------------------------------------------------------------------------------------
+%----------------------------------------------------------------------------------------
 % COVER LETTER
 %----------------------------------------------------------------------------------------
 \ifdefstring{\BUILD}{resume}{}{%
@@ -158,13 +159,17 @@
 \opening{\ifstrempty{<<COVER_SUBJECT>>}{}{{\bfseries <<COVER_SUBJECT>>}\\[1em]}<<OPENING>>}
 \closing{Mit freundlichen Grüßen,}
 
-\makelettertitle
+% Wrapped in a group so \raggedright inside \makelettertitle does not leak
+% \rightskip into the resume section and shift the \makecvtitle title gap.
+{\makelettertitle}%
 \AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%
 
 <<COVER_INTRO>>
 
+\bigskip
 <<COVER_BULLETS>>
 
+\bigskip
 <<COVER_CLOSING>>
 }
 
@@ -178,8 +183,7 @@
 
 % Content-pool macros (\itemFoo, \itemBar, ...) — see content_pool format in README.
 \input{\CvDataDir/content_pool}
-
-\setlength{\parskip}{0pt}\makecvtitle
+\makecvtitle
 \vspace{-4.3em}
 
 \section{Persönliche Informationen}

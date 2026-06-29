@@ -155,8 +155,7 @@
   <<RECIPIENT_ZIP_CITY>>%
 }
 \date{\today}
-\title{<<COVER_SUBJECT>>}
-\opening{<<OPENING>>}
+\opening{\ifstrempty{<<COVER_SUBJECT>>}{}{{\bfseries <<COVER_SUBJECT>>}\\[1em]}<<OPENING>>}
 \closing{Mit freundlichen Grüßen,}
 
 \makelettertitle
@@ -180,7 +179,7 @@
 % Content-pool macros (\itemFoo, \itemBar, ...) — see content_pool format in README.
 \input{\CvDataDir/content_pool}
 
-\makecvtitle
+\setlength{\parskip}{0pt}\makecvtitle
 \vspace{-4.3em}
 
 \section{Persönliche Informationen}

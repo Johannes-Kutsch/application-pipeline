@@ -81,7 +81,7 @@ def assert_template_contract(template: str) -> None:
     actual_markers = {match.group(0) for match in _TEMPLATE_SLOT_PATTERN.finditer(template)}
     assert actual_markers == TEMPLATE_MARKER_SET
     assert _RECIPIENT_PATTERN.search(template)
-    assert re.search(r"\\opening\{\s*<<OPENING>>\s*\}", template)
+    assert re.search(r"\\opening\{.*?<<OPENING>>", template, re.DOTALL)
     assert _COVER_BODY_PATTERN.search(template)
     assert _RESUME_PATTERN.search(template)
 
@@ -110,9 +110,11 @@ def assert_compiled_template_contract(
         re.DOTALL,
     )
     cover = re.compile(
-        r"\\opening\{\s*"
+        r"\\opening\{.*?"
+        + re.escape(slot_bodies["cover_subject"])
+        + r".*?"
         + re.escape(slot_bodies["opening"])
-        + r"\s*\}.*?"
+        + r".*?\}.*?"
         + re.escape(slot_bodies["cover_intro"])
         + r".*?"
         + re.escape(slot_bodies["cover_bullets"])

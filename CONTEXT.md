@@ -50,9 +50,9 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 ### CV authoring
 
-**CV Slot-Map**: Per-listing `<app_dir>/cv.tex` by `/write-cv`, consumed by `compile-cv` (ADR-0018). `^%% SLOT: <name>$` markers, raw TeX bodies. Thirteen slots: `recipient_company/name/street/zip_city`, `opening`, `cover_intro/pivot/fit/closing`, `resume_berufserfahrung/ausbildung/projekte`, `skills_block` (mechanically assembled from **Skill Group** pool — ADR-0020). Listing-invariant content in **Facts**. _Avoid_: cv document (`cv_template.tex` is the document).
+**CV Slot-Map**: Per-listing `<app_dir>/cv.tex` by `/write-cv`, consumed by `compile-cv` (ADR-0018). `^%% SLOT: <name>$` markers, raw TeX bodies. Thirteen slots: `recipient_company/name/street/zip_city`, `opening`, `cover_subject`, `cover_intro/closing/bullets`, `resume_berufserfahrung/ausbildung/projekte`, `skills_block` (mechanically assembled from **Skill Group** pool — ADR-0020). Listing-invariant content in **Facts**. _Avoid_: cv document (`cv_template.tex` is the document).
 
-**CV Slot Contract**: In-process module `application_pipeline.cv_slot_contract` owning canonical CV Slot-Map vocabulary and behavior-relevant projections. Exposes the thirteen slots, four Cover Paragraph Pattern slots, and marker forms such as uppercase `<<SLOT_NAME>>`. Not a persisted artefact, not an adapter/port. _Avoid_: duplicated private slot constants, parser-private slot vocabulary, external seam.
+**CV Slot Contract**: In-process module `application_pipeline.cv_slot_contract` owning canonical CV Slot-Map vocabulary and behavior-relevant projections. Exposes the thirteen slots, two Cover Paragraph Pattern slots (`cover_intro`, `cover_closing`), and marker forms such as uppercase `<<SLOT_NAME>>`. Not a persisted artefact, not an adapter/port. _Avoid_: duplicated private slot constants, parser-private slot vocabulary, external seam.
 
 **CV Skeleton**: Structure-only slot map at `<settings-dir>/cv-template/cv_skeleton.tex` (ADR-0018, relocated ADR-0027). Package-shipped, refreshable. `/write-cv` reads it as canonical slot list and order, not as content guidance. _Avoid_: cv template (overloaded with `cv_template.tex`).
 
@@ -62,13 +62,17 @@ Personal job-discovery and triage pipeline. Fetches listings from a small set of
 
 **Pdflatex Adapter**: Internal compile-cv port for external `pdflatex`. Production preserves `pdflatex` command shape, `.build/` cwd, `capture_output`, and `TEXINPUTS=".<pathsep>"` vendored-moderncv isolation; tests use a fake adapter. _Avoid_: subprocess seam, public compile option, TeX engine config.
 
-**Cover Strategy**: Default writing arc: opener carries a personal, listing-specific resonance hook; middle paragraphs develop one dominant capability arc with at most two evidence anchors. Projects serve as evidence, not catalogue. `/analyse-listing` surfaces one lead hook for `/write-cv`. _Avoid_: fixed cover template, project list.
+**Cover Strategy**: Default writing arc: opener (`cover_intro`) carries a personal, listing-specific resonance hook; middle section is a **Bullet Library** selection (`cover_bullets`) — 4–6 neutrally-phrased, data-backed facts selected by tag-overlap with the listing. `/analyse-listing` surfaces the lead hook and required-skill tags for `/write-cv`. _Avoid_: fixed cover template, project list.
+
+**Cover Subject**: Listing-specific subject line rendered bold above the opening greeting via moderncv's `\title{}`. Format: `Betreff: Ihre Stellenanzeige <Jobtitel>` with optional ` Refnr. <Nummer>` appended when the listing contains a reference number. Stored in `cover_subject` slot; filled automatically by `/write-cv` without an approval loop. _Avoid_: hardcoded subject, static Betreff.
 
 **Cover Spacing**: Cover letter uses one proportional gap rule for both opening-to-intro and closing-to-sign-off transitions. Both gaps track the selected cover stretch level. _Avoid_: hardcoded gap size, asymmetric cover spacing.
 
-**Pull-Fit**: Cover-letter argument that a listing is specifically attractive to the candidate, with capability fit implied through the same facts. _Avoid_: suitability pitch, generic motivation.
+**Pull-Fit**: Cover-letter argument that a listing is specifically attractive to the candidate, with capability fit implied through the same facts. Now realised via the **Bullet Library** (`cover_bullets` slot) rather than prose paragraphs. _Avoid_: suitability pitch, generic motivation.
 
-**Cover Paragraph Pattern**: Reusable slot-specific cover-letter paragraph model in `cover-patterns.md` with metadata and one candidate-approved paragraph text using placeholders such as Musterfirma. New patterns represent new slot-purpose + argument-type combinations, not substitutions. _Avoid_: generic style exemplar, free-prose inspiration, old-application archive.
+**Bullet Library**: Candidate-maintained file at `<settings-dir>/user-info/cv/bullet-library.md` containing fact-backed capability entries. Each entry has a name and one sentence of neutral, data-backed text. `/write-cv` selects 4–6 entries per application by semantic relevance to listing requirements (LLM judgment, no tags) and renders them as a `\begin{itemize}` block in the `cover_bullets` slot. New entries are drafted collaboratively with the user when gaps are identified against `candidate-profile.md` and listing requirements. _Avoid_: cover paragraph pattern (different format and purpose), skills block (different rendering surface), tag-based matching.
+
+**Cover Paragraph Pattern**: Reusable cover-letter paragraph stored in `cover-patterns.md` under `# Intro Patterns` or `# Closing Patterns`. Format: heading + text only (no metadata). Used for `cover_intro` and `cover_closing`; not used for `cover_bullets`. _Avoid_: generic style exemplar, free-prose inspiration.
 
 **Cover Paragraph Pattern Library**: In-process `application_pipeline.cover_patterns` interface for loading `cover-patterns.md` into a library value and projecting pattern views. Owns metadata, slot, placeholder, one-paragraph, and sentence-count validation; raises `CoverPatternError` at the module seam. Missing/empty artifacts → empty library. _Avoid_: raw pattern list, markdown parser seam, cover-patterns adapter.
 

@@ -16,6 +16,7 @@ Dieser Skill schreibt ausschließlich in:
 
 - `<application-folder>/cv.tex`
 - `application-pipeline/user-info/cv/cover-patterns.md`
+- `application-pipeline/user-info/cv/bullet-library.md`
 </write-rules>
 
 ## 1. Ordner erstellen
@@ -43,35 +44,39 @@ Bestätige Company, Role und den resultierenden Pfad (`application-pipeline/appl
 
 Erstelle als erstes eine leere Slotmap in `<application-folder>/cv.tex`, indem du `application-pipeline/cv-template/cv_skeleton.tex` kopierst.
 
-## 3. Adresse und Anrede ausfüllen
+## 3. Adresse, Anrede und Betreff ausfüllen
 
 1. Analysiere die Stellenausschreibung und fülle die Slots `recipient_company`, `recipient_name`, `recipient_street`, `recipient_zip_city` und `opening` aus.
-2. Falls Informationen fehlen, frage den Nutzer.
+2. Fülle `cover_subject`: `Betreff: Ihre Stellenanzeige <Jobtitel>` — hänge ` Refnr. <Nummer>` an, falls die Ausschreibung eine Referenznummer enthält, sonst weglassen.
+3. Falls Informationen fehlen, frage den Nutzer.
 
 ## 4. Anschreibenstext erstellen
 
-- Ziel dieses Schritts ist es, die 4 Absatz-Slots des Anschreibens zu erstellen.
-- Lies die Datei `application-pipeline/user-info/cv/cover-patterns.md`. Für jeden Absatz im Anschreiben gibt es hier vorformulierte Texte.
-- Die Absätze `cover_intro` und `cover_closing` sind generisch und können direkt aus `cover-patterns.md` in `cv.tex` übernommen werden.
-- Für die Erstellung der Absätze `cover_pivot` und `cover_fit` gehe nacheinander in einen Abstimmungsdurchlauf mit dem Nutzer. Dabei gilt:
-  - Schreibe die Umlaute ä, ü, ö und ß genau so.
-  - Kein Text für `cover_pivot` und `cover_fit` darf in `cv.tex` geschrieben werden, bevor der jeweilige Absatz vom Nutzer explizit freigegeben wurde.
-  - Pro Absatz: Vorschlag präsentieren → auf Antwort warten → nur bei expliziter Zustimmung schreiben → dann nächster Absatz.
+- Ziel dieses Schritts ist es, das Anschreiben zu erstellen. Dazu sollen die Cover-Slots gefüllt werden.
+- Die Absätze `cover_intro` und `cover_closing` sind generisch und sollen wortgenau aus `application-pipeline/user-info/cv/cover-patterns.md` in `cv.tex` übernommen werden. Übernehme die Absätze Wortegenau, passe nur die spezifische Informationen (etwa Titel der Anzeige) an.
+- Der Slot `cover_bullets` enthält eine Intro-Zeile gefolgt von einer Stichpunktliste. Fülle diese folgendermasen:
 
-### `cover_pivot` und `cover_fit` Absatzdurchlauf
+### 4.1 `cover_bullets` Selection Flow
 
-Gehe für `cover_pivot` und `cover_fit` nacheinander diesen Abstimmungsdurchlauf durch:
+<cover-bullets-selection-flow>
+1. Lies `application-pipeline/user-info/cv/bullet-library.md` ein.
+2. Übernehme die Intro-Zeile wortgenau aus der Bullet Library.
+3. Wähle 4–6 Einträge aus der Bullet Library die am besten zu den Anforderungen des Listings passen.
+4. Präsentiere dem Nutzer die Intro-Zeile + gewählte Bullets auf einmal.
+5. Schreibe erst nach Freigabe: Intro-Zeile gefolgt von `\begin{itemize}...\end{itemize}` in `cv.tex`. Der Nutzer kann einzelne Einträge streichen oder neu sortieren.
+6. Wenn der Nutzer einen Eintrag verändert, frage ob der bestehende Eintrag in `bullet-library.md` überschrieben oder als neuer Eintrag aufgenommen werden soll.
+</cover-bullets-selection-flow>
 
-<per-absatz-flow>
-1. Analysiere die Analyseergebnisse aus `/analyse-listing` und bestimme Slot-Zweck sowie passendes `argument_type`.
-2. Suche in `cover-patterns.md` nach einem passenden Muster.
-3. Präsentiere dem Nutzer:
-   3.1. bei klarem Treffer genau einen Vorschlag,
-   3.2. sonst drei unterschiedliche Alternativen.
-4. Schreibe den Text erst dann in `cv.tex`, wenn der Nutzer den konkreten Absatz ausdrücklich freigegeben hat.
-5. Wenn der Nutzer ablehnt oder umformuliert, wiederhole den Vorschlagsprozess ab Schritt 3.2.
-6. Wenn eine neue Formulierung entsteht, übernehme sie nach freigabe in `cover-patterns.md`.
-</per-absatz-flow>
+### 4.2 `cover_bullets` Drafting Flow
+
+Nach dem ersten Selektions-Vorschlag: gleiche `candidate-profile.md` und die Ergebnisse aus `/analyse-listing` gegen die vorhandenen Bullets ab. Wenn relevante Fähigkeiten oder Erfahrungen aus diesen Quellen nicht abgedeckt sind, oder wenn der Nutzer einen neuen Bullet wünscht:
+
+<cover-bullet-drafting-flow>
+1. Benenne die Lücke: welche Fähigkeit/Erfahrung fehlt und schlage eine Formulierung vor (neutral, datenbasiert, ein Satz)..
+2. Gehe die Einträge einzeln, nacheinander durch und Iteriere mit dem Nutzer bis zur Zufriedenheit.
+3. Übernehme neue Eintrag in `bullet-library.md`.
+4. Führe die Auswahl (Schritt 4.1) mit der erweiterten Library neu durch.
+</cover-bullet-drafting-flow>
 
 ## 5. Resume Slots füllen
 

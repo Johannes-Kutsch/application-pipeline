@@ -5,10 +5,10 @@ SLOT_NAMES: tuple[str, ...] = (
     "recipient_name",
     "recipient_street",
     "recipient_zip_city",
+    "cover_subject",
     "opening",
     "cover_intro",
-    "cover_pivot",
-    "cover_fit",
+    "cover_bullets",
     "cover_closing",
     "resume_berufserfahrung",
     "resume_ausbildung",
@@ -18,12 +18,9 @@ SLOT_NAMES: tuple[str, ...] = (
 
 SLOT_NAME_SET: frozenset[str] = frozenset(SLOT_NAMES)
 
-_COVER_PARAGRAPH_SLOT_PREFIX = "cover_"
-
-COVER_PARAGRAPH_PATTERN_SLOTS: tuple[str, ...] = tuple(
-    slot_name
-    for slot_name in SLOT_NAMES
-    if slot_name.startswith(_COVER_PARAGRAPH_SLOT_PREFIX)
+COVER_PARAGRAPH_PATTERN_SLOTS: tuple[str, ...] = (
+    "cover_intro",
+    "cover_closing",
 )
 
 TEMPLATE_MARKERS: dict[str, str] = {

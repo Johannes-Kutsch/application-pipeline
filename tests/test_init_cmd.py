@@ -12,10 +12,7 @@ from application_pipeline.prompts import load_prompts
 
 
 def _ap_template_bytes(name: str) -> bytes:
-    node = (
-        importlib.resources.files("application_pipeline.templates")
-        / "application-pipeline"
-    )
+    node = importlib.resources.files("application_pipeline.templates") / "application-pipeline"
     for part in name.split("/"):
         node = node / part
     return node.read_bytes()
@@ -76,9 +73,7 @@ def _assert_seeded_skill_affordances(skill_file: Path, skill: str) -> str:
     _assert_no_retired_skill_references(text)
     if skill == "analyse-listing":
         assert "application-pipeline/user-info/triage-profile/gate-criteria.md" in text
-        assert "application-pipeline/user-info/triage-profile/candidate-profile.md" in (
-            text
-        )
+        assert "application-pipeline/user-info/triage-profile/candidate-profile.md" in (text)
     if skill in {"analyse-listing", "write-cv"}:
         assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in text
     if skill == "write-cv":
@@ -107,7 +102,7 @@ _TRIAGE_PROFILE_FILES = (
     "skills.md",
 )
 
-_CV_MD_FILES = ("cover-patterns.md",)
+_CV_MD_FILES = ("cover-patterns.md", "bullet-library.md")
 
 _USER_INFO_ROOT_FILES = (
     "search-terms/keywords.md",
@@ -153,9 +148,7 @@ def test_config_template_contains_classify_keys(tmp_path: Path) -> None:
     assert "CLAUDE_CLASSIFY_BATCH_SIZE" not in config_text
 
 
-def test_first_bootstrap_prints_wrote_config(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_first_bootstrap_prints_wrote_config(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
 
     out = capsys.readouterr().out
@@ -165,9 +158,7 @@ def test_first_bootstrap_prints_wrote_config(
     assert "layout.py" not in out
 
 
-def test_skip_existing_config_prints_correctly(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_skip_existing_config_prints_correctly(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _ap(tmp_path).mkdir()
     (_ap(tmp_path) / "config.py").write_text("# operator-edited\n")
 
@@ -180,9 +171,7 @@ def test_skip_existing_config_prints_correctly(
     assert "layout.py" not in out
 
 
-def test_both_exist_prints_skipped_for_both(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_both_exist_prints_skipped_for_both(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _ap(tmp_path).mkdir()
     (_ap(tmp_path) / "config.py").write_text("# custom\n")
     (_ap(tmp_path) / "layout.py").write_text("# custom\n")
@@ -263,9 +252,7 @@ def test_fresh_seed_does_not_create_latex_dir(tmp_path: Path) -> None:
     assert not (_ap(tmp_path) / "latex").exists()
 
 
-def test_fresh_seed_prints_all_five_files(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_fresh_seed_prints_all_five_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
 
     out = capsys.readouterr().out
@@ -292,20 +279,9 @@ def test_rerun_is_idempotent(tmp_path: Path) -> None:
     ap = _ap(tmp_path)
     first_contents = (
         {p: (ap / p).read_bytes() for p in ["config.py"]}
-        | {
-            f"user-info/triage-profile/{f}": (
-                ap / "user-info" / "triage-profile" / f
-            ).read_bytes()
-            for f in _TRIAGE_PROFILE_FILES
-        }
-        | {
-            f"user-info/cv/{f}": (ap / "user-info" / "cv" / f).read_bytes()
-            for f in _CV_MD_FILES
-        }
-        | {
-            f"user-info/{f}": (ap / "user-info" / f).read_bytes()
-            for f in _USER_INFO_ROOT_FILES
-        }
+        | {f"user-info/triage-profile/{f}": (ap / "user-info" / "triage-profile" / f).read_bytes() for f in _TRIAGE_PROFILE_FILES}
+        | {f"user-info/cv/{f}": (ap / "user-info" / "cv" / f).read_bytes() for f in _CV_MD_FILES}
+        | {f"user-info/{f}": (ap / "user-info" / f).read_bytes() for f in _USER_INFO_ROOT_FILES}
     )
 
     init(tmp_path)
@@ -314,9 +290,7 @@ def test_rerun_is_idempotent(tmp_path: Path) -> None:
         assert (ap / rel).read_bytes() == original
 
 
-def test_rerun_prints_all_skipped(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_rerun_prints_all_skipped(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     capsys.readouterr()
 
@@ -343,18 +317,14 @@ def test_per_file_skip_leaves_existing_user_info_and_seeds_siblings(
     assert existing.read_text() == original_content
     for fname in _TRIAGE_PROFILE_FILES:
         if fname != "candidate-profile.md":
-            assert (ap / "user-info" / "triage-profile" / fname).exists(), (
-                f"{fname} should be seeded"
-            )
+            assert (ap / "user-info" / "triage-profile" / fname).exists(), f"{fname} should be seeded"
     for fname in _CV_MD_FILES:
         assert (ap / "user-info" / "cv" / fname).exists(), f"{fname} should be seeded"
     for fname in _USER_INFO_ROOT_FILES:
         assert (ap / "user-info" / fname).exists(), f"{fname} should be seeded"
 
 
-def test_fresh_init_prints_single_summary_line(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_fresh_init_prints_single_summary_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
 
     out = capsys.readouterr().out
@@ -364,17 +334,13 @@ def test_fresh_init_prints_single_summary_line(
     assert "wrote" in lines[0]
 
 
-def test_fresh_init_prints_wrote_only_summary_form(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_fresh_init_prints_wrote_only_summary_form(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
 
     assert re.fullmatch(r"wrote \d+ files\n", capsys.readouterr().out)
 
 
-def test_rerun_init_prints_single_summary_line(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_rerun_init_prints_single_summary_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     capsys.readouterr()
 
@@ -387,9 +353,7 @@ def test_rerun_init_prints_single_summary_line(
     assert "skipped" in lines[0]
 
 
-def test_rerun_init_prints_skipped_only_summary_form(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_rerun_init_prints_skipped_only_summary_form(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     capsys.readouterr()
 
@@ -398,14 +362,10 @@ def test_rerun_init_prints_skipped_only_summary_form(
     assert re.fullmatch(r"skipped \d+ files\n", capsys.readouterr().out)
 
 
-def test_partial_init_prints_single_summary_line_with_both_counts(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_partial_init_prints_single_summary_line_with_both_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     ap = _ap(tmp_path)
     (ap / "user-info" / "triage-profile").mkdir(parents=True)
-    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
-        "# custom\n"
-    )
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text("# custom\n")
 
     init(tmp_path)
 
@@ -417,14 +377,10 @@ def test_partial_init_prints_single_summary_line_with_both_counts(
     assert re.search(r"\d+", lines[0])
 
 
-def test_partial_init_prints_mixed_summary_form(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_partial_init_prints_mixed_summary_form(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     ap = _ap(tmp_path)
     (ap / "user-info" / "triage-profile").mkdir(parents=True)
-    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
-        "# custom\n"
-    )
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text("# custom\n")
 
     init(tmp_path)
 
@@ -453,15 +409,9 @@ def test_init_seeds_latex_user_info_files(tmp_path: Path) -> None:
 def test_init_seeds_cover_patterns_template(tmp_path: Path) -> None:
     init(tmp_path)
 
-    cover_patterns = (
-        _ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md"
-    ).read_text()
+    cover_patterns = (_ap(tmp_path) / "user-info" / "cv" / "cover-patterns.md").read_text()
 
-    assert "# Intro Patterns" in cover_patterns
-    assert "## Product Resonance Intro" in cover_patterns
-    assert "- slot: cover_intro" in cover_patterns
-    assert "- argument_type: resonance" in cover_patterns
-    assert "- placeholders: Musterfirma, Musterprodukt, Musterprojekt" in cover_patterns
+    assert cover_patterns.strip()
 
 
 def test_init_seeds_subdirs_under_user_info(tmp_path: Path) -> None:
@@ -478,9 +428,7 @@ def test_init_seeds_subdirs_under_user_info(tmp_path: Path) -> None:
     assert cv_seeded == set(_LATEX_USER_INFO_FILES) | set(_CV_MD_FILES)
 
 
-def test_rerun_skips_existing_latex_files(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_rerun_skips_existing_latex_files(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     capsys.readouterr()
 
@@ -546,9 +494,7 @@ def test_init_seeds_setup_scripts_with_correct_content(tmp_path: Path) -> None:
     init(tmp_path)
 
     for fname in _SETUP_SCRIPTS:
-        assert (_ap(tmp_path) / "setup" / fname).read_bytes() == _setup_template_bytes(
-            fname
-        )
+        assert (_ap(tmp_path) / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
 
 
 def test_rerun_does_not_overwrite_existing_setup_scripts(tmp_path: Path) -> None:
@@ -562,9 +508,7 @@ def test_rerun_does_not_overwrite_existing_setup_scripts(tmp_path: Path) -> None
         assert (ap / "setup" / fname).read_bytes() == originals[fname]
 
 
-def test_init_skips_existing_setup_scripts(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_init_skips_existing_setup_scripts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     ap = _ap(tmp_path)
     (ap / "setup").mkdir(parents=True)
     custom = "# custom cron\n"
@@ -662,9 +606,7 @@ def test_cron_install_command_is_absolute_path_only(tmp_path: Path) -> None:
 # --- --refresh: overwrite global files, preserve user files ---
 
 
-def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     ap = _ap(tmp_path)
     # Modify all files
@@ -672,9 +614,7 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
         (ap / "setup" / fname).write_text("# custom\n")
     (ap / "config.py").write_text("# custom\n")
     (ap / "layout.py").write_text("# legacy layout\n")
-    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
-        "# custom\n"
-    )
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text("# custom\n")
     # Delete a global file to trigger a new-file write
     (ap / "setup" / "cron-install.sh").unlink()
     capsys.readouterr()
@@ -693,9 +633,7 @@ def test_refresh_console_output_distinguishes_overwrote_preserved_wrote(
     assert "user-info" not in out
 
 
-def test_refresh_removes_layout_py_if_present(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_removes_layout_py_if_present(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     (_ap(tmp_path) / "layout.py").write_text("# legacy\n")
     capsys.readouterr()
@@ -716,17 +654,11 @@ def test_refresh_on_empty_dir_writes_all_files(tmp_path: Path) -> None:
     for fname in _SETUP_SCRIPTS:
         assert (ap / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
     for fname in _TRIAGE_PROFILE_FILES:
-        assert (
-            ap / "user-info" / "triage-profile" / fname
-        ).read_bytes() == _triage_profile_template_bytes(fname)
+        assert (ap / "user-info" / "triage-profile" / fname).read_bytes() == _triage_profile_template_bytes(fname)
     for fname in _CV_MD_FILES:
-        assert (ap / "user-info" / "cv" / fname).read_bytes() == _cv_template_bytes(
-            fname
-        )
+        assert (ap / "user-info" / "cv" / fname).read_bytes() == _cv_template_bytes(fname)
     for fname in _USER_INFO_ROOT_FILES:
-        assert (ap / "user-info" / fname).read_bytes() == _user_info_template_bytes(
-            fname
-        )
+        assert (ap / "user-info" / fname).read_bytes() == _user_info_template_bytes(fname)
 
 
 def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
@@ -741,18 +673,14 @@ def test_refresh_overwrites_setup_scripts_and_preserves_user_files(
     for fname in _SETUP_SCRIPTS:
         (ap / "setup" / fname).write_text(custom_setup)
     (ap / "config.py").write_text(custom_config)
-    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(
-        custom_user_info
-    )
+    (ap / "user-info" / "triage-profile" / "candidate-profile.md").write_text(custom_user_info)
 
     init(tmp_path, refresh=True)
 
     for fname in _SETUP_SCRIPTS:
         assert (ap / "setup" / fname).read_bytes() == _setup_template_bytes(fname)
     assert (ap / "config.py").read_text() == custom_config
-    assert (
-        ap / "user-info" / "triage-profile" / "candidate-profile.md"
-    ).read_text() == custom_user_info
+    assert (ap / "user-info" / "triage-profile" / "candidate-profile.md").read_text() == custom_user_info
 
 
 # --- cv-template/cv_skeleton.tex seeding ---
@@ -884,12 +812,8 @@ def test_first_bootstrap_seeds_missing_tool_skill_files_and_preserves_unknown_ne
         _codex(tmp_path) / "skills" / "write-cv" / "SKILL.md",
         "write-cv",
     )
-    assert (
-        _claude(tmp_path) / "skills" / "write-cv" / "notes.md"
-    ).read_text() == "# operator note\n"
-    assert (
-        _codex(tmp_path) / "skills" / "write-cv" / "notes.md"
-    ).read_text() == "# operator note\n"
+    assert (_claude(tmp_path) / "skills" / "write-cv" / "notes.md").read_text() == "# operator note\n"
+    assert (_codex(tmp_path) / "skills" / "write-cv" / "notes.md").read_text() == "# operator note\n"
 
 
 def test_refresh_overwrites_tool_local_shared_support_files_in_both_roots(
@@ -919,18 +843,10 @@ def test_first_bootstrap_seeds_missing_tool_shared_files_and_preserves_unknown_n
 
     init(tmp_path)
 
-    _assert_seeded_shared_doc_affordances(
-        _claude(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md"
-    )
-    _assert_seeded_shared_doc_affordances(
-        _codex(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md"
-    )
-    assert (
-        _claude(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md"
-    ).read_text() == "# operator-local support\n"
-    assert (
-        _codex(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md"
-    ).read_text() == "# operator-local support\n"
+    _assert_seeded_shared_doc_affordances(_claude(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md")
+    _assert_seeded_shared_doc_affordances(_codex(tmp_path) / "skills" / "_shared" / "CONVENTIONS.md")
+    assert (_claude(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md").read_text() == "# operator-local support\n"
+    assert (_codex(tmp_path) / "skills" / "_shared" / "STARTUP-TRIAGE.md").read_text() == "# operator-local support\n"
 
 
 def test_init_skips_existing_cv_skeleton(tmp_path: Path) -> None:
@@ -950,14 +866,10 @@ def test_refresh_overwrites_cv_skeleton(tmp_path: Path) -> None:
 
     init(tmp_path, refresh=True)
 
-    assert (
-        _ap(tmp_path) / "cv-template" / "cv_skeleton.tex"
-    ).read_bytes() == _skeleton_template_bytes()
+    assert (_ap(tmp_path) / "cv-template" / "cv_skeleton.tex").read_bytes() == _skeleton_template_bytes()
 
 
-def test_refresh_prints_overwrote_for_cv_skeleton(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_prints_overwrote_for_cv_skeleton(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     (_ap(tmp_path) / "cv-template" / "cv_skeleton.tex").write_text("% user-edited\n")
     capsys.readouterr()
@@ -971,15 +883,11 @@ def test_refresh_prints_overwrote_for_cv_skeleton(
 def test_refresh_preserves_user_info_when_skills_exist(tmp_path: Path) -> None:
     init(tmp_path)
     custom_user_info = "# my self-description\n"
-    (
-        _ap(tmp_path) / "user-info" / "triage-profile" / "candidate-profile.md"
-    ).write_text(custom_user_info)
+    (_ap(tmp_path) / "user-info" / "triage-profile" / "candidate-profile.md").write_text(custom_user_info)
 
     init(tmp_path, refresh=True)
 
-    assert (
-        _ap(tmp_path) / "user-info" / "triage-profile" / "candidate-profile.md"
-    ).read_text() == custom_user_info
+    assert (_ap(tmp_path) / "user-info" / "triage-profile" / "candidate-profile.md").read_text() == custom_user_info
 
 
 def test_refresh_preserves_operator_owned_cover_patterns(tmp_path: Path) -> None:
@@ -1008,9 +916,7 @@ def test_refresh_seeds_missing_cover_patterns_file(
 # --- legacy <cwd>/application-pipeline/skills/ cleanup on refresh ---
 
 
-def test_refresh_removes_legacy_skills_dir_with_only_cv_skeleton(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_removes_legacy_skills_dir_with_only_cv_skeleton(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     legacy = _ap(tmp_path) / "skills"
     legacy.mkdir(parents=True, exist_ok=True)
@@ -1041,9 +947,7 @@ def test_refresh_preserves_legacy_skills_dir_with_user_content(
     assert (legacy / "notes.md").read_text() == "# my notes\n"
 
 
-def test_refresh_with_no_legacy_skills_dir_is_silent(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_with_no_legacy_skills_dir_is_silent(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     capsys.readouterr()
 
@@ -1056,9 +960,7 @@ def test_refresh_with_no_legacy_skills_dir_is_silent(
 # --- retired iterate-cv cleanup on refresh ---
 
 
-def test_refresh_preserves_application_pipeline_agent_skills_while_removing_retired_tool_wrappers(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_preserves_application_pipeline_agent_skills_while_removing_retired_tool_wrappers(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     iterate_cv_md = _ap(tmp_path) / "agent-skills" / "iterate-cv.md"
     iterate_cv_md.parent.mkdir(parents=True, exist_ok=True)
@@ -1082,9 +984,7 @@ def test_refresh_preserves_application_pipeline_agent_skills_while_removing_reti
     assert "removed .codex/skills/iterate-cv/SKILL.md" in out
 
 
-def test_refresh_preserves_legacy_application_pipeline_agent_skills_shared_docs(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_preserves_legacy_application_pipeline_agent_skills_shared_docs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     legacy_shared = _ap(tmp_path) / "agent-skills" / "_shared" / "CONVENTIONS.md"
     legacy_shared.parent.mkdir(parents=True, exist_ok=True)
@@ -1127,9 +1027,7 @@ def test_refresh_preserves_user_files_in_retired_iterate_cv_dir(
     assert notes.read_text() == "# my notes\n"
 
 
-def test_normal_init_does_not_run_refresh_cleanup(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_normal_init_does_not_run_refresh_cleanup(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     legacy_layout = _ap(tmp_path) / "layout.py"
     legacy_layout.write_text("# legacy\n")
@@ -1152,9 +1050,7 @@ def test_normal_init_does_not_run_refresh_cleanup(
     assert "skills/cv_skeleton.tex" not in out
 
 
-def test_refresh_is_silent_when_retired_iterate_cv_files_absent(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_is_silent_when_retired_iterate_cv_files_absent(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     capsys.readouterr()
 
@@ -1164,9 +1060,7 @@ def test_refresh_is_silent_when_retired_iterate_cv_files_absent(
     assert "iterate-cv" not in out
 
 
-def test_refresh_silently_prunes_empty_retired_iterate_cv_parent_dirs(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_silently_prunes_empty_retired_iterate_cv_parent_dirs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     claude_skill = _claude(tmp_path) / "skills" / "iterate-cv" / "SKILL.md"
     claude_skill.parent.mkdir(parents=True, exist_ok=True)
@@ -1199,15 +1093,9 @@ def test_fresh_init_seeds_codex_skill_wrappers_with_claude_metadata(
         wrapper = codex_skills / d / "SKILL.md"
         assert wrapper.exists(), f"{d}/SKILL.md missing"
         codex_text = _assert_seeded_skill_affordances(wrapper, d)
-        claude_text = (_claude(tmp_path) / "skills" / d / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        assert _front_matter_field(codex_text, "name") == _front_matter_field(
-            claude_text, "name"
-        )
-        assert _front_matter_field(codex_text, "description") == _front_matter_field(
-            claude_text, "description"
-        )
+        claude_text = (_claude(tmp_path) / "skills" / d / "SKILL.md").read_text(encoding="utf-8")
+        assert _front_matter_field(codex_text, "name") == _front_matter_field(claude_text, "name")
+        assert _front_matter_field(codex_text, "description") == _front_matter_field(claude_text, "description")
 
     assert not (_ap(tmp_path) / ".codex").exists()
 
@@ -1329,9 +1217,7 @@ def test_init_seeds_matching_skill_metadata_in_both_tool_roots(
             skill,
         )
         assert _front_matter_field(claude, "name") == _front_matter_field(codex, "name")
-        assert _front_matter_field(claude, "description") == _front_matter_field(
-            codex, "description"
-        )
+        assert _front_matter_field(claude, "description") == _front_matter_field(codex, "description")
 
 
 def test_fresh_init_seeds_known_skill_files_with_template_content(
@@ -1420,9 +1306,7 @@ def test_refresh_restores_missing_wrapper_and_preserves_neighboring_user_files(
     assert notes.read_text() == "# wip\n"
 
 
-def test_refresh_reports_changed_agent_skill_artifacts_with_bucketed_paths(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_reports_changed_agent_skill_artifacts_with_bucketed_paths(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     claude_wrapper = _claude(tmp_path) / "skills" / "write-cv" / "SKILL.md"
     codex_wrapper = _codex(tmp_path) / "skills" / "analyse-listing" / "SKILL.md"
@@ -1461,12 +1345,8 @@ def test_refresh_restores_byte_identical_agent_skill_runtime_files(
     tmp_path: Path,
 ) -> None:
     init(tmp_path)
-    (_claude(tmp_path) / "skills" / "write-cv" / "SKILL.md").write_text(
-        "# tampered claude wrapper\n"
-    )
-    (_codex(tmp_path) / "skills" / "_shared" / "SLOT-MAP.md").write_text(
-        "# tampered codex shared\n"
-    )
+    (_claude(tmp_path) / "skills" / "write-cv" / "SKILL.md").write_text("# tampered claude wrapper\n")
+    (_codex(tmp_path) / "skills" / "_shared" / "SLOT-MAP.md").write_text("# tampered codex shared\n")
 
     init(tmp_path, refresh=True)
 
@@ -1511,9 +1391,7 @@ def test_refresh_preserves_runtime_data(tmp_path: Path) -> None:
 # --- --refresh quiet output (issue #664) ---
 
 
-def test_refresh_against_unmodified_dir_prints_only_confirmation(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_against_unmodified_dir_prints_only_confirmation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     capsys.readouterr()
 
@@ -1521,15 +1399,10 @@ def test_refresh_against_unmodified_dir_prints_only_confirmation(
 
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
     assert len(lines) == 1
-    assert not any(
-        line.startswith(("overwrote", "wrote", "skipped", "removed", "unchanged"))
-        for line in lines
-    )
+    assert not any(line.startswith(("overwrote", "wrote", "skipped", "removed", "unchanged")) for line in lines)
 
 
-def test_refresh_with_one_modified_file_prints_only_that_file(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_with_one_modified_file_prints_only_that_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     (_ap(tmp_path) / "setup" / "cron.sh").write_text("# modified\n")
     capsys.readouterr()
@@ -1540,9 +1413,7 @@ def test_refresh_with_one_modified_file_prints_only_that_file(
     assert lines == ["overwrote setup/cron.sh"]
 
 
-def test_refresh_prints_only_visible_actions_for_mixed_refresh_outcomes(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_prints_only_visible_actions_for_mixed_refresh_outcomes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     ap = _ap(tmp_path)
     (ap / "setup" / "cron.sh").write_text("# modified\n")
@@ -1561,9 +1432,7 @@ def test_refresh_prints_only_visible_actions_for_mixed_refresh_outcomes(
     ]
 
 
-def test_refresh_config_never_in_stdout(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_config_never_in_stdout(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     capsys.readouterr()
 
@@ -1573,9 +1442,7 @@ def test_refresh_config_never_in_stdout(
     assert "config.py" not in out
 
 
-def test_refresh_new_package_owned_file_is_reported_in_stdout(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_new_package_owned_file_is_reported_in_stdout(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     (_ap(tmp_path) / "setup" / "cron-install.sh").unlink()
     capsys.readouterr()
@@ -1586,9 +1453,7 @@ def test_refresh_new_package_owned_file_is_reported_in_stdout(
     assert capsys.readouterr().out.splitlines() == ["wrote setup/cron-install.sh"]
 
 
-def test_refresh_reports_missing_package_owned_file_but_not_operator_owned_file(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_reports_missing_package_owned_file_but_not_operator_owned_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     ap = _ap(tmp_path)
     package_owned = ap / "setup" / "cron-install.sh"
@@ -1605,9 +1470,7 @@ def test_refresh_reports_missing_package_owned_file_but_not_operator_owned_file(
     assert lines == ["wrote setup/cron-install.sh"]
 
 
-def test_refresh_reseeds_missing_operator_owned_file_without_stdout_path(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_reseeds_missing_operator_owned_file_without_stdout_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     keywords = _ap(tmp_path) / "user-info" / "search-terms" / "keywords.md"
     keywords.unlink()
@@ -1663,9 +1526,7 @@ def test_refresh_preserves_operator_owned_file_without_reading_bytes(
     assert config.read_text() == original
 
 
-def test_refresh_removed_lines_still_appear(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_removed_lines_still_appear(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     (_ap(tmp_path) / "layout.py").write_text("# legacy\n")
     capsys.readouterr()
@@ -1694,9 +1555,7 @@ def test_rerun_init_preserves_existing_operator_credential(tmp_path: Path) -> No
     assert env_path.read_text() == original
 
 
-def test_refresh_preserves_existing_operator_credential_without_stdout_path(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_preserves_existing_operator_credential_without_stdout_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     env_path = _ap(tmp_path) / ".env"
     original = "OPENCODE_GO_API_KEY=operator-secret\n"
@@ -1709,9 +1568,7 @@ def test_refresh_preserves_existing_operator_credential_without_stdout_path(
     assert ".env" not in capsys.readouterr().out
 
 
-def test_refresh_reseeds_missing_operator_credential_without_stdout_path(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_refresh_reseeds_missing_operator_credential_without_stdout_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     init(tmp_path)
     env_path = _ap(tmp_path) / ".env"
     env_path.unlink()

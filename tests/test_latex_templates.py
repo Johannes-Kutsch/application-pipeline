@@ -55,8 +55,7 @@ _RECIPIENT_PATTERN = re.compile(
 _COVER_BODY_PATTERN = re.compile(
     r"\\AutoCoverLetterStretch\{[^}]+\}\{[^}]+\}\{[^}]+\}\{[^}]+\}\{.*?"
     r"<<COVER_INTRO>>.*?"
-    r"<<COVER_PIVOT>>.*?"
-    r"<<COVER_FIT>>.*?"
+    r"<<COVER_BULLETS>>.*?"
     r"<<COVER_CLOSING>>.*?\}",
     re.DOTALL,
 )
@@ -68,27 +67,18 @@ _RESUME_PATTERN = re.compile(
     re.DOTALL,
 )
 _TEMPLATE_SLOT_PATTERN = re.compile(r"<<([A-Z_]+)>>")
-_MINIMAL_PNG = bytes.fromhex(
-    "89504e470d0a1a0a"
-    "0000000d49484452000000010000000108060000001f15c489"
-    "0000000d49444154789c63f8cfc0f01f00050001ff89993d1d"
-    "0000000049454e44ae426082"
-)
+_MINIMAL_PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082")
 
 
 @pytest.fixture(scope="module")
 def cv_template() -> str:
-    return (
-        importlib.resources.files("application_pipeline.latex") / "cv_template.tex"
-    ).read_text(encoding="utf-8")
+    return (importlib.resources.files("application_pipeline.latex") / "cv_template.tex").read_text(encoding="utf-8")
 
 
 def assert_template_contract(template: str) -> None:
     leaked = [t for t in _IDENTITY_TOKENS if t in template]
     assert leaked == [], f"cv_template.tex leaks identity tokens: {leaked}"
-    actual_markers = {
-        match.group(0) for match in _TEMPLATE_SLOT_PATTERN.finditer(template)
-    }
+    actual_markers = {match.group(0) for match in _TEMPLATE_SLOT_PATTERN.finditer(template)}
     assert actual_markers == TEMPLATE_MARKER_SET
     assert _RECIPIENT_PATTERN.search(template)
     assert re.search(r"\\opening\{\s*<<OPENING>>\s*\}", template)
@@ -125,9 +115,7 @@ def assert_compiled_template_contract(
         + r"\s*\}.*?"
         + re.escape(slot_bodies["cover_intro"])
         + r".*?"
-        + re.escape(slot_bodies["cover_pivot"])
-        + r".*?"
-        + re.escape(slot_bodies["cover_fit"])
+        + re.escape(slot_bodies["cover_bullets"])
         + r".*?"
         + re.escape(slot_bodies["cover_closing"]),
         re.DOTALL,
@@ -159,10 +147,10 @@ def _compileable_slot_bodies() -> dict[str, str]:
                 "Musterstrasse 1",
                 "12345 Berlin",
                 "Sehr geehrte Damen und Herren,",
+                "Betreff: Ihre Stellenanzeige Beispielrolle",
                 "Ich bewerbe mich hiermit.",
-                "Mein Hintergrund ist relevant.",
-                "Ich passe gut zu Ihrer Firma.",
                 "Ich freue mich auf Ihre Antwort.",
+                r"\begin{itemize}\item Fakt A.\end{itemize}",
                 r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
                 r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
                 r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
@@ -210,9 +198,7 @@ def test_cv_template_contract_rejects_unexpected_slot_markers(
 
 def test_cv_template_contract_rejects_renamed_slot_markers(cv_template: str) -> None:
     with pytest.raises(AssertionError):
-        assert_template_contract(
-            cv_template.replace("<<COVER_FIT>>", "<<COVER_MATCH>>", 1)
-        )
+        assert_template_contract(cv_template.replace("<<COVER_BULLETS>>", "<<COVER_MATCH>>", 1))
 
 
 @pytest.mark.skipif(shutil.which("pdflatex") is None, reason="pdflatex not installed")

@@ -1,10 +1,25 @@
 # Intro Patterns
 
-## Product Resonance Intro
-- slot: cover_intro
-- argument_type: resonance
-- use_when: Use when the employer's product or platform connects directly to a long-running motivation or curiosity.
-- placeholders: Musterfirma, Musterprodukt, Musterprojekt
-- why_it_works: It links the employer's surface to concrete candidate evidence instead of opening with generic motivation.
+## Openings
 
-Bei Musterfirma reizt mich besonders, dass Musterprodukt ein Problem adressiert, das ich in Musterprojekt bereits aus der Builder-Perspektive durchdrungen habe. Gerade diese Naehe zwischen Produktproblem und Umsetzungserfahrung macht den Wechsel fuer mich plausibel.
+<format>
+One Line per Paragraph, e.g.:
+- Ich heiße Johannes Kutsch und bewerbe mich hiermit auf die von Euch ausgeschriebene Stelle als Research Engineer AI. Die letzten Jahre habe ich erfolgreich das Indie-Studio Octofox Games mitgegründet. Nun möchte ich mich stärker meiner anderen Leidenschaft widmen und in Richtung AI, ML und Datenanalyse gehen.
+- ...
+
+<!-- Add your bullets below. Delete this comment and the example/instructions above when ready. -->
+
+---
+</format>
+
+
+## Closings
+
+<format>
+One Line per Paragraph, e.g.:
+- Diese Bewerbung wurde übrigens mithilfe eines weiteren ML-Projekts von mir verfasst, das Stellenausschreibungen parst, filtert, bewertet und mich anschließend bei der Zusammenstellung maßgeschneiderter Bewerbungsunterlagen unterstützt. Gerne erläutere ich Euch in einem Gespräch mehr und freue mich darauf, zu besprechen, wie ich meine Fähigkeiten bei Euch am besten einbringen kann.
+- ...
+<!-- Add your bullets below. Delete this comment and the example/instructions above when ready. -->
+
+---
+</format>

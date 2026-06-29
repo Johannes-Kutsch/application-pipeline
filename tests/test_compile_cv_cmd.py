@@ -64,10 +64,10 @@ def _slot_bodies(overrides: dict[str, str] | None = None) -> dict[str, str]:
                 "Musterstraße 1",
                 "12345 Berlin",
                 "Sehr geehrte Damen und Herren,",
+                "Betreff: Ihre Stellenanzeige Beispielrolle",
                 "Ich bewerbe mich hiermit.",
-                "Mein Hintergrund ist relevant.",
-                "Ich passe gut zu Ihrer Firma.",
                 "Ich freue mich auf Ihre Antwort.",
+                r"\begin{itemize}\item Fakt A.\end{itemize}",
                 r"\cventry{2020--2023}{Developer}{Firma}{Berlin}{}{}",
                 r"\cventry{2016--2020}{B.Sc.}{TU Berlin}{Berlin}{}{}",
                 r"\cventry{2021}{Projekt}{}{}{}{Beschreibung}",
@@ -277,15 +277,7 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     project_root: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    fake = _install_failing_pdflatex(
-        log_text=(
-            "This is pdflatex\n"
-            "! Undefined control sequence.\n"
-            "l.42 \\badmacro\n"
-            "           {foo}\n"
-            "? \n"
-        )
-    )
+    fake = _install_failing_pdflatex(log_text=("This is pdflatex\n! Undefined control sequence.\nl.42 \\badmacro\n           {foo}\n? \n"))
 
     with pytest.raises(SystemExit):
         _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
@@ -300,13 +292,7 @@ class _FailingPdflatexAdapterWithInMemoryLog:
     """Adapter seam variant that returns log text without touching build files."""
 
     returncode: int = 1
-    log_text: str = (
-        "This is pdflatex\n"
-        "! Undefined control sequence.\n"
-        "l.42 \\badmacro\n"
-        "           {foo}\n"
-        "? \n"
-    )
+    log_text: str = "This is pdflatex\n! Undefined control sequence.\nl.42 \\badmacro\n           {foo}\n? \n"
 
     def run_pass(
         self,
@@ -447,9 +433,7 @@ def test_compile_cv_via_cli_dispatch(
         captured_app_dirs.append(cli_app_dir)
 
     monkeypatch.setattr(compile_cv_cmd_module, "compile_cv", fake_compile_cv)
-    monkeypatch.setattr(
-        sys, "argv", ["application-pipeline", "compile-cv", str(app_dir)]
-    )
+    monkeypatch.setattr(sys, "argv", ["application-pipeline", "compile-cv", str(app_dir)])
 
     main()
 
@@ -484,9 +468,7 @@ def test_compile_cv_malformed_cv_tex_exits_naming_missing_slot(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (app_dir / "cv.tex").write_text(
-        "%% SLOT: recipient_company\nFirma GmbH\n", encoding="utf-8"
-    )
+    (app_dir / "cv.tex").write_text("%% SLOT: recipient_company\nFirma GmbH\n", encoding="utf-8")
     _install_preflight_tripwire(monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
@@ -533,15 +515,7 @@ def test_compile_cv_retains_substituted_cv_tex_when_build_fails(
     app_dir: Path,
     project_root: Path,
 ) -> None:
-    fake = _install_failing_pdflatex(
-        log_text=(
-            "This is pdflatex\n"
-            "! Undefined control sequence.\n"
-            "l.42 \\\\badmacro\n"
-            "           {foo}\n"
-            "? \n"
-        )
-    )
+    fake = _install_failing_pdflatex(log_text=("This is pdflatex\n! Undefined control sequence.\nl.42 \\\\badmacro\n           {foo}\n? \n"))
 
     with pytest.raises(SystemExit):
         _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)

@@ -23,6 +23,9 @@
 \usepackage[ngerman]{babel}
 \usepackage[utf8x]{inputenc}
 \usepackage{enumitem}
+% \enquote{} shim — csquotes conflicts with ragged2e/enumitem in this MiKTeX build;
+% ngerman babel already provides \glqq/\grqq so we define it directly.
+\providecommand{\enquote}[1]{\glqq #1\grqq}
 \usepackage{ragged2e}
 \usepackage{setspace}
 \usepackage{xpatch}
@@ -54,7 +57,7 @@
 \makeatother
 
 % Ported from cv_7.tex — tighter itemize spacing.
-\setlist[itemize]{itemsep=-0.2em, topsep=0pt}
+\setlist[itemize]{itemsep=-0.2em}
 \setlist[itemize,2]{topsep=-0.4em}
 
 % User-level helper macro on top of stock moderncv 1.2.0. Verbatim from the
@@ -95,7 +98,7 @@
 % Override moderncv's letter-closing to inject the signature image automatically,
 % so the applicant never has to print/sign/scan an Anschreiben. This couples to
 % moderncv internals by design; a Tier-3 refactor of the class will absorb it.
-\newcommand{\CoverLetterGap}{1.75\baselineskip}
+\newcommand{\CoverLetterGap}{1.5\baselineskip}
 \makeatletter
 \renewcommand*{\makeletterclosing}{%
   % Keep the sign-off gap proportional to the selected cover stretch so it
@@ -103,7 +106,6 @@
   % so the signature block stays tight.
   \setstretch{1}%
   \vspace{\CoverLetterGap}
-  \vfill
   \@closing\par
   \SignatureBlock
 }
@@ -116,6 +118,7 @@
     \hsize=\textwidth
     \setstretch{#1}%
     \justify
+    \setlength{\topsep}{0pt}% no gap between inline text and following itemize in cover body
     #2%
     \par
     \makeletterclosing
@@ -156,20 +159,23 @@
   <<RECIPIENT_ZIP_CITY>>%
 }
 \date{\today}
-\opening{\ifstrempty{<<COVER_SUBJECT>>}{}{{\bfseries <<COVER_SUBJECT>>}\\[1em]}<<OPENING>>}
+\opening{\ifstrempty{<<COVER_SUBJECT>>}{}{{\bfseries <<COVER_SUBJECT>>}\\[2\baselineskip]}<<OPENING>>}
 \closing{Mit freundlichen Grüßen,}
 
 % Wrapped in a group so \raggedright inside \makelettertitle does not leak
 % \rightskip into the resume section and shift the \makecvtitle title gap.
 {\makelettertitle}%
-\AutoCoverLetterStretch{1.8}{1.7}{1.6}{1.5}{%
+\AutoCoverLetterStretch{1.5}{1.4}{1.3}{1.2}{%
 
 <<COVER_INTRO>>
 
-\bigskip
+\vspace{0.5\baselineskip}
+\bgroup
+\setlist[itemize]{noitemsep,topsep=0pt}
 <<COVER_BULLETS>>
+\egroup
 
-\bigskip
+\vspace{0.5\baselineskip}
 <<COVER_CLOSING>>
 }
 

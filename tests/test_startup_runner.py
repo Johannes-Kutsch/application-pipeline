@@ -407,6 +407,172 @@ def test_cron_missing_config_does_not_invoke_init_bootstrap(
     assert not (tmp_path / "application-pipeline").exists()
 
 
+def test_credential_failure_does_not_create_log_artifacts(
+    tmp_path: Path,
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+    (settings_dir / ".env").write_text("OPENCODE_GO_API_KEY=\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert not (settings_dir / ".runtime-data").exists()
+
+
+def test_cron_credential_failure_happens_before_init_bootstrap(
+    tmp_path: Path,
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+    # No .env — credential check must fail before init runs
+
+    with pytest.raises(SystemExit):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    # Init Bootstrap materialises files when invoked; layout.py would be
+    # removed and seeded files would appear if init ran. Verify it did not.
+    assert not (settings_dir / "setup").exists()
+
+
+def test_run_startup_exits_2_with_operator_credential_message_when_key_absent_from_env(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+    (settings_dir / ".env").write_text("OTHER_VAR=some-value\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "startup failed" in stderr
+    assert "operator credential" in stderr
+    assert "OPENCODE_GO_API_KEY" in stderr
+
+
+def test_cron_startup_exits_2_with_operator_credential_message_when_key_absent_from_env(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+    (settings_dir / ".env").write_text("OTHER_VAR=some-value\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "startup failed" in stderr
+    assert "operator credential" in stderr
+    assert "OPENCODE_GO_API_KEY" in stderr
+
+
+def test_run_startup_exits_2_with_operator_credential_message_when_key_is_empty(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+    (settings_dir / ".env").write_text("OPENCODE_GO_API_KEY=\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "startup failed" in stderr
+    assert "operator credential" in stderr
+    assert "OPENCODE_GO_API_KEY" in stderr
+
+
+def test_cron_startup_exits_2_with_operator_credential_message_when_key_is_empty(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+    (settings_dir / ".env").write_text("OPENCODE_GO_API_KEY=\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "startup failed" in stderr
+    assert "operator credential" in stderr
+    assert "OPENCODE_GO_API_KEY" in stderr
+
+
+def test_cron_startup_exits_2_with_operator_credential_message_when_env_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "startup failed" in stderr
+    assert "operator credential" in stderr
+    assert "OPENCODE_GO_API_KEY" in stderr
+
+
 def test_startup_runner_requires_operator_credential_before_parser_work(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

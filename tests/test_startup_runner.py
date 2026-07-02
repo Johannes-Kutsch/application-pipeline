@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 
+from application_pipeline.config import ConfigError
 from application_pipeline.run_metrics import RunSummary
 from application_pipeline.startup_runner import (
     StartupRequest,
@@ -807,3 +808,149 @@ def test_startup_runner_uses_rich_status_display_with_terminal(
     )
 
     assert isinstance(captured_display[0], RichStatusDisplay)
+
+
+def test_config_loader_failure_propagates_as_unhandled_exception(
+    tmp_path: Path,
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+    (settings_dir / ".env").write_text(
+        "OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+
+def test_config_loader_failure_does_not_write_failure_reports(
+    tmp_path: Path,
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+    (settings_dir / ".env").write_text(
+        "OPENCODE_GO_API_KEY=test-key\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    failures_dir = settings_dir / ".runtime-data" / "failures"
+    failure_reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
+    assert failure_reports == []
+
+
+def test_cron_init_bootstrap_failure_propagates_as_unhandled_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+
+    monkeypatch.setattr(
+        "application_pipeline.init_cmd.init",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("init refresh exploded")),
+    )
+
+    with pytest.raises(RuntimeError, match="init refresh exploded"):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+
+def test_cron_init_bootstrap_failure_does_not_write_failure_reports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_dir = _write_settings_dir(tmp_path, with_operator_credential=True)
+
+    monkeypatch.setattr(
+        "application_pipeline.init_cmd.init",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("init refresh exploded")),
+    )
+
+    with pytest.raises(RuntimeError):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    failures_dir = settings_dir / ".runtime-data" / "failures"
+    failure_reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
+    assert failure_reports == []
+
+
+def test_orchestrator_failure_in_cron_propagates_as_unhandled_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+
+    monkeypatch.setattr(
+        "application_pipeline.init_cmd.init",
+        lambda *_a, **_kw: None,
+    )
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("orchestrator exploded")),
+    )
+
+    with pytest.raises(RuntimeError, match="orchestrator exploded"):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+
+def test_orchestrator_failure_does_not_write_failure_reports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_dir = _write_settings_dir(tmp_path, with_operator_credential=True)
+
+    monkeypatch.setattr(
+        "application_pipeline.orchestrator.run",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("orchestrator exploded")),
+    )
+
+    with pytest.raises(RuntimeError):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    failures_dir = settings_dir / ".runtime-data" / "failures"
+    failure_reports = list(failures_dir.glob("*.md")) if failures_dir.exists() else []
+    assert failure_reports == []

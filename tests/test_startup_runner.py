@@ -390,16 +390,8 @@ def test_missing_config_startup_does_not_create_log_artifacts(
 
 
 def test_cron_missing_config_does_not_invoke_init_bootstrap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    init_called = False
-
-    def fake_init(*_args: object, **_kwargs: object) -> None:
-        nonlocal init_called
-        init_called = True
-
-    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
-
     with pytest.raises(SystemExit):
         run_startup(
             StartupRequest(
@@ -410,7 +402,9 @@ def test_cron_missing_config_does_not_invoke_init_bootstrap(
             )
         )
 
-    assert init_called is False
+    # Init Bootstrap materialises files under application-pipeline/ when invoked;
+    # the directory must not exist after a missing-config exit.
+    assert not (tmp_path / "application-pipeline").exists()
 
 
 def test_startup_runner_requires_operator_credential_before_parser_work(

@@ -334,6 +334,85 @@ def test_startup_runner_without_config_exits_2_with_guidance(
     assert "no application-pipeline/config.py in" in capsys.readouterr().err
 
 
+def test_cron_startup_without_config_exits_2_with_guidance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    request = StartupRequest(
+        cwd=tmp_path,
+        mode="cron",
+        no_judge=False,
+        has_terminal=False,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(request)
+
+    assert exc_info.value.code == 2
+    assert "no application-pipeline/config.py in" in capsys.readouterr().err
+
+
+def test_startup_runner_inside_settings_dir_emits_cd_up_guidance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings_dir = tmp_path / "application-pipeline"
+    settings_dir.mkdir(parents=True)
+    (settings_dir / "config.py").write_text("", encoding="utf-8")
+
+    request = StartupRequest(
+        cwd=settings_dir,
+        mode="run",
+        no_judge=False,
+        has_terminal=False,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(request)
+
+    assert exc_info.value.code == 2
+    assert "cd .." in capsys.readouterr().err
+
+
+def test_missing_config_startup_does_not_create_log_artifacts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert not (tmp_path / ".runtime-data").exists()
+    assert not (tmp_path / "application-pipeline" / ".runtime-data").exists()
+
+
+def test_cron_missing_config_does_not_invoke_init_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    init_called = False
+
+    def fake_init(*_args: object, **_kwargs: object) -> None:
+        nonlocal init_called
+        init_called = True
+
+    monkeypatch.setattr("application_pipeline.init_cmd.init", fake_init)
+
+    with pytest.raises(SystemExit):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert init_called is False
+
+
 def test_startup_runner_requires_operator_credential_before_parser_work(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

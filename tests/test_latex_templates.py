@@ -67,18 +67,24 @@ _RESUME_PATTERN = re.compile(
     re.DOTALL,
 )
 _TEMPLATE_SLOT_PATTERN = re.compile(r"<<([A-Z_]+)>>")
-_MINIMAL_PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082")
+_MINIMAL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082"
+)
 
 
 @pytest.fixture(scope="module")
 def cv_template() -> str:
-    return (importlib.resources.files("application_pipeline.latex") / "cv_template.tex").read_text(encoding="utf-8")
+    return (
+        importlib.resources.files("application_pipeline.latex") / "cv_template.tex"
+    ).read_text(encoding="utf-8")
 
 
 def assert_template_contract(template: str) -> None:
     leaked = [t for t in _IDENTITY_TOKENS if t in template]
     assert leaked == [], f"cv_template.tex leaks identity tokens: {leaked}"
-    actual_markers = {match.group(0) for match in _TEMPLATE_SLOT_PATTERN.finditer(template)}
+    actual_markers = {
+        match.group(0) for match in _TEMPLATE_SLOT_PATTERN.finditer(template)
+    }
     assert actual_markers == TEMPLATE_MARKER_SET
     assert _RECIPIENT_PATTERN.search(template)
     assert re.search(r"\\opening\{.*?<<OPENING>>", template, re.DOTALL)
@@ -200,7 +206,9 @@ def test_cv_template_contract_rejects_unexpected_slot_markers(
 
 def test_cv_template_contract_rejects_renamed_slot_markers(cv_template: str) -> None:
     with pytest.raises(AssertionError):
-        assert_template_contract(cv_template.replace("<<COVER_BULLETS>>", "<<COVER_MATCH>>", 1))
+        assert_template_contract(
+            cv_template.replace("<<COVER_BULLETS>>", "<<COVER_MATCH>>", 1)
+        )
 
 
 @pytest.mark.skipif(shutil.which("pdflatex") is None, reason="pdflatex not installed")

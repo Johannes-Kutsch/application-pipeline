@@ -50,7 +50,9 @@ def test_cover_bullets_slot_is_not_in_cover_paragraph_pattern_slots() -> None:
 
 
 def test_template_markers_preserve_uppercase_slot_marker_spelling() -> None:
-    assert TEMPLATE_MARKERS == {slot_name: f"<<{slot_name.upper()}>>" for slot_name in SLOT_NAMES}
+    assert TEMPLATE_MARKERS == {
+        slot_name: f"<<{slot_name.upper()}>>" for slot_name in SLOT_NAMES
+    }
 
 
 def test_template_marker_set_matches_slot_vocabulary_projection() -> None:
@@ -58,4 +60,6 @@ def test_template_marker_set_matches_slot_vocabulary_projection() -> None:
 
 
 def test_template_marker_returns_marker_for_each_known_slot() -> None:
-    assert {slot_name: template_marker(slot_name) for slot_name in SLOT_NAMES} == (TEMPLATE_MARKERS)
+    assert {slot_name: template_marker(slot_name) for slot_name in SLOT_NAMES} == (
+        TEMPLATE_MARKERS
+    )

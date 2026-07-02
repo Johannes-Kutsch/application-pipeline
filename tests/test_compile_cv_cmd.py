@@ -277,7 +277,11 @@ def test_compile_cv_emits_error_blob_to_stderr_on_failure(
     project_root: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    fake = _install_failing_pdflatex(log_text=("This is pdflatex\n! Undefined control sequence.\nl.42 \\badmacro\n           {foo}\n? \n"))
+    fake = _install_failing_pdflatex(
+        log_text=(
+            "This is pdflatex\n! Undefined control sequence.\nl.42 \\badmacro\n           {foo}\n? \n"
+        )
+    )
 
     with pytest.raises(SystemExit):
         _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
@@ -433,7 +437,9 @@ def test_compile_cv_via_cli_dispatch(
         captured_app_dirs.append(cli_app_dir)
 
     monkeypatch.setattr(compile_cv_cmd_module, "compile_cv", fake_compile_cv)
-    monkeypatch.setattr(sys, "argv", ["application-pipeline", "compile-cv", str(app_dir)])
+    monkeypatch.setattr(
+        sys, "argv", ["application-pipeline", "compile-cv", str(app_dir)]
+    )
 
     main()
 
@@ -468,7 +474,9 @@ def test_compile_cv_malformed_cv_tex_exits_naming_missing_slot(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (app_dir / "cv.tex").write_text("%% SLOT: recipient_company\nFirma GmbH\n", encoding="utf-8")
+    (app_dir / "cv.tex").write_text(
+        "%% SLOT: recipient_company\nFirma GmbH\n", encoding="utf-8"
+    )
     _install_preflight_tripwire(monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
@@ -515,7 +523,11 @@ def test_compile_cv_retains_substituted_cv_tex_when_build_fails(
     app_dir: Path,
     project_root: Path,
 ) -> None:
-    fake = _install_failing_pdflatex(log_text=("This is pdflatex\n! Undefined control sequence.\nl.42 \\\\badmacro\n           {foo}\n? \n"))
+    fake = _install_failing_pdflatex(
+        log_text=(
+            "This is pdflatex\n! Undefined control sequence.\nl.42 \\\\badmacro\n           {foo}\n? \n"
+        )
+    )
 
     with pytest.raises(SystemExit):
         _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)

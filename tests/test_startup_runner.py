@@ -446,8 +446,7 @@ def test_cron_credential_failure_happens_before_init_bootstrap(
             )
         )
 
-    # Init Bootstrap materialises files when invoked; layout.py would be
-    # removed and seeded files would appear if init ran. Verify it did not.
+    # Init Bootstrap seeds setup/ when invoked; its absence confirms init did not run.
     assert not (settings_dir / "setup").exists()
 
 

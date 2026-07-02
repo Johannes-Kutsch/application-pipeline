@@ -7534,7 +7534,8 @@ def test_matched_llm_enricher_outcome_reaches_judge_and_daily_results_file(
     results_dir = tmp_path / "results"
     stub_url = "https://judge-flow.example/job/1"
     body = "Persisted body from the real LLM Enricher path. " + "x" * 120
-    header = "Senior Python Engineer\nAcme · Hamburg · remote\n2026-01-01 · Senior"
+    posted = (date.today() - timedelta(days=1)).isoformat()
+    header = f"Senior Python Engineer\nAcme · Hamburg · remote\n{posted} · Senior"
     card_summary = "Strong fit for the candidate profile."
     judge_candidates: list[JudgeCandidate] = []
 
@@ -7602,6 +7603,6 @@ def test_matched_llm_enricher_outcome_reaches_judge_and_daily_results_file(
     content = _read_all_results(results_dir)
     assert "# **1:** Senior Python Engineer" in content
     assert "Acme · Hamburg · remote" in content
-    assert "2026-01-01 · Senior" in content
+    assert f"{posted} · Senior" in content
     assert card_summary in content
     assert body in content

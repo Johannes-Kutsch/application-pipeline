@@ -6974,7 +6974,10 @@ def test_post_llm_stale_outcome_is_dropped_and_fresh_batch_peer_reaches_judge(
     stale_url = "https://ba.example/post-llm-stale"
     fresh_url = "https://ba.example/post-llm-fresh"
     stale_header = "ML Engineer\nCorp · Berlin · hybrid\n2020-01-01 · mid · —"
-    fresh_header = "Data Engineer\nCorp · Hamburg · remote\n2026-01-10 · senior · —"
+    fresh_posted = (date.today() - timedelta(days=1)).isoformat()
+    fresh_header = (
+        f"Data Engineer\nCorp · Hamburg · remote\n{fresh_posted} · senior · —"
+    )
     judge_candidate_ids: list[list[int]] = []
 
     class _TwoStubParser(_StubParserBase):

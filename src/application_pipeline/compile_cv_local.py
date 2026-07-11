@@ -16,6 +16,7 @@ from application_pipeline.latex.slot_map import parse
 class _PdflatexRunResult:
     returncode: int
     log_text: str | None = None
+    page_count: int | None = None
 
 
 class _PdflatexAdapter(Protocol):

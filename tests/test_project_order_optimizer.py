@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import permutations
 
 from application_pipeline.project_order_optimizer import optimize_project_order
 
@@ -22,8 +23,6 @@ def test_two_items_yields_one_permutation() -> None:
 def test_three_items_exhaustive() -> None:
     original = ["A", "B", "C"]
     result = list(optimize_project_order(original))
-    from itertools import permutations
-
     all_perms = {tuple(p) for p in permutations(original)}
     all_perms.discard(tuple(original))
     assert {tuple(p) for p in result} == all_perms
@@ -46,15 +45,12 @@ def test_ascending_kendall_tau_order() -> None:
 def test_four_items_exhaustive() -> None:
     original = ["A", "B", "C", "D"]
     result = list(optimize_project_order(original))
-    from itertools import permutations
-
     all_perms = {tuple(p) for p in permutations(original)}
     all_perms.discard(tuple(original))
     assert {tuple(p) for p in result} == all_perms
 
 
 def _kendall_tau(original: list[str], permutation: list[str]) -> int:
-    """Count the number of pairwise inversions between original and permutation."""
     pos = {v: i for i, v in enumerate(permutation)}
     n = len(original)
     count = 0

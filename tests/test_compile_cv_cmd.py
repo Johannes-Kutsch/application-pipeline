@@ -711,6 +711,24 @@ def multi_project_app_dir(tmp_path: Path, project_root: Path) -> Path:
     return d
 
 
+def test_probe_no_invocation_with_zero_project_macros(
+    project_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_dir = tmp_path / "app_zero_proj"
+    app_dir.mkdir()
+    bodies = _slot_bodies({"resume_projekte": ""})
+    (app_dir / "cv.tex").write_text(_render_cv_tex(bodies), encoding="utf-8")
+
+    fake = _install_fake_pdflatex([*_FINAL_PASSING_OUTCOMES])
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    out = capsys.readouterr()
+    assert "reorder" not in out.out
+    assert "warning" not in out.err
+
+
 def test_probe_no_invocation_with_single_project_macro(
     project_root: Path,
     tmp_path: Path,

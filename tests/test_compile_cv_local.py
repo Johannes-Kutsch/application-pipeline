@@ -114,3 +114,53 @@ def test_pdflatex_adapter_returns_subprocess_returncode(
     assert captured["cmd"][0] == "pdflatex"
     assert result == compile_cv_local_module._PdflatexRunResult(returncode=7)
     assert result.log_text is None
+    assert result.page_count is None
+
+
+def test_pdflatex_run_result_page_count_defaults_to_none() -> None:
+    result = compile_cv_local_module._PdflatexRunResult(returncode=0)
+
+    assert result.page_count is None
+
+
+def test_pdflatex_run_result_accepts_explicit_page_count() -> None:
+    result = compile_cv_local_module._PdflatexRunResult(returncode=0, page_count=3)
+
+    assert result.page_count == 3
+
+
+def test_fake_pdflatex_adapter_surfaces_configured_page_count_per_pass(
+    tmp_path: Path,
+) -> None:
+    adapter = compile_cv_local_module._CompileCvFakePdflatexAdapter(
+        outcomes=[
+            compile_cv_local_module._PdflatexRunResult(returncode=1, page_count=2),
+            compile_cv_local_module._PdflatexRunResult(returncode=1, page_count=5),
+        ]
+    )
+
+    first = adapter.run_pass(
+        build_dir=tmp_path, build_name="cover", cv_data_dir=tmp_path
+    )
+    second = adapter.run_pass(
+        build_dir=tmp_path, build_name="cover", cv_data_dir=tmp_path
+    )
+
+    assert first.page_count == 2
+    assert second.page_count == 5
+
+
+def test_fake_pdflatex_adapter_page_count_none_when_not_configured(
+    tmp_path: Path,
+) -> None:
+    adapter = compile_cv_local_module._CompileCvFakePdflatexAdapter(
+        outcomes=[compile_cv_local_module._PdflatexRunResult(returncode=1)]
+    )
+
+    result = adapter.run_pass(
+        build_dir=tmp_path,
+        build_name="cover",
+        cv_data_dir=tmp_path,
+    )
+
+    assert result.page_count is None

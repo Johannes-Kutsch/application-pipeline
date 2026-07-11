@@ -47,7 +47,7 @@ Erstelle als erstes eine leere Slotmap in `<application-folder>/cv.tex`, indem d
 ## 3. Adresse, Anrede und Betreff ausfüllen
 
 1. Analysiere die Stellenausschreibung und fülle die Slots `recipient_company`, `recipient_name`, `recipient_street`, `recipient_zip_city` und `opening` aus.
-2. Fülle `cover_subject`: `Betreff: Ihre Stellenanzeige <Jobtitel>` — hänge ` Refnr. <Nummer>` an, falls die Ausschreibung eine Referenznummer enthält, sonst weglassen.
+2. Fülle `cover_subject`: `Betreff: Ihre Stellenanzeige \enquote{<Jobtitel>}` — nutze `\enquote{...}` statt gerader Anführungszeichen für den Jobtitel. Hänge ` Refnr. <Nummer>` an, falls die Ausschreibung eine Referenznummer enthält, sonst weglassen.
 3. Falls Informationen fehlen, frage den Nutzer.
 
 ## 4. Anschreibenstext erstellen

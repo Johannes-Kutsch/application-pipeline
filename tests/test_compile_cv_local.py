@@ -258,3 +258,35 @@ def test_production_adapter_page_count_none_when_no_log_file(
     )
 
     assert result.page_count is None
+
+
+def test_production_adapter_parses_page_count_when_singular_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_dir = tmp_path / ".build"
+    build_dir.mkdir()
+
+    def _fake_run(
+        cmd: list[str],
+        *,
+        cwd: Path,
+        capture_output: bool,
+        env: dict[str, str],
+    ) -> SimpleNamespace:
+        (build_dir / "cover.log").write_text(
+            "Output written on cover.pdf (1 page, 98765 bytes).\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(compile_cv_local_module.subprocess, "run", _fake_run)
+    adapter = compile_cv_local_module._CompileCvLocalProductionAdapter()
+
+    result = adapter.run_pass(
+        build_dir=build_dir,
+        build_name="cover",
+        cv_data_dir=tmp_path,
+    )
+
+    assert result.page_count == 1

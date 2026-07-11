@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Deque
 
 import pytest
 
@@ -17,6 +19,38 @@ from application_pipeline.compile_cv_local import (
     _PdflatexRunResult,
 )
 from application_pipeline.cv_slot_contract import SLOT_NAMES
+
+
+@dataclass(slots=True)
+class _ProbeFakeAdapter:
+    """Fake adapter for probe-and-reorder tests.
+
+    Skips slot validation; writes staged cv.tex content into each PDF so tests
+    can assert on the actual reordered body.
+    """
+
+    outcomes: list[_PdflatexRunResult]
+    _queue: Deque[_PdflatexRunResult] = field(init=False, default_factory=deque)
+
+    def __post_init__(self) -> None:
+        self._queue = deque(self.outcomes)
+
+    def run_pass(
+        self,
+        *,
+        build_dir: Path,
+        build_name: str,
+        cv_data_dir: Path,
+    ) -> _PdflatexRunResult:
+        if not self._queue:
+            raise AssertionError("unexpected pdflatex pass")
+        result = self._queue.popleft()
+        if result.returncode == 0:
+            staged_tex = (build_dir / "cv.tex").read_bytes()
+            (build_dir / f"{build_name}.pdf").write_bytes(
+                b"%PDF-1.4 fake\n" + build_name.encode() + b"\n" + staged_tex
+            )
+        return result
 
 
 def _install_fake_pdflatex(
@@ -656,3 +690,147 @@ def test_compile_cv_missing_config_exits_2_without_build_dir(
     assert "no application-pipeline/config.py in" in err
     assert "did you forget to cd, or run init?" in err
     assert not (app_dir / ".build").exists()
+
+
+# ---------------------------------------------------------------------------
+# Probe-and-reorder phase tests
+# ---------------------------------------------------------------------------
+
+_TWO_PROJECT_BODY = "\\ProjectA\n\\ProjectB\n"
+_ONE_PROJECT_BODY = "\\ProjectAlpha\n"
+
+_FINAL_PASSING_OUTCOMES = [_PdflatexRunResult(returncode=0) for _ in range(6)]
+
+
+@pytest.fixture()
+def multi_project_app_dir(tmp_path: Path, project_root: Path) -> Path:
+    d = tmp_path / "app_multi"
+    d.mkdir()
+    bodies = _slot_bodies({"resume_projekte": _TWO_PROJECT_BODY})
+    (d / "cv.tex").write_text(_render_cv_tex(bodies), encoding="utf-8")
+    return d
+
+
+def test_probe_no_invocation_with_single_project_macro(
+    project_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_dir = tmp_path / "app_single"
+    app_dir.mkdir()
+    bodies = _slot_bodies({"resume_projekte": _ONE_PROJECT_BODY})
+    (app_dir / "cv.tex").write_text(_render_cv_tex(bodies), encoding="utf-8")
+
+    # Exactly 6 outcomes (no probe call): if a probe were made the queue would
+    # be exhausted early and raise AssertionError.
+    fake = _install_fake_pdflatex([*_FINAL_PASSING_OUTCOMES])
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    out = capsys.readouterr()
+    assert "reorder" not in out.out
+    assert "warning" not in out.err
+
+
+def test_probe_skips_optimization_when_baseline_page_count_unavailable(
+    multi_project_app_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    outcomes = [
+        _PdflatexRunResult(returncode=1, page_count=None),  # baseline probe
+        *_FINAL_PASSING_OUTCOMES,
+    ]
+    fake = _install_fake_pdflatex(outcomes)
+    _run_compile_with_fake_pdflatex(multi_project_app_dir, pdflatex=fake)
+
+    out = capsys.readouterr()
+    assert "reorder" not in out.out
+    assert "warning" not in out.err
+
+
+def test_probe_skips_optimization_when_baseline_fits_in_two_pages(
+    multi_project_app_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    outcomes = [
+        _PdflatexRunResult(returncode=1, page_count=2),  # baseline fits
+        *_FINAL_PASSING_OUTCOMES,
+    ]
+    fake = _install_fake_pdflatex(outcomes)
+    _run_compile_with_fake_pdflatex(multi_project_app_dir, pdflatex=fake)
+
+    out = capsys.readouterr()
+    assert "reorder" not in out.out
+    assert "warning" not in out.err
+
+
+def test_probe_prints_reorder_notice_when_permutation_fits(
+    multi_project_app_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    outcomes = [
+        _PdflatexRunResult(returncode=1, page_count=3),  # baseline too long
+        _PdflatexRunResult(returncode=1, page_count=2),  # first permutation fits
+        *[_PdflatexRunResult(returncode=0) for _ in range(6)],
+    ]
+    fake = _ProbeFakeAdapter(outcomes=outcomes)
+    _run_compile_with_fake_pdflatex(multi_project_app_dir, pdflatex=fake)
+
+    out = capsys.readouterr()
+    assert "reorder:" in out.out
+    assert "ProjectB" in out.out
+    assert "ProjectA" in out.out
+    assert "warning" not in out.err
+
+
+def test_probe_warns_when_no_permutation_fits(
+    multi_project_app_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    outcomes = [
+        _PdflatexRunResult(returncode=1, page_count=3),  # baseline too long
+        _PdflatexRunResult(returncode=1, page_count=3),  # only permutation also long
+        *_FINAL_PASSING_OUTCOMES,
+    ]
+    fake = _install_fake_pdflatex(outcomes)
+    _run_compile_with_fake_pdflatex(multi_project_app_dir, pdflatex=fake)
+
+    out = capsys.readouterr()
+    assert "reorder" not in out.out
+    assert "warning" in out.err
+
+
+def test_source_cv_tex_unchanged_after_reorder(
+    multi_project_app_dir: Path,
+) -> None:
+    original_source = (multi_project_app_dir / "cv.tex").read_text(encoding="utf-8")
+    outcomes = [
+        _PdflatexRunResult(returncode=1, page_count=3),
+        _PdflatexRunResult(returncode=1, page_count=2),
+        *[_PdflatexRunResult(returncode=0) for _ in range(6)],
+    ]
+    fake = _ProbeFakeAdapter(outcomes=outcomes)
+    _run_compile_with_fake_pdflatex(multi_project_app_dir, pdflatex=fake)
+
+    assert (multi_project_app_dir / "cv.tex").read_text(
+        encoding="utf-8"
+    ) == original_source
+
+
+def test_published_pdfs_reflect_winning_project_order(
+    multi_project_app_dir: Path,
+) -> None:
+    outcomes = [
+        _PdflatexRunResult(returncode=1, page_count=3),
+        _PdflatexRunResult(returncode=1, page_count=2),  # ProjectB, ProjectA wins
+        *[_PdflatexRunResult(returncode=0) for _ in range(6)],
+    ]
+    fake = _ProbeFakeAdapter(outcomes=outcomes)
+    _run_compile_with_fake_pdflatex(multi_project_app_dir, pdflatex=fake)
+
+    for build_name in ("cover", "resume", "combined"):
+        pdf = (
+            multi_project_app_dir / f"{build_name}_{multi_project_app_dir.name}.pdf"
+        ).read_bytes()
+        assert b"\\ProjectB" in pdf
+        # The original order \ProjectA\n\ProjectB must not appear together
+        assert b"\\ProjectA\n\\ProjectB" not in pdf

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.resources
+import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -13,10 +14,13 @@ from application_pipeline.compile_cv_local import (
 from application_pipeline.cv_slot_contract import template_marker
 from application_pipeline.init_cmd import home_dir, missing_config_message
 from application_pipeline.latex import slot_map
+from application_pipeline.project_order_optimizer import optimize_project_order
 
 _BUILDS = ("cover", "resume", "combined")
 
 _LATEX_SUFFIXES = frozenset({".tex", ".cls", ".sty"})
+
+_PROJECT_MACRO_RE = re.compile(r"(?m)^\\([A-Za-z]\w*)\s*$")
 
 
 def compile_cv(app_dir: Path) -> None:
@@ -36,7 +40,11 @@ class _CompileCvWorkflow:
             self.pdflatex = _CompileCvLocalProductionAdapter()
         build_dir = app_dir / ".build"
         build_dir.mkdir(exist_ok=True)
-        self._stage_latex(build_dir, slots)
+        template_text = self._stage_latex(build_dir, slots)
+        winning_slots = self._probe_and_reorder(build_dir, template_text, slots)
+        (build_dir / "cv.tex").write_text(
+            _substitute_slots(template_text, winning_slots), encoding="utf-8"
+        )
         self._run_builds(build_dir)
         self._publish_pdfs(build_dir, app_dir)
         shutil.rmtree(build_dir)
@@ -63,7 +71,7 @@ class _CompileCvWorkflow:
             print(str(exc), file=sys.stderr)
             sys.exit(1)
 
-    def _stage_latex(self, build_dir: Path, slots: dict[str, str]) -> None:
+    def _stage_latex(self, build_dir: Path, slots: dict[str, str]) -> str:
         pkg = importlib.resources.files("application_pipeline.latex")
         template_text: str | None = None
         for item in pkg.iterdir():
@@ -79,6 +87,54 @@ class _CompileCvWorkflow:
 
         substituted = _substitute_slots(template_text, slots)
         (build_dir / "cv.tex").write_text(substituted, encoding="utf-8")
+        return template_text
+
+    def _probe_and_reorder(
+        self,
+        build_dir: Path,
+        template_text: str,
+        slots: dict[str, str],
+    ) -> dict[str, str]:
+        project_macros = _extract_project_macros(slots["resume_projekte"])
+        if len(project_macros) <= 1:
+            return slots
+
+        assert self.pdflatex is not None
+        cv_data_dir = (home_dir() / "user-info" / "cv").resolve()
+
+        baseline = self.pdflatex.run_pass(
+            build_dir=build_dir,
+            build_name="resume",
+            cv_data_dir=cv_data_dir,
+        )
+        if baseline.page_count is None or baseline.page_count <= 2:
+            return slots
+
+        for perm in optimize_project_order(project_macros):
+            new_slots = dict(slots)
+            new_slots["resume_projekte"] = _reorder_projekte_body(
+                slots["resume_projekte"], perm
+            )
+            (build_dir / "cv.tex").write_text(
+                _substitute_slots(template_text, new_slots), encoding="utf-8"
+            )
+            result = self.pdflatex.run_pass(
+                build_dir=build_dir,
+                build_name="resume",
+                cv_data_dir=cv_data_dir,
+            )
+            if result.page_count is not None and result.page_count <= 2:
+                new_order_str = " ".join(f"\\{m}" for m in perm)
+                orig_order_str = " ".join(f"\\{m}" for m in project_macros)
+                print(f"reorder: {new_order_str} (was: {orig_order_str})")
+                return new_slots
+
+        print(
+            "warning: no project order reduces resume to ≤2 pages;"
+            " using original order",
+            file=sys.stderr,
+        )
+        return slots
 
     def _run_builds(self, build_dir: Path) -> None:
         assert self.pdflatex is not None
@@ -110,6 +166,15 @@ class _CompileCvWorkflow:
             generic_pdf = app_dir / f"{build_name}.pdf"
             if generic_pdf.exists():
                 generic_pdf.unlink()
+
+
+def _extract_project_macros(body: str) -> list[str]:
+    return _PROJECT_MACRO_RE.findall(body)
+
+
+def _reorder_projekte_body(original_body: str, new_order: list[str]) -> str:
+    trailing = original_body.endswith("\n")
+    return "\n".join(f"\\{name}" for name in new_order) + ("\n" if trailing else "")
 
 
 def _substitute_slots(template: str, slots: dict[str, str]) -> str:

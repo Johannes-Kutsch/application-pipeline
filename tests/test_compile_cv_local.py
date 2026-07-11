@@ -164,3 +164,97 @@ def test_fake_pdflatex_adapter_page_count_none_when_not_configured(
     )
 
     assert result.page_count is None
+
+
+def test_production_adapter_parses_page_count_from_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_dir = tmp_path / ".build"
+    build_dir.mkdir()
+
+    def _fake_run(
+        cmd: list[str],
+        *,
+        cwd: Path,
+        capture_output: bool,
+        env: dict[str, str],
+    ) -> SimpleNamespace:
+        (build_dir / "resume.log").write_text(
+            "This is pdfTeX, Version 3.14159265\n"
+            "Output written on resume.pdf (3 pages, 123456 bytes).\n"
+            "Transcript written on resume.log.\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(compile_cv_local_module.subprocess, "run", _fake_run)
+    adapter = compile_cv_local_module._CompileCvLocalProductionAdapter()
+
+    result = adapter.run_pass(
+        build_dir=build_dir,
+        build_name="resume",
+        cv_data_dir=tmp_path,
+    )
+
+    assert result.page_count == 3
+
+
+def test_production_adapter_page_count_none_when_output_written_line_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_dir = tmp_path / ".build"
+    build_dir.mkdir()
+
+    def _fake_run(
+        cmd: list[str],
+        *,
+        cwd: Path,
+        capture_output: bool,
+        env: dict[str, str],
+    ) -> SimpleNamespace:
+        (build_dir / "resume.log").write_text(
+            "This is pdfTeX, Version 3.14159265\n"
+            "! LaTeX Error: File `missing.sty' not found.\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(compile_cv_local_module.subprocess, "run", _fake_run)
+    adapter = compile_cv_local_module._CompileCvLocalProductionAdapter()
+
+    result = adapter.run_pass(
+        build_dir=build_dir,
+        build_name="resume",
+        cv_data_dir=tmp_path,
+    )
+
+    assert result.page_count is None
+
+
+def test_production_adapter_page_count_none_when_no_log_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_dir = tmp_path / ".build"
+
+    def _fake_run(
+        cmd: list[str],
+        *,
+        cwd: Path,
+        capture_output: bool,
+        env: dict[str, str],
+    ) -> SimpleNamespace:
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(compile_cv_local_module.subprocess, "run", _fake_run)
+    adapter = compile_cv_local_module._CompileCvLocalProductionAdapter()
+
+    result = adapter.run_pass(
+        build_dir=build_dir,
+        build_name="resume",
+        cv_data_dir=tmp_path,
+    )
+
+    assert result.page_count is None

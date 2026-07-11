@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -120,6 +121,18 @@ def _assert_substituted_slots_present(
             raise AssertionError(f"staged cv.tex missing slot body: {slot_name}")
 
 
+_OUTPUT_WRITTEN_RE = re.compile(r"Output written on .+? \((\d+) pages?,")
+
+
+def _parse_page_count(log_path: Path) -> int | None:
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    m = _OUTPUT_WRITTEN_RE.search(text)
+    return int(m.group(1)) if m else None
+
+
 @dataclass(frozen=True, slots=True)
 class _CompileCvLocalProductionAdapter:
     def run_pass(
@@ -135,7 +148,10 @@ class _CompileCvLocalProductionAdapter:
             capture_output=True,
             env={**os.environ, "TEXINPUTS": f".{os.pathsep}"},
         )
-        return _PdflatexRunResult(returncode=result.returncode)
+        return _PdflatexRunResult(
+            returncode=result.returncode,
+            page_count=_parse_page_count(build_dir / f"{build_name}.log"),
+        )
 
     def _pdflatex_cmd(self, build_name: str, cv_data_dir: Path) -> list[str]:
         cv_data_dir_tex = cv_data_dir.as_posix().replace("\\", "/")

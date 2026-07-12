@@ -117,18 +117,6 @@ def test_pdflatex_adapter_returns_subprocess_returncode(
     assert result.page_count is None
 
 
-def test_pdflatex_run_result_page_count_defaults_to_none() -> None:
-    result = compile_cv_local_module._PdflatexRunResult(returncode=0)
-
-    assert result.page_count is None
-
-
-def test_pdflatex_run_result_accepts_explicit_page_count() -> None:
-    result = compile_cv_local_module._PdflatexRunResult(returncode=0, page_count=3)
-
-    assert result.page_count == 3
-
-
 def test_fake_pdflatex_adapter_surfaces_configured_page_count_per_pass(
     tmp_path: Path,
 ) -> None:

@@ -852,3 +852,50 @@ def test_published_pdfs_reflect_winning_project_order(
         assert b"\\ProjectB" in pdf
         # The original order \ProjectA\n\ProjectB must not appear together
         assert b"\\ProjectA\n\\ProjectB" not in pdf
+
+
+def test_probe_skips_permutation_with_unavailable_page_count_and_continues(
+    project_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_dir = tmp_path / "app_three_proj"
+    app_dir.mkdir()
+    bodies = _slot_bodies({"resume_projekte": "\\ProjectA\n\\ProjectB\n\\ProjectC\n"})
+    (app_dir / "cv.tex").write_text(_render_cv_tex(bodies), encoding="utf-8")
+
+    outcomes = [
+        _PdflatexRunResult(returncode=1, page_count=3),  # baseline: too long
+        _PdflatexRunResult(returncode=1, page_count=None),  # first permutation: unknown
+        _PdflatexRunResult(returncode=1, page_count=2),  # second permutation: fits
+        *[_PdflatexRunResult(returncode=0) for _ in range(6)],
+    ]
+    fake = _ProbeFakeAdapter(outcomes=outcomes)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    out = capsys.readouterr()
+    assert "reorder:" in out.out
+    assert "warning" not in out.err
+
+
+def test_probe_warns_when_all_permutation_page_counts_unavailable(
+    project_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_dir = tmp_path / "app_none_proj"
+    app_dir.mkdir()
+    bodies = _slot_bodies({"resume_projekte": "\\ProjectA\n\\ProjectB\n"})
+    (app_dir / "cv.tex").write_text(_render_cv_tex(bodies), encoding="utf-8")
+
+    outcomes = [
+        _PdflatexRunResult(returncode=1, page_count=3),  # baseline: too long
+        _PdflatexRunResult(returncode=1, page_count=None),  # only permutation: unknown
+        *_FINAL_PASSING_OUTCOMES,
+    ]
+    fake = _install_fake_pdflatex(outcomes)
+    _run_compile_with_fake_pdflatex(app_dir, pdflatex=fake)
+
+    out = capsys.readouterr()
+    assert "reorder" not in out.out
+    assert "warning" in out.err

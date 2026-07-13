@@ -6,7 +6,7 @@ Issues are tracked in GitHub Issues on `Johannes-Kutsch/application-pipeline` vi
 
 ### Triage labels
 
-Uses the five canonical triage label names as-is (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+Uses the canonical label names as-is for state roles, category roles, and slice-mode labels. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

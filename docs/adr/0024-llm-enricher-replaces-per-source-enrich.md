@@ -1,12 +1,12 @@
 # LLM Enricher replaces per-source `enrich()`; classifier emits Card content
 
-Parsers shrink to `discover()` + `enrich(stub) -> EnrichResult` (ADR-0029). Shared **LLM Enricher** owns the classify LLM call. Output: `{matches: bool, header: str | None, summary: str | None}`. Classifier-time **Header** = three-line Card top block; **Summary** = prose paragraph.
+Parsers shrink to `discover()` + `enrich(stub) -> EnrichResult` (ADR-0028). Shared **LLM Enricher** owns the classify LLM call. Output: `{matches: bool, header: str | None, summary: str | None}`. Classifier-time **Header** = three-line Card top block; **Summary** = prose paragraph.
 
 `StructuredExtract` retires. `extracts.json` becomes `{listing_id: {header, summary, body}}`. **Match Judge** ranks on Header + Summary directly.
 
 Body strip: per-source CSS selector or generic library fallback. Oversized → stash to `failures/oversized/`, no `seen.json` mark. Malformed LLM output → stash to `failures/malformed/`, retry next run.
 
-**Freshness Gate** at three sites (ADR-0029): post-discover, post-enrich, post-LLM. `ExternalRedirect` retired — redirects followed silently in `parsers/body_fetch.py`.
+**Freshness Gate** at three sites (ADR-0028): post-discover, post-enrich, post-LLM. `ExternalRedirect` retired — redirects followed silently in `parsers/body_fetch.py`.
 
 ## Why
 

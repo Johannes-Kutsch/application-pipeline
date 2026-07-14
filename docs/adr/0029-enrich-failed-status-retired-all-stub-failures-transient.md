@@ -1,6 +1,6 @@
 # Retire `enrich_failed` status — all per-stub failures transient
 
-`enrich_failed` dedup status retired. Failed URLs remain absent from `seen.json` — retried next run. Same pattern as oversized bodies and malformed LLM outputs (ADR-0025). Natural discover falloff bounds the retry tail.
+`enrich_failed` dedup status retired. Failed URLs remain absent from `seen.json` — retried next run. Same pattern as oversized bodies and malformed LLM outputs (ADR-0024). Natural discover falloff bounds the retry tail.
 
 ## Why
 

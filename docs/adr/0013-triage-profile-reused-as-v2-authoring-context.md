@@ -8,5 +8,5 @@ v2 authoring (`/analyse-listing`, `/write-cv`) reads **Triage Profile** as sole 
 
 ## Consequences
 
-- `user-info/triage-profile/` contains three files (ADR-0036 split): `gate-criteria.md`, `candidate-profile.md`, `skills.md`.
+- `user-info/triage-profile/` contains three files (ADR-0034 split): `gate-criteria.md`, `candidate-profile.md`, `skills.md`.
 - CV Profile term retired before being built.

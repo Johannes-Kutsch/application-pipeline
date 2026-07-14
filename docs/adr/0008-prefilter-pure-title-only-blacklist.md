@@ -1,6 +1,6 @@
 # Domain Pre-Filter: pure title-only blacklist
 
-Drop if any **Negative Keyword** matches title (case-insensitive substring, after `normalize()`). Whitelist removed — no rescue via `SKILLS` or `INCLUSION_KEYWORDS`. `SKILLS` is judge-only (ADR-0020).
+Drop if any **Negative Keyword** matches title (case-insensitive substring, after `normalize()`). Whitelist removed — no rescue via `SKILLS` or `INCLUSION_KEYWORDS`. `SKILLS` is judge-only (ADR-0019).
 
 ## Why
 

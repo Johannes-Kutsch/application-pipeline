@@ -8,5 +8,5 @@ On provider usage-limit outcomes, sleep until `reset_time + 2 minutes`, then ret
 
 ## Consequences
 
-- **Agent Runtime** usage-limit outcomes carry `reset_time`. Sleep at orchestrator level for judge; through **Quota Wall** (ADR-0024) for classify workers.
+- **Agent Runtime** usage-limit outcomes carry `reset_time`. Sleep at orchestrator level for judge; through **Quota Wall** (ADR-0023) for classify workers.
 - Runs either complete or fail. No `degraded_reason`.

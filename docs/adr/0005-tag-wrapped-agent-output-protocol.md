@@ -1,6 +1,6 @@
 # Tag-wrapped Agent Output Protocol
 
-Every LLM response carries structured payload in semantic XML tags — `<verdict>` for classifier, `<verdicts>` for judge (ADR-0010). **Agent Output Protocol** extracts via rightmost-closing-tag walk-back + regex fence-strip, then `json.loads`. Bare-JSON fallback with `protocol_fallback` log when tags absent.
+Every LLM response carries structured payload in semantic XML tags — `<verdict>` for classifier, `<verdicts>` for judge (ADR-0009). **Agent Output Protocol** extracts via rightmost-closing-tag walk-back + regex fence-strip, then `json.loads`. Bare-JSON fallback with `protocol_fallback` log when tags absent.
 
 ## Why
 

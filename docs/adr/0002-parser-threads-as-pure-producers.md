@@ -1,6 +1,6 @@
 # Parser threads: one per parser type, concurrent fetch
 
-Each **Parser** runs on its own thread (one per `parser_type`). Within a thread sequential; across threads parallel. Threads do `discover()` and `enrich()` I/O inline (ADR-0033). No shared mutable module-level state.
+Each **Parser** runs on its own thread (one per `parser_type`). Within a thread sequential; across threads parallel. Threads do `discover()` and `enrich()` I/O inline (ADR-0028). No shared mutable module-level state.
 
 ## Why
 

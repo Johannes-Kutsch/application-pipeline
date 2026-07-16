@@ -232,7 +232,7 @@ def _collect_seed_entries(
     policy: _SeedPolicy,
 ) -> list[_SeedEntry]:
     entries: list[_SeedEntry] = []
-    for item in node.iterdir():
+    for item in sorted(node.iterdir(), key=lambda i: i.name):
         if item.name.startswith("__"):
             continue
         item_rel = rel / item.name

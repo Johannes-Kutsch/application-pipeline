@@ -4,7 +4,7 @@ v2 authoring (`/analyse-listing`, `/write-cv`) reads **Triage Profile** as sole 
 
 ## Why
 
-- Single source of applicant data eliminates drift seam. Grilling sessions sharpen the next day's shortlist too. Bullets scale better through grilling than prose.
+- Single source of applicant data eliminates drift seam. Bullets scale better than prose for structured matching against listing requirements (ADR-0041).
 
 ## Consequences
 

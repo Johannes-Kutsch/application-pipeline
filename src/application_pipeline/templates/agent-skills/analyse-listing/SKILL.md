@@ -1,6 +1,7 @@
 ---
 name: analyse-listing
-description: Fragt den Nutzer zu einer konkreten Stellenausschreibung. Wird aktiviert, wenn der Nutzer /analyse-listing aufruft.
+description: Extrahiert Anforderungen aus einer Stellenausschreibung, gleicht sie mit der Bullet Library ab und finalisiert mit dem Nutzer genau 4 Bullets für das Anschreiben.
+disable-model-invocation: true
 ---
 
 # Universalregeln
@@ -8,37 +9,45 @@ description: Fragt den Nutzer zu einer konkreten Stellenausschreibung. Wird akti
 [_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)
 
 <write-rules>
-Dieser Skill schreibt ausschliesslich in:
+Dieser Skill schreibt ausschließlich in:
 
-- `application-pipeline/user-info/triage-profile/gate-criteria.md` -> Informationen zu den Präferenzen und Interessen der Nutzer:in
-- `application-pipeline/user-info/triage-profile/candidate-profile.md` -> Informationen zum Profil der Nutzer:in
+- `application-pipeline/user-info/cv/bullet-library.md`
+- `application-pipeline/user-info/triage-profile/candidate-profile.md`
 </write-rules>
 
 # Aufgabe
 
-<what-to-do>
+## 1. Listing laden
 
-Befrage mich ununterbrochen zu der Stellenausschreibung, bis wir eine gemeinsame Sicht darauf haben, wieso ich mich auf diese bewerben möchte. Geh jeden Zweig des Entscheidungsbaums durch und kläre Abhängigkeiten schrittweise. Gib zu jeder Frage eine konkrete Empfehlung.
+Leite den Eingabe-Modus aus dem Argument ab:
 
-Stelle die Fragen einzeln und warte auf Feedback, bevor du mit der nächsten fortfährst.
+- **leer** → bitte den Nutzer, ein Listing einzufügen oder ein Datum anzugeben
+- **`today` / `last`** → lade die lexikographisch größte Datei aus `application-pipeline/results/`
+- **Datum** → normalisiere auf `YYYY-MM-DD` und lade `application-pipeline/results/<YYYY-MM-DD>.md`
+- **alles andere** → das Argument selbst ist das Listing
 
-Wenn eine Frage über `gate-criteria.md` oder `candidate-profile.md` beantwortbar ist, erforsche dazu zuerst diese Dateien statt zu raten.
-</what-to-do>
+Fehlt eine angeforderte Datei: dem Nutzer klar sagen, dann stopp.
 
-## Während der Sitzung
+Enthält eine Results-Datei mehrere Listings: zeige eine kurze nummerierte Übersicht und frage, welches einzelne Listing analysiert werden soll.
 
-### Abgleich gegen das Glossar
+## 2. Anforderungen extrahieren und Bullets abgleichen
 
-Wenn der Nutzer eine Information nutzt, der mit einem bestehenden Eintrag in `gate-criteria.md` oder `candidate-profile.md` kollidiert, weise sofort darauf hin.
-Beispiel: "Dein Profil definiert `Wohnort` als X, du meinst aber scheinbar Y. Was ist richtig?"
+Lies das Listing und extrahiere alle Anforderungen an den Kandidaten. Lies danach `application-pipeline/user-info/cv/bullet-library.md`.
 
-### Unklare Sprache präzisieren
+Zeige dem Nutzer eine strukturierte Übersicht auf einmal:
 
-Wenn die Nutzerin eine vagen oder überladene Information nutzt, schlage einen präzisen kanonischen Begriff vor.
-Beispiel: "Du sagst `Ort` — meinest du den Wohnort oder den Arbeitsort? Das sind unterschiedliche Dinge."
+- Pro Anforderung: welche Bullets passen (direkt oder indirekt)
+- Anforderungen ohne passenden Bullet: am Ende als Lücken markiert
 
-### `gate-criteria.md` und `candidate-profile.md` direkt aktualisieren
+## 3. Vier Bullets finalisieren
 
-Wenn eine Information geklärt ist, aktualisiere `gate-criteria.md` oder `candidate-profile.md` sofort im selben Schritt. Keine Sammelupdates am Ende — Einträge direkt beim Auftauchen erfassen.
+Schlage sofort die 4 am besten passenden Bullets als Startpunkt vor. Iteriere dann mit dem Nutzer:
 
-`gate-criteria.md` und `candidate-profile.md` sollen keine Stellenspezifischen Details enthalten. Behandle sie nicht als konkrete Bewerbungsdateien; sie sind ausschließlich Glossare.
+- Lücken → neuen Bullet formulieren und mit dem Nutzer iterieren bis zur Zufriedenheit
+- Der Nutzer kann jederzeit Bullets streichen, tauschen oder neue beauftragen
+
+Neue Bullets sofort wortgenau in `bullet-library.md` aufnehmen. Verallgemeinerte Fakten über den Kandidaten, die über dieses Listing hinausgehen, still in `candidate-profile.md` schreiben.
+
+## 4. Finalisierte Bullets ausgeben
+
+Sobald genau 4 Bullets feststehen: gib alle 4 mit exakt dem Wortlaut aus der Bullet Library aus. Schreibe darunter einen vorgeschlagenen `/write-cv`-Aufruf.

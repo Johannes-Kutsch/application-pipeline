@@ -45,7 +45,6 @@ where = ["src"]
     "application-pipeline/user-info/cv/*",
     "agent-skills/_shared/*",
     "agent-skills/analyse-listing/*",
-    "agent-skills/build-cv/*",
     "agent-skills/write-cv/*",
 ]
 "application_pipeline.templates.prompts" = ["*.md"]

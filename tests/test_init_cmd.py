@@ -46,14 +46,14 @@ def _agent_skill_template_bytes(name: str) -> bytes:
 
 def _skill_frontmatter(text: str) -> tuple[str, str]:
     match = re.match(
-        r"^---\nname: (?P<name>[^\n]+)\ndescription: (?P<description>[^\n]+)\n---\n",
+        r"^---\nname: (?P<name>[^\n]+)\ndescription: (?P<description>[^\n]+)\n(?:[^\n]+\n)*---\n",
         text,
     )
     assert match is not None
     return match.group("name"), match.group("description")
 
 
-_SKILL_DIRS = ("analyse-listing", "write-cv", "build-cv")
+_SKILL_DIRS = ("analyse-listing", "write-cv")
 
 
 def _front_matter_field(text: str, field: str) -> str:
@@ -75,16 +75,12 @@ def _assert_seeded_skill_affordances(skill_file: Path, skill: str) -> str:
     assert description
     _assert_no_retired_skill_references(text)
     if skill == "analyse-listing":
-        assert "application-pipeline/user-info/triage-profile/gate-criteria.md" in text
-        assert "application-pipeline/user-info/triage-profile/candidate-profile.md" in (
-            text
-        )
+        assert "application-pipeline/user-info/triage-profile/candidate-profile.md" in text
     if skill in {"analyse-listing", "write-cv"}:
         assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in text
     if skill == "write-cv":
         assert "[_shared/SLOT-MAP.md](../_shared/SLOT-MAP.md)" in text
         assert "application-pipeline/user-info/cv/cover-patterns.md" in text
-    if skill == "build-cv":
         assert "application-pipeline compile-cv <application-folder>" in text
         assert "cover_<application-folder>.pdf" in text
         assert "resume_<application-folder>.pdf" in text
@@ -803,7 +799,7 @@ def test_seeded_inline_tool_skills_link_to_tool_local_shared_support(
 
     for root_name in (".claude", ".codex"):
         skills_root = tmp_path / root_name / "skills"
-        for skill in ("analyse-listing", "write-cv", "build-cv"):
+        for skill in _SKILL_DIRS:
             _assert_seeded_skill_affordances(skills_root / skill / "SKILL.md", skill)
 
 

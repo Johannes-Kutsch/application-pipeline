@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,7 @@ def run_startup(request: StartupRequest) -> None:
     config_path = _require_config_path(request.cwd)
     home = config_path.parent
     _require_operator_credential(home)
+    _require_opencode_cli()
 
     if request.mode == "cron":
         from application_pipeline.init_cmd import init as _init
@@ -90,6 +92,16 @@ def _require_operator_credential(settings_dir: Path) -> None:
         load_operator_credential(settings_dir)
     except OperatorCredentialError as exc:
         print(f"startup failed — operator credential: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _require_opencode_cli() -> None:
+    if shutil.which("opencode") is None:
+        print(
+            "startup failed — opencode CLI not found on PATH"
+            " (install via: npm install -g opencode-ai)",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
 

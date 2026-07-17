@@ -810,6 +810,96 @@ def test_startup_runner_uses_rich_status_display_with_terminal(
     assert isinstance(captured_display[0], RichStatusDisplay)
 
 
+def test_run_startup_exits_2_with_opencode_message_when_opencode_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "startup failed" in stderr
+    assert "opencode CLI not found on PATH" in stderr
+    assert "npm install -g opencode-ai" in stderr
+
+
+def test_cron_startup_exits_2_with_opencode_message_when_opencode_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert exc_info.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "startup failed" in stderr
+    assert "opencode CLI not found on PATH" in stderr
+    assert "npm install -g opencode-ai" in stderr
+
+
+def test_missing_opencode_does_not_create_runtime_data_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings_dir = _write_settings_dir(tmp_path, with_operator_credential=True)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    with pytest.raises(SystemExit):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="run",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert not (settings_dir / ".runtime-data").exists()
+
+
+def test_cron_missing_opencode_does_not_invoke_init_bootstrap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_settings_dir(tmp_path, with_operator_credential=True)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+
+    with pytest.raises(SystemExit):
+        run_startup(
+            StartupRequest(
+                cwd=tmp_path,
+                mode="cron",
+                no_judge=False,
+                has_terminal=False,
+            )
+        )
+
+    assert not (tmp_path / "application-pipeline" / "setup").exists()
+
+
 def test_config_loader_failure_propagates_as_unhandled_exception(
     tmp_path: Path,
 ) -> None:

@@ -75,7 +75,9 @@ def _assert_seeded_skill_affordances(skill_file: Path, skill: str) -> str:
     assert description
     _assert_no_retired_skill_references(text)
     if skill == "analyse-listing":
-        assert "application-pipeline/user-info/triage-profile/candidate-profile.md" in text
+        assert (
+            "application-pipeline/user-info/triage-profile/candidate-profile.md" in text
+        )
     if skill in {"analyse-listing", "write-cv"}:
         assert "[_shared/CONVENTIONS.md](../_shared/CONVENTIONS.md)" in text
     if skill == "write-cv":
